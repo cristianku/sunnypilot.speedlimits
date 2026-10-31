@@ -15,7 +15,7 @@ import {activityTab, JOB_STATE, jobOf, startedWhen, terminalActivities} from './
 import RoadDrive from './RoadDrive.vue';
 import {ROAD_LABEL as LABEL, ROAD_TYPES as TYPES} from './roads';
 import SectionHead from './SectionHead.vue';
-import {goTo, roadsDrive} from './tabs';
+import {goTo, tabDrive as roadsDrive} from './tabs';
 import TerminalActivity from './TerminalActivity.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();

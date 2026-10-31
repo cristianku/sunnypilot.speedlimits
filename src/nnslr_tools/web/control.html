@@ -1387,6 +1387,196 @@ box-shadow:0 0 0 1.5px var(--surface);pointer-events:none}
 .trial-card .link-button:disabled{color:var(--muted);cursor:default}
 @media (max-width:560px){.inuse-car,.inuse-old{grid-column:1/-1}.versions-card[data-role="cutter"] .vt-c-every,
 .versions-card[data-role="cutter"] .vt-c-budget{display:none}}
+/* Data › Drive review (DriveReviewTab.vue): the search of the logs, the queue of episodes with its filters, the drives.
+   An episode is a link to its drive; its kinds are chips coloured by what happened (orange the driver's feet, red a
+   disengagement, blue the wheel, violet the set speed, amber vision against the map). */
+.dr-spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
+animation:dr-spin .8s linear infinite}
+@keyframes dr-spin{to{transform:rotate(360deg)}}
+.dr-queue,.dr-drives{display:flex;flex-direction:column;gap:12px}
+.dr-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.dr-filters .wp-field select{min-width:0}
+.dr-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.dr-list li{border-top:1px solid var(--line)}
+.dr-item{position:relative;display:flex;flex-direction:column;gap:5px;margin:0 -10px;padding:11px 32px 11px 10px;border-radius:12px;
+color:inherit;text-decoration:none;transition:background .15s}
+.dr-item:hover{background:var(--surface-2)}
+.dr-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dr-item-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
+.dr-item-head strong{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.dr-item-where,.dr-item-facts{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.dr-item-warn{font-size:12.5px;font-weight:600;color:var(--warn)}
+.dr-go{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
+.dr-chips{display:flex;flex-wrap:wrap;gap:5px}
+.dr-chip{display:inline-flex;align-items:center;padding:2px 9px;border:0;border-radius:999px;background:var(--surface-2);color:var(--fg);
+font:inherit;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+button.dr-chip{cursor:pointer}button.dr-chip:hover{filter:brightness(1.15)}
+.dr-k-gas,.dr-k-brake{background:var(--todo-soft);color:var(--todo)}
+.dr-k-disengage_user,.dr-k-disengage_auto,.dr-k-disengage_unknown{background:var(--bad-soft);color:var(--bad)}
+.dr-k-steer,.dr-k-steer_contact{background:var(--rev-soft);color:var(--rev)}
+.dr-k-set_speed_manual,.dr-k-set_speed_auto,.dr-k-set_speed_unknown{background:var(--imp-soft);color:var(--imp)}
+.dr-k-disagreement{background:var(--warn-soft);color:var(--warn)}
+.dr-drive{position:relative}
+.dr-drive-state{margin:0;font-size:13.5px}
+.dr-muted{color:var(--muted)}.dr-todo{color:var(--todo)}.dr-ok{color:var(--ok)}.dr-bad{color:var(--bad)}.dr-busy{color:var(--rev)}
+.dr-drive-actions{display:flex;flex-wrap:wrap;gap:8px}
+.dr-route{font-family:var(--font-data);font-size:11.5px;overflow-wrap:anywhere}
+@media (max-width:560px){
+  .dr-status{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:100%}
+  .dr-status button{padding:5px 4px;min-height:40px}
+  .dr-filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .dr-filters .wp-field:first-child{grid-column:1/-1}
+  .dr-filters .wp-field select{min-height:44px}
+}
+@media (prefers-reduced-motion:reduce){.dr-spin{animation-duration:2.4s}.dr-item{transition:none}}
+/* Data › Drive review, a drive opened (DriveReviewDrive.vue): the video as large as the column leaves with the comma's
+   vision limit on it, under it the controls, the strip of the whole drive and the lanes; at the side the episode, what
+   the comma had at the time shown, what the server finds today and the verdict. On an iPad or a phone one column. */
+.dr-view{gap:12px}
+.dr-uncertain{color:var(--warn)!important}
+.dr-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px 14px;border-radius:12px;background:var(--surface-2)}
+.dr-banner p{flex:1 1 280px;margin:0;font-size:14px;color:var(--fg)}
+.dr-banner.dr-bad{background:var(--bad-soft)}.dr-banner.dr-todo{background:var(--todo-soft)}.dr-banner.dr-busy{background:var(--rev-soft)}
+.dr-banner-actions{display:flex;flex-wrap:wrap;gap:8px}
+.dr-main{display:grid;grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:auto 1fr;grid-template-areas:"stage side" "time side";
+gap:12px 20px;align-items:start}
+.dr-stage{grid-area:stage;position:relative;aspect-ratio:1928/1208;width:min(100%,calc((100dvh - 420px) * 1928 / 1208));
+min-width:min(100%,420px);justify-self:center;border-radius:12px;overflow:hidden;background:var(--stage);cursor:pointer}
+.dr-stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none}
+.dr-stage-note{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);max-width:calc(100% - 28px);padding:6px 13px;
+border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:13px;text-align:center;-webkit-backdrop-filter:blur(10px);
+backdrop-filter:blur(10px)}
+.dr-stage.empty .dr-stage-note{top:50%;bottom:auto;transform:translate(-50%,-50%);background:none;color:rgba(255,255,255,.75)}
+.dr-hud .drive-truth{white-space:nowrap}
+.dr-time{grid-area:time;display:flex;flex-direction:column;gap:8px;min-width:0}
+.dr-sync{margin:0;font-size:12.5px;color:var(--muted)}
+.dr-strip{display:block;width:100%;height:26px;cursor:pointer;touch-action:none}
+.dr-strip:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.dr-strip-base{fill:var(--surface-3)}
+.dr-strip-ep{fill:var(--todo)}.dr-strip-ep.reviewed{fill:var(--ok)}.dr-strip-ep.undeterminable{fill:var(--muted)}
+.dr-strip-ep.spot{fill:var(--rev);opacity:.7}.dr-strip-ep.current{stroke:var(--fg);stroke-width:2;vector-effect:non-scaling-stroke}
+.dr-strip-window{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.dr-strip-head{fill:var(--fg)}
+.dr-zoom-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px}
+.dr-window{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.dr-side{grid-area:side;display:flex;flex-direction:column;gap:14px;min-width:0}
+.dr-side h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.dr-hint{margin:0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.dr-episode-card,.dr-now,.dr-note,.dr-free{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+.dr-episode-card{padding-top:0;border-top:0}
+.dr-ep-nav{display:flex;align-items:center;gap:8px}.dr-ep-nav h3{flex:1;text-align:center;font-variant-numeric:tabular-nums}
+.dr-ep-nav .btn{min-width:44px;justify-content:center;font-size:18px}
+.dr-ep-what,.dr-before{margin:0;font-size:13.5px;font-variant-numeric:tabular-nums}
+.dr-before{color:var(--muted)}.dr-before b{color:var(--fg);font-weight:600}
+.dr-reasons-list{margin:0;padding-left:18px;font-size:13px;color:var(--muted)}
+.dr-avail{margin:0;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--muted)}
+.dr-avail .ok{color:var(--ok)}.dr-avail .no{color:var(--warn)}
+.dr-now dl{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;font-size:13.5px}
+.dr-now dt{color:var(--muted)}.dr-now dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.dr-now dd small{font-size:12px;color:var(--muted)}
+.dr-today-card{border-top-style:dashed}
+.dr-free{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px}.dr-free .dr-field-name{flex-basis:100%}
+@media (max-width:860px){
+  .dr-main{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-template-areas:"stage" "time" "side"}
+  .dr-stage{width:100%;min-width:0}
+}
+@media (max-width:860px),(pointer:coarse){
+  .dr-view .btn.small,.dr-view .dr-choice{min-height:44px}
+  .dr-view .seg button{min-height:40px}
+}
+@media (max-width:560px){
+  .dr-banner{padding:10px 12px}
+  .dr-now dl{grid-template-columns:minmax(0,1fr) minmax(0,1.6fr)}
+  .dr-strip{height:34px}
+}
+/* The lanes (DriveReviewLanes.vue): a name column, then one SVG a lane at the width of the ruler; the time shown a line
+   across all of them. A stretch the log does not have is hatched, "none held" a hollow box, a value a filled one with
+   its number: missing data is never drawn as a value. What the comma recorded above, what the server finds today on a
+   dashed band, the review last. */
+.dr-lanes{--dr-name:78px;position:relative;display:flex;flex-direction:column;gap:3px;padding:2px 0;touch-action:pan-y;cursor:pointer;
+overflow:hidden;user-select:none;-webkit-user-select:none}
+.dr-defs{position:absolute;width:0;height:0;overflow:hidden}
+.dr-hatch-back{fill:transparent}.dr-hatch-line{stroke:var(--line-strong);stroke-width:2}
+.dr-lane,.dr-lane-ruler{display:grid;grid-template-columns:var(--dr-name) minmax(0,1fr);align-items:center}
+.dr-lane-ruler{height:0}
+.dr-lane svg{display:block;overflow:hidden}
+.dr-lane-name{display:flex;flex-direction:column;font-size:12px;font-weight:600;line-height:1.15;color:var(--fg);padding-right:8px}
+.dr-lane-name small{font-size:10.5px;font-weight:500;color:var(--muted)}
+.dr-lane-server{background:linear-gradient(var(--line),var(--line)) top/100% 1px no-repeat;padding-top:3px}
+.dr-lane-server .dr-lane-name small{color:var(--warn)}
+.dr-cursor{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--fg);pointer-events:none;opacity:.85}
+.dr-lanes rect{stroke:var(--surface);stroke-width:1}
+.dr-gap{fill:url(#dr-hatch)}.dr-lanes rect.dr-gap{stroke:var(--line)}
+.dr-none{fill:transparent}.dr-lanes rect.dr-none{stroke:var(--line-strong)}
+.dr-known{fill:var(--accent-soft)}
+.dr-run-text{font-size:11px;font-weight:600;text-anchor:middle;fill:var(--fg);pointer-events:none;font-variant-numeric:tabular-nums}
+.dr-sign-tick{fill:var(--bad)}
+.dr-src-vision{fill:var(--rev-soft)}.dr-src-map{fill:var(--ok-soft)}.dr-src-car{fill:var(--imp-soft)}.dr-src-other{fill:var(--surface-3)}
+.dr-src-none{fill:transparent}
+.dr-lanes .dr-src-vision.dr-none,.dr-lanes .dr-src-map.dr-none,.dr-lanes .dr-src-car.dr-none,.dr-lanes .dr-src-other.dr-none{fill:transparent}
+.dr-axis{stroke:var(--line-strong);stroke-width:1}
+.dr-ego{fill:none;stroke:var(--fg);stroke-width:1.6;stroke-linejoin:round}
+.dr-set-speed{fill:none;stroke:var(--imp);stroke-width:1.4;stroke-dasharray:5 3}
+.dr-target{fill:none;stroke:var(--ok);stroke-width:1.4;stroke-dasharray:1.5 2.5;stroke-linecap:round}
+.dr-op-long{fill:var(--ok)}.dr-op-lat{fill:var(--rev)}.dr-op-on{fill:var(--ok-soft)}.dr-op-cruise{fill:var(--surface-3)}.dr-op-off{fill:transparent}
+.dr-lanes rect.dr-op-off{stroke:var(--line-strong)}
+.dr-mark line{stroke:var(--todo);stroke-width:1.6}.dr-mark text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--todo)}
+.dr-m-disengage_user line,.dr-m-disengage_auto line,.dr-m-disengage_unknown line{stroke:var(--bad)}
+.dr-m-disengage_user text,.dr-m-disengage_auto text,.dr-m-disengage_unknown text{fill:var(--bad)}
+.dr-m-steer line,.dr-m-steer_contact line{stroke:var(--rev)}.dr-m-steer text,.dr-m-steer_contact text{fill:var(--rev)}
+.dr-m-set_speed_manual line,.dr-m-set_speed_auto line,.dr-m-set_speed_unknown line{stroke:var(--imp)}
+.dr-m-set_speed_manual text,.dr-m-set_speed_auto text,.dr-m-set_speed_unknown text{fill:var(--imp)}
+.dr-lanes .rt-town{fill:var(--split-4)}.dr-lanes .rt-zone30{fill:var(--rt-zone30)}.dr-lanes .rt-rural{fill:var(--rt-rural)}
+.dr-lanes .rt-expressway{fill:var(--split-5)}.dr-lanes .rt-motorway{fill:var(--c-train)}.dr-lanes .rt-ramp,.dr-lanes .rt-merge{fill:var(--rt-ramp)}
+.dr-lanes .rt-parking{fill:var(--rt-parking)}.dr-lanes .rt-garage{fill:var(--rt-garage)}.dr-lanes .rt-unknown{fill:var(--rt-unknown)}
+.dr-lanes .dr-today{opacity:.55}
+.dr-today-text{font-size:10px}
+.dr-inferred line{stroke:var(--warn);stroke-width:1.5}.dr-inferred text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--warn)}
+.dr-episode{fill:var(--todo);opacity:.55}.dr-episode.spot{fill:var(--rev)}.dr-episode.current{opacity:1}
+.dr-set{fill:var(--ok-soft)}.dr-set.dr-unsure{fill:var(--todo-soft)}.dr-unknown{fill:var(--surface-3)}
+.dr-lanes rect.dr-set{stroke:var(--ok)}.dr-lanes rect.dr-unsure{stroke:var(--todo);stroke-dasharray:3 2}
+.dr-draft{fill:var(--accent-soft)}.dr-lanes rect.dr-draft{stroke:var(--accent);stroke-dasharray:4 2}
+@media (max-width:560px){.dr-lanes{--dr-name:62px}.dr-lane-name{font-size:11px}}
+/* The verdict (DriveReviewNote.vue): three verdicts as buttons, the reason as chips, a row a limit (its value, quick
+   values and Unknown; from and until, each set at the time shown; what set it, the number on the sign, the road,
+   certain), the note, Save. */
+.dr-note-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 10px}
+.dr-note-who{font-size:12px;color:var(--muted)}
+.dr-verdicts{display:flex;flex-wrap:wrap;gap:6px}
+.dr-verdicts .btn[aria-checked="true"]{background:var(--accent);color:#fff}
+.dr-verdicts .dr-v-wrong_limit[aria-checked="true"]{background:var(--bad);color:#fff}
+.dr-verdicts .dr-v-correct_limit[aria-checked="true"]{background:var(--ok);color:var(--on-ok)}
+.dr-verdicts .dr-v-undeterminable[aria-checked="true"]{background:var(--surface-3);color:var(--fg);box-shadow:0 0 0 2px var(--fg) inset}
+.dr-reasons{display:flex;flex-wrap:wrap;gap:6px}.dr-reasons .dr-field-name{flex-basis:100%}
+.dr-field-name{font-size:12px;font-weight:600;color:var(--muted)}
+.dr-choice{appearance:none;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:4px 11px;border:0;
+border-radius:999px;background:var(--btn-2);color:var(--fg);font:inherit;font-size:13px;font-weight:500;cursor:pointer;font-variant-numeric:tabular-nums}
+.dr-choice:hover{background:var(--btn-2-hover)}
+.dr-choice[aria-checked="true"],.dr-choice[aria-pressed="true"]{background:var(--accent);color:#fff}
+.dr-choice:disabled{opacity:.5;cursor:default}
+.dr-rows{display:flex;flex-direction:column;gap:8px}
+.dr-rows-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px}
+.dr-row{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;background:var(--surface-2)}
+.dr-row-limit{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.dr-kph input,.dr-small-input{width:84px;min-height:36px;padding:5px 9px;border:1px solid var(--line-strong);border-radius:10px;
+background:var(--surface);color:var(--fg);font:inherit;font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.dr-small-input{font-size:14px;font-weight:500}
+.dr-kph input:disabled{opacity:.5}
+.dr-quick{display:flex;flex-wrap:wrap;gap:4px}.dr-quick .dr-choice{min-width:40px;padding:4px 8px}
+.dr-row-times{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13.5px;font-variant-numeric:tabular-nums}
+.dr-row-times>span{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+.dr-row-more{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px 10px}
+.dr-row-more .wp-field select{min-width:0;width:auto;min-height:36px;padding:5px 8px}
+.dr-check{display:inline-flex;align-items:center;gap:6px;min-height:36px;font-size:13.5px}
+.dr-remove{margin-left:auto;min-height:36px;color:var(--bad)}
+.dr-note-text{display:flex;flex-direction:column;gap:4px}
+.dr-note-text textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line-strong);border-radius:10px;
+background:var(--surface-2);color:var(--fg);font:inherit;font-size:14px;resize:vertical}
+.dr-note-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+@media (max-width:860px),(pointer:coarse){
+  .dr-kph input,.dr-small-input,.dr-row-more .wp-field select,.dr-check,.dr-remove{min-height:44px}
+  .dr-note-actions .btn{min-height:44px}
+}
 </style>
 </head>
 <body>

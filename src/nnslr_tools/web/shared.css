@@ -203,6 +203,12 @@ transition:background .2s,box-shadow .2s}
 .subnav a[data-busy="true"]::after{content:"";width:6px;height:6px;margin-left:6px;border-radius:50%;background:var(--rev);flex:none;
 animation:pulse 1.2s infinite}
 @media (max-width:767px){.head-title{font-size:30px}.subnav{width:100%}.subnav a{min-height:36px}}
+/* Five pages in a section (Data): the control as wide as its words need, at least as before; where the screen is
+   narrower it scrolls sideways in its own box (SectionHead.vue brings the page shown into view), never the page. */
+.subnav{width:max-content;min-width:min(100%,420px);max-width:100%;overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain}
+.subnav::-webkit-scrollbar{display:none}
+.subnav a{flex:1 0 auto}
+@media (max-width:767px){.subnav{width:100%;min-width:0}.subnav a{padding:4px 11px}}
 @media (prefers-reduced-motion:reduce){.subnav a{transition:none}.subnav a[data-busy="true"]::after{animation:none}}
 /* The phone's tab bar (pages.top_bar): the four sections at the bottom, as an iOS app; the top bar keeps the logo, the
    pills and the account. Not on the review page of a drive, whose controls are at the bottom. */

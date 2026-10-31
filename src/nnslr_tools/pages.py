@@ -54,7 +54,8 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Review'),
-                                  ('roads', '/roads', 'Roads'), ('dataset', '/dataset', 'Training dataset'))),
+                                  ('drivereview', '/drive-review', 'Drive review'), ('roads', '/roads', 'Roads'),
+                                  ('dataset', '/dataset', 'Training dataset'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
                                      ('publish', '/publish', 'Publish'))),
@@ -65,8 +66,9 @@ SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (page
 SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads', '/train': 'train',
-                '/evaluate': 'evaluate', '/models': 'models', '/publish': 'publish'}
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads',
+                '/drive-review': 'drivereview', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models',
+                '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
     'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
