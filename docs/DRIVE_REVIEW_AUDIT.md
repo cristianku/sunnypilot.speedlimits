@@ -46,7 +46,7 @@ the episodes of the recorded drive.*
 | Accelerator, brake | **has** | `carState.gasPressed`, `brakePressed` |
 | Wheel held against openpilot | **derived** | `carState.steeringPressed` held 1 s or more while openpilot steered; shorter is a touch (a hint only) |
 | Disengagement and its cause | **derived** | `selfdriveState` leaving engaged, with `onroadEvents` around it (`userDisable`, `softDisable`, `immediateDisable`, `buttonCancel`...) and the pedals |
-| Set speed changed by hand | **derived on the PSA** | `carState.buttonEvents` is empty on this car. A change of `vCruise` while ICBM was `inactive` for the whole second around it is the driver's (*Set speed by hand*); with ICBM in another state but no `sendButton`, or no ICBM in the log, it stays *changed by hand or by the car: the log does not say* |
+| Set speed changed by hand | **derived on the PSA** | `carState.buttonEvents` is empty in the logs so far. A change of `vCruise` while ICBM was `inactive` for the whole second around it is the driver's (*Set speed by hand*); with ICBM in another state but no `sendButton`, or no ICBM in the log, it stays *changed by hand or by the car: the log does not say*. opendbc now fills `buttonEvents` on the PSA (below): logs recorded with it have the press itself |
 | Set speed changed by ICBM | **has** | `selfdriveStateSP.intelligentCruiseButtonManagement.sendButton` |
 | Why the vision limit changed | **absent** | the log has the new limit and `signRead`, not the reason (a sign, the end of a ramp, the scene, a timeout) |
 | Raw sign reads (value, confidence, box) | **absent** | only the memory's output is logged; the server's networks on the extracted frames are shown in their own lane |
@@ -75,8 +75,14 @@ speed changes had no `buttonEvents`; with ICBM idle around them they now count a
 
 None of these is made by the drive review: each is a change to the comma's software, for a later decision.
 
-1. **Cruise buttons on the PSA**: decode the stalk into `carState.buttonEvents` (opendbc), so a set speed changed by
-   hand can be told from one changed by the car.
+1. **Cruise buttons on the PSA**: done in opendbc `048c22ae` (`psa-torque-sunny-testing` of cristianku/opendbc), in
+   the car's logs once sunnypilot's test branch is rebuilt with it. The stalk is wired to the BSI and is on none of
+   the comma's buses (every bit of buses 0, 1 and 2 checked against 14 presses of `00000141`); the press is read back
+   from what the BSI applied to `HS2_DAT_MDD_CMD_452`: +/- (one press per tap, one per 5 km/h step while held), set
+   (255 to the current speed), resume (255 to another setpoint, a heuristic), cancel (to 255 without the brake; with
+   the brake it is `brakePressed`, not a button) and main (the stalk wheel: off, limiter, cruise). On the car it only
+   adds alerts: Speed Limit Assist with openpilot longitudinal ignores the buttons, MADS reads the main switch from
+   `cruiseState.available`, and the set speed still comes from the car (`pcmCruiseSpeed`).
 2. **Why the vision limit changed**: a reason in `speedVisionSP` (sign, ramp end, scene, timeout, junction) and the
    value and confidence of the last sign read, so an episode says which rule moved the limit.
 3. **Unknown versus not sure**: an explicit validity flag in `speedVisionSP` instead of the value 0.
