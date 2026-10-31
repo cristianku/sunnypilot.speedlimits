@@ -50,7 +50,11 @@ def test_a_drive_becomes_one_video_with_where_each_minute_starts(tmp_path):
     probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=codec_name,width',
                             '-of', 'json', str(video)], capture_output=True, text=True, check=True)
     assert json.loads(probe.stdout)['streams'][0] == {'codec_name': 'h264', 'width': drive_video.WIDTH}
-    assert not list(video.parent.glob('*.part.mp4'))
+    assert not list(video.parent.glob('*.part.mp4')) and not list(video.parent.glob('*.parts'))
+    # Encoded minute by minute and joined: every frame is there, in order.
+    frames = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
+                             'stream=nb_read_packets', '-of', 'csv=p=0', str(video)], capture_output=True, text=True, check=True)
+    assert int(frames.stdout.strip()) == 60
     assert drive_video.state(tmp_path, ROUTE)['state'] == 'ready'
     # A minute changed (copied again from the comma): the video must be made again.
     _minute(tmp_path, 5, 1)
