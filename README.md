@@ -89,6 +89,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 - Automatic: the limit applies as soon as it is known. No confirmation and no set speed of 120/130 to confirm with (the Peugeot has no button for it), and changing the set speed does not switch it off.
 - The set speed is the maximum: the car drives to the lower of the limit and the set speed. With no limit known, the set speed.
 - **Set Speed Only Engages (Alpha)**, a sunnylink option shown with Assist mode, off by default: the car drives to the limit even above the set speed, which only engages. Only with the big driving model on the external GPU: the small one makes mistakes, so without it the set speed is the maximum again, at once. Curves and a forced deceleration still win. The driving screen then shows a green see-through **AUTO** square with an eye in the bottom right corner, above the final limit, and no longer the MAX set speed on +/-.
+- The map (Speed Limit Source Map Data, or when vision has no limit): a lower limit ahead is taken once the car is within its braking distance at 1 m/s², counted from the higher of the car's speed and the limit in force, and held to the sign. On sunnypilot master this never happens (the GPS age is Unix time taken from the time since boot), so the map slows the car only at the sign; fixed on `speed-limits` and proposed upstream from branch `speed-limit-resolver-gps-clock` (31 Oct 2026). The planner slows down at most 0.5 m/s², so the car still reaches the lower limit a little after the sign.
 
 ## Daily use
 
