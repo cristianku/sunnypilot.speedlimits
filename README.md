@@ -67,6 +67,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 - A number counts once it is read in 2 pictures within 1.5 s (*settings*), the classifier at least 70 % sure (*setting*). Two at once (a gantry, roadworks): the one seen most; on a tie, the lower.
 - A number holds until the next sign. The end of a limit gives the general limit of the road the car is on, or none if that is not known.
 - Town entry and exit, motorway and expressway start and end set the general limit of that road. In Sweden, Norway and Finland they only say which road it is: the limit held stays.
+- The distance to the round sign ahead (a number, the end of a limit) shows in the fuchsia square in place of the eye ("42 m"), for the driver to check; nothing on the car uses it yet. It comes from the sign's size on the camera, its diameter taken from the kind of road (the usual Swiss sizes, still to be checked: 60 cm in town, 80 cm outside, 100 cm on expressways, 120 cm on motorways) and corrected by the metres driven as the sign grows. Once the sign has left the picture the metres driven are counted down; it goes when the car passes the sign, or 15 s after it was last seen.
 
 **Ramps and carriageways**
 
