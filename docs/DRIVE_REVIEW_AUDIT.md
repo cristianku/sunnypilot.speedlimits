@@ -36,7 +36,8 @@ the episodes of the recorded drive.*
 | Speed | **has** | `carState.vEgo` (100 Hz) |
 | The comma's vision limit | **has** | `speedVisionSP.speedLimit` (about 4 Hz): the limit the memory holds and the screen shows, not the sign of one frame. 0 means "not sure" and is treated as missing |
 | A sign confirmed | **has** | `speedVisionSP.signRead` marks the moment the memory took a sign; the value is the limit after it |
-| Scene (road type) | **has** | `speedVisionSP.roadType`, `modelName` |
+| Scene (road type) | **has** | `speedVisionSP.roadType` |
+| The vision network in use | **has** | `speedVisionSP.modelName`: shown with each episode and kept with each verdict (`vision_model` in the export), so a label says which network was wrong. Drives before the first day reviewed (30 Oct 2026 by default, **Drives from** on the page) are left out: an older network is not worth judging |
 | Map limit | **has**, needs a GPS fix | `liveMapDataSP.speedLimit` with `speedLimitValid`, the next limit ahead and its distance, `roadName` (1 Hz). Not valid → missing, never a disagreement |
 | Limit the car used | **has** | `longitudinalPlanSP.speedLimit.resolver` (`speedLimit`, `source` none/car/map/vision, `speedLimitFinal`) |
 | Speed Limit Assist | **has** | `longitudinalPlanSP.speedLimit.assist` (`state`, `active`), `longitudinalPlanSource`, `vTarget` |

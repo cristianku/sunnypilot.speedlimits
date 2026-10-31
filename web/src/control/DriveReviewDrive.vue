@@ -157,10 +157,24 @@ function seek(seconds: number): void {
 }
 /** The video asked to play at a time, not playing yet: the time waits for it. */
 let starting = false;
+/** Why the browser does not play the video (its error, or play() refused), shown on the picture; '' while it plays. */
+const videoProblem = ref('');
+const MEDIA_ERRORS: Record<number, string> = {1: 'loading was stopped', 2: 'a network error', 3: 'it could not be decoded',
+  4: 'this browser does not play this video'};
+function onVideoError(): void {
+  const code = player.value?.error?.code ?? 0;
+  videoProblem.value = 'The video does not play here: ' + (MEDIA_ERRORS[code] ?? 'unknown error') + '.';
+}
 function start(element: HTMLVideoElement, at: number): void {
   element.currentTime = at;
   starting = true;
-  void element.play().catch(() => undefined).finally(() => { starting = false; });
+  void element.play()
+    .catch((problem: unknown) => {
+      // A pause or a seek during the start is not a problem; anything else is said, and not tried again every frame.
+      const name = problem instanceof DOMException ? problem.name : '';
+      if (name !== 'AbortError') videoProblem.value = 'The browser did not start the video' + (name ? ' (' + name + ')' : '') + '.';
+    })
+    .finally(() => { starting = false; });
 }
 function tick(now: number): void {
   if (!playing.value) return;
@@ -174,7 +188,7 @@ function tick(now: number): void {
     // No picture here: the logs go on at their own pace, the video takes over where it has the time again.
     cursor.value = clamp(cursor.value + (last ? (now - last) / 1000 : 0));
     const at = plainVideo.value ? cursor.value : videoTime.value;
-    if (element && at !== null && !element.ended) start(element, at);
+    if (element && at !== null && !element.ended && !videoProblem.value) start(element, at);
   }
   last = now;
   if (end.value && cursor.value >= end.value - 0.05) {
@@ -188,6 +202,7 @@ function play(): void {
   if (end.value && cursor.value >= end.value - 0.05) seek(0);
   playing.value = true;
   last = 0;
+  videoProblem.value = '';
   const element = player.value;
   const at = plainVideo.value ? cursor.value : videoTime.value;
   if (element && at !== null) start(element, at);
@@ -428,8 +443,10 @@ watch(() => props.route, () => {
 
       <div class="dr-main">
         <div class="dr-stage" :class="{empty: !ready}" @click="toggle">
-          <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"></video>
-          <div v-if="ready && hasLogs && videoTime === null" class="dr-stage-note">No picture of this time: the logs go on.</div>
+          <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"
+                 @error="onVideoError" @playing="videoProblem = ''"></video>
+          <div v-if="ready && videoProblem" class="dr-stage-note">{{ videoProblem }}</div>
+          <div v-else-if="ready && hasLogs && videoTime === null" class="dr-stage-note">No picture of this time: the logs go on.</div>
           <div v-else-if="!ready" class="dr-stage-note">{{ video === null ? 'Asking for the video…' : video.state === 'making' || video.state === 'waiting'
             ? 'Making the video of the drive… ' + Math.round((video.progress ?? 0) * 100) + '%'
             : video.state === 'failed' ? 'The video could not be made: ' + (video.reason ?? 'unknown error') + '.'
@@ -490,7 +507,8 @@ watch(() => props.route, () => {
                 map <b>{{ episode.before.map_logged ? episode.before.map_kph ?? 'none' : 'not logged' }}</b>,
                 resolver <b>{{ episode.before.resolver_kph ?? '–' }}</b>{{ episode.before.resolver_source ? ' (' + episode.before.resolver_source + ')' : '' }},
                 speed <b>{{ episode.before.v_ego_kph === null ? '–' : Math.round(episode.before.v_ego_kph) }}</b>, set <b>{{ episode.before.set_speed_kph ?? 'none' }}</b>,
-                openpilot <b>{{ episode.before.openpilot ?? 'not logged' }}</b>.</p>
+                openpilot <b>{{ episode.before.openpilot ?? 'not logged' }}</b><template v-if="episode.before.vision_model !== undefined">,
+                vision network <b>{{ episode.before.vision_model ?? 'not logged' }}</b></template>.</p>
               <p v-if="episode.previous_change" class="dr-hint">Last change of the vision limit before it:
                 {{ episode.previous_change.from_kph ?? '–' }} → {{ episode.previous_change.vision_kph }}
                 <button type="button" class="link-button" @click="seek((episode.previous_change.t_ns - t0) / 1e9 - 3)">at

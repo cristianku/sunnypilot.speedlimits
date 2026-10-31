@@ -486,6 +486,9 @@ def test_corrections_survive_new_logs_rescans_and_a_new_scanner(tmp_path, monkey
     assert [(line['interval']['limit']['state'], line['use']) for line in intervals] == [('known', 'target'),
                                                                                          ('unknown', 'target')]
     assert lines[0]['kind'] == 'header' and 'Limite sconosciuto' in lines[0]['semantics']['limit.state unknown']
+    # Each label carries the vision network the comma ran where it starts: an error belongs to that network.
+    assert intervals[0]['vision_model'] == 'synthetic' and intervals[0]['recorded']['vision_kph'] == 80
+    assert 'vision_model' in lines[0]['semantics']
 
 
 def test_a_stale_revision_is_refused_and_a_verdict_needs_what_it_claims(tmp_path):
@@ -535,6 +538,46 @@ def test_rules_and_models_only_propose(tmp_path):
     assert line['author_kind'] == 'rule' and line['use'] == 'excluded'
     with pytest.raises(drive_review.DriveReviewError):
         store.save_annotation(ROUTE, body, author='x', author_kind='someone')
+
+
+def test_drives_before_the_first_day_reviewed_stay_out_of_the_queue(tmp_path):
+    make_report(tmp_path)
+    # ROUTE's GPS says 21 Sep 2026, before the default first day; OTHER_ROUTE has no fix: its videos' day (today).
+    comma_drive(tmp_path, segments=(0,), gps_unix_ms=1_790_000_000_000)
+    comma_drive(tmp_path, OTHER_ROUTE, segments=(0,))
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    store.scan(OTHER_ROUTE)
+    assert store.review_from() == drive_review.DEFAULT_REVIEW_FROM == '2026-10-30'
+    assert drive_review.early_routes(store) == {ROUTE}
+    queue = drive_review.queue_view(store)
+    assert {item['route'] for item in queue} == {OTHER_ROUTE}
+    # Each episode says when it was: here from the videos' times only (no fix), so not certain.
+    assert all(item['when'] and item['when_certain'] is False for item in queue)
+    view = {item['route']: item for item in drive_review.drives_view(store)}
+    assert view[ROUTE]['day'] == '2026-09-21' and view[ROUTE]['before_review'] is True
+    assert view[OTHER_ROUTE]['before_review'] is False
+    server = RunningServer(tmp_path)
+    try:
+        # Out of date with a new scanner: Find episodes searches only the drives reviewed.
+        store._run([("UPDATE scans SET scanner_version = 0", ())])
+        status, _, data = server.request('POST', '/api/drive-review/scan-all', body={})
+        assert status == 200 and json_of(data)['queued'] == [OTHER_ROUTE]
+        settled(store, OTHER_ROUTE)
+        status, _, data = server.request('POST', '/api/drive-review/settings', body={'review_from': '30 Oct'})
+        assert status == 400 and json_of(data)['error'] == 'bad_date'
+        status, _, data = server.request('POST', '/api/drive-review/settings', body={'review_from': ''})
+        assert status == 200 and json_of(data)['review_from'] == ''
+        listing = json_of(server.request('GET', '/api/drive-review/drives')[2])
+        assert listing['review_from'] == '' and not any(item['before_review'] for item in listing['drives'])
+    finally:
+        server.close()
+    # Every drive again: both drives' episodes are in the queue; ROUTE's say their time from the GPS.
+    queue = drive_review.queue_view(store)
+    assert {item['route'] for item in queue} == {ROUTE, OTHER_ROUTE}
+    assert all(item['when'].endswith('2026 · ' + item['when'][-5:]) and item['when_certain']
+               for item in queue if item['route'] == ROUTE)
+    assert any('21 Sep 2026' in item['when'] for item in queue if item['route'] == ROUTE)
 
 
 def test_the_command_line_scans_every_drive_with_logs_and_exports(tmp_path, capsys):

@@ -1108,7 +1108,7 @@ def make_handler(app: ReviewApp):
             value = lambda name: query.get(name, [''])[0] or None  # noqa: E731
             try:
                 if path == '/api/drive-review/drives':
-                    self._json(200, {'drives': drive_review.drives_view(store)})
+                    self._json(200, {'drives': drive_review.drives_view(store), 'review_from': store.review_from()})
                     return
                 if path == '/api/drive-review/episodes':
                     route, kind, data, status = value('route'), value('kind'), value('data'), value('status')
@@ -1186,7 +1186,10 @@ def make_handler(app: ReviewApp):
                     return
                 if path == '/api/drive-review/scan-all':
                     queued = []
+                    early = drive_review.early_routes(store)
                     for route in drive_review.all_routes(app.root):
+                        if route in early:
+                            continue
                         state = store.scan_state(route)['state']
                         if state in ('not_scanned', 'outdated') or (
                                 state == 'no_logs' and drive_logs.discover(app.root, route)):
@@ -1196,6 +1199,12 @@ def make_handler(app: ReviewApp):
                     return
                 if not isinstance(body, dict):
                     self._problem(400, 'invalid_json', 'An object is expected.', True)
+                    return
+                if path == '/api/drive-review/settings':
+                    review_from = store.set_review_from(body.get('review_from'))
+                    print(f'Drive review: drives reviewed from {review_from or "the first"} ({terminal_text(author)})',
+                          flush=True)
+                    self._json(200, {'ok': True, 'review_from': review_from})
                     return
                 if path == '/api/drive-review/annotations':
                     saved = store.save_annotation(str(body.get('route') or ''), body, author=author, origin='portal')

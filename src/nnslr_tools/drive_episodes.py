@@ -31,7 +31,7 @@ import hashlib
 import random
 import statistics
 
-SCANNER_VERSION = 2
+SCANNER_VERSION = 3
 NS = 1_000_000_000
 # The state an intervention is judged on: this long before it.
 BEFORE_NS = NS // 10
@@ -183,7 +183,7 @@ class Drive:
                 'sla_state': get('sla_state'), 'v_ego_kph': get('v_ego'), 'set_speed_kph': _set_speed(get('v_cruise')),
                 'openpilot': get('sd_state'), 'engaged': get('sd_enabled'), 'long_active': get('long_active'),
                 'lat_active': get('lat_active'), 'road_type': get('vis_road') or None,
-                'road_name': get('road_name') or None}
+                'road_name': get('road_name') or None, 'vision_model': get('vis_model') or None}
 
 
 # ---------- the interventions ----------

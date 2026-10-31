@@ -32,6 +32,10 @@ export interface DriveRow {
   title: string | null;
   when: string | null;
   when_certain: boolean;
+  /** The local day it started (YYYY-MM-DD), null when unknown. */
+  day: string | null;
+  /** Before the first day reviewed: not searched, its episodes not in the queue. */
+  before_review: boolean;
   minutes: number | null;
   scan: ScanState;
   /** Logs found on the server and not imported yet (only for a drive without logs). */
@@ -59,6 +63,8 @@ export interface Recorded {
   lat_active: boolean | null;
   road_type: string | null;
   road_name: string | null;
+  /** The vision network the comma ran (speedVisionSP.modelName); missing in episodes found before it was kept. */
+  vision_model?: string | null;
 }
 
 export interface Availability {
@@ -95,6 +101,9 @@ export interface QueueItem {
   status: EpisodeStatus;
   segments: [number, number] | null;
   duration_s: number;
+  /** When the episode starts ("Fri 31 Oct 2026 · 08:12"): from the GPS when certain, else from the videos' times. */
+  when: string | null;
+  when_certain: boolean;
 }
 
 export interface Clue {

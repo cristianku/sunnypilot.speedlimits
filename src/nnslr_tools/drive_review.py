@@ -29,7 +29,7 @@ import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from nnslr_tools import drive_episodes, drive_logs
@@ -80,10 +80,16 @@ SCHEMA_STATEMENTS = (
         author TEXT NOT NULL, author_kind TEXT NOT NULL, origin TEXT NOT NULL, created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)''',
     'CREATE INDEX IF NOT EXISTS annotations_route ON annotations (route)',
+    'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     '''CREATE TABLE IF NOT EXISTS annotation_history (
         id TEXT NOT NULL, revision INTEGER NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL, author TEXT NOT NULL,
         author_kind TEXT NOT NULL, origin TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (id, revision))''',
 )
+
+
+# Drives before this day are not searched and their episodes are not in the queue: the vision network on the car was
+# not yet the one worth judging (Cristian, 31 Oct 2026). Changed from the page (Review drives from); '' for every drive.
+DEFAULT_REVIEW_FROM = '2026-10-30'
 
 
 class DriveReviewError(ValueError):
@@ -254,6 +260,24 @@ class DriveReviewStore:
             item.pop('path')
             out.append(item)
         return out
+
+    # ---------- settings ----------
+
+    def review_from(self) -> str:
+        """The first day (YYYY-MM-DD) whose drives are reviewed; '' for every drive."""
+        rows = self._rows("SELECT value FROM settings WHERE key = 'review_from'")
+        return rows[0]['value'] if rows else DEFAULT_REVIEW_FROM
+
+    def set_review_from(self, value) -> str:
+        value = '' if value is None else str(value).strip()
+        if value:
+            try:
+                value = date.fromisoformat(value).isoformat()
+            except ValueError:
+                raise DriveReviewError(400, 'bad_date', 'A day as YYYY-MM-DD, or nothing for every drive.') from None
+        self._run([("INSERT INTO settings (key, value) VALUES ('review_from', ?) "
+                    'ON CONFLICT(key) DO UPDATE SET value = excluded.value', (value,))])
+        return value
 
     # ---------- the scan ----------
 
@@ -619,7 +643,8 @@ class DriveReviewStore:
                 out.write(_dumps({**base, 'interval': None, 'use': 'excluded', 'excluded_because': 'no interval'})
                           + '\n')
                 continue
-            for interval in intervals:
+            recorded = [entry.get('recorded') for entry in (payload.get('context') or {}).get('intervals') or []]
+            for number, interval in enumerate(intervals):
                 use, why = 'target', None
                 if item['author_kind'] != 'human':
                     use, why = 'excluded', 'not a person\'s label (a rule, model or auto-acceptance only proposes)'
@@ -627,7 +652,10 @@ class DriveReviewStore:
                     use, why = 'excluded', 'the reviewer could not determine it'
                 elif not interval.get('certain', True):
                     use, why = 'excluded', 'the reviewer marked it uncertain'
-                out.write(_dumps({**base, 'interval': interval, 'use': use, 'excluded_because': why}) + '\n')
+                state = recorded[number] if number < len(recorded) else None
+                out.write(_dumps({**base, 'interval': interval, 'recorded': state,
+                                  'vision_model': (state or {}).get('vision_model'), 'use': use,
+                                  'excluded_because': why}) + '\n')
                 count += 1
         for row in self._rows("SELECT route, summary, files FROM scans WHERE state = 'done' AND summary IS NOT NULL"):
             summary = _loads(row['summary'], {})
@@ -652,6 +680,9 @@ EXPORT_SEMANTICS = {
     'author_kind': 'human: a person in the portal; rule, model, auto: proposals, never used as targets; '
                    'auto-acceptance needs a reliability measured on independent drives and is not enabled',
     'use': 'target only for a person\'s certain interval of a determined verdict',
+    'recorded': 'what the comma\'s logs had where the interval starts (drive_episodes.Drive.state)',
+    'vision_model': 'the vision network the comma ran there (speedVisionSP.modelName), null when the log has '
+                    'none: an error belongs to that network, not to a later one',
 }
 
 
@@ -889,6 +920,49 @@ def _when(civil_ms: int | None, drive: dict) -> tuple[str | None, bool]:
     return drive.get('when'), False
 
 
+def episode_when(summary: dict, drive: dict, start_ns: int) -> tuple[str | None, bool]:
+    """The date and time an episode starts: the GPS's time of the drive plus the log time since its start (certain),
+    else the drive's videos' start plus that time (uncertain); (None, False) when neither is known."""
+    from nnslr_tools.drives import LOCAL
+    t0 = summary.get('t0_ns')
+    offset_s = (start_ns - t0) / NS if t0 is not None else 0.0
+    if summary.get('civil_ms') and t0 is not None:
+        at, certain = datetime.fromtimestamp(summary['civil_ms'] / 1000 + offset_s, timezone.utc), True
+    elif drive.get('start'):
+        at, certain = datetime.fromtimestamp(datetime.fromisoformat(drive['start']).timestamp() + offset_s,
+                                             timezone.utc), False
+    else:
+        return None, False
+    return at.astimezone(LOCAL).strftime('%a %-d %b %Y · %H:%M'), certain
+
+
+def drive_day(civil_ms: int | None, drive: dict) -> str | None:
+    """The local day (YYYY-MM-DD) a drive started: the GPS's, else its videos' file times; None when unknown."""
+    if civil_ms:
+        from nnslr_tools.drives import LOCAL
+        return datetime.fromtimestamp(civil_ms / 1000, timezone.utc).astimezone(LOCAL).date().isoformat()
+    return (drive.get('start') or '')[:10] or None
+
+
+def before_review(day: str | None, review_from: str) -> bool:
+    """A drive before the first day reviewed; a drive whose day is unknown is reviewed."""
+    return bool(review_from and day and day < review_from)
+
+
+def early_routes(store: 'DriveReviewStore') -> set[str]:
+    """The drives before the first day reviewed (their episodes stay out of the queue, Find episodes skips them)."""
+    from nnslr_tools.drives import drive_of
+    review_from = store.review_from()
+    if not review_from:
+        return set()
+    out = set()
+    for route in all_routes(store.root):
+        summary = store.summary(route) or {}
+        if before_review(drive_day(summary.get('civil_ms'), drive_of(store.root, route)), review_from):
+            out.add(route)
+    return out
+
+
 def _title(root: Path, ends: list) -> str | None:
     """"Olten → Zürich" from the first and the last GPS fix of the logs (drives.place_name)."""
     from nnslr_tools.drives import place_name
@@ -918,11 +992,13 @@ def drives_view(store: DriveReviewStore) -> list[dict]:
     from nnslr_tools.drives import drive_of
     annotations = store.annotations()
     episodes = store.episodes()
+    review_from = store.review_from()
     out = []
     for route in all_routes(store.root):
         drive = drive_of(store.root, route)
         summary = store.summary(route) or {}
         when, certain = _when(summary.get('civil_ms'), drive)
+        day = drive_day(summary.get('civil_ms'), drive)
         if not drive.get('title') and summary.get('gps'):
             drive['title'] = _title(store.root, summary['gps'])
         state = store.scan_state(route)
@@ -932,7 +1008,8 @@ def drives_view(store: DriveReviewStore) -> list[dict]:
         for item in mine:
             if item['channel'] != 'spot_check':
                 statuses[episode_status(item['id'], annotations)] += 1
-        out.append({'route': route, 'title': drive.get('title'), 'when': when, 'when_certain': certain,
+        out.append({'route': route, 'title': drive.get('title'), 'when': when, 'when_certain': certain, 'day': day,
+                    'before_review': before_review(day, review_from),
                     'minutes': drive.get('minutes'), 'scan': state, 'logs_found': found,
                     'video_segments': len(drive_video.minutes(store.root, route)),
                     'episodes': statuses, 'spot_checks': sum(1 for item in mine if item['channel'] == 'spot_check'),
@@ -949,12 +1026,17 @@ QUEUE_STATUS = ('open', 'reviewed', 'undeterminable')
 def queue_view(store: DriveReviewStore, *, route: str | None = None, kind: str | None = None,
                data: str | None = None, status: str | None = None) -> list[dict]:
     """The episodes to review, the ones with more agreeing clues first: filtered by drive, kind (a channel or a
-    clue), data available and status."""
+    clue), data available and status; none of a drive before the first day reviewed (early_routes)."""
     from nnslr_tools import drive_video
+    from nnslr_tools.drives import drive_of
     annotations = store.annotations()
+    early = early_routes(store)
     videos: dict[str, set] = {}
+    drives: dict[str, tuple[dict, dict]] = {}
     out = []
     for item in store.episodes(route):
+        if item['route'] in early:
+            continue
         if kind and kind != item['channel'] and kind not in item['kinds']:
             continue
         if item['route'] not in videos:
@@ -976,7 +1058,10 @@ def queue_view(store: DriveReviewStore, *, route: str | None = None, kind: str |
         current = episode_status(item['id'], annotations)
         if status and current != status:
             continue
-        out.append({'id': item['id'], 'route': item['route'], 'start_ns': item['start_ns'], 'end_ns': item['end_ns'],
+        if item['route'] not in drives:
+            drives[item['route']] = (store.summary(item['route']) or {}, drive_of(store.root, item['route']))
+        when, certain = episode_when(*drives[item['route']], item['start_ns'])
+        out.append({'when': when, 'when_certain': certain, 'id': item['id'], 'route': item['route'], 'start_ns': item['start_ns'], 'end_ns': item['end_ns'],
                     'channel': item['channel'], 'kinds': item['kinds'], 'priority': item['priority'],
                     'reasons': item['reasons'], 'hint': item['hint'], 'before': item['before'], 'data': available,
                     'video': has_video, 'status': current, 'segments': item.get('segments'),

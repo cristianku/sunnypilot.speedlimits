@@ -19,17 +19,27 @@ defineProps<{readOnly: boolean}>();
 // -- the drives ----------------------------------------------------------------------------------------------------------
 const drives = shallowRef<DriveRow[] | null>(null);
 const error = ref('');
+/** The first day whose drives are reviewed ('' every drive): the vision network before it is not worth judging. */
+const reviewFrom = ref('');
 async function loadDrives(): Promise<void> {
   try {
-    drives.value = (await api<{drives: DriveRow[]}>('/api/drive-review/drives')).drives;
+    const answer = await api<{drives: DriveRow[]; review_from: string}>('/api/drive-review/drives');
+    drives.value = answer.drives;
+    // Never over a day being picked (the list reloads every 2 s while it searches).
+    if (document.activeElement?.id !== 'dr-review-from' && typeof answer.review_from === 'string') {
+      reviewFrom.value = answer.review_from;
+    }
     error.value = '';
   } catch (problem) {
     error.value = messageOf(problem);
   }
 }
 const busy = computed(() => (drives.value ?? []).some((drive) => drive.scan.state === 'queued' || drive.scan.state === 'scanning'));
+/** The drives reviewed: from the first day on (and those of a day unknown). */
+const reviewed = computed(() => (drives.value ?? []).filter((drive) => !drive.before_review));
+const early = computed(() => (drives.value ?? []).length - reviewed.value.length);
 /** Drives whose logs wait for a search: not searched, out of date, or found on the server and not imported. */
-const toSearch = computed(() => (drives.value ?? []).filter((drive) => drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated'
+const toSearch = computed(() => reviewed.value.filter((drive) => drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated'
   || (drive.scan.state === 'no_logs' && (drive.logs_found ?? 0) > 0)).length);
 const withoutLogs = computed(() => (drives.value ?? []).filter((drive) => drive.scan.state === 'no_logs' && !drive.logs_found).length);
 const searched = computed(() => (drives.value ?? []).filter((drive) => drive.scan.state === 'done' || drive.scan.state === 'no_episodes').length);
@@ -37,6 +47,27 @@ const titleOf = (route: string): string => {
   const drive = drives.value?.find((item) => item.route === route);
   return drive?.title ?? drive?.when ?? route;
 };
+
+let fromTimer = 0;
+/** A day picked: saved once it is a whole date. While a year is typed digit by digit the input passes through
+ * 0002, 0020, 0202: those are never saved. */
+function fromChanged(): void {
+  window.clearTimeout(fromTimer);
+  if (reviewFrom.value && Number(reviewFrom.value.slice(0, 4)) < 2020) return;
+  fromTimer = window.setTimeout(() => void saveFrom(), 700);
+}
+async function saveFrom(): Promise<void> {
+  try {
+    const answer = await post<{review_from: string}>('/api/drive-review/settings', {review_from: reviewFrom.value});
+    reviewFrom.value = answer.review_from;
+    toast(answer.review_from ? 'Drives reviewed from ' + dayText(answer.review_from) + '.' : 'Every drive is reviewed.');
+    await Promise.all([loadDrives(), loadQueue()]);
+  } catch (problem) {
+    toast(messageOf(problem), true);
+    await loadDrives();
+  }
+}
+const dayText = (day: string): string => new Date(day + 'T12:00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
 
 const starting = ref(false);
 async function searchAll(): Promise<void> {
@@ -106,6 +137,7 @@ function beforeText(item: QueueItem): string {
     'map ' + (before.map_logged ? before.map_kph ?? 'none' : 'not logged'),
   ];
   if (before.v_ego_kph !== null) parts.push(kphText(before.v_ego_kph));
+  if (before.vision_model) parts.push('network ' + before.vision_model);
   return parts.join(' · ');
 }
 const episodeHref = (item: QueueItem): string => '/drive-review?drive=' + encodeURIComponent(item.route) + '&episode=' + item.id;
@@ -149,8 +181,14 @@ onBeforeUnmount(() => window.clearTimeout(timer));
         <button type="button" class="btn" :class="{primary: toSearch > 0}" id="dr-search-all" :disabled="readOnly || starting || busy || !toSearch"
                 @click="searchAll">Find episodes</button>
       </div>
-      <p v-if="drives" class="import-why">{{ plural(searched, 'drive') }} searched<template v-if="withoutLogs"> ·
-        {{ plural(withoutLogs, 'drive') }} without logs on the server</template>.</p>
+      <div class="dr-search-facts">
+        <p v-if="drives" class="import-why">{{ plural(searched, 'drive') }} searched<template v-if="withoutLogs"> ·
+          {{ plural(withoutLogs, 'drive') }} without logs on the server</template><template v-if="early"> ·
+          {{ plural(early, 'drive') }} before {{ dayText(reviewFrom) }} left out</template>.</p>
+        <label class="dr-from" title="Drives before this day are not searched and stay out of the episodes: the vision network on the car was not yet the one to judge. Empty: every drive.">
+          <span>Drives from</span>
+          <input type="date" id="dr-review-from" v-model="reviewFrom" :disabled="readOnly" @change="fromChanged"></label>
+      </div>
     </section>
 
     <section class="card dr-queue" aria-labelledby="dr-queue-title">
@@ -163,7 +201,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
         <label class="wp-field"><span>Drive</span>
           <select v-model="route" id="dr-filter-drive">
             <option value="">Every drive</option>
-            <option v-for="drive in drives ?? []" :key="drive.route" :value="drive.route"
+            <option v-for="drive in reviewed" :key="drive.route" :value="drive.route"
                     :disabled="drive.scan.state !== 'done' && drive.scan.state !== 'no_episodes'">{{ drive.title ?? drive.when ?? drive.route }}</option>
           </select></label>
         <label class="wp-field"><span>Kind</span>
@@ -183,7 +221,8 @@ onBeforeUnmount(() => window.clearTimeout(timer));
               <strong>{{ CHANNEL_LABEL[item.channel] }}</strong>
               <span class="pill" :class="item.status === 'open' ? 'todo' : item.status === 'reviewed' ? 'ok' : 'muted'">{{ STATUS_LABEL[item.status] }}</span>
             </span>
-            <span class="dr-item-where">{{ titleOf(item.route) }} · {{ lengthOf(item.duration_s) }}</span>
+            <span class="dr-item-where"><b v-if="item.when" class="dr-item-when">{{ item.when_certain ? '' : '≈ ' }}{{ item.when }}</b><template
+              v-if="item.when"> · </template>{{ titleOf(item.route) }} · {{ lengthOf(item.duration_s) }}</span>
             <span class="dr-chips">
               <span v-for="name in item.kinds" :key="name" class="dr-chip" :class="'dr-k-' + name">{{ KIND_LABEL[name] ?? name }}</span>
             </span>
@@ -216,10 +255,11 @@ onBeforeUnmount(() => window.clearTimeout(timer));
               <span><template v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</template>{{
                 drive.minutes !== null ? ' · ' + drive.minutes + ' min' : '' }}</span>
             </div>
-            <p class="dr-drive-state" :class="'dr-' + scanText(drive.scan).tone">
-              <template v-if="drive.scan.state === 'no_logs' && drive.logs_found">Logs found on the server, not imported yet: Import and search reads them.</template>
+            <p class="dr-drive-state" :class="drive.before_review ? 'dr-muted' : 'dr-' + scanText(drive.scan).tone">
+              <template v-if="drive.before_review">Before {{ dayText(reviewFrom) }}: not reviewed.</template>
+              <template v-else-if="drive.scan.state === 'no_logs' && drive.logs_found">Logs found on the server, not imported yet: Import and search reads them.</template>
               <template v-else>{{ scanText(drive.scan).text }}</template>
-              <template v-if="drive.scan.state === 'done'"> {{ drive.episodes.open ? plural(drive.episodes.open, 'episode') + ' to review' : 'All reviewed' }}<template
+              <template v-if="drive.scan.state === 'done' && !drive.before_review"> {{ drive.episodes.open ? plural(drive.episodes.open, 'episode') + ' to review' : 'All reviewed' }}<template
                 v-if="drive.episodes.reviewed + drive.episodes.undeterminable"> · {{ drive.episodes.reviewed + drive.episodes.undeterminable }} done</template>.</template>
             </p>
             <p class="rt-shares">
@@ -231,7 +271,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
             </p>
             <span class="data-chev rt-go" aria-hidden="true">›</span>
           </a>
-          <div v-if="!readOnly && (drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated' || drive.scan.state === 'failed'
+          <div v-if="!readOnly && !drive.before_review && (drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated' || drive.scan.state === 'failed'
                  || (drive.scan.state === 'no_logs' && drive.logs_found))" class="dr-drive-actions">
             <button type="button" class="btn small" @click="searchOne(drive.route)">{{ drive.scan.state === 'no_logs' ? 'Import and search' : 'Search again' }}</button>
           </div>
