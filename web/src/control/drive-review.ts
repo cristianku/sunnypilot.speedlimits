@@ -235,6 +235,13 @@ export const CHANNEL_LABEL: Record<Channel, string> = {
 };
 export const STATUS_LABEL: Record<EpisodeStatus, string> = {open: 'To review', reviewed: 'Reviewed', undeterminable: 'Can\'t tell'};
 
+/** What a person said of an episode, by its latest verdict: the colour of the episode on the strip and in the lanes. */
+export type VerdictStatus = 'open' | Verdict;
+export function statusOf(annotations: readonly Annotation[], episodeId: string): VerdictStatus {
+  const mine = annotations.filter((note) => note.author_kind === 'human' && note.episode_id === episodeId)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
+  return mine ? mine.payload.verdict : 'open';
+}
 export const VERDICTS: [Verdict, string][] = [['wrong_limit', 'Wrong limit'], ['correct_limit', 'Right limit, another reason'],
   ['undeterminable', 'Can\'t tell']];
 export const OTHER_REASONS: [string, string][] = [['traffic', 'Traffic'], ['road_or_curve', 'Road or curve'],

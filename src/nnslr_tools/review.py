@@ -1086,7 +1086,8 @@ def make_handler(app: ReviewApp):
             self.send_header('Accept-Ranges', 'bytes')
             if status == 206:
                 self.send_header('Content-Range', f'bytes {first}-{last}/{size}')
-            self._security_headers(DEFAULT_CSP)
+            # Kept by this browser only (private) for a day: its address changes when the video is made again.
+            self._security_headers(DEFAULT_CSP, 'private, max-age=86400')
             self.end_headers()
             try:
                 with path.open('rb') as source:
@@ -1724,8 +1725,8 @@ def make_handler(app: ReviewApp):
             except (UnicodeDecodeError, ValueError, TypeError) as exc:
                 raise ReviewRejected(400, 'invalid_json', 'Invalid JSON data.') from exc
 
-        def _security_headers(self, csp):
-            self.send_header('Cache-Control', 'no-store')
+        def _security_headers(self, csp, cache='no-store'):
+            self.send_header('Cache-Control', cache)
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('X-Frame-Options', 'DENY')

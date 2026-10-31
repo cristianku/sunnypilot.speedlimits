@@ -66,6 +66,9 @@ speed changes had no `buttonEvents`; with ICBM idle around them they now count a
 - **Holes**: a missing minute, or a service that goes quiet (more than 0.5 s for carState, 1.5 s for the plan, 3 s
   for vision and map), ends its values with *missing*; nothing is carried over a hole. A minute whose clock goes back
   is left out and reported.
+- **The vision ahead of the map**: the vision reads a sign tens of metres before the car reaches it; the map changes
+  only where its limit begins (at the sign or past it) and at its next update. A disagreement that began with a new
+  vision limit and ended within 10 s with the map on that same limit is no episode (counted as `vision_ahead`).
 - **Missing is not wrong**: no vision, vision not sure (0), or no valid map limit is shown hatched and never counts as
   a disagreement.
 - **Episodes** are clues for a person, not labels. A rule or a model may only propose; only a person's verdict is a

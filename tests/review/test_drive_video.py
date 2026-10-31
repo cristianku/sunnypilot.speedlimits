@@ -72,10 +72,11 @@ def test_the_site_serves_the_video_with_byte_ranges(tmp_path):
     try:
         status, _, data = server.request('GET', '/api/panel/drive-video/' + ROUTE)
         answer = json.loads(data)
-        assert status == 200 and answer['state'] == 'ready' and answer['url'] == f'/route/{ROUTE}/video.mp4'
-        status, response, data = server.request('GET', f'/route/{ROUTE}/video.mp4', headers={'Range': 'bytes=10-109'})
+        assert status == 200 and answer['state'] == 'ready' and answer['url'].startswith(f'/route/{ROUTE}/video.mp4?v=')
+        status, response, data = server.request('GET', answer['url'], headers={'Range': 'bytes=10-109'})
         assert status == 206 and len(data) == 100 and response.getheader('Content-Range') == f'bytes 10-109/{size}'
         assert response.getheader('Content-Type') == 'video/mp4' and response.getheader('Accept-Ranges') == 'bytes'
+        assert response.getheader('Cache-Control') == 'private, max-age=86400'
         status, _, data = server.request('GET', f'/route/{ROUTE}/video.mp4')
         assert status == 200 and len(data) == size
         status, _, _ = server.request('GET', f'/route/{ROUTE}/video.mp4', headers={'Range': f'bytes={size}-'})

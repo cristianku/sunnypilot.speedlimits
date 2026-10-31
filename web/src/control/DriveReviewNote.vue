@@ -48,6 +48,14 @@ watch([verdict, reason, undeterminable, note, rows], () => { dirty.value = true;
 watch(rows, () => emit('draft', rows.value.map((row) => ({from: row.from, to: row.to,
   text: row.unknown ? '?' : row.value === null ? '…' : String(row.value)}))), {deep: true, immediate: true});
 
+/** A wrong limit needs the right one: choosing it starts a first stretch where the episode begins, to be given its limit. */
+function choose(key: Verdict): void {
+  verdict.value = key;
+  if (key === 'wrong_limit' && !rows.value.length) {
+    rows.value = [{key: ++keys, from: props.episode ? props.episode.start_s : props.cursor, to: null, unknown: false, value: null,
+      change: 'sign', signRead: null, scene: null, certain: true}];
+  }
+}
 function addRow(): void {
   const at = props.cursor;
   rows.value = [...rows.value, {key: ++keys, from: at, to: null, unknown: false, value: null, change: 'sign', signRead: null,
@@ -132,7 +140,7 @@ async function remove(): Promise<void> {
     </div>
     <div class="dr-verdicts" role="radiogroup" aria-label="Verdict">
       <button v-for="[key, label] in VERDICTS" :key="key" type="button" role="radio" class="btn small" :class="'dr-v-' + key"
-              :aria-checked="verdict === key" :disabled="readOnly" @click="verdict = key">{{ label }}</button>
+              :aria-checked="verdict === key" :disabled="readOnly" @click="choose(key)">{{ label }}</button>
     </div>
     <div v-if="verdict === 'correct_limit'" class="dr-reasons" role="radiogroup" aria-label="Why the driver acted">
       <span class="dr-field-name">Why the driver acted</span>
@@ -193,7 +201,7 @@ async function remove(): Promise<void> {
       <button type="button" class="btn primary" id="dr-save" :disabled="readOnly || saving || Boolean(problem) || (!dirty && Boolean(annotation))"
               @click="save">{{ annotation ? 'Save changes' : 'Save' }}</button>
       <button v-if="annotation" type="button" class="btn" :disabled="readOnly" @click="remove">Delete</button>
-      <span v-if="problem && verdict !== null" class="dr-hint">{{ problem }}</span>
+      <span v-if="problem && verdict !== null" class="dr-hint dr-problem" role="status">{{ problem }}</span>
     </div>
   </section>
 </template>

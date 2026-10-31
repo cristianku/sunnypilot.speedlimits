@@ -12,7 +12,7 @@ import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {toast} from '../composables/toast';
 import {type Annotation, CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange,
-  type ScanState, scanText, secondOf, setSpeedOf, type Timeline, valueAt, videoTimeOf, type VideoState} from './drive-review';
+  type ScanState, scanText, secondOf, setSpeedOf, statusOf, type Timeline, valueAt, videoTimeOf, type VideoState} from './drive-review';
 import DriveReviewLanes, {type DraftInterval} from './DriveReviewLanes.vue';
 import DriveReviewNote from './DriveReviewNote.vue';
 import {ROAD_LABEL} from './roads';
@@ -285,9 +285,9 @@ function saved(item: Annotation): void {
   void read();
 }
 const draft = ref<DraftInterval[]>([]);
-const statusOf = (item: Episode): 'open' | 'reviewed' | 'undeterminable' => {
-  const mine = humanNotes.value.filter((note) => note.episode_id === item.id).sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-  return !mine ? 'open' : mine.payload.verdict === 'undeterminable' ? 'undeterminable' : 'reviewed';
+const stripClass = (item: Episode): string => {
+  const status = statusOf(humanNotes.value, item.id);
+  return item.channel === 'spot_check' && status === 'open' ? 'spot' : status;
 };
 
 // -- the window of the lanes ------------------------------------------------------------------------------------------------
@@ -474,7 +474,7 @@ watch(() => props.route, () => {
                @pointerdown="stripDown" @pointermove="stripMove" @pointerup="stripUp" @pointercancel="stripUp">
             <rect x="0" y="7" width="1000" height="6" rx="3" class="dr-strip-base"/>
             <rect v-for="item in episodes" :key="item.id" :x="sx(item.start_s)" y="3" :width="Math.max(4, sx(item.end_s) - sx(item.start_s))" height="14" rx="2"
-                  :class="['dr-strip-ep', item.channel === 'spot_check' ? 'spot' : statusOf(item), {current: item.id === episode?.id}]"/>
+                  :class="['dr-strip-ep', stripClass(item), {current: item.id === episode?.id}]"/>
             <rect :x="sx(windowFrom)" y="0.5" :width="Math.max(2, sx(windowTo) - sx(windowFrom))" height="19" rx="3" class="dr-strip-window"/>
             <rect :x="sx(cursor) - 1.5" y="0" width="3" height="20" class="dr-strip-head"/>
           </svg>

@@ -1453,7 +1453,7 @@ backdrop-filter:blur(10px)}
 .dr-strip{display:block;width:100%;height:26px;cursor:pointer;touch-action:none}
 .dr-strip:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .dr-strip-base{fill:var(--surface-3)}
-.dr-strip-ep{fill:var(--todo)}.dr-strip-ep.reviewed{fill:var(--ok)}.dr-strip-ep.undeterminable{fill:var(--muted)}
+.dr-strip-ep{fill:var(--todo)}.dr-strip-ep.wrong_limit{fill:var(--bad)}.dr-strip-ep.correct_limit{fill:var(--ok)}.dr-strip-ep.undeterminable{fill:var(--muted)}
 .dr-strip-ep.spot{fill:var(--rev);opacity:.7}.dr-strip-ep.current{stroke:var(--fg);stroke-width:2;vector-effect:non-scaling-stroke}
 .dr-strip-window{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .dr-strip-head{fill:var(--fg)}
@@ -1462,6 +1462,7 @@ backdrop-filter:blur(10px)}
 .dr-side{grid-area:side;display:flex;flex-direction:column;gap:14px;min-width:0}
 .dr-side h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
 .dr-hint{margin:0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
+.dr-hint.dr-problem{color:var(--todo);font-weight:600}
 .dr-search-facts{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
 .dr-search-facts .import-why{margin:0;flex:1 1 220px}
 .dr-from{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);white-space:nowrap}
@@ -1537,7 +1538,8 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
 .dr-lanes .dr-today{opacity:.55}
 .dr-today-text{font-size:10px}
 .dr-inferred line{stroke:var(--warn);stroke-width:1.5}.dr-inferred text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--warn)}
-.dr-episode{fill:var(--todo);opacity:.55}.dr-episode.spot{fill:var(--rev)}.dr-episode.current{opacity:1}
+.dr-episode{fill:var(--todo);opacity:.55}.dr-episode.spot{fill:var(--rev)}.dr-episode.wrong_limit{fill:var(--bad)}
+.dr-episode.correct_limit{fill:var(--ok)}.dr-episode.undeterminable{fill:var(--muted)}.dr-episode.current{opacity:1}
 .dr-set{fill:var(--ok-soft)}.dr-set.dr-unsure{fill:var(--todo-soft)}.dr-unknown{fill:var(--surface-3)}
 .dr-lanes rect.dr-set{stroke:var(--ok)}.dr-lanes rect.dr-unsure{stroke:var(--todo);stroke-dasharray:3 2}
 .dr-draft{fill:var(--accent-soft)}.dr-lanes rect.dr-draft{stroke:var(--accent);stroke-dasharray:4 2}

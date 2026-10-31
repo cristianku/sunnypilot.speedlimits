@@ -5,7 +5,7 @@
 // the map as it is now), and the review (the episodes, the limits a person set). A stretch the log does not have is
 // hatched: missing data is never a value. A tap or a drag goes to that time.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
-import {type Annotation, combine, type Episode, indexAt, limitOf, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
+import {type Annotation, combine, type Episode, indexAt, limitOf, runsOf, secondOf, type Series, setSpeedOf, statusOf, type Timeline,
   type Value} from './drive-review';
 
 export interface DraftInterval {from: number; to: number | null; text: string}
@@ -169,7 +169,7 @@ const mapToday = computed(() => (props.view.map_today?.runs ?? []).flatMap(([seg
 // The review: the episodes, and the limits a person set (saved, and the one being edited).
 const episodes = computed(() => props.view.episodes.filter((item) => item.active && item.end_s >= props.from && item.start_s <= props.to)
   .map((item) => ({id: item.id, from: Math.max(item.start_s, props.from), to: Math.min(Math.max(item.end_s, item.start_s + span.value / 200), props.to),
-    current: item.id === props.episode?.id, spot: item.channel === 'spot_check'})));
+    current: item.id === props.episode?.id, status: statusOf(props.annotations, item.id), spot: item.channel === 'spot_check'})));
 const end = computed(() => props.view.span_s?.[1] ?? props.to);
 const saved = computed(() => {
   const t0 = props.view.t0_ns ?? 0;
@@ -290,11 +290,11 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="The episodes found in the logs, and the limits a person set (a question mark: the limit is unknown)">
+    <div class="dr-lane" title="The episodes found in the logs (orange: to review, red: wrong limit, green: right limit, grey: can't tell), and the limits a person set (a question mark: the limit is unknown)">
       <span class="dr-lane-name">Review</span>
       <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
         <rect v-for="item in episodes" :key="item.id" :x="x(item.from)" y="1" :width="Math.max(3, w(item.from, item.to))" height="8" rx="2"
-              :class="['dr-episode', {current: item.current, spot: item.spot}]"/>
+              :class="['dr-episode', item.status, {current: item.current, spot: item.spot && item.status === 'open'}]"/>
         <g v-for="(item, index) in saved" :key="'a' + index">
           <rect :x="x(item.from)" y="12" :width="w(item.from, item.to)" height="17" rx="2" :class="item.cls"/>
           <text v-if="textFits(item.from, item.to, item.text)" :x="x(item.from) + w(item.from, item.to) / 2" y="24.5" class="dr-run-text">{{ item.text }}</text>

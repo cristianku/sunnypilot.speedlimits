@@ -398,6 +398,23 @@ def test_a_disagreement_without_intervention_and_missing_data_that_is_none(tmp_p
     assert coverage['vision_limit'] < coverage['vision'] < coverage['seconds'] and coverage['buttons'] is False
 
 
+def test_the_vision_ahead_of_the_map_is_no_disagreement():
+    """Merged drives made up in place (no log): the vision reads the 40 sign before the map's 40 begins."""
+    def scan(map_at_s, vision_back=False):
+        vision = [[0, 60.0], [30 * NS, 40.0]] + ([[map_at_s * NS, 60.0]] if vision_back else [])
+        merged = {'series': {'vis_limit': vision, 'map_valid': [[0, True]],
+                             'map_limit': [[0, 60.0], [map_at_s * NS, 40.0], [100 * NS, 40.0]]},
+                  'events': [], 'spans': {0: [0, 120 * NS]}, 'meta': {}}
+        return drive_episodes.scan(ROUTE, merged, {0: 'rlog'})
+
+    found = scan(35)
+    assert not [item for item in found['episodes'] if item['channel'] != 'spot_check']
+    assert found['counts'] == {'vision_ahead': 1} and found['coverage']['disagreement'] == 0
+    # The map 15 s later is a disagreement; so is a vision that went back to 60 as the map came to 40.
+    assert [item['channel'] for item in scan(45)['episodes'] if item['channel'] != 'spot_check'] == ['disagreement']
+    assert scan(35, vision_back=True)['counts'].get('disagreement') == 1
+
+
 def test_spot_checks_stay_away_from_episodes_and_are_the_same_at_every_scan():
     """A merged drive of 40 minutes made up in place (no log): vision and map agree throughout."""
     minutes = 40

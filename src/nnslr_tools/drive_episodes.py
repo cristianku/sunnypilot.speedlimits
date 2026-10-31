@@ -10,6 +10,9 @@ Two channels, independent of each other:
   changed with ICBM idle (state inactive, no button sent) is the driver's even where the car logs no cruise buttons
   (the PSA): only the driver's stalk or ICBM's buttons move the car's set speed;
 - the comma's vision limit and the map's limit far apart (5 km/h or more for 3 s or more) with no intervention at all.
+  The vision reads a sign tens of metres before the car reaches it, the map changes only where its limit begins (at
+  the sign or past it, at its next update): when the vision changed first and the map came to the same limit within
+  10 s, the vision was ahead, not in disagreement, and nothing is found (counted as vision_ahead).
 
 Clues close in time (8 s), also across the minutes of the drive, make one episode; an intervention during a
 disagreement belongs to it. Episodes with several clues that agree come first (priority, with its reasons). The
@@ -31,7 +34,7 @@ import hashlib
 import random
 import statistics
 
-SCANNER_VERSION = 3
+SCANNER_VERSION = 4
 NS = 1_000_000_000
 # The state an intervention is judged on: this long before it.
 BEFORE_NS = NS // 10
@@ -43,6 +46,8 @@ STEER_HOLD_NS = NS
 DISAGREE_KPH = 5
 DISAGREE_NS = 3 * NS
 MERGE_NS = 5 * NS
+# The vision ahead of the map: a run this short that the map ends by coming to the vision's limit.
+LEAD_NS = 10 * NS
 # A disengagement's cause is looked for in this window around it.
 CAUSE_BEFORE_NS = 2 * NS
 CAUSE_AFTER_NS = 3 * NS // 10
@@ -287,9 +292,21 @@ def _set_speed_changes(drive: Drive) -> list[dict]:
 
 # ---------- vision against map ----------
 
+def _vision_ahead(drive: Drive, start: int, end: int, parts: list) -> bool:
+    """A run that began with a new vision limit (the map unchanged) and ended within LEAD_NS with the map on that
+    limit: the vision read the sign before the place where the map's limit begins."""
+    if end - start > LEAD_NS or len({part[:2] for part in parts}) != 1:
+        return False
+    vision, map_limit = parts[0][:2]
+    after = drive.map(end)
+    return (drive.map(start - 1) == map_limit and drive.vision(end) == vision and after is not None
+            and abs(after - vision) < DISAGREE_KPH)
+
+
 def disagreements(drive: Drive) -> list[dict]:
     """Runs where the vision limit and the map's are both known and 5 km/h or more apart for 3 s or more:
-    {kind: 'disagreement', t_ns, end_ns, detail: {pairs: [[vision, map, seconds]], seconds}}."""
+    {kind: 'disagreement', t_ns, end_ns, detail: {pairs: [[vision, map, seconds]], seconds}}; a run where the vision
+    was only ahead of the map has the kind 'vision_ahead' instead."""
     times = sorted({t for name in ('vis_limit', 'map_limit', 'map_valid') for t in drive.get(name).t})
     runs: list[list] = []
     for index, t in enumerate(times):
@@ -310,7 +327,8 @@ def disagreements(drive: Drive) -> list[dict]:
         pairs: dict[tuple, int] = {}
         for vision, map_limit, length in parts:
             pairs[(vision, map_limit)] = pairs.get((vision, map_limit), 0) + length
-        out.append({'kind': 'disagreement', 't_ns': start, 'end_ns': end,
+        out.append({'kind': 'vision_ahead' if _vision_ahead(drive, start, end, parts) else 'disagreement',
+                    't_ns': start, 'end_ns': end,
                     'detail': {'seconds': round(apart / NS, 1),
                                'pairs': [[v, m, round(n / NS, 1)] for (v, m), n in
                                          sorted(pairs.items(), key=lambda item: -item[1])]}})
@@ -486,11 +504,13 @@ def scan(route: str, merged: dict, log_kinds: dict[int, str]) -> dict:
     spans = {int(segment): span for segment, span in (merged.get('spans') or {}).items()}
     found = interventions(drive)
     runs = disagreements(drive)
+    ahead = [run for run in runs if run['kind'] == 'vision_ahead']
+    runs = [run for run in runs if run['kind'] == 'disagreement']
     episodes = [_episode(drive, clues, log_kinds, spans) for clues in _group(found, runs)]
     episodes += _spot_checks(route, drive, episodes, log_kinds, spans)
     episodes.sort(key=lambda item: item['start_ns'])
     counts: dict[str, int] = {}
-    for clue in found + runs:
+    for clue in found + runs + ahead:
         counts[clue['kind']] = counts.get(clue['kind'], 0) + 1
     coverage = {
         'seconds': round(sum((span[1] - span[0]) / NS for span in spans.values()), 1),

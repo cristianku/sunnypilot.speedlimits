@@ -167,7 +167,10 @@ def state(root: Path, route: str, *, start: bool = False) -> dict:
         return {'state': 'missing', 'reason': 'invalid route id'}
     made = index(root, route)
     if made is not None:
-        return {'state': 'ready', 'url': '/route/' + route + '/video.mp4', 'index': made}
+        # The file's time in the address: the browser keeps a video (seeking back needs no new download) and a
+        # video made again is another address.
+        version = paths(root, route)[0].stat().st_mtime_ns
+        return {'state': 'ready', 'url': f'/route/{route}/video.mp4?v={version}', 'index': made}
     with _lock:
         work = _making.get(route)
         if work is not None and work['state'] in ('waiting', 'making'):
