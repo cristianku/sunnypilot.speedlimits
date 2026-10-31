@@ -11,3 +11,5 @@ def private_data_folders(tmp_path, monkeypatch):
     # check the defaults remove these variables themselves (monkeypatch.delenv).
     monkeypatch.setenv("COMMA_VIDEOS_DIR", str(tmp_path / "comma-videos"))
     monkeypatch.setenv("NNSLR_DATA_ROOT", str(tmp_path / "data"))
+    # openpilot.distill next to the clone has real localizer tracks and the Python that runs the localizer.
+    monkeypatch.setenv("NNSLR_DISTILL_ROOT", str(tmp_path / "openpilot.distill"))

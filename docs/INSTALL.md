@@ -64,6 +64,17 @@ uv pip install --python .venv/bin/python -e ".[log-reader]"
 
 Adds `pycapnp` and `zstandard` for `nnslr log-metadata`, `nnslr align-route` and the comma download (`helpers/fetch_comma_segments.sh`), which without it drops every trip.
 
+### Precise frame positions: openpilot.distill's localizer (optional)
+
+`nnslr localize` runs the localizer of [openpilot.distill](https://github.com/cristianku/openpilot.distill) (its `localizer/`) on every segment of the drives: the raw GNSS, the car's motion and the calibration give the position and velocity of every road-camera frame, where the GPS fix is a few metres off and late. It needs a clone of openpilot.distill with its `.venv` (laika, numpy, safetensors, openpilot's LogReader: `git clone --recurse-submodules` and `uv sync` there, as its README says), next to this clone (`../openpilot.distill`) or named by `NNSLR_DISTILL_ROOT`. Nothing is installed here and nothing is written into openpilot.distill: its Python runs `src/nnslr_tools/localize_child.py` on the segment and the output goes to `data/derived/localizer/`.
+
+```sh
+.venv/bin/nnslr localize --all          # about 20 s of a core and 220 MB a segment, 6 side by side
+.venv/bin/nnslr gps --all --missing     # the frames of the localized drives take the localizer's position
+```
+
+The first run of a day downloads that day's GNSS orbits and ionosphere maps (laika, from comma's public gnss-data mirror on GitHub, no account) into `/tmp/gnss`. Without openpilot.distill's `.venv`, `nnslr localize` says so and the frames keep the position of the GPS, as before. From the portal it runs as step a of **Find the road types** (Data › Roads, `helpers/road_types.sh`).
+
 ### Training on a GPU (`.venv-gpu`)
 
 ```sh

@@ -1209,6 +1209,42 @@ def _cmd_drive_review(args: argparse.Namespace) -> int:
 # [drive-review] - END
 
 
+# [localizer] - START
+def _cmd_localize(args: argparse.Namespace) -> int:
+    """openpilot.distill's localizer on the segments of drives (nnslr_tools.localized): the precise position of every
+    road-camera frame, which nnslr gps then takes. Exit 1 when a segment failed or a drive named has no segments."""
+    from nnslr_tools import localized
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    routes = list(args.routes)
+    if args.all:
+        routes += localized.all_routes(root)
+    if not routes:
+        if args.all:
+            return 0
+        print('nnslr localize: name the drives, or --all', file=sys.stderr)
+        return 2
+    try:
+        localized.distill_python()
+    except localized.LocalizerError as exc:
+        print(f'nnslr localize: {exc}; the positions stay those of the GPS', file=sys.stderr)
+        return 2
+    failed = 0
+
+    def report(summary: dict) -> None:
+        nonlocal failed
+        failed += bool(summary['failed_segments'] or summary.get('error'))
+        print(json.dumps(summary, sort_keys=True), flush=True)
+
+    try:
+        localized.localize_routes(root, routes, workers=args.workers, again=args.again, on_route=report)
+    except ValueError as exc:
+        print(f'nnslr localize: {exc}', file=sys.stderr)
+        return 2
+    return 1 if failed else 0
+# [localizer] - END
+
+
 # [offline-replay] - START
 def _cmd_replay(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
@@ -1580,7 +1616,9 @@ def build_parser() -> argparse.ArgumentParser:
                                        "(derived/gps/<route>/positions.jsonl); the review proposes that country")
     p_gps.add_argument("--route", action="append", help="route id; repeat for more")
     p_gps.add_argument("--all", action="store_true", help="every route with a pre-annotation report")
-    p_gps.add_argument("--missing", action="store_true", help="with --all: only routes without positions yet")
+    p_gps.add_argument("--missing", action="store_true",
+                       help="with --all: only routes without positions yet, or whose positions are older than a "
+                            "localizer track of theirs (nnslr localize)")
     p_gps.add_argument("--countries", action="store_true",
                        help="only the country of each frame again, from the positions already read and the borders "
                             "now (after scripts/make_country_borders.py --gisco); the logs are not read")
@@ -2113,6 +2151,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_drive_review.set_defaults(func=_cmd_drive_review)
     # [drive-review] - END
 
+    # [localizer] - START
+    p_localize = sub.add_parser(
+        "localize",
+        help="the precise position of every road-camera frame of the drives, from openpilot.distill's localizer "
+             "(CPU only, needs its .venv; derived/localizer/<route>/<segment>/), which nnslr gps then takes instead "
+             "of the GPS fix",
+    )
+    p_localize.add_argument("routes", nargs="*", help="the drives, e.g. 00000154--fa7e8f49aa")
+    p_localize.add_argument("--all", action="store_true", help="every drive with segments in raw/routes")
+    p_localize.add_argument("--workers", type=int, default=6, help="segments localized side by side (default 6)")
+    p_localize.add_argument("--again", action="store_true",
+                            help="try again the segments the localizer could not use (localizer.failed)")
+    p_localize.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_localize.set_defaults(func=_cmd_localize)
+    # [localizer] - END
+
     p_car = sub.add_parser(
         "on-car",
         help="record which networks run on the comma (models/on-car.json, shown on the Models tab) from a clone of "
@@ -2371,14 +2425,14 @@ def _cmd_review_reclassify(args: argparse.Namespace) -> int:
 
 
 def _cmd_gps(args: argparse.Namespace) -> int:
-    from nnslr_tools.gps import GpsError, build_positions, positions_path, recountry_positions
+    from nnslr_tools.gps import GpsError, build_positions, positions_current, recountry_positions
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.review import latest_report, list_reports, report_rows
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     routes = list(args.route or [])
     if args.all:
         routes += [route for route, _ in list_reports(root)
-                   if not (args.missing and positions_path(root, route).is_file())]
+                   if not (args.missing and positions_current(root, route))]
     if not routes:
         if args.all:
             # --all --missing with every route already done.

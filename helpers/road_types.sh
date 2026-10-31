@@ -4,7 +4,10 @@
 # the road-type head, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads
 # starts this). A person corrects them later in the road-type review; nothing here touches the reviews of the signs.
 #
-#   a. the GPS position of the frames of the drives prepared without it            (nnslr gps --all --missing)
+#   a. the precise position of the road camera's frames from openpilot.distill's localizer, for the segments without
+#      it (nnslr localize --all; about 20 s of a core a segment, 6 side by side; skipped without distill's .venv),
+#      then the GPS position of the frames of the drives prepared without it or localized since (nnslr gps --all
+#      --missing)
 #   b. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a
 #      garage of the map, is a garage when it is slow                                (nnslr car-motion --all, cached)
 #   c. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
@@ -14,8 +17,9 @@
 #      --all, data/derived/junctions; a person's corrections, annotations/junctions, are never touched)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
-# No network but uv's first download of osmium; about 2 minutes when the map is read, seconds otherwise, plus about a
-# minute for the logs of each new drive.
+# No network but uv's first download of osmium and the localizer's GNSS orbits and ionosphere maps of a new day (laika,
+# from comma's gnss-data mirror); about 2 minutes when the map is read, seconds otherwise, plus about a minute for the
+# logs of each new drive.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="${NNSLR_DATA_ROOT:-$ROOT/data}"
@@ -36,6 +40,9 @@ if [ -z "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -print -quit 2>/dev/null)"
 fi
 
 echo "== a. GPS of the drives"
+# Without openpilot.distill (or for a segment it cannot use) the frames keep the position of the GPS.
+"$NN" localize --all --data-root "$DATA" < /dev/null \
+    || echo "The localizer did not run for some segments: their frames keep the position of the GPS"
 # A drive whose logs cannot be read keeps no position: it is said, and the others go on.
 "$NN" gps --all --missing --data-root "$DATA" < /dev/null \
     || echo "GPS position not read for some drives: their frames stay without a road type"

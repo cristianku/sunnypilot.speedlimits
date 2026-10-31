@@ -3,13 +3,21 @@
 ``nnslr gps --route <id>`` (or ``--all``) reads ``raw/routes/<route>/<segment>/rlog.zst`` (or the qlog) and
 writes ``derived/gps/<route>/positions.jsonl``: one line per frame of the route's current pre-annotation
 report, ``{"frame_key", "segment_index", "output_index", "latitude", "longitude", "speed_mps", "bearing_deg",
-"country", "country_from"}``, latitude to bearing null when the log has no fix within GPS_MAX_GAP_S of
-the frame; the country then comes from the nearest frame with a fix (country_from "nearest_fix", else "gps").
+"position_from", "country", "country_from"}``, latitude to bearing null when the frame has no position; the
+country then comes from the nearest frame with a fix (country_from "nearest_fix", else "gps").
 
 The frame k of a segment is the first video frame at k seconds (1 frame a second, nnslr_tools.media), so
 its time is the time of the segment's first encoded road frame plus k seconds; the nearest fix
-(``gpsLocationExternal``, else ``gpsLocation``) gives its position. The logs are read by the Python of the
-comma fetch (openpilot's LogReader, or pycapnp with NNSLR_OPENPILOT_ROOT: helpers/comma_fetch_log.py).
+(``gpsLocationExternal``, else ``gpsLocation``) within GPS_MAX_GAP_S gives its position (position_from "gps"). The
+logs are read by the Python of the comma fetch (openpilot's LogReader, or pycapnp with NNSLR_OPENPILOT_ROOT:
+helpers/comma_fetch_log.py). A frame of the road camera (fcamera) of a segment that openpilot.distill's localizer
+went through (``nnslr localize``, nnslr_tools.localized) takes the localizer's position at that very frame instead
+of its GPS fix (position_from "localizer"), unless the track disagrees with that fix (LOCALIZER_MAX_GAP_M plus the
+way the car drove between the fix and the frame, and LOCALIZER_MAX_SPEED_GAP_MPS for a fix within
+LOCALIZER_CHECK_GAP_S of the frame) or with too many of the fixes within LOCALIZER_CHECK_GAP_S of its segment's
+frames (LOCALIZER_MAX_REFUSED): a track can go wrong where the raw GNSS is poor (its speed metres a second off, its
+bearing turned round). A frame without a GPS fix keeps no position, as before, even where the track has one:
+nnslr_tools.road_types takes a slow stretch without GPS for a garage.
 
 The country comes from the borders in ``data/countries.json.gz`` (Natural Earth 1:10 million, public domain;
 scripts/make_country_borders.py), Europe only: elsewhere it is None. Natural Earth is coarse where a border
@@ -24,6 +32,7 @@ from __future__ import annotations
 import bisect
 import gzip
 import json
+import math
 import os
 import subprocess
 import sys
@@ -31,11 +40,21 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
+from nnslr_tools import localized
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl
 from nnslr_tools.manifest import parse_route_id
 
 GPS_RELATIVE_DIR = Path('derived') / 'gps'
 GPS_MAX_GAP_S = 2.0
+# The localizer's position of a frame is kept when it is within this of the frame's GPS fix, in metres (plus the way
+# driven at the fix's speed between the fix and the frame) and in m/s of speed; a segment whose track is refused at more
+# than this share of its frames checked is not used at all.
+LOCALIZER_MAX_GAP_M = 25.0
+LOCALIZER_MAX_SPEED_GAP_MPS = 2.0
+LOCALIZER_MAX_REFUSED = 0.2
+# Only a fix this close in time to the frame checks the track's speed and counts for its segment (the GPS gives 5 a
+# second): one further away, where the GPS dropped out, is where the car was up to GPS_MAX_GAP_S before or after.
+LOCALIZER_CHECK_GAP_S = 0.5
 BORDERS = Path(__file__).resolve().parent / 'data' / 'countries.json.gz'
 # Finer borders of the data root (scripts/make_country_borders.py --gisco), used instead when there.
 DETAILED_BORDERS = GPS_RELATIVE_DIR / 'borders.json.gz'
@@ -112,8 +131,8 @@ def read_logs(paths: list[Path], *, python: str | None = None) -> dict[str, dict
     return result
 
 
-def frame_position(segment_log_data: dict | None, output_index: int) -> dict | None:
-    """The fix nearest to frame ``output_index`` of the segment, within GPS_MAX_GAP_S, or None."""
+def _nearest_fix(segment_log_data: dict | None, output_index: int) -> tuple[list, float] | None:
+    """The fix nearest to frame ``output_index`` of the segment and its distance in time (s), within GPS_MAX_GAP_S."""
     if not segment_log_data or segment_log_data.get('first_frame_mono') is None or not segment_log_data['fixes']:
         return None
     fixes = segment_log_data['fixes']
@@ -126,8 +145,18 @@ def frame_position(segment_log_data: dict | None, output_index: int) -> dict | N
             best = fixes[index]
     if best is None or abs(best[0] - when) > GPS_MAX_GAP_S * 1e9:
         return None
-    return {'latitude': round(best[1], 6), 'longitude': round(best[2], 6), 'speed_mps': round(best[3], 2),
-            'bearing_deg': round(best[4], 1)}
+    return best, abs(best[0] - when) / 1e9
+
+
+def _fix_position(fix: list) -> dict:
+    return {'latitude': round(fix[1], 6), 'longitude': round(fix[2], 6), 'speed_mps': round(fix[3], 2),
+            'bearing_deg': round(fix[4], 1)}
+
+
+def frame_position(segment_log_data: dict | None, output_index: int) -> dict | None:
+    """The fix nearest to frame ``output_index`` of the segment, within GPS_MAX_GAP_S, or None."""
+    nearest = _nearest_fix(segment_log_data, output_index)
+    return None if nearest is None else _fix_position(nearest[0])
 
 
 @lru_cache(maxsize=4)
@@ -280,8 +309,55 @@ def positions_path(root: Path, route: str) -> Path:
     return Path(root) / GPS_RELATIVE_DIR / route / 'positions.jsonl'
 
 
+def _agrees(precise: dict, fix: dict, gap_s: float) -> bool:
+    """Whether the localizer's position of a frame is within LOCALIZER_MAX_GAP_M of its GPS fix ``gap_s`` seconds away,
+    plus the way driven at the fix's speed in that time, and, for a fix within LOCALIZER_CHECK_GAP_S, within
+    LOCALIZER_MAX_SPEED_GAP_MPS of its speed."""
+    north = math.radians(precise['latitude'] - fix['latitude']) * 6371000.0
+    east = math.radians(precise['longitude'] - fix['longitude']) * 6371000.0 * math.cos(math.radians(fix['latitude']))
+    if math.hypot(north, east) > LOCALIZER_MAX_GAP_M + fix['speed_mps'] * gap_s:
+        return False
+    return gap_s > LOCALIZER_CHECK_GAP_S or abs(precise['speed_mps'] - fix['speed_mps']) <= LOCALIZER_MAX_SPEED_GAP_MPS
+
+
+def localizer_positions(root: Path, route: str, rows: list[dict], fixes: list[dict | None], gaps: list[float | None],
+                        errors: list[str], distill: Path | None = None) -> tuple[dict[int, dict], list[int]]:
+    """{index of a row: the localizer's position} for the rows of the road camera with a GPS fix (``fixes``, at
+    ``gaps`` seconds from the frame) whose segment has a localizer track (localized.frame_fix at their
+    decoded_frame_index), where it agrees with that fix (_agrees); and the segments whose track disagrees with too
+    many of the fixes within LOCALIZER_CHECK_GAP_S to be used (LOCALIZER_MAX_REFUSED)."""
+    by_segment: dict[int, list[tuple[int, int]]] = {}
+    for index, row in enumerate(rows):
+        frame = row.get('decoded_frame_index')
+        if row.get('camera_stream') == 'narrow_road' and isinstance(frame, int) and not isinstance(frame, bool):
+            by_segment.setdefault(row['segment_index'], []).append((index, frame))
+    precise: dict[int, dict] = {}
+    refused = []
+    for segment, frames in sorted(by_segment.items()):
+        path = localized.track_path(root, route, segment, distill)
+        if path is None:
+            continue
+        try:
+            track = localized.load_track(path)
+        except (localized.LocalizerError, OSError, ValueError) as exc:
+            errors.append(f'segment {segment}: {exc}')
+            continue
+        found = {}
+        for index, frame in frames:
+            fix = localized.frame_fix(track, frame) if fixes[index] is not None else None
+            if fix is not None:
+                found[index] = fix
+        disagree = {index for index in found if not _agrees(found[index], fixes[index], gaps[index])}
+        checked = [index for index in found if gaps[index] <= LOCALIZER_CHECK_GAP_S]
+        if len(disagree.intersection(checked)) > LOCALIZER_MAX_REFUSED * len(checked):
+            refused.append(segment)
+            continue
+        precise.update({index: fix for index, fix in found.items() if index not in disagree})
+    return precise, refused
+
+
 def build_positions(root: Path, route: str, rows: list[dict], *, python: str | None = None,
-                    workers: int = 8) -> dict:
+                    workers: int = 8, distill: Path | None = None) -> dict:
     """Write positions.jsonl for the report ``rows`` of a route; returns counts."""
     segments = sorted({row['segment_index'] for row in rows})
     logs = {segment: segment_log(root, route, segment) for segment in segments}
@@ -291,22 +367,32 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
     with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
         for part in pool.map(lambda group: read_logs(group, python=python), groups):
             data.update(part)
-    lines = []
-    located = 0
-    countries: dict[str, int] = {}
+    ordered = sorted(rows, key=lambda item: (item['segment_index'], item['output_index']))
+    fixes = []
+    gaps = []
     errors = []
-    for row in sorted(rows, key=lambda item: (item['segment_index'], item['output_index'])):
+    for row in ordered:
         path = logs.get(row['segment_index'])
         segment_data = data.get(str(path)) if path is not None else None
         if segment_data and segment_data.get('error'):
             errors.append(f"segment {row['segment_index']}: {segment_data['error']}")
-        position = frame_position(segment_data, row['output_index'])
+        nearest = _nearest_fix(segment_data, row['output_index'])
+        fixes.append(None if nearest is None else _fix_position(nearest[0]))
+        gaps.append(None if nearest is None else nearest[1])
+    precise, refused = localizer_positions(root, route, ordered, fixes, gaps, errors, distill)
+    lines = []
+    located = 0
+    countries: dict[str, int] = {}
+    for index, row in enumerate(ordered):
+        position, source = (precise[index], 'localizer') if index in precise else (fixes[index], 'gps')
         country = country_of(position['latitude'], position['longitude'], root) if position else None
         line = {'frame_key': row['frame_key'], 'segment_index': row['segment_index'],
                 'output_index': row['output_index'], 'latitude': None, 'longitude': None, 'speed_mps': None,
-                'bearing_deg': None, 'country': country, 'country_from': 'gps' if country else None}
+                'bearing_deg': None, 'position_from': None, 'country': country,
+                'country_from': 'gps' if country else None}
         if position:
             line.update(position)
+            line['position_from'] = source
             located = located + 1
         if country:
             countries[country] = countries.get(country, 0) + 1
@@ -314,9 +400,27 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
     _nearest_countries(lines)
     target = positions_path(root, route)
     atomic_write(target, jsonl_bytes(lines))
-    return {'route_id': route, 'frames': len(lines), 'located': located, 'countries': countries,
+    return {'route_id': route, 'frames': len(lines), 'located': located, 'from_localizer': len(precise),
+            'localizer_refused_segments': refused, 'countries': countries,
             'segments_without_log': [segment for segment, path in logs.items() if path is None],
             'errors': sorted(set(errors)), 'output': str(target)}
+
+
+def positions_current(root: Path, route: str, distill: Path | None = None) -> bool:
+    """Whether positions.jsonl of a route is there and need not be read again for the localizer: its lines say where
+    their position comes from (position_from) and no localizer track of the route is newer; or the route has no
+    track at all (the GPS would give the same). Only its first line is read."""
+    path = positions_path(root, route)
+    try:
+        stamp = path.stat().st_mtime_ns
+        with path.open('rb') as handle:
+            first = handle.readline()
+    except OSError:
+        return False
+    newest = localized.newest_track_ns(root, route, distill)
+    if not newest:
+        return True
+    return (not first or b'"position_from"' in first) and newest <= stamp
 
 
 def _nearest_countries(lines: list[dict]) -> None:

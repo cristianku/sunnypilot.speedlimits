@@ -95,9 +95,10 @@ TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and
 # scripts/try_on_comma.sh --restore: "== 1/2 Check the comma", "== 2/2 Put back the build's networks".
 RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
-# helpers/road_types.sh: the GPS of the drives prepared without it, the car's speed from the logs (a minute for each new
-# drive), the map roads near the drives (minutes when the map is read again), the road type of every frame, the
-# intersections every drive passed.
+# helpers/road_types.sh: openpilot.distill's localizer on the segments new to it (about 20 s of a core each, 6 side by
+# side: some 20 minutes the first time) and the GPS of the drives prepared without it or localized since, the car's
+# speed from the logs (a minute for each new drive), the map roads near the drives (minutes when the map is read again),
+# the road type of every frame, the intersections every drive passed.
 ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('speed', 'Read the speed of the drives', 10),
                     ('map_roads', 'Read the map roads near the drives', 55),
                     ('road_types', 'Find the road type of every picture', 18),
