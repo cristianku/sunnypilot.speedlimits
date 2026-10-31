@@ -29,7 +29,7 @@ export interface SectionPage {
 /** The sections, as pages.SECTIONS: their title, and their pages under it. */
 export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = {
   overview: {title: 'Overview', pages: []},
-  data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Review'},
+  data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Sign review'},
     {key: 'drivereview', href: '/drive-review', label: 'Drive review'}, {key: 'roads', href: '/roads', label: 'Roads'},
     {key: 'dataset', href: '/dataset', label: 'Training dataset'}]},
   train: {title: 'Training', pages: []},

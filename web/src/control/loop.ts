@@ -94,7 +94,7 @@ function review(status: PanelStatus): Omit<LoopRow, 'primary'> {
     .reduce((total, row) => total + Math.max(0, row.report_frames - row.confirmed), 0);
   const drivesLeft = summary.inProgress + summary.toStart;
   return {
-    key: 'review', label: 'Review', href: '/routes', kind: 'review',
+    key: 'review', label: 'Sign review', href: '/routes', kind: 'review',
     big: !summary.frames ? 'Nothing to review yet' : left ? thousands(left) + ' frames to review' : 'All confirmed',
     note: summary.frames ? (drivesLeft ? 'In ' + plural(drivesLeft, 'drive') + ' · ' : '')
       + reviewPercent(summary.confirmed, summary.frames) + '% of ' + thousands(summary.frames) + ' frames confirmed' : '',

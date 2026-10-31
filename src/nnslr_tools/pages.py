@@ -53,7 +53,7 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
-    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Review'),
+    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
                                   ('drivereview', '/drive-review', 'Drive review'), ('roads', '/roads', 'Roads'),
                                   ('dataset', '/dataset', 'Training dataset'))),
     ('train', '/train', 'Training', ()),
@@ -209,7 +209,7 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
     # The window title names the drive ("Herznach → Zürich"), as the route list does; Review without a name.
     drive = next((link.get('title') for link in (routes or []) if link.get('route_id') == route_id), None)
     return fill(asset('review.html'), nonce, 'review', 'review', signed_in=server, data=payload,
-                title=drive or 'Review')
+                title=drive or 'Sign review')
 
 
 # [control-panel] - START
@@ -363,7 +363,7 @@ def _review_overview(summaries: list[dict], grouped: dict[str, list[dict]]) -> s
                      + key + '"' + (' disabled' if not rows else '') + '><span class="rv-tile-label">' + title
                      + '</span><span class="rv-tile-n">' + str(len(rows)) + '</span><span class="rv-tile-sub">'
                      + (_group_sub(key, rows, short=True) if rows else 'none') + '</span></button>')
-    return ('<section class="card rv-overview" aria-label="Review at a glance">'
+    return ('<section class="card rv-overview" aria-label="Sign review at a glance">'
             '<p class="rv-big"><strong>' + str(review_percent(confirmed, total)) + '%</strong><span>of the frames confirmed · '
             + f'{confirmed:,}' + ' of ' + f'{total:,}' + ' in ' + _plural(len(summaries), 'drive', 'drives') + '</span></p>'
             '<span class="rv-bar" aria-hidden="true"><span style="width:' + str(people) + '%"></span>'
@@ -406,7 +406,7 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     main.append('<details class="foot"><summary>Technical details</summary>'
                 '<p>Review database: <code>' + html.escape(str(database)) + '</code></p></details>')
     main.append('</main>')
-    return simple_page('Review', 'review', nonce, '\n'.join(main))
+    return simple_page('Sign review', 'review', nonce, '\n'.join(main))
 
 
 def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False) -> str:
@@ -421,7 +421,7 @@ def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = 
         main.append('<p>' + html.escape(message) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
     if status != 403:
-        main.append('<a class="btn back" href="/routes">← Review</a>' if drive
+        main.append('<a class="btn back" href="/routes">← Sign review</a>' if drive
                     else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')
     return simple_page(title, 'review' if drive else '', nonce, '\n'.join(main))

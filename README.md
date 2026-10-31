@@ -119,7 +119,7 @@ For the scene network, **Data › Roads › Find the road types** (`helpers/road
 
 <img src="docs/images/routes.png" alt="Data, Review page: 40% of the frames confirmed (12,575 of 31,680 in 25 drives), with tiles for In progress, To start and Done, and a list of drives each with Resume and Review with AI buttons. Place names are blurred." width="100%">
 
-<sub>Data › Review: how much is confirmed, and the drives to work on.</sub>
+<sub>Data › Sign review: how much is confirmed, and the drives to work on.</sub>
 
 On each picture you:
 
