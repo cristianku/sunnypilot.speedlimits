@@ -45,7 +45,7 @@ the episodes of the recorded drive.*
 | Accelerator, brake | **has** | `carState.gasPressed`, `brakePressed` |
 | Wheel held against openpilot | **derived** | `carState.steeringPressed` held 1 s or more while openpilot steered; shorter is a touch (a hint only) |
 | Disengagement and its cause | **derived** | `selfdriveState` leaving engaged, with `onroadEvents` around it (`userDisable`, `softDisable`, `immediateDisable`, `buttonCancel`...) and the pedals |
-| Set speed changed by hand | **absent on the PSA** | `carState.buttonEvents` is empty on this car: a change of `vCruise` without ICBM's `sendButton` is reported as *changed by hand or by the car: the log does not say* |
+| Set speed changed by hand | **derived on the PSA** | `carState.buttonEvents` is empty on this car. A change of `vCruise` while ICBM was `inactive` for the whole second around it is the driver's (*Set speed by hand*); with ICBM in another state but no `sendButton`, or no ICBM in the log, it stays *changed by hand or by the car: the log does not say* |
 | Set speed changed by ICBM | **has** | `selfdriveStateSP.intelligentCruiseButtonManagement.sendButton` |
 | Why the vision limit changed | **absent** | the log has the new limit and `signRead`, not the reason (a sign, the end of a ramp, the scene, a timeout) |
 | Raw sign reads (value, confidence, box) | **absent** | only the memory's output is logged; the server's networks on the extracted frames are shown in their own lane |
@@ -56,7 +56,7 @@ the episodes of the recorded drive.*
 On the two real drives: `00000154` has vision, map and resolver for the whole 20 minutes but `dashcamOnly` is set,
 so openpilot never drove and only the vision-against-map channel can find something (7 disagreements). `00000141`
 was engaged (5 brakes, 5 disengagements by the driver) but its log has no `speedVisionSP` at all, so no vision limit; its 9 set
-speed changes could not be told apart (no `buttonEvents`).
+speed changes had no `buttonEvents`; with ICBM idle around them they now count as the driver's.
 
 ## Limits of the reading
 

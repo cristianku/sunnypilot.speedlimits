@@ -413,6 +413,25 @@ def test_spot_checks_stay_away_from_episodes_and_are_the_same_at_every_scan():
         assert item['end_ns'] <= 540 * NS or item['start_ns'] >= 661 * NS
 
 
+def test_a_set_speed_changed_with_icbm_idle_is_the_drivers_even_without_buttons():
+    """Merged drives made up in place (no log), as the PSA logs them: no buttonEvents, the set speed from the car."""
+    base = {'sd_enabled': [[0, True]], 'v_cruise': [[0, 50.0], [20 * NS, 51.0], [40 * NS, 52.0]]}
+
+    def kinds(**series):
+        merged = {'series': {**base, **series}, 'events': [], 'spans': {0: [0, 60 * NS]}, 'meta': {}}
+        clues = drive_episodes.interventions(drive_episodes.Drive(merged))
+        return [item['kind'] for item in clues if item['kind'].startswith('set_speed')]
+    # ICBM idle throughout: the driver's stalk.
+    assert kinds(icbm_state=[[0, 'inactive']], icbm_send=[[0, 'none']]) == ['set_speed_manual'] * 2
+    # ICBM pressing a button at the first change: the car's; the second, with ICBM idle again, the driver's.
+    assert kinds(icbm_state=[[0, 'inactive'], [19 * NS, 'increasing'], [22 * NS, 'inactive']],
+                 icbm_send=[[0, 'none'], [19_500_000_000, 'increase'], [20_500_000_000, 'none']]) == [
+        'set_speed_auto', 'set_speed_manual']
+    # ICBM active without a button in the log, or no ICBM state at all (an older log): the log does not say.
+    assert kinds(icbm_state=[[0, 'holding']]) == ['set_speed_unknown'] * 2
+    assert kinds() == ['set_speed_unknown'] * 2
+
+
 # ---------- the annotations ----------
 
 def _note(server, body: dict):

@@ -139,9 +139,10 @@ onBeforeUnmount(() => window.clearTimeout(timer));
       <h2 id="dr-search-title" class="sr-only">Search the logs</h2>
       <div class="import-row">
         <span class="import-icon" :class="{fresh: toSearch > 0 || busy}" aria-hidden="true">
-          <span v-if="busy" class="dr-spin"></span><template v-else-if="toSearch">!</template><template v-else>✓</template></span>
+          <span v-if="busy || (!drives && !error)" class="dr-spin"></span><template v-else-if="toSearch || !drives">!</template><template v-else>✓</template></span>
         <div class="import-what">
-          <strong>{{ busy ? 'Searching the logs…' : toSearch ? plural(toSearch, 'drive', 'drives') + ' to search' : 'Every drive with logs is searched' }}</strong>
+          <strong>{{ !drives ? (error ? 'The drives could not be read' : 'Reading the drives…') : busy ? 'Searching the logs…'
+            : toSearch ? plural(toSearch, 'drive', 'drives') + ' to search' : 'Every drive with logs is searched' }}</strong>
           <span>Reads the comma's logs (rlog, qlog) for the moments worth a look: the driver taking over, or the vision limit disagreeing
             with the map's. No networks: only the logs, on the CPU.</span>
         </div>

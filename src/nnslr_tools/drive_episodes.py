@@ -6,7 +6,9 @@ Two channels, independent of each other:
 - interventions of the driver while openpilot drove: the accelerator while openpilot held the speed, the brake, the
   steering wheel really forced (held, not touched), a disengagement (the driver's own, or openpilot's), a set speed
   changed by hand. Each is judged on the state just before it (100 ms): a pedal pressed while the driver already drove
-  by hand is not an intervention, and neither is a set speed that Speed Limit Assist or ICBM changed;
+  by hand is not an intervention, and neither is a set speed that Speed Limit Assist or ICBM changed. A set speed
+  changed with ICBM idle (state inactive, no button sent) is the driver's even where the car logs no cruise buttons
+  (the PSA): only the driver's stalk or ICBM's buttons move the car's set speed;
 - the comma's vision limit and the map's limit far apart (5 km/h or more for 3 s or more) with no intervention at all.
 
 Clues close in time (8 s), also across the minutes of the drive, make one episode; an intervention during a
@@ -29,7 +31,7 @@ import hashlib
 import random
 import statistics
 
-SCANNER_VERSION = 1
+SCANNER_VERSION = 2
 NS = 1_000_000_000
 # The state an intervention is judged on: this long before it.
 BEFORE_NS = NS // 10
@@ -263,6 +265,7 @@ def _set_speed_changes(drive: Drive) -> list[dict]:
     out = []
     previous = None
     icbm = drive.get('icbm_send')
+    icbm_state = drive.get('icbm_state')
     for t, value in drive.get('v_cruise').changes():
         now = _set_speed(value)
         was, previous = previous, now
@@ -273,9 +276,12 @@ def _set_speed_changes(drive: Drive) -> list[dict]:
         sent = [value for _t, value in icbm.between(t - BUTTON_NS, t + BUTTON_NS) if value not in (None, 'none')]
         buttons = [event[2] for event in drive.events_in(t - BUTTON_NS, t + BUTTON_NS, 'button')
                    if event[2] in SET_BUTTONS]
-        kind = 'set_speed_auto' if sent else 'set_speed_manual' if buttons else 'set_speed_unknown'
+        # ICBM idle the whole second around the change: no button of the car's was pressed by openpilot.
+        idle = all(state == 'inactive' for _t, state in icbm_state.between(t - BUTTON_NS, t + BUTTON_NS))
+        kind = ('set_speed_auto' if sent else 'set_speed_manual' if buttons or idle else 'set_speed_unknown')
         out.append({'kind': kind, 't_ns': t, 'end_ns': t,
-                    'detail': {'from_kph': was, 'to_kph': now, 'buttons': sorted(set(buttons)), 'icbm': sorted(set(sent))}})
+                    'detail': {'from_kph': was, 'to_kph': now, 'buttons': sorted(set(buttons)), 'icbm': sorted(set(sent)),
+                               'icbm_idle': idle}})
     return out
 
 
