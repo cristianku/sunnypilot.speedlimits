@@ -209,7 +209,7 @@ A review can be done by hand, or by an AI that sees the images, through any serv
 
 | What | Where |
 | --- | --- |
-| Original videos (shared with distill) | `/root/comma-videos/<route>--<segment>/` |
+| Original videos (shared with distill) | `/root/comma-videos/<route>--<segment>/`: on this server a link to the NAS, `/mnt/comma-raw/comma-videos` (docs/proxmox-gpu-container.md, section 2) |
 | Links to the videos, per route | `data/raw/routes/<route>/<segment>/` |
 | Extracted frames | `data/derived/frames/<route>/` |
 | Videos of the drives for Results › Drive (`nnslr drive-video`) | `data/derived/video/<route>.mp4` and `.json` |

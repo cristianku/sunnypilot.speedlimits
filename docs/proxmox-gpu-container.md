@@ -75,6 +75,13 @@ in `~/comma-videos`. Neither folder may be committed to Git.
 If the videos outgrow the container disk, give `~/comma-videos` its own disk
 from the Proxmox host (`pct set <id> -mp0 ...`, run by hand on the host).
 
+On the live server they are on the NAS since 1 Nov 2026: `/root/comma-videos`
+is a symlink to `/mnt/comma-raw/comma-videos`, the NAS share the Proxmox host
+mounts (NFS 4.2, soft) and passes into the container. The links of the data
+root go through it unchanged. With the NAS off, downloading and preparing
+drives fail with I/O errors; frames already extracted and the review keep
+working, since they are on the container disk.
+
 ---
 
 ## 3. Clone sunnypilot.speedlimits
