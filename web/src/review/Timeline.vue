@@ -3,6 +3,7 @@
 // the confirmed frames that still carry a doubt (each one a filter). On a phone the card folds under its title.
 import {computed, nextTick} from 'vue';
 import {thousands} from '../common/format';
+import {carDiffers, carLogs} from './car-moment';
 import {writeLocal} from './dom';
 import {DOUBT_LABELS, doubtCounts, routeCounts} from './current';
 import {aiConfirmed, doubtsOf, driveTime, framePlace, frameStatus, proposalsOf, reasonsOf, statusLabel} from './frames';
@@ -41,6 +42,7 @@ function tickClass(row: FrameRow): string {
   } else if (proposalsOf(row).length > 0 || hintsOf(key).length > 0) {
     cls = 'has';
   }
+  if (carDiffers(row)) cls += ' differ';
   if (key === state.currentKey) cls += ' cur';
   return cls;
 }
@@ -49,7 +51,7 @@ function tickClass(row: FrameRow): string {
 function tickLabel(row: FrameRow): string {
   const place = driveTime(row) === null ? framePlace(row)
     : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
-  return place + ' · ' + statusLabel(row.frame_key).toLowerCase();
+  return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '');
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
@@ -114,8 +116,9 @@ function tickClicked(event: MouseEvent): void {
       <span><i class="l-none"></i>nothing proposed</span>
       <span><i class="l-dirty"></i>unsaved changes</span>
       <span><i class="l-error"></i>not saved</span>
+      <span v-if="carLogs.phase === 'ready'"><i class="l-differ"></i>map ≠ vision in the car</span>
     </div>
-    <div class="timeline" id="timeline" aria-label="All the frames of the route" :style="{'--tl-cols': columns}"
+    <div class="timeline" id="timeline" :class="{'car-logs': carLogs.phase === 'ready'}" aria-label="All the frames of the route" :style="{'--tl-cols': columns}"
          @click="tickClicked">
       <div v-for="(segment, i) in segments" :key="i" class="tl-seg">
         <span class="tl-label">seg {{ segment.segment }}</span>

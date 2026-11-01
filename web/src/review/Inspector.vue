@@ -9,7 +9,6 @@ import AiLiveBanner from './AiLiveBanner.vue';
 import BusyBanner from './BusyBanner.vue';
 import {boxCountText} from './boxes';
 import {applyPrevious, carryState} from './carry';
-import {carMomentOf} from './car-moment';
 import ConfirmArea from './ConfirmArea.vue';
 import RoutePick from './RoutePick.vue';
 import {releaseFocus} from './dom';
@@ -43,8 +42,6 @@ const countryText = computed(() => {
 // On the server: what the car did at this moment (its limit, the map's, the vision's), in Drive review.
 const driveHref = computed(() => report.apiBase === null ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
-// What the comma had at this frame, from its logs: the map's limit, the vision memory's, the one the car used.
-const moment = computed(() => carMomentOf(props.row));
 </script>
 
 <template>
@@ -58,12 +55,6 @@ const moment = computed(() => carMomentOf(props.row));
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
       <p class="country-line" id="country" :data-country="country ?? ''"><span v-if="country" class="flag" aria-hidden="true">{{ flagOf(country) }}</span>{{ countryText }}</p>
-      <dl v-if="moment" class="car-moment" id="carMoment" :class="{differ: moment.differ}">
-        <div><dt>Map</dt><dd id="carMap">{{ moment.map }}<span v-if="moment.ahead" class="ahead"> · {{ moment.ahead }}</span></dd></div>
-        <div><dt>Vision memory</dt><dd id="carVision">{{ moment.vision }}</dd></div>
-        <div><dt>Car</dt><dd id="carLimit">{{ moment.car }}</dd></div>
-        <p v-if="moment.differ" class="differ-note">Vision ≠ map here</p>
-      </dl>
       <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Drive review →</a></p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}<button v-if="carryHint" type="button" class="btn small carry-hint" @click="applyPrevious(); releaseFocus($event)">Apply previous <kbd class="keycap">A</kbd></button></template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>

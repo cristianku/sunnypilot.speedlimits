@@ -177,6 +177,15 @@ input::placeholder { color: var(--placeholder); }
 .ai-box.delete { stroke-dasharray: 2 4; }
 .ai-tag { fill: var(--ov-ai); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
 #draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
+/* What the comma had at this moment (car-moment.ts): on the photo, top left, never in the way of the pointer. */
+.car-moment { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 16px); display: flex; flex-wrap: wrap; gap: 2px 10px;
+  padding: 4px 10px; border-radius: 10px; pointer-events: none; background: rgba(8, 11, 16, 0.72);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #e8ecf3; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.car-moment > span { white-space: nowrap; }
+.car-moment b { font-weight: 500; color: #9aa4b2; }
+.car-moment span span { font-weight: 700; }
+.car-moment .ahead { font-weight: 400; color: #9aa4b2; }
+.car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--bad); }
 .stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
 .stage-hint span {
   background: rgba(8, 11, 16, 0.8); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
@@ -290,6 +299,11 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .tl-ticks button.done.ai { background: var(--ai-hatch); }
 .tl-ticks button.done.ai.unsure { background: linear-gradient(var(--doubt) 0 4px, transparent 4px), var(--ai-hatch); }
 .tl-ticks button:hover { box-shadow: inset 0 0 0 1px var(--fg); }
+/* Map and vision differ there in the car (car-moment.ts): a red dash under the tick. */
+.timeline.car-logs { gap: 6px; }
+.tl-ticks button.differ { position: relative; }
+.tl-ticks button.differ::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 2.5px; border-radius: 1px; background: var(--bad); }
+.legend .l-differ { height: 3px; margin-top: 7px; background: var(--bad); }
 .tl-ticks button.cur, .tl-ticks button.cur:hover { position: relative; z-index: 1; box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--fg); }
 .quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 20px; font-size: 13px; color: var(--muted); background: var(--surface-2); border-top: 1px solid var(--line); }
 .quality-label { margin-right: 4px; font-weight: 600; }
@@ -416,15 +430,6 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .country-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 13px; color: var(--muted); }
 .country-line .flag { font-size: 18px; line-height: 1; }
 .drive-link { margin: -6px 0 0; font-size: 13px; }
-.car-moment { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -2px 0 0; padding: 8px 12px; border-radius: 10px;
-  background: var(--surface-2); font-size: 13px; }
-.car-moment div { display: flex; flex-direction: column; min-width: 0; }
-.car-moment dt { font-size: 11.5px; color: var(--muted); }
-.car-moment dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
-.car-moment .ahead { font-weight: 400; color: var(--muted); }
-.car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--warn); }
-.car-moment .differ-note { flex: 0 0 100%; margin: 0; font-size: 12px; font-weight: 600; color: var(--warn); }
-.drive-link a { color: var(--accent); text-decoration: none; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .kind-group-label { flex: 0 0 100%; font-size: 11.5px; font-weight: 600; letter-spacing: 0; color: var(--muted); margin-top: 2px; }
