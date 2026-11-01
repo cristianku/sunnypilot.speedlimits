@@ -1,4 +1,4 @@
-// Keyboard shortcuts: Shift ← → frame, Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
+// Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → from picture to picture (a second), Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
 // direction (left, right, straight, several), Enter confirm, B or N new box, C fit the box picked to its sign on the server
@@ -13,6 +13,7 @@ import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind,
   toggleHints, toggleVariable} from './edits';
 import {currentRow, workOf} from './frames';
 import {step} from './navigation';
+import {stepFrame} from './video';
 import {report, state, toggleKeys} from './store';
 
 // A speed is one key (2 = 20 … 9 = 90); after a 1 the page waits this long for a second digit ("1 2" = 120, 1 alone
@@ -212,11 +213,13 @@ export function useKeyboard(): void {
         break;
       case 'ArrowLeft':
         event.preventDefault();
-        step(-1);
+        if (event.shiftKey) step(-1);
+        else stepFrame(-1);
         break;
       case 'ArrowRight':
         event.preventDefault();
-        step(1);
+        if (event.shiftKey) step(1);
+        else stepFrame(1);
         break;
       case 'Enter':
         event.preventDefault();

@@ -60,6 +60,8 @@ export interface FrameRow {
   country_from?: string | null;
   /** Seconds into its segment (one minute each), when the extraction knows it. */
   media_time_s?: number | null;
+  /** The frame of its segment's video this picture is (20 a second), when the extraction knows it. */
+  decoded_frame_index?: number | null;
   requested_sample_fps?: number | null;
   /** The value of the sign the comma read at this frame (km/h; null: a sign without a number), only on the frames
    * added at its reads (output index 1000 + the frame in the video). */

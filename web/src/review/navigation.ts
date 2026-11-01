@@ -6,15 +6,18 @@ import {
   aiConfirmed, confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, segmentSecond, visibleRows, workOf,
 } from './frames';
 import {revealStage, scrollTimelineToCurrent} from './scroll';
-import {indexOf, report, rowOf, state} from './store';
+import {anchorIndex, indexOf, report, rowOf, state} from './store';
 import type {Filter} from './types';
 
-/** ‹ › and Shift ← → (← → alone with no box selected): the frame just before or after in the route, whatever the
- * filter (the filter decides where Confirm goes next). */
+/** Shift ← → (and ‹ › ← → offline, video.ts): the picture just before or after in the route (a second, or a frame
+ * between the seconds of the report), whatever the filter (the filter decides where Confirm goes next). From a frame
+ * of the video not saved: the picture just before it, or just after. */
 export function step(delta: number): void {
-  const index = state.currentKey === null ? -1 : indexOf(state.currentKey);
-  const target = report.rows[index + delta];
-  if (index < 0 || target === undefined) return;
+  if (state.currentKey === null) return;
+  const index = indexOf(state.currentKey);
+  const anchor = anchorIndex(state.currentKey);
+  const target = report.rows[index >= 0 ? index + delta : delta < 0 ? anchor : anchor + 1];
+  if (target === undefined) return;
   openFrame(target.frame_key);
 }
 
@@ -23,7 +26,7 @@ export function go(step: number): void {
   const list = visibleRows();
   const index = list.findIndex((row) => row.frame_key === state.currentKey);
   const target = list[index + step];
-  if (index + step < 0 || target === undefined) return;
+  if (index < 0 || index + step < 0 || target === undefined) return;
   openFrame(target.frame_key);
 }
 
@@ -52,7 +55,7 @@ export function openFrame(key: string, reveal = true): void {
 
 // The frame to show after a confirmation: the next one still to do under the current filter.
 function nextAfterConfirm(key: string): string | null {
-  for (const row of report.rows.slice(indexOf(key) + 1)) {
+  for (const row of report.rows.slice(anchorIndex(key) + 1)) {
     if (state.filter === 'all') return row.frame_key;
     if (confirmedFilter(state.filter)) {
       if (matchesFilter(row, state.filter)) return row.frame_key;
@@ -113,7 +116,7 @@ export function setFilter(filter: Filter): void {
     return;
   }
   // The next frame of the filter after this one, else the first one before it.
-  const start = indexOf(row.frame_key);
+  const start = anchorIndex(row.frame_key);
   const target = report.rows.slice(start + 1).find((item) => matchesFilter(item, filter))
     ?? report.rows.slice(0, Math.max(start, 0)).find((item) => matchesFilter(item, filter));
   if (target === undefined) {

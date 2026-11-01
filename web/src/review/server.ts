@@ -4,7 +4,7 @@ import {messageOf} from '../common/api';
 import {dropStaleKind} from './catalog';
 import {clone} from './dom';
 import {countryOf, fromServer, unsavedKeys} from './frames';
-import {report, rowOf, state, store} from './store';
+import {insertRow, isVirtual, report, rowOf, state, store} from './store';
 import type {FrameRow, Problem, ReviewsAnswer, SaveAnswer, Suspicious} from './types';
 
 /** A failed call; retry is true when trying again later can help (no network, server error). */
@@ -85,6 +85,10 @@ export async function send(key: string): Promise<boolean> {
       s.base = clone(result.review);
     }
     takeSuspicious(result);
+    // A frame of the video between the seconds: saved with its box, it is a picture of the report now
+    // (review_service.video_frame_row).
+    const added = isVirtual(key) ? rowOf(key) : null;
+    if (added !== null) insertRow(added);
     ok = true;
   } catch (error) {
     s.error = messageOf(error);

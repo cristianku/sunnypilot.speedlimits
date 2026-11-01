@@ -1,7 +1,8 @@
 // Frames and their review state: the working copy, the status of a frame, its doubts, the filters.
 import {hasValue, isSpeedFamily} from './catalog';
 import {clone} from './dom';
-import {report, rowOf, state} from './store';
+import {READ_INDEX_BASE} from './order';
+import {indexOf, isVirtual, report, rowOf, state} from './store';
 import {trialKeys} from './trial';
 import type {
   ConfirmedCopy, Detection, Filter, FrameEdit, FrameRow, FrameStatus, QualityFilter, SuspiciousReason,
@@ -11,9 +12,6 @@ export function currentRow(): FrameRow | null {
   return state.currentKey === null ? null : rowOf(state.currentKey);
 }
 
-/** The output index of the frames of the comma's reads: READ_INDEX_BASE + their frame in the video. */
-const READ_INDEX_BASE = 1000;
-
 /** The second of its segment's video a frame was taken at, else null. */
 export function segmentSecond(row: FrameRow): number | null {
   const fps = row.requested_sample_fps;
@@ -22,9 +20,14 @@ export function segmentSecond(row: FrameRow): number | null {
   return second === null || !Number.isFinite(second) ? null : second;
 }
 
-/** The frame of a sign the comma's vision read (nnslr_tools.sign_reads), between the pictures at 1 a second. */
-export function isReadFrame(row: FrameRow): boolean {
+/** A frame between the pictures at 1 a second: a sign the comma read there, or a frame of the video (video.ts). */
+export function isBetweenFrame(row: FrameRow): boolean {
   return row.output_index >= READ_INDEX_BASE;
+}
+
+/** The frame of a sign the comma's vision read (nnslr_tools.sign_reads): only those carry the value it read. */
+export function isReadFrame(row: FrameRow): boolean {
+  return 'comma_read_kph' in row;
 }
 
 /** "the comma read 20 here" (its value unknown: "the comma read a sign here"). */
@@ -42,9 +45,9 @@ export function driveTime(row: FrameRow): string | null {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const pad = (value: number): string => String(value).padStart(2, '0');
-  // A frame of a comma read is between two seconds: "19:32.8".
-  const tenth = isReadFrame(row) ? '.' + (Math.floor(second * 10 + 1e-6) % 10) : '';
-  return (hours > 0 ? hours + ':' + pad(minutes) : String(minutes)) + ':' + pad(total % 60) + tenth;
+  // A frame between two seconds (20 a second): "19:32.85".
+  const hundredths = isBetweenFrame(row) ? '.' + pad(Math.floor(second * 100 + 1e-6) % 100) : '';
+  return (hours > 0 ? hours + ':' + pad(minutes) : String(minutes)) + ':' + pad(total % 60) + hundredths;
 }
 
 /** "12:46 into the drive", else the segment and the image ("Segment 12 · image 46"). */
@@ -228,10 +231,13 @@ export function visibleRows(): FrameRow[] {
   return report.rows.filter((row) => row.frame_key === state.currentKey || matchesFilter(row, state.filter));
 }
 
-/** Frames confirmed here and not stored on the server yet. */
+/** Frames confirmed here and not stored on the server yet (a frame of the video between the seconds too: the
+ * server takes it into the report when it is saved). */
 export function unsavedKeys(): string[] {
-  return report.rows.filter((row) => {
-    const s = state.edits[row.frame_key];
+  const keys = report.rows.map((row) => row.frame_key)
+    .concat(Object.keys(state.edits).filter((key) => indexOf(key) < 0 && isVirtual(key)));
+  return keys.filter((key) => {
+    const s = state.edits[key];
     return s && s.saved === false && s.review_state === 'reviewed';
-  }).map((row) => row.frame_key);
+  });
 }

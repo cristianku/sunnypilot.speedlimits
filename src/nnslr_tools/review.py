@@ -761,6 +761,12 @@ def make_handler(app: ReviewApp):
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
                 return
+            # The frames of the road video around one, for the arrows of Sign review (nnslr_tools.video_frames).
+            match = re.fullmatch(r'/api/route/([^/]+)/video/([0-9]{1,4})/([0-9]{1,6})', path)
+            if match:
+                self._json(200, {'ok': True, **app.video_gop(match.group(1), int(match.group(2)),
+                                                              int(match.group(3)))})
+                return
             match = re.fullmatch(r'/route/([^/]+)', path)
             if match:
                 route = self._route_or_none(match.group(1))
@@ -774,6 +780,10 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(r'/route/([^/]+)(/images/[0-9]{8}\.jpg)', path)
             if match:
                 self._send_image(match.group(1), match.group(2))
+                return
+            match = re.fullmatch(r'/route/([^/]+)/video/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
+            if match:
+                self._send_video_frame(match.group(1), int(match.group(2)), int(match.group(3)))
                 return
             match = re.fullmatch(r'/route/([0-9a-f]{8}--[0-9a-f]{10})/video\.mp4', path)
             if match:
@@ -1058,6 +1068,24 @@ def make_handler(app: ReviewApp):
             with path.open('rb') as source:
                 while block := source.read(65536):
                     self.wfile.write(block)
+
+        def _send_video_frame(self, route, segment, decoded):
+            """The JPEG of a frame of the road video (nnslr_tools.video_frames), the same on every visit."""
+            from nnslr_tools import video_frames
+            try:
+                parse_route_id(route)
+                app.report(route)
+                path = video_frames.preview(app.root, route, segment, decoded)
+                data = path.read_bytes()
+            except (PreannotationError, ValueError, OSError):
+                self._problem(404, 'not_found', 'Frame of the video not found.', False)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', str(len(data)))
+            self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
+            self.end_headers()
+            self.wfile.write(data)
 
         def _send_video(self, route):
             """The video of a drive (nnslr_tools.drive_video), with byte ranges: the player seeks in it."""
@@ -1414,11 +1442,21 @@ def make_handler(app: ReviewApp):
                 self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', True)
                 return
             report_row = by_key.get(frame_key)
+            made = False
+            if report_row is None:
+                # A frame between the seconds confirmed with a box: its picture is taken out of the video now.
+                report_row, made = app.video_frame_row(route, frame_key, body)
+                rows = app.report(route)[1]
             if report_row is None:
                 self._problem(404, 'unknown_frame', 'Frame not in the report of this route.', True)
                 return
-            review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
-                                       report_row=report_row, body=body, client=self.client_address[0])
+            try:
+                review = save_frame_review(app.store, app.root, route_id=route, run_id=directory.name,
+                                           report_row=report_row, body=body, client=self.client_address[0])
+            except Exception:
+                if made:
+                    app.forget_video_frame(route, frame_key)
+                raise
             reviewer = terminal_text(review['reviewer'])
             if review['confirmed']:
                 print(f'Salvato: {route} fotogramma {frame_key}, revisione {review["revision"]} '

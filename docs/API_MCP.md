@@ -89,6 +89,8 @@ Base: `http://<server>:8765/api/v1`. Tutte le risposte sono JSON (tranne le imma
 
 Gli endpoint della pagina (`GET /api/routes`, `GET /api/route/{route}/reviews`, `POST /api/route/{route}/frame/{seg}/{img}`) restano identici, con cookie o `X-Review-Token` come prima. `GET /api/route/{route}/reviews` ora indica anche `reviewer_kind` e `channel` di ogni revisione.
 
+Every frame of the video (the page only): `GET /api/route/{route}/video/{seg}/{frame}` decodes the GOP of that frame of the segment's video (20 a second) and gives `frame_count`, `gop` (first and last frame), `seconds` (the seconds a segment kept only at the signs has, else `null`) and `frames`, each with its `frame_key`: the key of the picture of the report when there is one, else `{seg}/{1000 + frame}`; `GET /route/{route}/video/{seg}/{frame}.jpg` is its picture. `POST /api/route/{route}/frame/{seg}/{1000 + frame}` with `confirmed: true` and at least one box takes such a frame into the report (its own PNG, `video_frames.jsonl`) and saves the review; with no box it answers 400 `video_frame_needs_box` and saves nothing. The REST API and MCP save only frames of the report, and `next`/`next_frame` never walk the frames of the video that are not saved.
+
 ### Ordine, cursori e ripresa
 
 - L'ordine è quello della timeline della pagina: per segmento e poi per immagine. Gli indici non devono essere consecutivi (`0/0, 0/2, 0/5, 1/1, ...`): precedente e successivo sono i vicini in quest'ordine, anche tra segmenti diversi; `same_segment` dice se un vicino è nello stesso segmento.

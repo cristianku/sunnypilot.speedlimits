@@ -5,8 +5,8 @@ import {computed} from 'vue';
 import {position, selectedBox, status} from './current';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {thousands} from '../common/format';
-import {aiConfirmed, framePlace, proposalsOf, reasonsOf, statusLabel} from './frames';
-import {step} from './navigation';
+import {aiConfirmed, framePlace, isBetweenFrame, proposalsOf, reasonsOf, statusLabel} from './frames';
+import {stepFrame} from './video';
 import {hintsOf, report, state} from './store';
 import ReviewFilters from './ReviewFilters.vue';
 import type {FrameRow} from './types';
@@ -27,6 +27,15 @@ const frameData = computed(() => {
   return info;
 });
 
+// "Segment 3, image 12"; a frame between the seconds: "Segment 3, frame 245 of the video".
+const frameTitle = computed(() => {
+  const row = props.row;
+  if (!isBetweenFrame(row) || typeof row.decoded_frame_index !== 'number') {
+    return 'Segment ' + row.segment_index + ', image ' + row.output_index;
+  }
+  return 'Segment ' + row.segment_index + ', frame ' + row.decoded_frame_index + ' of the video';
+});
+
 function hintsSwitched(event: Event): void {
   if ((event.target as HTMLInputElement).checked !== state.showHints) toggleHints();
 }
@@ -35,15 +44,15 @@ function hintsSwitched(event: Event): void {
 <template>
   <div class="stage-bar">
     <div class="nav">
-      <button type="button" class="btn icon" id="prev" aria-label="Previous frame" title="Previous frame (Shift ←)"
-              :disabled="position.index <= 0" @click="step(-1)"><span class="nav-glyph">‹</span><kbd class="nav-key">⇧ ←</kbd></button>
+      <button type="button" class="btn icon" id="prev" aria-label="Previous frame" title="Previous frame (←) · a second back: Shift ←"
+              :disabled="!position.canPrev" @click="stepFrame(-1)"><span class="nav-glyph">‹</span><kbd class="nav-key">←</kbd></button>
       <span class="pos" id="pos">{{ thousands(position.index + 1) }} / {{ thousands(position.length) }}</span>
-      <button type="button" class="btn icon" id="next" aria-label="Next frame" title="Next frame (Shift →)"
-              :disabled="position.index >= position.length - 1" @click="step(1)"><span class="nav-glyph">›</span><kbd class="nav-key">⇧ →</kbd></button>
+      <button type="button" class="btn icon" id="next" aria-label="Next frame" title="Next frame (→) · a second on: Shift →"
+              :disabled="!position.canNext" @click="stepFrame(1)"><span class="nav-glyph">›</span><kbd class="nav-key">→</kbd></button>
     </div>
     <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
-    <span class="data" id="frameData" :title="'Segment ' + row.segment_index + ', image ' + row.output_index">{{ frameData }}</span>
+    <span class="data" id="frameData" :title="frameTitle">{{ frameData }}</span>
     <div class="stage-tools">
       <button type="button" class="btn" :class="{on: state.drawing}" id="draw" :disabled="report.readOnly" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
       <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Delete</button>

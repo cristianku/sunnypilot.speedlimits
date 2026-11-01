@@ -19,6 +19,7 @@ from pathlib import Path
 
 from nnslr_tools.manifest import parse_route_id, sha256_of
 from nnslr_tools.sign_reads import READS_MANIFEST, frame_order
+from nnslr_tools.video_frames import VIDEO_MANIFEST
 from nnslr_tools.sync import DEFAULT_DATA_ROOT
 from nnslr_tools.road_text import ROAD_MODEL_INFO, OCR_INFO
 
@@ -49,6 +50,48 @@ def _inside(root: Path, path: Path) -> Path:
     return resolved
 
 
+def frame_row(root: Path, route: str, segment: int, raw, manifest: Path) -> dict:
+    """The frame row of a line of a segment's manifest (frames.jsonl, sign_reads.jsonl, video_frames.jsonl): its
+    identity checked, its picture inside the route's frames and with the hash it was extracted with."""
+    directory = _inside(root, root / 'derived/frames' / route)
+    if not isinstance(raw, dict) or raw.get('route_id') != route or raw.get('segment_index') != segment:
+        raise PreannotationError(f'frame identity mismatch: {manifest}')
+    index = raw.get('output_index')
+    if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+        raise PreannotationError(f'invalid/duplicate output_index: {manifest}')
+    name = raw.get('image_path')
+    if not isinstance(name, str) or not name:
+        raise PreannotationError(f'missing image_path: {manifest}')
+    path = Path(name)
+    path = _inside(directory, path if path.is_absolute() else root / path)
+    if not path.is_file():
+        raise PreannotationError(f'frame not found: {path}')
+    # [frame-provenance] - START
+    image_hash = sha256_of(path)
+    if raw.get('image_sha256') is not None and raw['image_sha256'] != image_hash:
+        raise PreannotationError(f'frame hash mismatch since extraction: {path}')
+    # [frame-provenance] - END
+    return {
+        'frame_key': f'{segment}/{index}', 'route_id': route, 'segment_index': segment,
+        'output_index': index, 'image_path': str(path.relative_to(root)),
+        'frame_sha256': image_hash, 'camera_stream': raw.get('camera_stream', 'narrow_road'),
+        'requested_sample_fps': raw.get('requested_sample_fps'), 'start_s': raw.get('start_s'),
+        # [frame-provenance] - START
+        # Preserve explicit source evidence; legacy output_index is never promoted.
+        'decoded_frame_index': raw.get('decoded_frame_index'),
+        'capture_mono_ns': raw.get('capture_mono_ns'),
+        'alignment_status': raw.get('alignment_status', 'unresolved'),
+        'alignment_reason': raw.get('alignment_reason', 'legacy_manifest'),
+        'capture_time_provenance': raw.get('capture_time_provenance', 'unknown'),
+        'media_time_s': raw.get('media_time_s'),
+        'media_time_provenance': raw.get('media_time_provenance', 'unknown'),
+        'source_video_sha256': raw.get('source_video_sha256'),
+        'source_log_sha256': raw.get('source_log_sha256'),
+        # [frame-provenance] - END
+        **({'comma_read_kph': raw.get('comma_read_kph')} if 'comma_read_kph' in raw else {}),
+    }
+
+
 def discover_frames(root: Path, route: str) -> list[dict]:
     parse_route_id(route)
     directory = _inside(root, root / 'derived/frames' / route)
@@ -62,50 +105,25 @@ def discover_frames(root: Path, route: str) -> list[dict]:
         if not manifest.parent.name.isdigit():
             raise PreannotationError(f'non-numeric segment: {manifest.parent.name}')
         segment = int(manifest.parent.name)
-        # The pictures at 1 a second, then the frames of the comma's reads (nnslr_tools.sign_reads).
-        reads = manifest.parent / READS_MANIFEST
-        lines = manifest.read_text().splitlines() + (reads.read_text().splitlines() if reads.is_file() else [])
-        for line in lines:
+        # The pictures at 1 a second, the frames of the comma's reads (nnslr_tools.sign_reads), then the frames
+        # between the seconds saved in Sign review (nnslr_tools.video_frames): one of those that a later read took
+        # too is the same picture, and its row is the read's.
+        lines = [(line, False) for line in manifest.read_text().splitlines()]
+        for name, added in ((READS_MANIFEST, False), (VIDEO_MANIFEST, True)):
+            extra = manifest.parent / name
+            if extra.is_file():
+                lines += [(line, added) for line in extra.read_text().splitlines()]
+        for line, added in lines:
             if not line.strip():
                 continue
             raw = json.loads(line)
-            if not isinstance(raw, dict) or raw.get('route_id') != route or raw.get('segment_index') != segment:
-                raise PreannotationError(f'frame identity mismatch: {manifest}')
-            index = raw.get('output_index')
-            if isinstance(index, bool) or not isinstance(index, int) or index < 0 or (segment,index) in seen:
+            if added and isinstance(raw, dict) and (segment, raw.get('output_index')) in seen:
+                continue
+            row = frame_row(root, route, segment, raw, manifest)
+            if (segment, row['output_index']) in seen:
                 raise PreannotationError(f'invalid/duplicate output_index: {manifest}')
-            name = raw.get('image_path')
-            if not isinstance(name, str) or not name:
-                raise PreannotationError(f'missing image_path: {manifest}')
-            path = Path(name)
-            path = _inside(directory, path if path.is_absolute() else root / path)
-            if not path.is_file():
-                raise PreannotationError(f'frame not found: {path}')
-            # [frame-provenance] - START
-            image_hash = sha256_of(path)
-            if raw.get('image_sha256') is not None and raw['image_sha256'] != image_hash:
-                raise PreannotationError(f'frame hash mismatch since extraction: {path}')
-            # [frame-provenance] - END
-            seen.add((segment,index))
-            rows.append({
-                'frame_key': f'{segment}/{index}', 'route_id': route, 'segment_index': segment,
-                'output_index': index, 'image_path': str(path.relative_to(root)),
-                'frame_sha256': image_hash, 'camera_stream': raw.get('camera_stream', 'narrow_road'),
-                'requested_sample_fps': raw.get('requested_sample_fps'), 'start_s': raw.get('start_s'),
-                # [frame-provenance] - START
-                # Preserve explicit source evidence; legacy output_index is never promoted.
-                'decoded_frame_index': raw.get('decoded_frame_index'),
-                'capture_mono_ns': raw.get('capture_mono_ns'),
-                'alignment_status': raw.get('alignment_status', 'unresolved'),
-                'alignment_reason': raw.get('alignment_reason', 'legacy_manifest'),
-                'capture_time_provenance': raw.get('capture_time_provenance', 'unknown'),
-                'media_time_s': raw.get('media_time_s'),
-                'media_time_provenance': raw.get('media_time_provenance', 'unknown'),
-                'source_video_sha256': raw.get('source_video_sha256'),
-                'source_log_sha256': raw.get('source_log_sha256'),
-                # [frame-provenance] - END
-                **({'comma_read_kph': raw.get('comma_read_kph')} if 'comma_read_kph' in raw else {}),
-            })
+            seen.add((segment, row['output_index']))
+            rows.append(row)
     if not rows:
         raise PreannotationError('frame manifests contain no frames')
     return sorted(rows, key=frame_order)

@@ -2,7 +2,7 @@
 // box selected in it, its place in the route.
 import {computed, watchEffect} from 'vue';
 import {aiConfirmed, currentRow, doubtsOf, frameStatus, isConfirmed, reasonsOf, workOf} from './frames';
-import {indexOf, report, state} from './store';
+import {anchorIndex, indexOf, report, state} from './store';
 import type {Detection, FrameEdit, FrameRow, FrameStatus, QualityFilter} from './types';
 
 export const row = computed<FrameRow | null>(() => currentRow());
@@ -11,10 +11,16 @@ export const work = computed<FrameEdit | null>(() => (row.value ? state.edits[ro
 export const status = computed<FrameStatus>(() => (row.value ? frameStatus(row.value.frame_key) : 'todo'));
 export const selectedBox = computed<Detection | null>(() => work.value?.detections[state.selected] ?? null);
 
-/** Position of the frame in the route (0 based) and the number of frames: what ‹ › walk through. */
+/** Position of the frame in the route (0 based; a frame of the video between the seconds: of the picture before
+ * it) and the number of frames; whether ‹ › can go back and on (with the server ‹ › go through every frame of the
+ * video, video.ts). */
 export const position = computed(() => {
   const key = row.value?.frame_key;
-  return {index: key === undefined ? 0 : Math.max(0, indexOf(key)), length: report.rows.length};
+  const index = key === undefined ? -1 : indexOf(key);
+  const anchor = key === undefined ? -1 : anchorIndex(key);
+  const length = report.rows.length;
+  return {index: Math.max(0, anchor), length, canPrev: index !== 0 && anchor >= 0,
+    canNext: index < 0 || index < length - 1 || report.apiBase !== null};
 });
 
 /** Confirmed, suspicious and AI-confirmed frames of the route. */

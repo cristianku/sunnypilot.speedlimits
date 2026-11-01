@@ -295,10 +295,14 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .tl-label { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tl-ticks { position: relative; display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
 .tl-ticks button { min-width: 0; height: 12px; border: 0; padding: 0; border-radius: 2px; background: var(--none-cell); }
-/* The frame of a sign the comma read: a thin bar, taller than the cells, in the gap after the --at cells before it;
+/* A frame between the seconds (a sign the comma read, a frame of the video saved with a box): a thin bar, taller
+   than the cells, --at cells from the start (the cell of the picture before it and how far into its second it is);
    its fill is the frame's state like a cell's, the colour of a read when nothing is proposed. */
-.tl-ticks button.read { position: absolute; z-index: 1; top: -3px; width: 4px; height: 18px; border-radius: 2px;
-  left: calc(var(--at) * (100% + 2px) / var(--tl-cols, 60) - 3px); background: var(--read); box-shadow: 0 0 0 1px var(--surface); }
+.tl-ticks button.between { position: absolute; z-index: 1; top: -3px; width: 4px; height: 18px; border-radius: 2px;
+  left: calc(var(--at) * (100% + 2px) / var(--tl-cols, 60) - 2px); box-shadow: 0 0 0 1px var(--surface); }
+.tl-ticks button.read { background: var(--read); }
+/* The frame of the video on screen, not saved (video.ts): an empty bar, ringed as the current frame. */
+.tl-ticks button.video { background: var(--surface); }
 .tl-ticks button.has { background: var(--has); }
 .tl-ticks button.sus { background: var(--sus); }
 .tl-ticks button.dirty { background: var(--warn); }
@@ -316,6 +320,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .legend .l-read { width: 4px; height: 14px; background: var(--read); }
 .legend .l-differ { height: 3px; margin-top: 7px; background: var(--bad); }
 .tl-ticks button.cur, .tl-ticks button.cur:hover { position: relative; z-index: 1; box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--fg); }
+.tl-ticks button.between, .tl-ticks button.between.cur { position: absolute; z-index: 2; }
 .quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 20px; font-size: 13px; color: var(--muted); background: var(--surface-2); border-top: 1px solid var(--line); }
 .quality-label { margin-right: 4px; font-weight: 600; }
 .qchip {

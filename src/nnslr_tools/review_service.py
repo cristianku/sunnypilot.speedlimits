@@ -33,7 +33,8 @@ from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, MAX_DETECTIONS_PER_FRAME,
                                    REVIEW_CHANNELS, REVIEWER_KINDS, ReviewRejected, public_review,
                                    save_frame_review)
 from nnslr_tools.review_hints import frame_sizes_of, load_hints, suspicious_frames
-from nnslr_tools.sign_reads import frame_order
+from nnslr_tools import video_frames
+from nnslr_tools.sign_reads import CAMERA_FPS, READ_INDEX_BASE, frame_order, frame_second
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
 GPS_FIELDS = ('latitude', 'longitude', 'speed_mps', 'bearing_deg')
@@ -168,7 +169,7 @@ class ReviewService:
             stamp = positions.stat().st_mtime_ns
         except OSError:
             stamp = None
-        key = (str(directory), stamp)
+        key = (str(directory), stamp, video_frames.manifest_stamp(self.root, route))
         with self._reports_lock:
             cached = self._reports.get(key)
         if cached is None:
@@ -188,6 +189,11 @@ class ReviewService:
                         row['country_proposed'] = position.get('country')
                         row['country_from'] = position.get('country_from')
                 by_key[row.get('frame_key')] = row
+            added = self._added_rows(route, directory, rows, by_key)
+            if added:
+                rows = sorted(rows + added, key=frame_order)
+                for row in added:
+                    by_key[row['frame_key']] = row
             cached = (rows, by_key)
             with self._reports_lock:
                 # One entry per report: the rows of an older positions file go.
@@ -195,6 +201,84 @@ class ReviewService:
                     del self._reports[old]
                 self._reports[key] = cached
         return directory, cached[0], cached[1]
+
+    def _added_rows(self, route: str, directory: Path, rows: list[dict], by_key: dict) -> list[dict]:
+        """The frames between the seconds saved in Sign review since the report was made (nnslr_tools.video_frames),
+        as rows of the report: no proposals, the GPS and the country of the nearest frame of their segment."""
+        from nnslr_tools.preannotate import frame_row
+        added = []
+        for raw in video_frames.added_rows(self.root, route):
+            try:
+                row = frame_row(self.root, route, raw.get('segment_index'), raw, Path(video_frames.VIDEO_MANIFEST))
+            except (PreannotationError, OSError, ValueError, TypeError):
+                continue
+            if row['frame_key'] in by_key or not isinstance(row['media_time_s'], (int, float)):
+                continue
+            near = min((item for item in rows if item.get('segment_index') == row['segment_index']),
+                       key=lambda item: abs(frame_second(item) - row['media_time_s']), default={})
+            row.update(schema_version=1, kind='preannotated_frame', run_id=directory.name, width=raw.get('width'),
+                       height=raw.get('height'),
+                       preview_path=f'video/{row["segment_index"]}/{row["decoded_frame_index"]}.jpg',
+                       detections=[], review_state='pending', ground_truth=False, model=None, road_model=None,
+                       ocr=None, inference=None, gps=near.get('gps'), country_proposed=near.get('country_proposed'),
+                       country_from='nearest_fix' if near.get('country_proposed') else None)
+            added.append(row)
+        return added
+
+    def video_gop(self, route, segment: int, decoded: int) -> dict:
+        """The frames of the road video around one, a GOP (nnslr_tools.video_frames), for the arrows of Sign review:
+        each with its key (the report's row when it is one), their previews ready in the cache. ``frame_count``: the
+        frames of the segment's video; ``seconds``: the seconds kept of a segment kept only at a car park's speed
+        (None: every second)."""
+        directory, rows, _by_key = self.known_report(route)
+        try:
+            video = video_frames.video_of(self.root, route, segment)
+            first, last = video_frames.gop_of(video, decoded)
+            video_frames.preview(self.root, route, segment, first)
+            count = video_frames.frame_count(video)
+        except (video_frames.VideoFrameError, OSError) as exc:
+            raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be shown: ' + str(exc)) from exc
+        seconds = video_frames.kept_seconds(self.root, route, segment)
+        keys = {}
+        for row in rows:
+            if row.get('segment_index') == segment and type(row.get('decoded_frame_index')) is int:
+                keys[row['decoded_frame_index']] = row['frame_key']
+        frames = []
+        for index in range(first, last + 1):
+            if seconds is None or int(index / CAMERA_FPS) in seconds:
+                frames.append({'decoded': index, 'media_time_s': index / CAMERA_FPS,
+                               'frame_key': keys.get(index, f'{segment}/{READ_INDEX_BASE + index}')})
+        return {'route_id': route, 'run_id': directory.name, 'segment_index': segment, 'frame_count': count,
+                'gop': [first, last], 'seconds': seconds, 'frames': frames}
+
+    def video_frame_row(self, route, frame_key: str, body) -> tuple[dict | None, bool]:
+        """(report row, made now) of a frame between the seconds the page confirms with a box: its picture taken out
+        of the video now (nnslr_tools.video_frames.materialize) and added to the report. (None, False): not such a
+        frame (another unknown key, or a frame that is already a row under another key)."""
+        segment, index = (int(part) for part in frame_key.split('/'))
+        if index < READ_INDEX_BASE:
+            return None, False
+        _directory, rows, _by_key = self.known_report(route)
+        decoded = index - READ_INDEX_BASE
+        if any(row.get('segment_index') == segment and row.get('decoded_frame_index') == decoded for row in rows):
+            return None, False
+        if not isinstance(body, dict) or body.get('confirmed') is not True:
+            return None, False
+        if not isinstance(body.get('detections'), list) or not body['detections']:
+            raise ReviewRejected(400, 'video_frame_needs_box',
+                                 'A frame between the seconds is saved only with a box: draw the sign first.')
+        from nnslr_tools.reproposing import refuse_if_busy
+        refuse_if_busy(self.root, route)
+        try:
+            _row, fresh = video_frames.materialize(self.root, route, segment, decoded)
+        except (video_frames.VideoFrameError, OSError, ValueError) as exc:
+            raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be saved: ' + str(exc)) from exc
+        return self.report(route)[2].get(frame_key), fresh
+
+    def forget_video_frame(self, route, frame_key: str) -> None:
+        """Undo video_frame_row when the save it was for was refused."""
+        segment, index = (int(part) for part in frame_key.split('/'))
+        video_frames.forget(self.root, route, segment, index - READ_INDEX_BASE)
 
     def hints(self, route: str, rows: list[dict]) -> tuple[dict, dict]:
         """Second-opinion hints of a route, read again at every call (the files may change)."""
@@ -539,7 +623,13 @@ class ReviewService:
         if variant == 'preview':
             preview = row.get('preview_path')
             path = None
-            if isinstance(preview, str):
+            if isinstance(preview, str) and preview.startswith('video/'):
+                # A frame between the seconds saved in Sign review: its preview is in the video cache.
+                try:
+                    path = video_frames.preview(self.root, route, row['segment_index'], row['decoded_frame_index'])
+                except (video_frames.VideoFrameError, OSError):
+                    path = None
+            elif isinstance(preview, str):
                 path = public_file(directory, '/' + preview)
             if path is None:
                 raise ReviewRejected(404, 'image_not_found', 'Frame preview not found.')

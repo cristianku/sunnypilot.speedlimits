@@ -4,6 +4,7 @@
 import {reactive, shallowReactive} from 'vue';
 import {readLocal, writeLocal} from './dom';
 import {isFilter} from './frames';
+import {CAMERA_FPS, READ_INDEX_BASE, compareFrames, frameSecond} from './order';
 import type {
   Busy, Drag, Filter, FrameEdit, FrameRow, Hint, HintStats, LastSave, Notice, Payload, RouteLink, ServerState,
   Suspicious,
@@ -49,6 +50,9 @@ export const report: Report = shallowReactive({
 
 let hintsByFrame: Record<string, Hint[]> = {};
 let rowIndex = new Map<string, number>();
+let segmentRows = new Map<number, FrameRow[]>();
+// The frames of the video between the seconds the reviewer went through (virtualRowOf), by key.
+const virtualRows = new Map<string, FrameRow>();
 
 /** The export of "Download reviews (JSONL)": its message under the button. */
 export interface ExportMessage {
@@ -170,8 +174,18 @@ export function initStore(raw: Partial<Payload>): void {
     atWork: isRecord(raw.busy) && raw.busy['phase'] === 'proposing again',
   } satisfies Report);
   state.busy = isRecord(raw.busy) ? raw.busy as unknown as Busy : null;
-  rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
+  reindex();
   state.suspicious = isRecord(raw.suspicious) ? raw.suspicious as Suspicious : {};
+}
+
+function reindex(): void {
+  rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
+  segmentRows = new Map();
+  for (const row of report.rows) {
+    const list = segmentRows.get(row.segment_index);
+    if (list === undefined) segmentRows.set(row.segment_index, [row]);
+    else list.push(row);
+  }
 }
 
 /** The new proposals of the drive at work (review/busy.ts), after the rows the page has. */
@@ -179,16 +193,70 @@ export function appendRows(rows: readonly FrameRow[]): void {
   const fresh = rows.filter((row) => !rowIndex.has(row.frame_key));
   if (fresh.length === 0) return;
   report.rows = [...report.rows, ...fresh];
-  rowIndex = new Map(report.rows.map((row, index) => [row.frame_key, index]));
+  reindex();
+}
+
+/** A frame between the seconds just saved (server.ts send): a picture of the report from now on, in time order. */
+export function insertRow(row: FrameRow): void {
+  if (rowIndex.has(row.frame_key)) return;
+  report.rows = [...report.rows, row].sort(compareFrames);
+  virtualRows.delete(row.frame_key);
+  reindex();
 }
 
 export function indexOf(key: string): number {
   return rowIndex.get(key) ?? -1;
 }
 
+/** The place of a frame in the route: its index, or for a frame of the video not saved (virtualRowOf) the index of
+ * the frame just before it (-1 when there is none). */
+export function anchorIndex(key: string): number {
+  const index = rowIndex.get(key);
+  if (index !== undefined) return index;
+  const row = virtualRowOf(key);
+  if (row === null) return -1;
+  let anchor = -1;
+  for (let i = 0; i < report.rows.length && compareFrames(report.rows[i] as FrameRow, row) < 0; i += 1) anchor = i;
+  return anchor;
+}
+
 export function rowOf(key: string): FrameRow | null {
   const index = rowIndex.get(key);
-  return index === undefined ? null : report.rows[index] ?? null;
+  return index === undefined ? virtualRowOf(key) : report.rows[index] ?? null;
+}
+
+/** A frame of the video between the seconds that is not a picture of the report (video.ts): its row, shown from
+ * the server's video (preview video/<segment>/<frame>.jpg), with the size, position and country of the nearest
+ * picture of its segment. Only with the review server, which takes it into the report when it is saved with a box
+ * (review_service.video_frame_row). Null for any other key. */
+export function virtualRowOf(key: string): FrameRow | null {
+  const known = virtualRows.get(key);
+  if (known !== undefined) return known;
+  const match = /^([0-9]+)\/([0-9]+)$/.exec(key);
+  if (report.apiBase === null || match === null || rowIndex.has(key)) return null;
+  const segment = Number(match[1]);
+  const index = Number(match[2]);
+  const rows = segmentRows.get(segment);
+  if (index <= READ_INDEX_BASE || rows === undefined) return null;
+  const decoded = index - READ_INDEX_BASE;
+  const second = decoded / CAMERA_FPS;
+  let near = rows[0] as FrameRow;
+  for (const row of rows) {
+    if (Math.abs(frameSecond(row) - second) < Math.abs(frameSecond(near) - second)) near = row;
+  }
+  const row: FrameRow = {
+    frame_key: key, segment_index: segment, output_index: index, decoded_frame_index: decoded, media_time_s: second,
+    width: near.width, height: near.height, preview_path: 'video/' + segment + '/' + decoded + '.jpg', detections: [],
+    gps: near.gps ?? null, country_proposed: near.country_proposed ?? null,
+    country_from: near.country_proposed ? 'nearest_fix' : null,
+  };
+  virtualRows.set(key, row);
+  return row;
+}
+
+/** Not a picture of the report: a frame of the video between the seconds, never saved. */
+export function isVirtual(key: string): boolean {
+  return !rowIndex.has(key) && virtualRowOf(key) !== null;
 }
 
 export function hintsOf(key: string): Hint[] {

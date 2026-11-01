@@ -17,7 +17,7 @@ import {selectedBox} from './current';
 import {reasonsOf, segmentSecond} from './frames';
 import OtherFields from './OtherFields.vue';
 import SecondReading from './SecondReading.vue';
-import {report, state} from './store';
+import {isVirtual, report, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow; work: FrameEdit}>();
@@ -47,7 +47,7 @@ const driveHref = computed(() => report.apiBase === null ? null : '/drive-review
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>
       <BoxList :row="row" :work="work"/>
       <p class="pick-hint" id="pickHint" :hidden="count === 0 || state.selected >= 0">Select a box to correct its value, type and road.</p>
-      <p class="empty-note" id="noBoxes" :hidden="count > 0"><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3.3"/><path d="M12 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>No boxes. If there is no speed sign, confirm “no sign”: this example is needed too.</span></p>
+      <p class="empty-note" id="noBoxes" :hidden="count > 0"><svg viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="14" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3.3"/><path d="M12 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span v-if="isVirtual(row.frame_key)">A frame of the video between the seconds: draw a box on a sign to save it. Frames with no sign are saved at 1 a second.</span><span v-else>No boxes. If there is no speed sign, confirm “no sign”: this example is needed too.</span></p>
     </section>
     <!-- Right under the list: what another model saw is compared with the boxes, before any of them is edited. -->
     <SecondReading :row="row" :work="work"/>

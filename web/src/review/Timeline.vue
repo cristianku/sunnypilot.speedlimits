@@ -6,31 +6,60 @@ import {thousands} from '../common/format';
 import {carDiffers, carLogs} from './car-moment';
 import {writeLocal} from './dom';
 import {DOUBT_LABELS, doubtCounts, routeCounts} from './current';
-import {aiConfirmed, commaReadText, doubtsOf, driveTime, framePlace, frameStatus, isReadFrame, proposalsOf, reasonsOf,
-  statusLabel} from './frames';
+import {aiConfirmed, commaReadText, doubtsOf, driveTime, framePlace, frameStatus, isBetweenFrame, isReadFrame, proposalsOf,
+  reasonsOf, statusLabel} from './frames';
 import {openFrame, pickFilter} from './navigation';
 import {scrollTimelineToCurrent} from './scroll';
-import {hintsOf, report, state} from './store';
+import {frameSecond} from './order';
+import {hintsOf, isVirtual, report, rowOf, state} from './store';
 import type {FrameRow, QualityFilter} from './types';
 
-/** One row of ticks per segment, with its label: a cell per picture at 1 a second, and a thin bar between two
- * cells for the frame of a sign the comma read there (at: how many cells come before it). */
-const segments = (() => {
-  const list: {segment: number; rows: FrameRow[]; reads: {row: FrameRow; at: number}[]}[] = [];
+interface Between {
+  row: FrameRow;
+  /** Where its bar is, in cells: the cell of the picture before it and how far into its second it is. */
+  at: number;
+}
+
+interface Segment {
+  segment: number;
+  rows: FrameRow[];
+  between: Between[];
+}
+
+/** Where the thin bar of a frame between the seconds goes, its cells the pictures of its segment before it. */
+function placeOf(row: FrameRow, before: number): number {
+  const second = frameSecond(row);
+  return Math.max(0, before - 1 + second - Math.floor(second));
+}
+
+/** One row of ticks per segment, with its label: a cell per picture at 1 a second, and a thin bar across the cells
+ * for each frame between the seconds (a sign the comma read there, a frame of the video saved with a box). */
+const segments = computed(() => {
+  const list: Segment[] = [];
   for (const row of report.rows) {
     let last = list[list.length - 1];
     if (last === undefined || last.segment !== row.segment_index) {
-      last = {segment: row.segment_index, rows: [], reads: []};
+      last = {segment: row.segment_index, rows: [], between: []};
       list.push(last);
     }
-    if (isReadFrame(row)) last.reads.push({row, at: last.rows.length});
+    if (isBetweenFrame(row)) last.between.push({row, at: placeOf(row, last.rows.length)});
     else last.rows.push(row);
   }
   return list;
-})();
+});
 // The cells fill the width: one column per picture of the longest segment.
-const columns = String(Math.max(1, ...segments.map((segment) => segment.rows.length)));
-const hasReads = segments.some((segment) => segment.reads.length > 0);
+const columns = computed(() => String(Math.max(1, ...segments.value.map((segment) => segment.rows.length))));
+const hasReads = computed(() => report.rows.some(isReadFrame));
+
+/** The frame of the video on screen when it is not a picture of the report (video.ts): its bar in its segment. */
+const walking = computed<{segment: number; bar: Between} | null>(() => {
+  const key = state.currentKey;
+  const row = key === null || !isVirtual(key) ? null : rowOf(key);
+  const segment = row === null ? undefined : segments.value.find((item) => item.segment === row.segment_index);
+  if (row === null || segment === undefined) return null;
+  const before = segment.rows.filter((item) => frameSecond(item) <= frameSecond(row)).length;
+  return {segment: row.segment_index, bar: {row, at: placeOf(row, before)}};
+});
 
 function tickClass(row: FrameRow): string {
   const key = row.frame_key;
@@ -50,7 +79,9 @@ function tickClass(row: FrameRow): string {
     cls = 'has';
   }
   if (carDiffers(row)) cls += ' differ';
+  if (isBetweenFrame(row)) cls += ' between';
   if (isReadFrame(row)) cls += ' read';
+  if (isVirtual(key)) cls += ' video';
   if (key === state.currentKey) cls += ' cur';
   return cls;
 }
@@ -59,8 +90,9 @@ function tickClass(row: FrameRow): string {
 function tickLabel(row: FrameRow): string {
   const place = driveTime(row) === null ? framePlace(row)
     : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
+  if (isVirtual(row.frame_key)) return place + ' · a frame of the video, saved only with a box';
   return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '')
-    + (isReadFrame(row) ? ' · ' + commaReadText(row) : '');
+    + (isReadFrame(row) ? ' · ' + commaReadText(row) : isBetweenFrame(row) ? ' · a frame between the seconds' : '');
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
@@ -135,9 +167,12 @@ function tickClicked(event: MouseEvent): void {
         <div class="tl-ticks">
           <button v-for="row in segment.rows" :key="row.frame_key" type="button" tabindex="-1" :data-key="row.frame_key"
                   :class="tickClass(row)" :title="tickLabel(row)" :aria-label="tickLabel(row)"></button>
-          <button v-for="read in segment.reads" :key="read.row.frame_key" type="button" tabindex="-1"
-                  :data-key="read.row.frame_key" :class="tickClass(read.row)" :style="{'--at': read.at}"
-                  :title="tickLabel(read.row)" :aria-label="tickLabel(read.row)"></button>
+          <button v-for="bar in segment.between" :key="bar.row.frame_key" type="button" tabindex="-1"
+                  :data-key="bar.row.frame_key" :class="tickClass(bar.row)" :style="{'--at': bar.at}"
+                  :title="tickLabel(bar.row)" :aria-label="tickLabel(bar.row)"></button>
+          <button v-if="walking !== null && walking.segment === segment.segment" type="button" tabindex="-1"
+                  :data-key="walking.bar.row.frame_key" :class="tickClass(walking.bar.row)" :style="{'--at': walking.bar.at}"
+                  :title="tickLabel(walking.bar.row)" :aria-label="tickLabel(walking.bar.row)"></button>
         </div>
       </div>
     </div>

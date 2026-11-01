@@ -3,7 +3,7 @@
 // of the frame, the message of the phone bar.
 import {shortName} from './catalog';
 import {aiConfirmed, frameStatus, sameAsServer, unsavedKeys} from './frames';
-import {report, state} from './store';
+import {isVirtual, report, state} from './store';
 import type {FrameEdit, FrameStatus} from './types';
 
 export interface PageNotice {
@@ -86,7 +86,11 @@ export function confirmLabels(key: string, work: FrameEdit, status: FrameStatus)
   // On a phone too: "Confirm · 60", so the list under the photo need not be checked to know what is saved.
   let label = 'Confirm · ' + names.join(' · ');
   let mobileLabel = label;
-  if (work.detections.length === 0) {
+  if (work.detections.length === 0 && isVirtual(key)) {
+    // A frame of the video between the seconds is saved only with a box (confirm.ts).
+    label = 'Draw a box to save this frame';
+    mobileLabel = 'Draw a box first';
+  } else if (work.detections.length === 0) {
     label = 'Confirm · no sign';
     mobileLabel = 'Confirm no sign';
   }

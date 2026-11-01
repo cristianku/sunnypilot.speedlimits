@@ -11,7 +11,7 @@ import {blockUnchecked} from './carry';
 import {advanceAfterConfirm, allConfirmed, allConfirmedText, go} from './navigation';
 import {revealEditor} from './scroll';
 import {call, reviewerName, send, takeSuspicious} from './server';
-import {report, state, store} from './store';
+import {isVirtual, report, state, store} from './store';
 import type {FrameRow, SaveAnswer} from './types';
 
 function needReviewer(key: string): void {
@@ -52,6 +52,13 @@ export async function confirmFrame(): Promise<void> {
   if (!row || refuseChange()) return;
   const key = row.frame_key;
   if (state.inFlight.has(key)) return;
+  // A frame of the video between the seconds becomes a picture of the report only with a sign on it: with no box
+  // nothing is saved (the server refuses it too, review_service.video_frame_row).
+  if (isVirtual(key) && workOf(row).detections.length === 0) {
+    state.notice = {key, error: true, text: 'A frame between the seconds is saved only with a box: draw the sign '
+      + 'first (B), or go to the pictures at 1 a second with ⇧ ← →.'};
+    return;
+  }
   // Already on the server and not changed since: Confirm moves on, it does not sign the frame again
   // (a frame an AI confirmed too: that confirmation is final).
   const current = state.edits[key];
