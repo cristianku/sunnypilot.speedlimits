@@ -126,6 +126,19 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
                     sign = event.init('speedVisionSP')
                     sign.speedLimit, sign.modelName, sign.roadType = vision / 3.6, 'synthetic', 'rural'
                     sign.signRead = s == 5
+                    # The first 3 s from a build before these fields: none of them written.
+                    if s < 3:
+                        return
+                    sign.speedLimitState = 'limit' if vision else 'unknown'
+                    sign.speedLimitReason = 'sign' if s >= 5 else ''
+                    # An 80 read and taken at 5 s, a 120 read at 30 s that the memory dropped (too unsure).
+                    if s >= 5:
+                        taken = s < 30
+                        sign.rawSignClass = 'maximum_speed:80' if taken else 'maximum_speed:120'
+                        sign.rawSignSpeed, sign.rawSignConfidence, sign.rawSignTaken = (80, 0.93, True) if taken else (120, 0.4, False)
+                    # The 80 ahead, nearer each second until it is passed at 5 s.
+                    sign.signDistance = max(0.0, (5 - s) * 85 / 3.6)
+                    sign.signSize = 40.0 if s < 5 else 0.0
                 put(t + 5_000_000, speed_vision)
 
             def live_map(event, s=s):
@@ -335,6 +348,35 @@ def test_the_video_is_joined_on_the_monotonic_clock_not_on_file_times(tmp_path):
                                               (2, 120.0, 120.0, 'frame', 0.0)]
     # No GPS fix in the logs: no civil time, and the date shown says it is uncertain.
     assert view['civil_ms'] is None and view['when_certain'] is False
+
+
+def test_the_timeline_says_why_the_vision_limit_is_what_it_is(tmp_path):
+    make_report(tmp_path)
+    comma_drive(tmp_path)
+    fake_video(tmp_path)
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    server = RunningServer(tmp_path)
+    try:
+        view = json_of(server.request('GET', f'/api/drive-review/drives/{ROUTE}/timeline')[2])
+    finally:
+        server.close()
+    series = view['series']
+
+    def at(name, s):
+        points = [value for t, value in series[name] if t <= s]
+        return points[-1] if points else None
+    # Not written by the build: not in the log, not an empty reason.
+    assert at('vis_state', 1.5) is None and at('vis_reason', 1.5) is None and at('vis_sign_dist', 1.5) is None
+    assert at('vis_state', 10) == 'limit' and at('vis_reason', 3.5) == '' and at('vis_reason', 10) == 'sign'
+    assert (at('vis_raw_class', 10), at('vis_raw_speed', 10), at('vis_raw_conf', 10), at('vis_raw_taken', 10)) == \
+        ('maximum_speed:80', 80, 0.93, True)
+    assert (at('vis_raw_class', 40), at('vis_raw_speed', 40), at('vis_raw_conf', 40), at('vis_raw_taken', 40)) == \
+        ('maximum_speed:120', 120, 0.4, False)
+    assert 30 < at('vis_sign_dist', 3.5) < 50 and at('vis_sign_dist', 10) == 0
+    assert at('vis_sign_size', 3.5) == 40 and at('vis_sign_size', 10) == 0
+    # Where speedVisionSP stops (150 s on), its series end: a missing value is never carried on.
+    assert at('vis_reason', 170) is None and at('vis_raw_class', 170) is None
 
 
 def test_holes_in_the_encode_index_degrade_the_sync_and_the_gps_gives_the_date(tmp_path):

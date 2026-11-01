@@ -138,6 +138,14 @@ struct SpeedVisionSP {
   modelName @1 :Text;
   signRead @2 :Bool;
   roadType @3 :Text;
+  speedLimitState @4 :Text;
+  speedLimitReason @5 :Text;
+  rawSignClass @6 :Text;
+  rawSignSpeed @7 :Float32;
+  rawSignConfidence @8 :Float32;
+  rawSignTaken @9 :Bool;
+  signDistance @10 :Float32;
+  signSize @11 :Float32;
 }
 
 struct Event {

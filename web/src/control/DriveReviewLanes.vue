@@ -1,12 +1,12 @@
 <script setup lang="ts">
 // The lanes of a drive under its video (DriveReviewDrive.vue), between two times of the logs: what the comma recorded
-// (its vision limit and the signs it read, the map's limit, the resolver's limit and source, the speeds, openpilot and
+// (its vision limit and the signs it read, every sign read with the reason the limit holds, the map's limit, the resolver's limit and source, the speeds, openpilot and
 // the interventions, the kind of road its vision saw), what the server finds today (our networks' signs on its frames,
 // the map as it is now), and the review (the episodes, the limits a person set). A stretch the log does not have is
 // hatched: missing data is never a value. A tap or a drag goes to that time.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
-import {type Annotation, combine, type Episode, indexAt, limitOf, runsOf, secondOf, type Series, setSpeedOf, statusOf, type Timeline,
-  type Value} from './drive-review';
+import {type Annotation, combine, type Episode, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf,
+  statusOf, type Timeline, type Value} from './drive-review';
 
 export interface DraftInterval {from: number; to: number | null; text: string}
 
@@ -47,6 +47,25 @@ const limitStep = (value: Value): [string, string] => {
 const vision = computed(() => steps(series('vis_limit'), limitStep));
 const signs = computed(() => props.view.events.filter((event) => event[1] === 'sign' && event[0] >= props.from && event[0] <= props.to)
   .map((event) => ({at: event[0], text: typeof event[2] === 'number' && event[2] > 0 ? String(Math.round(event[2])) : '–'})));
+// What the vision read and why it holds its limit: every sign read (solid: the limit was set from it, hollow: dropped,
+// too unsure or overruled) over the rule that set the limit held.
+const reads = computed(() => {
+  const all = combine([series('vis_raw_class'), series('vis_raw_speed'), series('vis_raw_conf'), series('vis_raw_taken')],
+    (values) => typeof values[0] === 'string' && values[0] ? JSON.stringify(values) : null);
+  let lastX = -Infinity;
+  return all.flatMap(([at, value]) => {
+    if (typeof value !== 'string' || at < props.from || at > props.to) return [];
+    const [signClass, speed, confidence, taken] = JSON.parse(value) as Value[];
+    const text = readText(signClass, speed);
+    const short = /^[0-9]+$/.test(text) || text === 'end' ? text : '◆';
+    const shown = x(at) - lastX >= short.length * 6 + 6;
+    if (shown) lastX = x(at);
+    const sure = typeof confidence === 'number' ? ' · ' + Math.round(confidence * 100) + '%' : '';
+    return [{at, text: shown ? short : '', taken: taken === true, title: text + sure + (taken === true ? ' · taken' : ' · dropped')}];
+  });
+});
+const reasons = computed(() => steps(series('vis_reason'), (value) =>
+  value === null || value === undefined ? ['dr-gap', ''] : value === '' ? ['dr-none', ''] : ['dr-reason', REASON_LABEL[String(value)] ?? String(value)]));
 const mapSeries = computed(() => combine([series('map_valid'), series('map_limit')], ([valid, limit]) =>
   valid === undefined || valid === null ? null : valid === false ? 0 : limit ?? null));
 const map = computed(() => steps(mapSeries.value, limitStep));
@@ -230,6 +249,20 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
           <text v-if="run.text && textFits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="17.5" class="dr-run-text">{{ run.text }}</text>
         </g>
         <path v-for="(sign, index) in signs" :key="'s' + index" :d="`M${x(sign.at) - 3.5} 0h7l-3.5 4.5z`" class="dr-sign-tick"><title>Sign read: {{ sign.text }}</title></path>
+      </svg>
+    </div>
+    <div class="dr-lane" title="The signs the comma's vision read (solid: the limit was set from it; hollow: dropped, too unsure or overruled), over the reason its limit is what it is (speedVisionSP)">
+      <span class="dr-lane-name">Reads<small>comma</small></span>
+      <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
+        <g v-for="(read, index) in reads" :key="'r' + index" :class="['dr-read', {dropped: !read.taken}]">
+          <line :x1="x(read.at)" :x2="x(read.at)" y1="10" y2="15"/>
+          <text v-if="read.text" :x="x(read.at)" y="8.5">{{ read.text }}</text>
+          <title>{{ read.title }}</title>
+        </g>
+        <g v-for="(run, index) in reasons" :key="'w' + index">
+          <rect :x="x(run.from)" y="17" :width="w(run.from, run.to)" height="12" rx="2" :class="run.cls"/>
+          <text v-if="run.text && textFits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="26.5" class="dr-run-text dr-today-text">{{ run.text }}</text>
+        </g>
       </svg>
     </div>
     <div class="dr-lane" title="The map's limit the comma had (liveMapDataSP); – no valid limit; hatched: not in the log">

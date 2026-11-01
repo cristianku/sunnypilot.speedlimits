@@ -49,7 +49,9 @@ the episodes of the recorded drive.*
 | Set speed changed by hand | **derived on the PSA** | `carState.buttonEvents` is empty in the logs so far. A change of `vCruise` while ICBM was `inactive` for the whole second around it is the driver's (*Set speed by hand*); with ICBM in another state but no `sendButton`, or no ICBM in the log, it stays *changed by hand or by the car: the log does not say*. opendbc now fills `buttonEvents` on the PSA (below): logs recorded with it have the press itself |
 | Set speed changed by ICBM | **has** | `selfdriveStateSP.intelligentCruiseButtonManagement.sendButton` |
 | Why the vision limit changed | **absent** | the log has the new limit and `signRead`, not the reason (a sign, the end of a ramp, the scene, a timeout) |
-| Raw sign reads (value, confidence, box) | **absent** | only the memory's output is logged; the server's networks on the extracted frames are shown in their own lane |
+| Why the vision limit holds | **has**, from 31 Oct 2026 builds | `speedVisionSP.speedLimitReason` (sign, end sign, road sign, ramp end, carriageway, car park, road type, zone 30) and `speedLimitState` (limit, none, unknown): the strip under the **Reads** lane and **Why** at the time shown. An older build leaves them unset: hatched, not in the log |
+| Raw sign reads (class, value, confidence) | **has**, from 31 Oct 2026 builds | `speedVisionSP.rawSign*`: the last sign read the memory could take, at any confidence, and whether the limit was set from it: the ticks of the **Reads** lane (solid: taken, hollow: dropped, too unsure or overruled) and **Last sign read**. Its box is not logged; the server's networks on the extracted frames are shown in their own lane |
+| The distance to the sign ahead | **has**, from 31 Oct 2026 builds | `speedVisionSP.signDistance` (m, what the screen showed) and `signSize` (px): **sign ahead in** at the time shown |
 | The map as the car had it | **absent** | only its limit is logged, not the map version or the way; the "map today" lane is the local OSM of today, kept apart |
 | Speed Limit Source setting | **not read** | the review shows the resolver's source instead |
 | The driver's reason | **absent** | only the review can say it; the driver's speed is a hint, never a limit |
@@ -86,9 +88,8 @@ None of these is made by the drive review: each is a change to the comma's softw
    the brake it is `brakePressed`, not a button) and main (the stalk wheel: off, limiter, cruise). On the car it only
    adds alerts: Speed Limit Assist with openpilot longitudinal ignores the buttons, MADS reads the main switch from
    `cruiseState.available`, and the set speed still comes from the car (`pcmCruiseSpeed`).
-2. **Why the vision limit changed**: a reason in `speedVisionSP` (sign, ramp end, scene, timeout, junction) and the
-   value and confidence of the last sign read, so an episode says which rule moved the limit.
-3. **Unknown versus not sure**: an explicit validity flag in `speedVisionSP` instead of the value 0.
+2. **Why the vision limit changed**: done in the 31 Oct 2026 builds (`speedLimitReason` and `rawSign*`, see above).
+3. **Unknown versus not sure**: done in the 31 Oct 2026 builds (`speedLimitState`).
 4. **The map the car used**: the map data version and the way (or segment) of `liveMapDataSP`, so "the map then" can
    be compared with "the map today".
 5. **The Speed Limit Source setting** and the offset in use, in the log (or read from the params of `initData`), so the

@@ -11,7 +11,7 @@ import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, w
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {toast} from '../composables/toast';
-import {type Annotation, CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange,
+import {type Annotation, CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, readText, REASON_LABEL,
   type ScanState, scanText, secondOf, setSpeedOf, statusOf, type Timeline, valueAt, videoTimeOf, type VideoState} from './drive-review';
 import DriveReviewLanes, {type DraftInterval} from './DriveReviewLanes.vue';
 import DriveReviewNote from './DriveReviewNote.vue';
@@ -327,7 +327,19 @@ const now = computed(() => {
   const resolver = limitOf(at('res_limit'));
   const ahead = limitOf(at('map_ahead'));
   const aheadDistance = at('map_ahead_dist');
+  const reason = at('vis_reason');
+  const state = at('vis_state');
+  const read = readText(at('vis_raw_class'), at('vis_raw_speed'));
+  const confidence = at('vis_raw_conf');
+  const signDistance = at('vis_sign_dist');
   return {
+    why: reason === undefined || reason === null ? 'not in the log' : reason === '' ? 'no rule yet'
+      : REASON_LABEL[String(reason)] ?? String(reason),
+    state: state === 'none' ? 'no general limit' : state === 'unknown' ? 'unknown' : '',
+    read: at('vis_raw_class') === undefined || at('vis_raw_class') === null ? 'not in the log' : !read ? 'none yet'
+      : read + (typeof confidence === 'number' ? ' · ' + Math.round(confidence * 100) + '%' : '')
+      + (at('vis_raw_taken') === true ? ' · taken' : ' · dropped'),
+    signAhead: typeof signDistance === 'number' && signDistance > 0 ? Math.round(signDistance) + ' m' : '',
     vision: vision === undefined ? 'not in the log' : vision === null ? 'none held' : vision + ' km/h',
     visionKph: vision ?? null,
     model: typeof at('vis_model') === 'string' ? String(at('vis_model')) : '',
@@ -527,6 +539,8 @@ watch(() => props.route, () => {
             <h3 id="dr-now-title">At {{ clockOf(cursor) }}, the comma had</h3>
             <dl>
               <dt>Vision limit</dt><dd>{{ now.vision }}<small v-if="now.model"> · {{ now.model }}</small></dd>
+              <dt>Why</dt><dd>{{ now.why }}<small v-if="now.state"> · {{ now.state }}</small></dd>
+              <dt>Last sign read</dt><dd>{{ now.read }}<small v-if="now.signAhead"> · sign ahead in {{ now.signAhead }}</small></dd>
               <dt>Map limit</dt><dd>{{ now.map }}<small v-if="now.ahead"> · then {{ now.ahead }}</small><small v-if="now.road"> · {{ now.road }}</small></dd>
               <dt>Resolver</dt><dd>{{ now.resolver }}<small v-if="now.sla"> · assist {{ now.sla }}</small></dd>
               <dt>Speed</dt><dd>{{ now.speed }}</dd>

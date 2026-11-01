@@ -787,7 +787,8 @@ def _seconds(t, t0) -> float | None:
 TIMELINE_SERIES = ('v_ego', 'v_cruise', 'cruise_speed', 'cruise_enabled', 'v_target', 'a_target', 'gas', 'brake',
                    'steer_pressed', 'sd_state', 'sd_enabled', 'long_active', 'lat_active', 'mads_active', 'alert', 'icbm_send',
                    'res_limit', 'res_source', 'res_final', 'sla_state', 'vis_limit', 'vis_road', 'vis_model',
-                   'map_valid', 'map_limit', 'map_ahead', 'map_ahead_dist', 'road_name')
+                   'vis_state', 'vis_reason', 'vis_raw_class', 'vis_raw_speed', 'vis_raw_conf', 'vis_raw_taken',
+                   'vis_sign_dist', 'vis_sign_size', 'map_valid', 'map_limit', 'map_ahead', 'map_ahead_dist', 'road_name')
 
 
 def timeline(store: DriveReviewStore, route: str, video: dict | None) -> dict:

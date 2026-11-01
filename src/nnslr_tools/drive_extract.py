@@ -27,7 +27,7 @@ import json
 import sys
 from pathlib import Path
 
-EXTRACT_VERSION = 1
+EXTRACT_VERSION = 2
 
 # (series, service, field path, kind, tolerance, scale): numbers are km/h where the log has m/s (scale 3.6).
 SERIES = (
@@ -61,6 +61,17 @@ SERIES = (
     ('vis_limit', 'speedVisionSP', 'speedLimit', 'num', 0.5, 3.6),
     ('vis_road', 'speedVisionSP', 'roadType', 'str', 0, 1),
     ('vis_model', 'speedVisionSP', 'modelName', 'str', 0, 1),
+    # Why the vision limit is what it is, and the last sign read the memory could take (speed_limits/vision.py): its
+    # class, its speed (already km/h), the classifier's probability, whether the limit was set from it.
+    ('vis_state', 'speedVisionSP', 'speedLimitState', 'str', 0, 1),
+    ('vis_reason', 'speedVisionSP', 'speedLimitReason', 'str', 0, 1),
+    ('vis_raw_class', 'speedVisionSP', 'rawSignClass', 'str', 0, 1),
+    ('vis_raw_speed', 'speedVisionSP', 'rawSignSpeed', 'num', 0.5, 1),
+    ('vis_raw_conf', 'speedVisionSP', 'rawSignConfidence', 'num', 0.01, 1),
+    ('vis_raw_taken', 'speedVisionSP', 'rawSignTaken', 'bool', 0, 1),
+    # The distance (m) to the round sign ahead the screen shows (0 without one) and its size on the camera (px).
+    ('vis_sign_dist', 'speedVisionSP', 'signDistance', 'num', 2, 1),
+    ('vis_sign_size', 'speedVisionSP', 'signSize', 'num', 2, 1),
     ('map_valid', 'liveMapDataSP', 'speedLimitValid', 'bool', 0, 1),
     ('map_limit', 'liveMapDataSP', 'speedLimit', 'num', 0.5, 3.6),
     ('map_ahead_valid', 'liveMapDataSP', 'speedLimitAheadValid', 'bool', 0, 1),
@@ -68,6 +79,10 @@ SERIES = (
     ('map_ahead_dist', 'liveMapDataSP', 'speedLimitAheadDistance', 'num', 25, 1),
     ('road_name', 'liveMapDataSP', 'roadName', 'str', 0, 1),
 )
+# The fields speedvisiond added on 31 Oct 2026: an older build leaves them unset, read as ''/0/False. speedLimitState
+# is never '' when written, so without it they are None: not in the log, never a value.
+VISION_DETAIL = frozenset(('vis_state', 'vis_reason', 'vis_raw_class', 'vis_raw_speed', 'vis_raw_conf', 'vis_raw_taken',
+                           'vis_sign_dist', 'vis_sign_size'))
 # After this long without a message of the service (s), its series turn to None. Long enough for a qlog (carState
 # 10 Hz, longitudinalPlanSP 2 Hz, speedVisionSP 1 Hz, liveMapDataSP 1 Hz).
 GAP_SECONDS = {'carState': 0.5, 'selfdriveState': 0.5, 'selfdriveStateSP': 0.5, 'carControl': 0.5,
@@ -185,8 +200,10 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
                 for spec in specs:
                     put(spec[0], seen + int(gap * 1e9), None, 0)
             last_seen[which] = t
+            detail = which != 'speedVisionSP' or bool(_get(payload, 'speedLimitState'))
             for name, _service, field, kind, tolerance, scale in specs:
-                put(name, t, _value(_get(payload, field), kind, scale), tolerance)
+                value = _value(_get(payload, field), kind, scale) if detail or name not in VISION_DETAIL else None
+                put(name, t, value, tolerance)
             if which == 'carState':
                 for button in _get(payload, 'buttonEvents') or ():
                     events.append([t, 'button', str(_get(button, 'type')), bool(_get(button, 'pressed'))])

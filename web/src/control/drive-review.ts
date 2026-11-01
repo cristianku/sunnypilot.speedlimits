@@ -322,6 +322,21 @@ export function setSpeedOf(value: Value | undefined): number | null {
   return typeof value === 'number' && value > 0 && value < 250 ? Math.round(value) : null;
 }
 
+/** Why the comma's vision limit is what it is (speedVisionSP.speedLimitReason: the rule that set it). */
+export const REASON_LABEL: Record<string, string> = {sign: 'a sign', end_sign: 'an end of limit', road_sign: 'a road sign',
+  ramp_end: 'the ramp ended', carriageway: 'back on the carriageway', car_park: 'a car park', road_type: 'the kind of road',
+  zone30: 'a 30 zone'};
+
+/** A sign the comma's vision read (speedVisionSP.rawSignClass): its number, "end" for the end of a limit, else the
+ * kind of road sign; '' before the first. */
+export function readText(signClass: Value | undefined, speed: Value | undefined): string {
+  if (typeof signClass !== 'string' || !signClass) return '';
+  if (signClass === 'cancellation') return 'end';
+  const [family = '', kind = ''] = signClass.split(':');
+  if (family === 'maximum_speed') return typeof speed === 'number' && speed > 0 ? String(Math.round(speed)) : kind || '?';
+  return (kind || family).replaceAll('_', ' ');
+}
+
 /** Several series as one, on all their times: f of the value of each there (undefined before its first point); a
  * value equal to the one before is not repeated. */
 export function combine(list: readonly (Series | undefined)[], f: (values: (Value | undefined)[]) => Value): Series {

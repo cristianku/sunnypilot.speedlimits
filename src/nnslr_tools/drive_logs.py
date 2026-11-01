@@ -58,7 +58,7 @@ EXTRACT_TIMEOUT = 300
 
 # The schema of the runtime branch speed-limits (cristianku/sunnypilot): its last change to openpilot/cereal.
 SCHEMA_REPO = 'cristianku/sunnypilot'
-SCHEMA_COMMIT = 'ea7485e3884fc9d618a04075a098b3a4b5c588b4'
+SCHEMA_COMMIT = 'e3cd38a88e56095d541528741f349d7b811eaade'
 # car.capnp of opendbc, the same pin as helpers/comma_fetch_log.py.
 CAR_REPO = 'cristianku/opendbc'
 CAR_COMMIT = '6810f033b9e60738365cfecb8504c980dfaad137'
@@ -67,7 +67,7 @@ SCHEMA_FILES = (
     ('log.capnp', f'{_RAW}/{SCHEMA_REPO}/{SCHEMA_COMMIT}/openpilot/cereal/log.capnp',
      '4f7e5f7352d8eeb32d4e4bd6fd1db3204dd18057cfcef9fae78c870bbdc9d555'),
     ('custom.capnp', f'{_RAW}/{SCHEMA_REPO}/{SCHEMA_COMMIT}/openpilot/cereal/custom.capnp',
-     'ece368ee632e949c81173531b89f7b31378ba6c857a0b72a1796c10ea3b13ab9'),
+     '5ba0f4f7634f8b257c65fde6b8aaac8e7d6a619ebb38e0d4f1ffec1052930da2'),
     ('deprecated.capnp', f'{_RAW}/{SCHEMA_REPO}/{SCHEMA_COMMIT}/openpilot/cereal/deprecated.capnp',
      'b3aa5c13de40001ed7376cef858500fb003f7698f96131cd0db18d878fa1af0d'),
     ('include/c++.capnp', f'{_RAW}/{SCHEMA_REPO}/{SCHEMA_COMMIT}/openpilot/cereal/include/c++.capnp',
