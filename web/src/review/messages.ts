@@ -13,13 +13,18 @@ export interface PageNotice {
   retry: boolean;
 }
 
+/** The confirmed frames the server does not have. The first send of a fresh confirmation is not one of them: it
+ * becomes one only if it fails. */
+function notSaved(): string[] {
+  if (!report.apiBase) return [];
+  return unsavedKeys().filter((key) => !(state.inFlight.has(key) && !state.edits[key]?.error));
+}
+
 export function pageNotices(): PageNotice[] {
   const out: PageNotice[] = [];
   if (state.serverWarning) out.push({text: state.serverWarning, error: false, retry: false});
   if (state.storageWarning) out.push({text: state.storageWarning, error: false, retry: false});
-  // The first send of a fresh confirmation is not an error: it becomes one only if it fails.
-  const unsaved = report.apiBase
-    ? unsavedKeys().filter((key) => !(state.inFlight.has(key) && !state.edits[key]?.error)) : [];
+  const unsaved = notSaved();
   if (unsaved.length === 0) return out;
   let list = unsaved.slice(0, 8).join(', ');
   if (unsaved.length > 8) list += ', …';
@@ -137,7 +142,7 @@ export function statusLine(key: string, status: FrameStatus): StatusLine {
     }
   }
   let mobile = '';
-  const unsaved = report.apiBase ? unsavedKeys().length : 0;
+  const unsaved = notSaved().length;
   if (notice && notice.error) mobile = notice.text;
   else if (savedClass === 'error') mobile = savedText;
   else if (state.serverWarning) mobile = state.serverWarning;
