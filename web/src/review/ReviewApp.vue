@@ -8,6 +8,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
 import {aiPhase, loadAiState} from './ai';
 import {watchAiLive} from './ai-live';
 import {watchBusy} from './busy';
+import {loadCarLogs} from './car-moment';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
@@ -66,6 +67,7 @@ onMounted(() => {
   if (!report.apiBase) return;
   watchBusy();
   void loadAiState();
+  void loadCarLogs();
   // A confirmed frame gets its boxes from the server: then its first box is selected too.
   void loadServer().then(() => {
     startAtWork();

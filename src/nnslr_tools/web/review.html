@@ -416,6 +416,14 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .country-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 13px; color: var(--muted); }
 .country-line .flag { font-size: 18px; line-height: 1; }
 .drive-link { margin: -6px 0 0; font-size: 13px; }
+.car-moment { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: -2px 0 0; padding: 8px 12px; border-radius: 10px;
+  background: var(--surface-2); font-size: 13px; }
+.car-moment div { display: flex; flex-direction: column; min-width: 0; }
+.car-moment dt { font-size: 11.5px; color: var(--muted); }
+.car-moment dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.car-moment .ahead { font-weight: 400; color: var(--muted); }
+.car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--warn); }
+.car-moment .differ-note { flex: 0 0 100%; margin: 0; font-size: 12px; font-weight: 600; color: var(--warn); }
 .drive-link a { color: var(--accent); text-decoration: none; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
