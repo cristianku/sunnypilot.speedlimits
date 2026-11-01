@@ -77,7 +77,7 @@ function tickClass(row: FrameRow): string {
   const status = frameStatus(key);
   const part = secondProgress(row);
   let cls = '';
-  if (status === 'done' && (part === null || part.done >= part.total)) {
+  if (status === 'done' && (part === null || part.complete)) {
     const unsure = [row, ...cellFrames(row)].some((frame) => {
       const doubts = doubtsOf(frame.frame_key);
       return doubts.unknown + doubts.unreadable > 0;
@@ -93,7 +93,7 @@ function tickClass(row: FrameRow): string {
   } else if (proposalsOf(row).length > 0 || hintsOf(key).length > 0) {
     cls = 'has';
   }
-  if (part !== null && part.done > 0 && part.done < part.total) cls += ' part';
+  if (part !== null && part.done > 0 && !part.complete) cls += ' part';
   if (carDiffers(row)) cls += ' differ';
   if (isBetweenFrame(row)) cls += ' between';
   if (isReadFrame(row)) cls += ' read';
@@ -117,7 +117,7 @@ function tickLabel(row: FrameRow): string {
 /** How much of a cell's second is confirmed, for its fill (class part). */
 function fillOf(row: FrameRow): Record<string, string> | undefined {
   const part = secondProgress(row);
-  return part === null || part.done === 0 || part.done >= part.total ? undefined : {'--fill': String(part.done / part.total)};
+  return part === null || part.done === 0 || part.complete ? undefined : {'--fill': String(part.done / part.total)};
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */

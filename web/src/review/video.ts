@@ -3,8 +3,8 @@
 // and gives the key of each: a picture of the report where there is one, else READ_INDEX_BASE + the frame. A frame
 // of the video is not a picture of the report (store.ts virtualRowOf) until it is confirmed. Offline (no
 // server) the arrows go from picture to picture (navigation.ts step).
-import {currentRow} from './frames';
-import {advanceAfterConfirm, openFrame, step} from './navigation';
+import {currentRow, isBetweenFrame} from './frames';
+import {advanceAfterConfirm, openFrame, secondTarget, step} from './navigation';
 import {CAMERA_FPS} from './order';
 import {hasVideo, nextInVideo} from './seconds';
 import {call} from './server';
@@ -147,8 +147,18 @@ async function moveOne(delta: number): Promise<boolean> {
   return true;
 }
 
-/** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved. */
-async function nextVideoFrame(savedText: string): Promise<void> {
+/** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved; saved
+ * with no sign (``noSign``), the picture of the next second. */
+async function nextVideoFrame(savedText: string, noSign: boolean): Promise<void> {
+  if (noSign) {
+    const target = walking ? null : secondTarget(state.currentKey, 1);
+    if (target !== null) openFrame(target);
+    if (state.currentKey !== null) {
+      state.notice = {key: state.currentKey, text: savedText + (target !== null ? ' Here is the next second.' : ''),
+        error: false};
+    }
+    return;
+  }
   const moved = !walking && await moveOne(1);
   if (state.currentKey === null) return;
   state.notice = {key: state.currentKey, text: savedText + (moved ? ' Here is the next frame of the video.' : ''),
@@ -182,13 +192,15 @@ async function nextToConfirm(key: string, skipDone: boolean): Promise<string | n
 }
 
 /** After Confirm (and Confirm on a frame already confirmed, unchanged: ``savedText`` "Already confirmed."): with To
- * review the next frame not confirmed, with All the next frame, through every frame of the video (seconds.ts) where
- * the server has it; elsewhere a frame of the video that was not saved (``fromVideo``) goes on to the next frame of
- * the video, a frame of the report to the next one of the filter (navigation.ts). */
+ * review the next frame not confirmed, with All the next frame, through the frames of the video (seconds.ts) where
+ * the server has it, frame by frame while they have a sign and on to the next second after one with no sign;
+ * elsewhere a frame of the video that was not saved (``fromVideo``) goes on to the next frame of the video (with no
+ * sign to the next second), a frame of the report to the next one of the filter (navigation.ts). */
 export async function afterConfirm(key: string, savedText: string, fromVideo = false): Promise<void> {
   const row = rowOf(key);
+  const noSign = (state.edits[key]?.detections.length ?? 0) === 0;
   if (row === null || !walksVideo(row)) {
-    if (fromVideo) await nextVideoFrame(savedText);
+    if (fromVideo) await nextVideoFrame(savedText, noSign);
     else advanceAfterConfirm(key, savedText);
     return;
   }
@@ -204,8 +216,12 @@ export async function afterConfirm(key: string, savedText: string, fromVideo = f
     return;
   }
   openFrame(next);
-  state.notice = {key: next, text: savedText + ' Here is the next frame of the video.', error: false};
   const opened = rowOf(next);
+  const following = opened !== null && opened.segment_index === row.segment_index
+    && opened.decoded_frame_index === (row.decoded_frame_index ?? NaN) + 1;
+  const where = following ? ' Here is the next frame of the video.'
+    : opened !== null && !isBetweenFrame(opened) ? ' Here is the next second.' : ' Here is the next frame to review.';
+  state.notice = {key: next, text: savedText + where, error: false};
   const at = opened === null ? null : decodedOf(opened);
   if (opened !== null && at !== null) {
     void gopOf(opened.segment_index, at).then(() => preload(opened.segment_index, at, 1)).catch(() => undefined);
