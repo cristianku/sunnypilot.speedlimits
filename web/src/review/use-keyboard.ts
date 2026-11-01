@@ -1,7 +1,7 @@
-// Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → a second (a whole cell of the timeline), Shift ↑ ↓ box (the arrows alone too on a box with a number or none selected), the speed typed
+// Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → a second (a whole cell of the timeline), ↑ ↓ box, the speed typed
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
-// sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road, ← → ↑ ↓ the
-// direction (left, right, straight, several), Enter confirm, B or N new box, C fit the box picked to its sign on the server
+// sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road (a direction has no
+// key, only its button), Enter confirm, B or N new box, C fit the box picked to its sign on the server
 // (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel, ? shows or hides the list of the keys. While a menu or panel of the site's top bar is open, the keys are its own.
@@ -23,30 +23,13 @@ const TYPING_MS = 900;
 // G P R E M: the kind of an other sign.
 const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other', m: 'main_road'};
 
-// The arrows with a box selected: its direction (↓ several directions), on an "Other sign" or any box without a number
-// (one just drawn, too). On a box with a number or "Not a sign" they keep their moves: a speed limit never becomes a
-// direction sign, its number lost, by an arrow pressed to change box.
-const DIRECTION_KEYS: Record<string, string> = {ArrowLeft: 'direction_left', ArrowRight: 'direction_right',
-  ArrowUp: 'direction_straight', ArrowDown: 'direction_several'};
-
 // O X U: the road of the selected box (A is Apply previous).
 const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'unresolved'};
 
-/** The selected box, if any. */
-function selectedBox() {
-  const row = currentRow();
-  return row ? workOf(row).detections[state.selected] : undefined;
-}
-
-/** Whether the arrows set the direction of the selected box (DIRECTION_KEYS). */
-function takesDirection(): boolean {
-  const d = selectedBox();
-  return d !== undefined && (d.family === 'other_sign' || (d.value_kph == null && d.family !== 'not_a_sign'));
-}
-
 /** The kind of the selected box when it is an other sign, else null. */
 function selectedKind(): string | null {
-  const d = selectedBox();
+  const row = currentRow();
+  const d = row ? workOf(row).detections[state.selected] : undefined;
   return d && d.family === 'other_sign' ? d.sign_type ?? null : null;
 }
 
@@ -192,10 +175,8 @@ export function useKeyboard(): void {
         toggleVariable();
         return;
       }
-      // G give way, P stop, R roundabout, E something else, M main road, an arrow a direction: pressed again the kind
-      // stays, as with its button.
-      const kind = KIND_KEYS[event.key.toLowerCase()]
-        ?? (takesDirection() ? DIRECTION_KEYS[event.key] : undefined);
+      // G give way, P stop, R roundabout, E something else, M main road: pressed again the kind stays, as with its button.
+      const kind = KIND_KEYS[event.key.toLowerCase()];
       if (kind) {
         event.preventDefault();
         if (selectedKind() !== kind) setKind(kind);
