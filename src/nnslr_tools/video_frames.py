@@ -6,7 +6,8 @@ and the frames up to the next one, decoded on their own: a third of a second, th
 video), as JPEG previews in a cache under derived/video_cache that keeps at most CACHE_BYTES (the least recently shown
 go first). Nothing of that is a review or a row of the report.
 
-A frame between the seconds becomes one only when the reviewer confirms it with a box (materialize): its picture is
+A frame between the seconds becomes one only when the reviewer confirms it, with boxes or as no sign (materialize):
+its picture is
 taken out of the video as the others are (``video_<output index>.png`` next to them, listed in ``video_frames.jsonl``
 of the segment, the rows of frames.jsonl), with the key scheme of the frames of the comma's reads: output index
 READ_INDEX_BASE + decoded frame index. The keys at 1 a second (0..59) never change, so the reviews saved stay where

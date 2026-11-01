@@ -1,6 +1,6 @@
 // The order of the frames of a drive, the same as the server's (nnslr_tools.sign_reads.frame_order): segment, second,
 // output index. The pictures at 1 a second have output index = their second; a frame between the seconds (a sign the
-// comma read, or a frame of the video saved with a box, video.ts) has READ_INDEX_BASE + its frame in the video.
+// comma read, or a frame of the video saved, video.ts) has READ_INDEX_BASE + its frame in the video.
 import type {FrameRow} from './types';
 
 export const READ_INDEX_BASE = 1000;

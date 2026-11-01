@@ -2,6 +2,7 @@
 // box selected in it, its place in the route.
 import {computed, watchEffect} from 'vue';
 import {aiConfirmed, currentRow, doubtsOf, frameStatus, isConfirmed, reasonsOf, workOf} from './frames';
+import {secondTarget} from './navigation';
 import {anchorIndex, indexOf, report, state} from './store';
 import type {Detection, FrameEdit, FrameRow, FrameStatus, QualityFilter} from './types';
 
@@ -13,14 +14,16 @@ export const selectedBox = computed<Detection | null>(() => work.value?.detectio
 
 /** Position of the frame in the route (0 based; a frame of the video between the seconds: of the picture before
  * it) and the number of frames; whether ‹ › can go back and on (with the server ‹ › go through every frame of the
- * video, video.ts). */
+ * video, video.ts), and « » (a whole cell, navigation.ts secondTarget). */
 export const position = computed(() => {
   const key = row.value?.frame_key;
   const index = key === undefined ? -1 : indexOf(key);
   const anchor = key === undefined ? -1 : anchorIndex(key);
   const length = report.rows.length;
-  return {index: Math.max(0, anchor), length, canPrev: index !== 0 && anchor >= 0,
-    canNext: index < 0 || index < length - 1 || report.apiBase !== null};
+  const canPrev = index !== 0 && anchor >= 0;
+  const canNext = (index < 0 ? anchor + 1 < length : index < length - 1) || report.apiBase !== null;
+  return {index: Math.max(0, anchor), length, canPrev, canNext,
+    canPrevSecond: secondTarget(key ?? null, -1) !== null, canNextSecond: secondTarget(key ?? null, 1) !== null};
 });
 
 /** Confirmed, suspicious and AI-confirmed frames of the route. */

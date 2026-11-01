@@ -252,8 +252,8 @@ class ReviewService:
                 'gop': [first, last], 'seconds': seconds, 'frames': frames}
 
     def video_frame_row(self, route, frame_key: str, body) -> tuple[dict | None, bool]:
-        """(report row, made now) of a frame between the seconds the page confirms with a box: its picture taken out
-        of the video now (nnslr_tools.video_frames.materialize) and added to the report. (None, False): not such a
+        """(report row, made now) of a frame between the seconds the page confirms (with its boxes, or as no sign):
+        its picture taken out of the video now (nnslr_tools.video_frames.materialize) and added to the report. (None, False): not such a
         frame (another unknown key, or a frame that is already a row under another key)."""
         segment, index = (int(part) for part in frame_key.split('/'))
         if index < READ_INDEX_BASE:
@@ -264,9 +264,6 @@ class ReviewService:
             return None, False
         if not isinstance(body, dict) or body.get('confirmed') is not True:
             return None, False
-        if not isinstance(body.get('detections'), list) or not body['detections']:
-            raise ReviewRejected(400, 'video_frame_needs_box',
-                                 'A frame between the seconds is saved only with a box: draw the sign first.')
         from nnslr_tools.reproposing import refuse_if_busy
         refuse_if_busy(self.root, route)
         try:

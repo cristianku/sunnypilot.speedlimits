@@ -1,7 +1,7 @@
 // Every frame of the road video, between the pictures at 1 a second: ← → and ‹ › go through them, 20 a second.
 // The server decodes them on demand, a GOP at a time (GET <api>/video/<segment>/<frame>, review_service.video_gop),
 // and gives the key of each: a picture of the report where there is one, else READ_INDEX_BASE + the frame. A frame
-// of the video is not a picture of the report (store.ts virtualRowOf) until it is saved with a box. Offline (no
+// of the video is not a picture of the report (store.ts virtualRowOf) until it is confirmed. Offline (no
 // server) the arrows go from picture to picture (navigation.ts step).
 import {currentRow} from './frames';
 import {openFrame, step} from './navigation';
@@ -143,6 +143,14 @@ async function moveOne(delta: number): Promise<boolean> {
   const at = opened === null ? null : decodedOf(opened);
   if (opened !== null && at !== null) preload(opened.segment_index, at, delta);
   return true;
+}
+
+/** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved. */
+export async function nextVideoFrame(savedText: string): Promise<void> {
+  const moved = !walking && await moveOne(1);
+  if (state.currentKey === null) return;
+  state.notice = {key: state.currentKey, text: savedText + (moved ? ' Here is the next frame of the video.' : ''),
+    error: false};
 }
 
 /** ← → ‹ ›: the frame of the video just before or after (20 a second), with the review server; the picture just

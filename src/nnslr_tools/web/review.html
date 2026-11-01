@@ -204,7 +204,7 @@ input::placeholder { color: var(--placeholder); }
 .nav .btn { width: 32px; min-height: 30px; padding: 0; border: 0; border-radius: 9px; background: transparent; box-shadow: none; font-size: 19px; font-weight: 500; }
 .nav .btn:hover:not(:disabled) { background: var(--surface-3); }
 .nav .pos { font-size: 13px; font-weight: 650; min-width: 9ch; text-align: center; font-variant-numeric: tabular-nums; }
-/* ‹ › show their keys, ⇧ ← and ⇧ →, in their place; a touch screen keeps ‹ ›. */
+/* « ‹ › » show their keys, ⇧← ← → ⇧→, in their place; a touch screen keeps the arrows. */
 .nav .btn:has(.nav-key) { width: auto; padding: 0 6px; }
 .nav .nav-glyph { display: none; }
 .nav .nav-key { font-size: 11px; white-space: nowrap; cursor: pointer; }
@@ -295,7 +295,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .tl-label { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tl-ticks { position: relative; display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
 .tl-ticks button { min-width: 0; height: 12px; border: 0; padding: 0; border-radius: 2px; background: var(--none-cell); }
-/* A frame between the seconds (a sign the comma read, a frame of the video saved with a box): a thin bar, taller
+/* A frame between the seconds (a sign the comma read, a frame of the video saved): a thin bar, taller
    than the cells, --at cells from the start (the cell of the picture before it and how far into its second it is);
    its fill is the frame's state like a cell's, the colour of a read when nothing is proposed. */
 .tl-ticks button.between { position: absolute; z-index: 1; top: -3px; width: 4px; height: 18px; border-radius: 2px;
@@ -639,6 +639,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .mobile-buttons { display: flex; gap: 8px; }
   .mobile-buttons .btn { flex: 1; min-width: 0; min-height: 50px; padding: 8px; border-radius: 14px; font-size: 24px; font-weight: 500; }
   .mobile-buttons .btn.primary { flex: 3; font-size: 16px; font-weight: 650; }
+  .mobile-buttons .btn.second { font-size: 22px; }
   .mobile-msg { margin: 0; font-size: 13px; color: var(--bad); font-weight: 650; overflow-wrap: anywhere; }
   /* The bottom bar never covers the end of the page: its height is measured by the script. */
   .page { padding-bottom: calc(var(--mobilebar-h, 76px) + 16px); }
@@ -681,6 +682,11 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   }
   .nav { grid-area: nav; justify-self: start; }
   .nav .pos { min-width: 7ch; }
+  /* No room next to the tools: « » are in the bottom bar. */
+  .nav .btn.second { display: none; }
+  /* The four arrows of the bottom bar at their touch size, Confirm the rest: its label still fits. */
+  .mobile-buttons { gap: 6px; }
+  .mobile-buttons .btn:not(.primary) { flex: 0 0 46px; padding: 0; }
   .stage-tools .btn { padding-inline: 10px; }
   .stage-tools { grid-area: tools; margin-left: 0; }
   #statePill { grid-area: pill; width: auto; height: 32px; }

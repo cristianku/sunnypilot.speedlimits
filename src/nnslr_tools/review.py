@@ -1444,7 +1444,7 @@ def make_handler(app: ReviewApp):
             report_row = by_key.get(frame_key)
             made = False
             if report_row is None:
-                # A frame between the seconds confirmed with a box: its picture is taken out of the video now.
+                # A frame between the seconds confirmed: its picture is taken out of the video now.
                 report_row, made = app.video_frame_row(route, frame_key, body)
                 rows = app.report(route)[1]
             if report_row is None:

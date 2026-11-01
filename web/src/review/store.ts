@@ -227,7 +227,7 @@ export function rowOf(key: string): FrameRow | null {
 
 /** A frame of the video between the seconds that is not a picture of the report (video.ts): its row, shown from
  * the server's video (preview video/<segment>/<frame>.jpg), with the size, position and country of the nearest
- * picture of its segment. Only with the review server, which takes it into the report when it is saved with a box
+ * picture of its segment. Only with the review server, which takes it into the report when it is confirmed
  * (review_service.video_frame_row). Null for any other key. */
 export function virtualRowOf(key: string): FrameRow | null {
   const known = virtualRows.get(key);

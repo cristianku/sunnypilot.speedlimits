@@ -33,7 +33,7 @@ function placeOf(row: FrameRow, before: number): number {
 }
 
 /** One row of ticks per segment, with its label: a cell per picture at 1 a second, and a thin bar across the cells
- * for each frame between the seconds (a sign the comma read there, a frame of the video saved with a box). */
+ * for each frame between the seconds (a sign the comma read there, a frame of the video saved). */
 const segments = computed(() => {
   const list: Segment[] = [];
   for (const row of report.rows) {
@@ -90,7 +90,7 @@ function tickClass(row: FrameRow): string {
 function tickLabel(row: FrameRow): string {
   const place = driveTime(row) === null ? framePlace(row)
     : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
-  if (isVirtual(row.frame_key)) return place + ' · a frame of the video, saved only with a box';
+  if (isVirtual(row.frame_key)) return place + ' · a frame of the video, not saved yet';
   return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '')
     + (isReadFrame(row) ? ' · ' + commaReadText(row) : isBetweenFrame(row) ? ' · a frame between the seconds' : '');
 }

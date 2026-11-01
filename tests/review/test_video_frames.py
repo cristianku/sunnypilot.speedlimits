@@ -1,5 +1,6 @@
 """Every frame of the road video in Sign review (nnslr_tools.video_frames): GOP previews, a frame between the seconds
-saved only with a box, as a real picture of the report that Propose again and the import keep."""
+saved when it is confirmed (with boxes or as no sign), as a real picture of the report that Propose again and the
+import keep."""
 from __future__ import annotations
 
 import json
@@ -88,12 +89,11 @@ def test_a_gop_has_the_pixels_of_a_decode_of_the_whole_video(drive, tmp_path):
     assert not list((root / video_frames.CACHE_DIR).glob('*/*/*.jpg'))
 
 
-def test_a_frame_between_the_seconds_is_saved_only_with_a_box_and_kept_by_propose_again(drive, capsys):
+def test_a_frame_between_the_seconds_is_saved_with_a_box_and_kept_by_propose_again(drive, capsys):
     root, video, rows, server = drive
     manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
-    # Confirmed with no box: nothing saved, nothing taken out.
-    status, _response, data = server.post_frame(ROUTE, '0/1025', body([]))
-    assert status == 400 and json_of(data)['error'] == 'video_frame_needs_box' and not manifest.exists()
+    # Not confirmed: nothing taken out of the video.
+    assert server.post_frame(ROUTE, '0/1025', body([BOX], confirmed=False))[0] == 404 and not manifest.exists()
     # The picture at 1 a second under a key of the frames between: never a second key for the same image.
     assert server.post_frame(ROUTE, '0/1020', body([BOX]))[0] == 404 and not manifest.exists()
     # A save refused after the picture was taken out leaves nothing behind.
@@ -137,6 +137,17 @@ def test_a_frame_between_the_seconds_is_saved_only_with_a_box_and_kept_by_propos
     objects = [json.loads(line) for line in (root / 'annotations/objects.jsonl').read_text().splitlines()]
     imported = [row for row in objects if row['output_index'] == 1025]
     assert imported and all(row['image_path'] == added['image_path'] for row in imported)
+
+
+def test_a_frame_between_the_seconds_with_no_sign_is_saved_too(drive):
+    root, video, rows, server = drive
+    status, _response, data = server.post_frame(ROUTE, '0/1045', body([]))
+    assert status == 200, data
+    manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
+    assert [row['decoded_frame_index'] for row in map(json.loads, manifest.open())] == [45]
+    assert [row['frame_key'] for row in server.app.report(ROUTE)[1]] == ['0/0', '0/1', '0/2', '0/1045']
+    saved = ReviewStore(db_path(root)).review(ROUTE, RUN_ID, '0/1045')
+    assert saved['confirmed'] and saved['payload']['detections'] == []
 
 
 def test_a_later_read_of_the_same_frame_keeps_one_row(drive):

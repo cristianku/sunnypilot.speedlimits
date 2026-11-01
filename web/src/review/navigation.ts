@@ -3,14 +3,15 @@ import {nextTick} from 'vue';
 import {thousands} from '../common/format';
 import {readLocal, writeLocal} from './dom';
 import {
-  aiConfirmed, confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, segmentSecond, visibleRows, workOf,
+  aiConfirmed, confirmedFilter, currentRow, frameStatus, isBetweenFrame, isQualityFilter, matchesFilter, segmentSecond,
+  visibleRows, workOf,
 } from './frames';
 import {revealStage, scrollTimelineToCurrent} from './scroll';
 import {anchorIndex, indexOf, report, rowOf, state} from './store';
 import type {Filter} from './types';
 
-/** Shift ← → (and ‹ › ← → offline, video.ts): the picture just before or after in the route (a second, or a frame
- * between the seconds of the report), whatever the filter (the filter decides where Confirm goes next). From a frame
+/** ‹ › ← → offline (video.ts): the picture just before or after in the route (a second, or a frame between the
+ * seconds of the report), whatever the filter (the filter decides where Confirm goes next). From a frame
  * of the video not saved: the picture just before it, or just after. */
 export function step(delta: number): void {
   if (state.currentKey === null) return;
@@ -19,6 +20,25 @@ export function step(delta: number): void {
   const target = report.rows[index >= 0 ? index + delta : delta < 0 ? anchor : anchor + 1];
   if (target === undefined) return;
   openFrame(target.frame_key);
+}
+
+/** « » and Shift ← →: a whole cell of the timeline, the picture of the second before or after, over the frames
+ * between the seconds (a frame between the seconds goes back to the picture of its own second first). Null: none. */
+export function secondTarget(key: string | null, delta: number): string | null {
+  if (key === null) return null;
+  const rows = report.rows;
+  const index = indexOf(key);
+  const from = index >= 0 ? index : anchorIndex(key);
+  if (delta > 0) {
+    return rows.slice(from + 1).find((row) => !isBetweenFrame(row))?.frame_key ?? null;
+  }
+  // A frame of the video not saved sorts after its anchor: the anchor itself may be the picture of its second.
+  return rows.slice(0, index >= 0 ? index : from + 1).reverse().find((row) => !isBetweenFrame(row))?.frame_key ?? null;
+}
+
+export function stepSecond(delta: number): void {
+  const target = secondTarget(state.currentKey, delta);
+  if (target !== null) openFrame(target);
 }
 
 /** The frame before or after in the filter ("Already confirmed · next"). */
