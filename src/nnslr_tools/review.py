@@ -645,13 +645,6 @@ def make_handler(app: ReviewApp):
                 start = parse_qs(urlsplit(self.path).query).get('start', [''])[0] == '1'
                 self._json(200, drive_video.state(app.root, match.group(1), start=start))
                 return
-            # [drive-review] - START
-            # Data › Drive review (nnslr_tools.drive_review): the drives with their logs and scans, the queue of
-            # episodes, a drive's timeline.
-            if path.startswith('/api/drive-review/'):
-                self._drive_review_get(path)
-                return
-            # [drive-review] - END
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
@@ -1100,131 +1093,6 @@ def make_handler(app: ReviewApp):
                 # The player asked for another range and closed this one.
                 pass
 
-        # [drive-review] - START
-        def _drive_review_get(self, path):
-            from nnslr_tools import drive_review, drive_video
-            from nnslr_tools.drive_logs import DriveLogError
-            store = drive_review.store_for(app.root)
-            query = parse_qs(urlsplit(self.path).query)
-            value = lambda name: query.get(name, [''])[0] or None  # noqa: E731
-            try:
-                if path == '/api/drive-review/drives':
-                    self._json(200, {'drives': drive_review.drives_view(store), 'review_from': store.review_from()})
-                    return
-                if path == '/api/drive-review/episodes':
-                    route, kind, data, status = value('route'), value('kind'), value('data'), value('status')
-                    if ((route and not re.fullmatch(r'[0-9a-f]{8}--[0-9a-f]{10}', route))
-                            or (kind and kind not in drive_review.QUEUE_KINDS)
-                            or (data and data not in drive_review.QUEUE_DATA)
-                            or (status and status not in drive_review.QUEUE_STATUS)):
-                        self._problem(400, 'bad_filter', 'Unknown filter.', True)
-                        return
-                    self._json(200, {'episodes': drive_review.queue_view(store, route=route, kind=kind, data=data,
-                                                                         status=status)})
-                    return
-                match = re.fullmatch(r'/api/drive-review/drives/([0-9a-f]{8}--[0-9a-f]{10})(/timeline)?', path)
-                if match and match.group(2):
-                    route = match.group(1)
-                    video = drive_video.state(app.root, route)
-                    view = drive_review.timeline(store, route, video)
-                    drive = drive_of(app.root, route)
-                    when, certain = drive_review._when(view.get('civil_ms'), drive)
-                    view.update(video=video, title=drive.get('title'), when=when, when_certain=certain,
-                                inference=drive_review.inference_lane(app.root, route),
-                                map_today=drive_review.map_today_lane(app.root, route))
-                    self._json(200, view)
-                    return
-                if match:
-                    self._json(200, {'scan': store.scan_state(match.group(1)), 'files': store.log_files(match.group(1))})
-                    return
-                match = re.fullmatch(r'/api/drive-review/annotations/([0-9a-f]{32})/history', path)
-                if match:
-                    self._json(200, {'history': store.history(match.group(1))})
-                    return
-            except (drive_review.DriveReviewError, DriveLogError) as exc:
-                self._problem(exc.status, exc.reason, exc.message, True)
-                return
-            self._problem(404, 'not_found', 'Not found.', True)
-
-        def _drive_review_post(self, path):
-            """The drive review's changes: same origin and a session, as every change of the portal. A log is sent as
-            it is (application/octet-stream, ?name=<its path or name>&segment=N); everything else is JSON."""
-            from nnslr_tools import drive_logs, drive_review
-            store = drive_review.store_for(app.root)
-            if not self._same_origin():
-                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
-                return
-            content_type = self.headers.get('Content-Type', '').split(';')[0].strip().lower()
-            upload = re.fullmatch(r'/api/drive-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/logs', path)
-            try:
-                if upload:
-                    if content_type != 'application/octet-stream':
-                        self._problem(415, 'unsupported_media_type', 'Send the log file as it is.', True)
-                        return
-                    self._require_ai_session()
-                    raw_length = self.headers.get('Content-Length', '')
-                    if self.headers.get('Transfer-Encoding') is not None or not raw_length.strip().isdigit():
-                        self._problem(411, 'length_required', 'Request without Content-Length.', True)
-                        return
-                    query = parse_qs(urlsplit(self.path).query)
-                    segment, kind, ext = drive_logs.parse_upload_name(upload.group(1), query.get('name', [''])[0],
-                                                                      query.get('segment', [None])[0])
-                    if int(raw_length) > drive_logs.MAX_UPLOAD_BYTES:
-                        self.close_connection = True
-                    added = store.add_upload(upload.group(1), segment, kind, ext, self.rfile, int(raw_length))
-                    self._json(200, {'ok': True, **added, 'scan': store.scan_state(upload.group(1))})
-                    return
-                if content_type != 'application/json':
-                    self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
-                    return
-                self._require_ai_session()
-                body = self._read_json()
-                who, via = self._who()
-                author = who or 'administrator'
-                match = re.fullmatch(r'/api/drive-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/scan', path)
-                if match:
-                    self._json(200, {'ok': True, 'scan': store.queue_scan(match.group(1))})
-                    return
-                if path == '/api/drive-review/scan-all':
-                    queued = []
-                    early = drive_review.early_routes(store)
-                    for route in drive_review.all_routes(app.root):
-                        if route in early:
-                            continue
-                        state = store.scan_state(route)['state']
-                        if state in ('not_scanned', 'outdated') or (
-                                state == 'no_logs' and drive_logs.discover(app.root, route)):
-                            store.queue_scan(route)
-                            queued.append(route)
-                    self._json(200, {'ok': True, 'queued': queued})
-                    return
-                if not isinstance(body, dict):
-                    self._problem(400, 'invalid_json', 'An object is expected.', True)
-                    return
-                if path == '/api/drive-review/settings':
-                    review_from = store.set_review_from(body.get('review_from'))
-                    print(f'Drive review: drives reviewed from {review_from or "the first"} ({terminal_text(author)})',
-                          flush=True)
-                    self._json(200, {'ok': True, 'review_from': review_from})
-                    return
-                if path == '/api/drive-review/annotations':
-                    saved = store.save_annotation(str(body.get('route') or ''), body, author=author, origin='portal')
-                    print(f'Drive review: annotation {saved["id"][:8]} revision {saved["revision"]} '
-                          f'({terminal_text(author)})', flush=True)
-                    self._json(200, {'ok': True, 'annotation': saved})
-                    return
-                match = re.fullmatch(r'/api/drive-review/annotations/([0-9a-f]{32})/delete', path)
-                if match:
-                    gone = store.delete_annotation(str(body.get('route') or ''), match.group(1),
-                                                   body.get('base_revision'), author=author, origin='portal')
-                    self._json(200, {'ok': True, **gone})
-                    return
-            except (drive_review.DriveReviewError, drive_logs.DriveLogError) as exc:
-                self._problem(exc.status, exc.reason, exc.message, True)
-                return
-            self._problem(404, 'not_found', 'Not found.', True)
-        # [drive-review] - END
-
         def _send_reviews(self, route):
             try:
                 directory, run_id, rows, busy, proposer = app.view(route)
@@ -1299,11 +1167,6 @@ def make_handler(app: ReviewApp):
                 self._hf_post(path, self._read_json())
                 return
             # [ai-reviewer] - END
-            # [drive-review] - START
-            if path.startswith('/api/drive-review/'):
-                self._drive_review_post(path)
-                return
-            # [drive-review] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)

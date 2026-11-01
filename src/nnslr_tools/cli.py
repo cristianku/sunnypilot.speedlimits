@@ -1172,43 +1172,6 @@ def _cmd_drive_video(args: argparse.Namespace) -> int:
     return 0
 
 
-# [drive-review] - START
-def _cmd_drive_review(args: argparse.Namespace) -> int:
-    """The drive review (nnslr_tools.drive_review): scan drives for episodes, or export the annotations."""
-    from nnslr_tools import drive_logs, drive_review
-    from nnslr_tools.preannotate import resolve_data_root
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    store = drive_review.DriveReviewStore(root)
-    if args.action == 'export':
-        output = Path(args.output)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        with output.open('w', encoding='utf-8') as handle:
-            count = store.export(handle)
-        print(json.dumps({'output': str(output), 'intervals': count}))
-        return 0
-    routes = list(args.routes)
-    if args.all:
-        # The drives with logs to read: never scanned, out of date, or with logs found and not imported yet.
-        for route in drive_review.all_routes(root):
-            state = store.scan_state(route)['state']
-            if state in ('not_scanned', 'outdated', 'failed') or (state == 'no_logs' and drive_logs.discover(root, route)):
-                routes.append(route)
-    if not routes:
-        print('Nothing to scan: name the drives, or --all.', file=sys.stderr)
-        return 0
-    failed = 0
-    for route in dict.fromkeys(routes):
-        try:
-            state = store.scan(route)
-        except drive_logs.DriveLogError as exc:
-            state = {'route': route, 'state': 'failed', 'error': exc.message}
-        failed += state['state'] == 'failed'
-        print(json.dumps({key: state.get(key) for key in ('route', 'state', 'segments', 'kinds', 'episodes', 'error')}),
-              flush=True)
-    return 1 if failed else 0
-# [drive-review] - END
-
-
 # [localizer] - START
 def _cmd_localize(args: argparse.Namespace) -> int:
     """openpilot.distill's localizer on the segments of drives (nnslr_tools.localized): the precise position of every
@@ -2136,20 +2099,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_video.add_argument("--again", action="store_true", help="make it again even when it is up to date")
     p_video.set_defaults(func=_cmd_drive_video)
 
-    # [drive-review] - START
-    p_drive_review = sub.add_parser(
-        "drive-review",
-        help="the drive review (Data › Drive review): scan drives' comma logs for episodes (CPU only), or export the "
-             "annotations as JSON lines",
-    )
-    p_drive_review.add_argument("action", choices=("scan", "export"))
-    p_drive_review.add_argument("routes", nargs="*", help="scan: the drives, e.g. 00000154--fa7e8f49aa")
-    p_drive_review.add_argument("--all", action="store_true",
-                                help="scan: every drive with logs never scanned, out of date or not imported yet")
-    p_drive_review.add_argument("--output", default="drive-review.jsonl", help="export: the file to write")
-    p_drive_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_drive_review.set_defaults(func=_cmd_drive_review)
-    # [drive-review] - END
 
     # [localizer] - START
     p_localize = sub.add_parser(
