@@ -41,6 +41,9 @@ HEADER_BYTES = 1 << 16
 
 _locks: dict[tuple, threading.Lock] = {}
 _locks_guard = threading.Lock()
+# The frame timings of the videos last saved from (timings_of), oldest first.
+TIMINGS_KEPT = 16
+_timings: dict[tuple, tuple] = {}
 
 
 class VideoFrameError(ValueError):
@@ -106,6 +109,37 @@ def frame_count(video: Path) -> int:
     return len(index_of(video)[0])
 
 
+def timings_of(video: Path) -> tuple:
+    """probe_frame_timestamps of a video, kept for the last TIMINGS_KEPT videos: the probe decodes the whole video
+    (about 11 s for a minute of the road camera)."""
+    from nnslr_tools.media import probe_frame_timestamps
+    stat = video.stat()
+    key = (str(video), stat.st_mtime_ns, stat.st_size)
+    with _lock('timings', str(video)):
+        found = _timings.get(key)
+        if found is None:
+            found = tuple(probe_frame_timestamps(video))
+            with _locks_guard:
+                _timings[key] = found
+                while len(_timings) > TIMINGS_KEPT:
+                    del _timings[next(iter(_timings))]
+        return found
+
+
+def read_timings_soon(video: Path) -> None:
+    """timings_of in the background while the reviewer looks at the frames, so that a save does not wait for it."""
+    stat = video.stat()
+    if (str(video), stat.st_mtime_ns, stat.st_size) in _timings or _lock('timings', str(video)).locked():
+        return
+
+    def read() -> None:
+        try:
+            timings_of(video)
+        except Exception:  # noqa: BLE001 - the save reads them again and says what went wrong
+            pass
+    threading.Thread(target=read, name='video-timings', daemon=True).start()
+
+
 def gop_of(video: Path, decoded: int) -> tuple[int, int]:
     """(first, last) decoded index of the GOP that holds a frame."""
     offsets, keys, _header = index_of(video)
@@ -114,6 +148,14 @@ def gop_of(video: Path, decoded: int) -> tuple[int, int]:
     at = bisect.bisect_right(keys, decoded) - 1
     last = keys[at + 1] - 1 if at + 1 < len(keys) else len(offsets) - 1
     return keys[at], last
+
+
+def gop_bytes(video: Path, first: int, last: int) -> bytes:
+    """The parameter sets and the frames first..last of a raw HEVC video (a GOP), to decode on their own."""
+    offsets, _keys, header = index_of(video)
+    with open(video, 'rb') as source:
+        source.seek(offsets[first])
+        return header + source.read(offsets[last + 1] - offsets[first] if last + 1 < len(offsets) else -1)
 
 
 def kept_seconds(root: Path, route: str, segment: int) -> list[int] | None:
@@ -152,15 +194,11 @@ def preview(root: Path, route: str, segment: int, decoded: int) -> Path:
     wanted = folder / f'{decoded}.jpg'
     with _lock('gop', route, int(segment), first):
         if not wanted.is_file():
-            offsets, _keys, header = index_of(video)
-            with open(video, 'rb') as source:
-                source.seek(offsets[first])
-                body = source.read(offsets[last + 1] - offsets[first] if last + 1 < len(offsets) else -1)
             with tempfile.TemporaryDirectory(prefix='.gop-', dir=folder) as temporary:
                 staging = Path(temporary)
                 decode = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', '-', '-vsync', '0',
                                          '-q:v', JPEG_QUALITY, str(staging / 'f_%04d.jpg')],
-                                        input=header + body, capture_output=True, check=False)
+                                        input=gop_bytes(video, first, last), capture_output=True, check=False)
                 made = sorted(staging.glob('f_*.jpg'))
                 if decode.returncode != 0 or len(made) != last - first + 1:
                     raise VideoFrameError(f'GOP {first}..{last} not decoded: '
@@ -214,7 +252,7 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
     from nnslr_tools.media import extract_frames, extracted_frame_rows
     root = Path(root)
     video = video_of(root, route, segment)
-    gop_of(video, decoded)
+    first, last = gop_of(video, decoded)
     seconds = kept_seconds(root, route, segment)
     if seconds is not None and int(decoded / CAMERA_FPS) not in seconds:
         raise VideoFrameError('this second of the segment was not kept (only a car park\'s speed)')
@@ -230,9 +268,11 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
         # Taken out on its own folder: extract_frames replaces every picture with its prefix in the folder it writes.
         with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
             staging = Path(temporary)
+            # Only its GOP is decoded (0.3 s, the whole video takes 5), with the timings read when its frames were shown.
             result = extract_frames(video, staging, decoded=[decoded], prefix=VIDEO_PREFIX,
                                     index_base=READ_INDEX_BASE, alignment=alignment, route_id=route,
-                                    segment_index=int(segment))
+                                    segment_index=int(segment), timings=timings_of(video),
+                                    gop=(first, gop_bytes(video, first, last)))
             made = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)[0]
             if not isinstance(made.get('media_time_s'), (int, float)):
                 raise VideoFrameError('the frame has no time in the video')

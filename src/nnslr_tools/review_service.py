@@ -236,6 +236,8 @@ class ReviewService:
             first, last = video_frames.gop_of(video, decoded)
             video_frames.preview(self.root, route, segment, first)
             count = video_frames.frame_count(video)
+            # Ready for a save of one of these frames (video_frames.materialize).
+            video_frames.read_timings_soon(video)
         except (video_frames.VideoFrameError, OSError) as exc:
             raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be shown: ' + str(exc)) from exc
         seconds = video_frames.kept_seconds(self.root, route, segment)

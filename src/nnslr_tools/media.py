@@ -367,11 +367,16 @@ def extract_frames(
     decoded: Sequence[int] | None = None,
     prefix: str = "frame",
     index_base: int | None = None,
+    timings: Sequence[VideoFrameTiming] | None = None,
+    gop: tuple[int, bytes] | None = None,
 ) -> list[ExtractedFrame]:
     """Decode local video frames to PNG without resizing. ``decoded``: these frames of the video (decoded frame
     indices) instead of a sampling; ``prefix``: the name of the pictures (``<prefix>_<output index>.png``), only those
     are replaced; ``index_base``: each picture's output index is index_base + its decoded frame index instead of its
-    number in the selection."""
+    number in the selection. ``timings``: probe_frame_timestamps of the video, when the caller has it already (the
+    probe decodes the whole video). ``gop``: (its first decoded frame index, the parameter sets and the bytes of one
+    GOP of a raw HEVC video): only that GOP is decoded, for frames of ``decoded`` inside it; its pictures are the same
+    as the decode of the whole video."""
     if not video.is_file():
         raise MediaToolError("video_not_found", str(video))
     if fps is not None and (not math.isfinite(fps) or fps <= 0):
@@ -389,7 +394,10 @@ def extract_frames(
         raise MediaToolError("output_not_empty", str(output_dir))
     exe = _resolve_executable("ffmpeg", ffmpeg)
     source_hash = _file_sha256(video)
-    timings = probe_frame_timestamps(video, ffprobe=ffprobe)
+    if timings is None:
+        timings = probe_frame_timestamps(video, ffprobe=ffprobe)
+    if gop is not None and decoded is None:
+        raise MediaToolError("frame_extraction_failed", "a GOP is decoded only for chosen frames")
     timed_selection = decoded is None and (fps is not None or start_s is not None or end_s is not None)
     if timed_selection and any(f.media_time_s is None for f in timings):
         raise MediaToolError("sampling_time_unknown", str(video))
@@ -419,19 +427,24 @@ def extract_frames(
         selected.append(frame)
     if not selected:
         raise MediaToolError("frame_extraction_failed", "no frames in requested interval")
+    first = 0 if gop is None else gop[0]
+    if any(f.decoded_frame_index < first for f in selected):
+        raise MediaToolError("frame_extraction_failed", f"a frame before the GOP from {first}")
     output_dir.mkdir(parents=True, exist_ok=True)
     # Stage a complete decode before publishing anything or replacing old images.
     with tempfile.TemporaryDirectory(prefix=".extract-", dir=output_dir) as temporary:
         staging = Path(temporary)
-        expression = "+".join(f"eq(n\\,{f.decoded_frame_index})" for f in selected)
+        expression = "+".join(f"eq(n\\,{f.decoded_frame_index - first})" for f in selected)
         graph = staging / "select.txt"
         graph.write_text("select=" + expression)
+        source = ["-i", str(video)] if gop is None else ["-f", "hevc", "-i", "-"]
         cmd = [exe, "-hide_banner", "-loglevel", "error", "-xerror", "-err_detect", "explode",
-               "-abort_on", "empty_output", "-n", "-i", str(video), "-filter_script:v", str(graph),
+               "-abort_on", "empty_output", "-n", *source, "-filter_script:v", str(graph),
                "-map", "0:v:0", "-vsync", "0", "-start_number", "0", str(staging / "frame_%08d.png")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0 or proc.stderr.strip():
-            raise MediaToolError("frame_extraction_failed", str(video), stderr=proc.stderr.strip())
+        proc = subprocess.run(cmd, input=None if gop is None else gop[1], capture_output=True, check=False)
+        stderr = proc.stderr.decode(errors="replace").strip()
+        if proc.returncode != 0 or stderr:
+            raise MediaToolError("frame_extraction_failed", str(video), stderr=stderr)
         files = sorted(staging.glob("frame_*.png"))
         if len(files) != len(selected):
             raise MediaToolError("extracted_frame_count_mismatch", f"{len(files)} != {len(selected)}")
