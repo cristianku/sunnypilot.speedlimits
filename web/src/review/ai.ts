@@ -150,7 +150,15 @@ function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box |
   if (!workOf(row).detections.includes(detection)) return 'removed';
   if (JSON.stringify(detection.bbox_xyxy) !== sent) return 'changed';
   const was = detection.bbox_xyxy;
-  if (!box || box.every((value, side) => Math.abs(value - (was[side] ?? Infinity)) < within)) return 'same';
+  if (!box || box.every((value, side) => Math.abs(value - (was[side] ?? Infinity)) < within)) {
+    // A sign found right under a box carried from the previous frame (a frame of the video, 1/20 s later): it is
+    // on its sign, as after "Here".
+    if (box && detection.check_position) {
+      delete detection.check_position;
+      changed(row);
+    }
+    return 'same';
+  }
   detection.bbox_xyxy = box;
   // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
   delete detection.check_position;

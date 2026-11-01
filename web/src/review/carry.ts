@@ -9,12 +9,14 @@ import {changed} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
 import {revealEditor} from './scroll';
 import {call} from './server';
-import {indexOf, isVirtual, report, state} from './store';
+import {anchorIndex, indexOf, isVirtual, report, state} from './store';
 import type {CarryAnswer, FrameEdit, FrameRow} from './types';
 
-/** The frame just before in the timeline (this segment or the end of the one before), or null. */
+/** The frame just before in the timeline (this segment or the end of the one before), or null. For a frame of the
+ * video not saved (video.ts): the frame of the report just before it. */
 export function previousRow(row: FrameRow): FrameRow | null {
-  const before = report.rows[indexOf(row.frame_key) - 1];
+  const key = row.frame_key;
+  const before = report.rows[isVirtual(key) ? anchorIndex(key) : indexOf(key) - 1];
   if (!before || before.segment_index < row.segment_index - 1) return null;
   return before;
 }
@@ -29,10 +31,6 @@ export interface CarryState {
 
 export function carryState(row: FrameRow): CarryState {
   if (!report.apiBase) return {shown: false, enabled: false, title: ''};
-  // A frame of the video between the seconds is not in the report until it is saved (video.ts).
-  if (isVirtual(row.frame_key)) {
-    return {shown: true, enabled: false, title: 'Only on the frames of the report: draw the boxes on a frame between the seconds.'};
-  }
   const before = previousRow(row);
   if (before === null) return {shown: true, enabled: false, title: 'No frame just before this one.'};
   if (!isConfirmed(before.frame_key)) {

@@ -4,10 +4,11 @@
 // of the video is not a picture of the report (store.ts virtualRowOf) until it is confirmed. Offline (no
 // server) the arrows go from picture to picture (navigation.ts step).
 import {currentRow} from './frames';
-import {openFrame, step} from './navigation';
+import {advanceAfterConfirm, openFrame, step} from './navigation';
 import {CAMERA_FPS} from './order';
+import {hasVideo, nextInVideo} from './seconds';
 import {call} from './server';
-import {report, rowOf, state} from './store';
+import {isVirtual, report, rowOf, state, videoCounted} from './store';
 import type {FrameRow} from './types';
 
 /** A frame of the GOP, by its index in the segment's video. */
@@ -49,6 +50,7 @@ function gopOf(segment: number, decoded: number): Promise<Gop> {
   if (pending === undefined) {
     pending = call<Gop>('GET', report.apiBase + '/video/' + id).then((gop) => {
       gops.set(segment, [...(gops.get(segment) ?? []), gop]);
+      videoCounted(segment, gop.frame_count);
       return gop;
     }).finally(() => asked.delete(id));
     asked.set(id, pending);
@@ -146,11 +148,68 @@ async function moveOne(delta: number): Promise<boolean> {
 }
 
 /** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved. */
-export async function nextVideoFrame(savedText: string): Promise<void> {
+async function nextVideoFrame(savedText: string): Promise<void> {
   const moved = !walking && await moveOne(1);
   if (state.currentKey === null) return;
   state.notice = {key: state.currentKey, text: savedText + (moved ? ' Here is the next frame of the video.' : ''),
     error: false};
+}
+
+/** Confirm goes on frame by frame through the video (seconds.ts): with To review and All, in a segment whose video the
+ * server has. */
+function walksVideo(row: FrameRow): boolean {
+  return Boolean(report.apiBase) && (state.filter === 'todo' || state.filter === 'all')
+    && typeof row.decoded_frame_index === 'number' && hasVideo(row.segment_index);
+}
+
+/** nextInVideo, once the server has said how many frames the video of the frame found has when a frame not saved is in
+ * the last second of a segment not counted yet (the frames of its GOP give it). */
+async function nextToConfirm(key: string, skipDone: boolean): Promise<string | null> {
+  let found = nextInVideo(key, skipDone);
+  const row = found === null || !isVirtual(found) ? null : rowOf(found);
+  if (row === null || typeof row.decoded_frame_index !== 'number' || report.videos?.[row.segment_index] != null) {
+    return found;
+  }
+  // The picture at 1 a second of its cell is in the video: its GOP says how long the video is.
+  const first = Math.floor(row.decoded_frame_index / CAMERA_FPS) * CAMERA_FPS;
+  try {
+    await gopOf(row.segment_index, first);
+    found = nextInVideo(key, skipDone);
+  } catch {
+    // Kept as found: the frame shows that it cannot be read.
+  }
+  return found;
+}
+
+/** After Confirm (and Confirm on a frame already confirmed, unchanged: ``savedText`` "Already confirmed."): with To
+ * review the next frame not confirmed, with All the next frame, through every frame of the video (seconds.ts) where
+ * the server has it; elsewhere a frame of the video that was not saved (``fromVideo``) goes on to the next frame of
+ * the video, a frame of the report to the next one of the filter (navigation.ts). */
+export async function afterConfirm(key: string, savedText: string, fromVideo = false): Promise<void> {
+  const row = rowOf(key);
+  if (row === null || !walksVideo(row)) {
+    if (fromVideo) await nextVideoFrame(savedText);
+    else advanceAfterConfirm(key, savedText);
+    return;
+  }
+  if (walking) {
+    state.notice = {key, text: savedText, error: false};
+    return;
+  }
+  const next = await nextToConfirm(key, state.filter === 'todo');
+  // The reviewer opened another frame meanwhile.
+  if (state.currentKey !== key) return;
+  if (next === null) {
+    advanceAfterConfirm(key, savedText);
+    return;
+  }
+  openFrame(next);
+  state.notice = {key: next, text: savedText + ' Here is the next frame of the video.', error: false};
+  const opened = rowOf(next);
+  const at = opened === null ? null : decodedOf(opened);
+  if (opened !== null && at !== null) {
+    void gopOf(opened.segment_index, at).then(() => preload(opened.segment_index, at, 1)).catch(() => undefined);
+  }
 }
 
 /** ← → ‹ ›: the frame of the video just before or after (20 a second), with the review server; the picture just

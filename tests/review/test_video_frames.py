@@ -161,3 +161,48 @@ def test_a_later_read_of_the_same_frame_keeps_one_row(drive):
     (folder / 'sign_reads.jsonl').write_text(json.dumps(read) + '\n')
     found = [row for row in discover_frames(root, ROUTE) if row['frame_key'] == '0/1025']
     assert len(found) == 1 and found[0]['comma_read_kph'] == 50.0
+
+
+def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive):
+    """A frame between the seconds not saved yet: Apply previous carries the boxes of the frame of the report just
+    before it, each to check (it has no proposals), and Fit box fits on its picture. Neither saves anything."""
+    root, video, rows, server = drive
+    manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
+
+    def apply(key):
+        status, _response, data = server.request('POST', f'/api/route/{ROUTE}/frame/{key}/apply-previous',
+                                                 body={'run_id': RUN_ID, 'detections': []})
+        return status, json_of(data)
+
+    status, answer = apply('0/1025')
+    assert status == 409 and answer['error'] == 'previous_not_confirmed' and '0/1' in answer['message']
+    assert server.post_frame(ROUTE, '0/1', body([BOX]))[0] == 200
+    status, answer = apply('0/1025')
+    assert status == 200, answer
+    assert answer['source_frame_key'] == '0/1' and answer['save'] == {'run_id': RUN_ID, 'base_revision': 0}
+    carried = answer['detections']
+    assert [box['bbox_xyxy'] for box in carried] == [BOX['bbox_xyxy']] and carried[0]['value_kph'] == 50
+    assert carried[0]['check_position'] is True and answer['to_check']
+    # The frame before is the one of the report before it in time: the next second starts at its own picture.
+    status, answer = apply('0/1041')
+    assert status == 409 and answer['error'] == 'previous_not_confirmed' and '0/2' in answer['message']
+    # Not such a frame: the picture at 1 a second under another key, past the end of the video.
+    assert apply('0/1020')[0] == 404 and apply('0/1060')[0] == 404
+    fit = f'/api/route/{ROUTE}/frame/0/1025/fit'
+    status, _response, data = server.request('POST', fit, body={'run_id': RUN_ID, 'boxes': [BOX['bbox_xyxy']]})
+    assert status == 200, data
+    assert len(json_of(data)['boxes']) == 1
+    status, _response, data = server.request('POST', fit, body={'run_id': NEW_RUN, 'boxes': [BOX['bbox_xyxy']]})
+    assert status == 409 and json_of(data)['error'] == 'stale_report'
+    assert not manifest.exists() and not list(manifest.parent.glob('video_*.png'))
+    # The page knows the segments with their video, and how long it is once a frame of it is saved.
+    status, _response, data = server.request('GET', f'/route/{ROUTE}/')
+    assert status == 200 and b'"videos": {"0": null}' in data
+    # A box still to check is refused, as on any frame; checked ("Here", or Fit box on its sign) it is saved.
+    assert server.post_frame(ROUTE, '0/1025', body(carried))[0] == 400 and not manifest.exists()
+    checked = [{name: value for name, value in box.items() if name != 'check_position'} for box in carried]
+    assert server.post_frame(ROUTE, '0/1025', body(checked))[0] == 200
+    status, answer = apply('0/1026')
+    assert status == 200 and answer['source_frame_key'] == '0/1025'
+    status, _response, data = server.request('GET', f'/route/{ROUTE}/')
+    assert status == 200 and b'"videos": {"0": 60}' in data

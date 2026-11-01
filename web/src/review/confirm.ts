@@ -10,9 +10,10 @@ import {countryOf, currentRow, frameStatus, fromServer, sameAsServer, workOf} fr
 import {blockUnchecked} from './carry';
 import {advanceAfterConfirm, allConfirmed, allConfirmedText, go} from './navigation';
 import {revealEditor} from './scroll';
+import {hasVideo} from './seconds';
 import {call, reviewerName, send, takeSuspicious} from './server';
 import {isVirtual, report, state, store} from './store';
-import {nextVideoFrame} from './video';
+import {afterConfirm} from './video';
 import type {FrameRow, SaveAnswer} from './types';
 
 function needReviewer(key: string): void {
@@ -58,6 +59,11 @@ export async function confirmFrame(): Promise<void> {
   const current = state.edits[key];
   if (report.apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
+    // Through the video: on to the next frame of the second still to confirm.
+    if ((state.filter === 'todo' || state.filter === 'all') && hasVideo(row.segment_index)) {
+      void afterConfirm(key, 'Already confirmed.');
+      return;
+    }
     go(1);
     if (state.currentKey === key) {
       const text = allConfirmed() ? allConfirmedText() : 'Already confirmed: there are no more frames with this filter.';
@@ -100,14 +106,12 @@ export async function confirmFrame(): Promise<void> {
   }
   state.notice = null;
   store();
-  // A frame of the video between the seconds (reached with ← →): saved, it becomes a picture of the report, and
-  // Confirm goes on to the next frame of the video, not to the next picture of the filter.
+  // A frame of the video between the seconds (reached with ← →) becomes a picture of the report once saved. Confirm
+  // then goes on through the frames of the video (video.ts afterConfirm).
   const fromVideo = isVirtual(key);
   const ok = await send(key);
   if (!ok || state.currentKey !== key) return;
-  const saved = 'Saved ' + key + ' at ' + timeNow() + '.';
-  if (fromVideo) void nextVideoFrame(saved);
-  else advanceAfterConfirm(key, saved);
+  void afterConfirm(key, 'Saved ' + key + ' at ' + timeNow() + '.', fromVideo);
 }
 
 export async function withdrawFrame(): Promise<void> {

@@ -40,12 +40,16 @@ export interface Report {
   readOnly: boolean;
   /** The page shows the new proposals made so far, not the report (the drive at work). */
   atWork: boolean;
+  /** Segment: the frames of its road video (null: not counted yet), for the segments that have one on the server;
+   * null offline. A cell of the timeline is the 20 frames of its second (seconds.ts). Replaced, never changed in
+   * place, when video.ts learns a count. */
+  videos: Readonly<Record<number, number | null>> | null;
 }
 
 // Shallow: only its fields are followed (the rows of the drive at work grow while the page is open, appendRows).
 export const report: Report = shallowReactive({
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
-  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false,
+  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null,
 });
 
 let hintsByFrame: Record<string, Hint[]> = {};
@@ -172,10 +176,26 @@ export function initStore(raw: Partial<Payload>): void {
     proposer: typeof raw.proposer === 'string' ? raw.proposer : null,
     readOnly: isRecord(raw.busy),
     atWork: isRecord(raw.busy) && raw.busy['phase'] === 'proposing again',
+    videos: raw.server && isRecord(raw.videos) ? videosOf(raw.videos) : null,
   } satisfies Report);
   state.busy = isRecord(raw.busy) ? raw.busy as unknown as Busy : null;
   reindex();
   state.suspicious = isRecord(raw.suspicious) ? raw.suspicious as Suspicious : {};
+}
+
+function videosOf(raw: Record<string, unknown>): Record<number, number | null> {
+  const videos: Record<number, number | null> = {};
+  for (const [segment, count] of Object.entries(raw)) {
+    if (/^[0-9]+$/.test(segment)) videos[Number(segment)] = typeof count === 'number' && count > 0 ? count : null;
+  }
+  return videos;
+}
+
+/** The frames of a segment's video, learnt from the server (video.ts). */
+export function videoCounted(segment: number, count: number): void {
+  const videos = report.videos;
+  if (videos === null || videos[segment] === count) return;
+  report.videos = {...videos, [segment]: count};
 }
 
 function reindex(): void {

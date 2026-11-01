@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // The timeline card: one row of ticks per segment, coloured by the state of each frame, and the counters of
 // the confirmed frames that still carry a doubt (each one a filter). On a phone the card folds under its title.
+// Where the server has the road video, a cell is a whole second (seconds.ts): confirmed when its 20 frames are, filled
+// from the bottom as they are confirmed.
 import {computed, nextTick} from 'vue';
 import {thousands} from '../common/format';
 import {carDiffers, carLogs} from './car-moment';
@@ -10,6 +12,7 @@ import {aiConfirmed, commaReadText, doubtsOf, driveTime, framePlace, frameStatus
   reasonsOf, statusLabel} from './frames';
 import {openFrame, pickFilter} from './navigation';
 import {scrollTimelineToCurrent} from './scroll';
+import {cellFrames, hasVideo, secondProgress} from './seconds';
 import {frameSecond} from './order';
 import {hintsOf, isVirtual, report, rowOf, state} from './store';
 import type {FrameRow, QualityFilter} from './types';
@@ -32,8 +35,14 @@ function placeOf(row: FrameRow, before: number): number {
   return Math.max(0, before - 1 + second - Math.floor(second));
 }
 
+/** A frame between the seconds with a thin bar of its own: a sign the comma read, and a frame of the video saved
+ * where its cell does not count it (offline). */
+function hasBar(row: FrameRow): boolean {
+  return isBetweenFrame(row) && !isVirtual(row.frame_key) && (isReadFrame(row) || !hasVideo(row.segment_index));
+}
+
 /** One row of ticks per segment, with its label: a cell per picture at 1 a second, and a thin bar across the cells
- * for each frame between the seconds (a sign the comma read there, a frame of the video saved). */
+ * for each frame between the seconds that has one (hasBar). */
 const segments = computed(() => {
   const list: Segment[] = [];
   for (const row of report.rows) {
@@ -42,8 +51,8 @@ const segments = computed(() => {
       last = {segment: row.segment_index, rows: [], between: []};
       list.push(last);
     }
-    if (isBetweenFrame(row)) last.between.push({row, at: placeOf(row, last.rows.length)});
-    else last.rows.push(row);
+    if (hasBar(row)) last.between.push({row, at: placeOf(row, last.rows.length)});
+    else if (!isBetweenFrame(row)) last.rows.push(row);
   }
   return list;
 });
@@ -51,10 +60,12 @@ const segments = computed(() => {
 const columns = computed(() => String(Math.max(1, ...segments.value.map((segment) => segment.rows.length))));
 const hasReads = computed(() => report.rows.some(isReadFrame));
 
-/** The frame of the video on screen when it is not a picture of the report (video.ts): its bar in its segment. */
+/** The frame of the video on screen when it has no bar of its own (not saved, or counted by its cell): its bar in its
+ * segment. */
 const walking = computed<{segment: number; bar: Between} | null>(() => {
   const key = state.currentKey;
-  const row = key === null || !isVirtual(key) ? null : rowOf(key);
+  const found = key === null ? null : rowOf(key);
+  const row = found === null || !isBetweenFrame(found) || hasBar(found) ? null : found;
   const segment = row === null ? undefined : segments.value.find((item) => item.segment === row.segment_index);
   if (row === null || segment === undefined) return null;
   const before = segment.rows.filter((item) => frameSecond(item) <= frameSecond(row)).length;
@@ -64,10 +75,14 @@ const walking = computed<{segment: number; bar: Between} | null>(() => {
 function tickClass(row: FrameRow): string {
   const key = row.frame_key;
   const status = frameStatus(key);
+  const part = secondProgress(row);
   let cls = '';
-  if (status === 'done') {
-    const doubts = doubtsOf(key);
-    cls = doubts.unknown + doubts.unreadable > 0 ? 'done unsure' : 'done';
+  if (status === 'done' && (part === null || part.done >= part.total)) {
+    const unsure = [row, ...cellFrames(row)].some((frame) => {
+      const doubts = doubtsOf(frame.frame_key);
+      return doubts.unknown + doubts.unreadable > 0;
+    });
+    cls = unsure ? 'done unsure' : 'done';
     if (aiConfirmed(key)) cls += ' ai';
   } else if (status === 'error') {
     cls = 'error';
@@ -78,6 +93,7 @@ function tickClass(row: FrameRow): string {
   } else if (proposalsOf(row).length > 0 || hintsOf(key).length > 0) {
     cls = 'has';
   }
+  if (part !== null && part.done > 0 && part.done < part.total) cls += ' part';
   if (carDiffers(row)) cls += ' differ';
   if (isBetweenFrame(row)) cls += ' between';
   if (isReadFrame(row)) cls += ' read';
@@ -91,8 +107,17 @@ function tickLabel(row: FrameRow): string {
   const place = driveTime(row) === null ? framePlace(row)
     : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
   if (isVirtual(row.frame_key)) return place + ' · a frame of the video, not saved yet';
-  return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '')
+  const part = secondProgress(row);
+  return place + ' · ' + statusLabel(row.frame_key).toLowerCase()
+    + (part === null ? '' : ' · ' + part.done + '/' + part.total + ' frames of the second confirmed')
+    + (carDiffers(row) ? ' · map ≠ vision' : '')
     + (isReadFrame(row) ? ' · ' + commaReadText(row) : isBetweenFrame(row) ? ' · a frame between the seconds' : '');
+}
+
+/** How much of a cell's second is confirmed, for its fill (class part). */
+function fillOf(row: FrameRow): Record<string, string> | undefined {
+  const part = secondProgress(row);
+  return part === null || part.done === 0 || part.done >= part.total ? undefined : {'--fill': String(part.done / part.total)};
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
@@ -149,7 +174,8 @@ function tickClicked(event: MouseEvent): void {
     <button type="button" class="tl-toggle" id="tlToggle" :aria-expanded="state.timelineOpen" aria-controls="timeline"
             @click="toggle"><span class="tl-title">Timeline</span><span class="tl-sub" id="tlSub">{{ summary }}</span></button>
     <div class="legend">
-      <span><i class="l-done"></i>confirmed</span>
+      <span><i class="l-done"></i>{{ report.videos === null ? 'confirmed' : 'confirmed, every frame of the second' }}</span>
+      <span v-if="report.videos !== null"><i class="l-part"></i>partly confirmed</span>
       <span><i class="l-ai"></i>by AI</span>
       <span><i class="l-unsure"></i>confirmed with doubts</span>
       <span><i class="l-sus"></i>suspicious</span>
@@ -166,7 +192,7 @@ function tickClicked(event: MouseEvent): void {
         <span class="tl-label">seg {{ segment.segment }}</span>
         <div class="tl-ticks">
           <button v-for="row in segment.rows" :key="row.frame_key" type="button" tabindex="-1" :data-key="row.frame_key"
-                  :class="tickClass(row)" :title="tickLabel(row)" :aria-label="tickLabel(row)"></button>
+                  :class="tickClass(row)" :style="fillOf(row)" :title="tickLabel(row)" :aria-label="tickLabel(row)"></button>
           <button v-for="bar in segment.between" :key="bar.row.frame_key" type="button" tabindex="-1"
                   :data-key="bar.row.frame_key" :class="tickClass(bar.row)" :style="{'--at': bar.at}"
                   :title="tickLabel(bar.row)" :aria-label="tickLabel(bar.row)"></button>

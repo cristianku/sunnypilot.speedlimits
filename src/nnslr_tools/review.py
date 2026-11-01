@@ -1045,7 +1045,8 @@ def make_handler(app: ReviewApp):
             nonce = secrets.token_urlsafe(18)
             page = render_review(rows, run_id, route_id=route, server=True, nonce=nonce,
                                  hints=hints_by_frame, hint_stats=hint_stats, suspicious=suspicious,
-                                 routes=app.route_links(), proposer=proposer, busy=busy)
+                                 routes=app.route_links(), proposer=proposer, busy=busy,
+                                 videos=app.videos(route, rows))
             csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
@@ -1653,7 +1654,8 @@ def make_handler(app: ReviewApp):
         # [box-fit] - START
         def _local_fit(self, route, frame_key, body):
             """{boxes: [box or None for each box sent], ms}: the reviewer's boxes fitted to the signs under them by
-            :mod:`nnslr_tools.box_fit`, on the original frame decoded once. None: no better box, keep it."""
+            :mod:`nnslr_tools.box_fit`, on the original frame decoded once (a frame of the video between the seconds
+            not saved yet: its preview). None: no better box, keep it."""
             import math
             import time
             if not isinstance(body, dict):
@@ -1665,7 +1667,15 @@ def make_handler(app: ReviewApp):
             if not isinstance(sent, list) or not 1 <= len(sent) <= MAX_FIT_BOXES:
                 raise ReviewRejected(400, 'invalid_boxes',
                                      f'boxes is a list of 1 to {MAX_FIT_BOXES} boxes [x1, y1, x2, y2] in pixels.')
-            frame = app.get_frame(route, frame_key)
+            video = None
+            try:
+                frame = app.get_frame(route, frame_key)
+            except ReviewRejected as exc:
+                if exc.reason != 'unknown_frame':
+                    raise
+                # A frame of the video between the seconds, not saved yet: its picture is the video's.
+                frame, video_run, video = app.video_frame(route, frame_key)
+                frame = dict(frame, run_id=video_run)
             if run_id is not None and run_id != frame['run_id']:
                 raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: reload the page.')
             width, height = frame.get('width'), frame.get('height')
@@ -1687,7 +1697,7 @@ def make_handler(app: ReviewApp):
                 started = time.perf_counter()
                 from nnslr_tools import box_fit
                 try:
-                    path = app.image_file(route, frame_key, 'original')[0]
+                    path = video or app.image_file(route, frame_key, 'original')[0]
                 except (ReviewRejected, OSError):
                     path = app.image_file(route, frame_key, 'preview')[0]
                 try:

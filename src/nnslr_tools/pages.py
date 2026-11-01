@@ -191,13 +191,14 @@ def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool 
 def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
                   nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
                   suspicious: dict | None = None, routes: list[dict] | None = None,
-                  proposer: str | None = None, busy: dict | None = None) -> str:
+                  proposer: str | None = None, busy: dict | None = None, videos: dict | None = None) -> str:
     """The review page with its data embedded. Hints and suspicious flags travel apart from the
     frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
     signs of the report (vietnam, ours, qwen; None when not known), for the page's "More". busy: the drive is read
-    only, Propose again works on it (nnslr_tools.reproposing.public), else None."""
+    only, Propose again works on it (nnslr_tools.reproposing.public), else None. videos: the segments with their road
+    video on the server (ReviewService.videos), None offline."""
     data = {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
-            'busy': busy,
+            'busy': busy, 'videos': videos,
             'hints': hints if hints is not None else {},
             'hint_stats': hint_stats if hint_stats is not None else empty_stats(),
             'suspicious': suspicious if suspicious is not None else {},

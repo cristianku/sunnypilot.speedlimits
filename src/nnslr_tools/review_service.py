@@ -272,6 +272,63 @@ class ReviewService:
             raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be saved: ' + str(exc)) from exc
         return self.report(route)[2].get(frame_key), fresh
 
+    def video_stand_in(self, snapshot: RouteSnapshot, key: str) -> dict:
+        """A frame of the video between the seconds not saved yet (video_gop gives its key), as Apply previous and Fit
+        box see it before it is a row of the report: its place and time, the size of the nearest picture of its
+        segment, no proposals. 404 for any other key."""
+        segment, index = (int(part) for part in key.split('/'))
+        decoded = index - READ_INDEX_BASE
+        rows = [snapshot.by_key[other] for other in snapshot.order
+                if snapshot.by_key[other]['segment_index'] == segment]
+        valid = index > READ_INDEX_BASE and bool(rows) \
+            and not any(row.get('decoded_frame_index') == decoded for row in rows)
+        if valid:
+            try:
+                video_frames.gop_of(video_frames.video_of(self.root, snapshot.route, segment), decoded)
+                seconds = video_frames.kept_seconds(self.root, snapshot.route, segment)
+                valid = seconds is None or int(decoded / CAMERA_FPS) in seconds
+            except (video_frames.VideoFrameError, OSError):
+                valid = False
+        if not valid:
+            raise ReviewRejected(404, 'unknown_frame', 'Frame not in the report of this route.')
+        second = decoded / CAMERA_FPS
+        near = min(rows, key=lambda row: abs(frame_second(row) - second))
+        return {'frame_key': key, 'segment_index': segment, 'output_index': index, 'decoded_frame_index': decoded,
+                'media_time_s': second, 'width': near.get('width'), 'height': near.get('height'), 'detections': []}
+
+    def video_frame(self, route, frame_key) -> tuple[dict, str, Path]:
+        """(video_stand_in, run id, its picture: the preview JPEG of the video cache, the size of the report's pictures)
+        of a frame between the seconds not saved yet, for Fit box."""
+        key = frame_key_of(frame_key)
+        snapshot = self.snapshot(route)
+        row = self.video_stand_in(snapshot, key)
+        try:
+            path = video_frames.preview(self.root, snapshot.route, row['segment_index'], row['decoded_frame_index'])
+        except (video_frames.VideoFrameError, OSError) as exc:
+            raise ReviewRejected(404, 'image_not_found', 'This frame of the video cannot be shown: ' + str(exc)) from exc
+        return row, snapshot.run_id, path
+
+    def videos(self, route: str, rows: list[dict]) -> dict[str, int | None]:
+        """{segment: frames of its road video} for the segments that have one: Sign review counts the frames of each
+        second (a cell of its timeline is confirmed when they all are). Counted only where a frame between the seconds
+        was saved, the only segments a cell can be complete in; None elsewhere (the page learns the count as it goes
+        through the video)."""
+        saved = set()
+        segments = set()
+        for row in rows:
+            if type(row.get('segment_index')) is int:
+                segments.add(row['segment_index'])
+                if str(row.get('preview_path') or '').startswith('video/'):
+                    saved.add(row['segment_index'])
+        found = {}
+        for segment in sorted(segments):
+            try:
+                video = video_frames.video_of(self.root, route, segment)
+                found[str(segment)] = video_frames.frame_count(video) if segment in saved else None
+            except (video_frames.VideoFrameError, OSError):
+                continue
+        return found
+
     def forget_video_frame(self, route, frame_key: str) -> None:
         """Undo video_frame_row when the save it was for was refused."""
         segment, index = (int(part) for part in frame_key.split('/'))
@@ -729,7 +786,9 @@ class ReviewService:
         they are now (default: the model proposals). See :mod:`nnslr_tools.carry_over`: a box placed
         where the sign should be has ``check_position: true`` and no save accepts it until that is gone.
         A box keeps its labels only when the reviewer changed it on screen: one as the model proposed it, or as
-        this frame was confirmed before (a drive reviewed again), takes those of the previous frame.
+        this frame was confirmed before (a drive reviewed again), takes those of the previous frame. A frame of the
+        video between the seconds not saved yet (video_stand_in) works too: it has no proposals, every box carried
+        there is to check (Fit box or "Here").
         """
         key = frame_key_of(frame_key)
         if body is None:
@@ -737,10 +796,17 @@ class ReviewService:
         if not isinstance(body, dict):
             raise ReviewRejected(400, 'invalid_schema', 'The request must be a JSON object.')
         snapshot = self.snapshot(route)
-        row = snapshot.row(key)
+        if key in snapshot.position:
+            row = snapshot.row(key)
+            position = snapshot.position[key]
+        else:
+            # A frame of the video between the seconds, not saved yet: the frame before is the last one of the report
+            # before it in time.
+            row = self.video_stand_in(snapshot, key)
+            place = frame_order(row)
+            position = sum(1 for other in snapshot.order if frame_order(snapshot.by_key[other]) < place)
         if body.get('run_id') is not None and body.get('run_id') != snapshot.run_id:
             raise ReviewRejected(409, 'stale_report', 'The report of this route was rebuilt: read the frame again.')
-        position = snapshot.position[key]
         source_key = snapshot.order[position - 1] if position > 0 else None
         # The frame before in the timeline, in this segment or at the end of the one before.
         if source_key is None or snapshot.by_key[source_key]['segment_index'] < row['segment_index'] - 1:

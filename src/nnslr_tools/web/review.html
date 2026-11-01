@@ -289,6 +289,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .legend .l-none { background: var(--none-cell); box-shadow: inset 0 0 0 1px var(--line-strong); }
 .legend .l-dirty { background: var(--warn); }
 .legend .l-error { background: var(--bad); }
+.legend .l-part { background: linear-gradient(to top, var(--ok) 40%, var(--none-cell) 40%); box-shadow: inset 0 0 0 1px var(--line-strong); }
 /* The cells fill the width: one column per image of the longest segment (set by the script). */
 .timeline { display: flex; flex-direction: column; gap: 3px; padding: 2px 20px 16px; }
 .tl-seg { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; }
@@ -313,6 +314,10 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .tl-ticks button.done.ai { background: var(--ai-hatch); }
 .tl-ticks button.done.ai.unsure { background: linear-gradient(var(--doubt) 0 4px, transparent 4px), var(--ai-hatch); }
 .tl-ticks button:hover { box-shadow: inset 0 0 0 1px var(--fg); }
+/* A second partly confirmed (seconds.ts): its confirmed frames, --fill of 1, fill the cell from the bottom. */
+.tl-ticks button.part { position: relative; }
+.tl-ticks button.part::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; border-radius: inherit;
+  height: max(2px, calc(var(--fill, 0) * 100%)); background: var(--ok); }
 /* Map and vision differ there in the car (car-moment.ts): a red dash under the tick. */
 .timeline.car-logs { gap: 6px; }
 .tl-ticks button.differ { position: relative; }

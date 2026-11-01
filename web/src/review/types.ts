@@ -127,6 +127,9 @@ export interface Payload {
   proposer?: string | null;
   /** Propose again works on this drive: read only (nnslr_tools.reproposing.public); null otherwise. */
   busy?: Busy | null;
+  /** The segments with their road video on the server, with its frames when counted (review_service.videos); null
+   * offline. */
+  videos?: Record<string, number | null> | null;
 }
 
 /** A drive Propose again works on, read only until its new proposals are in. */
