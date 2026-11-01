@@ -7,6 +7,7 @@ import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {thousands} from '../common/format';
 import {aiConfirmed, framePlace, isBetweenFrame, proposalsOf, reasonsOf, statusLabel} from './frames';
 import {stepSecond} from './navigation';
+import {frameOfSecond} from './seconds';
 import {stepFrame} from './video';
 import {hintsOf, report, state} from './store';
 import ReviewFilters from './ReviewFilters.vue';
@@ -23,7 +24,10 @@ const pillClass = computed(() => {
 const frameData = computed(() => {
   const row = props.row;
   const proposals = proposalsOf(row).length;
-  let info = framePlace(row) + ' · ' + proposals + (proposals === 1 ? ' proposal' : ' proposals');
+  // "4:22 into the drive · frame 7/20": where the second has the frames of its video.
+  const place = frameOfSecond(row);
+  let info = framePlace(row) + (place === null ? '' : ' · frame ' + place[0] + '/' + place[1]);
+  info += ' · ' + proposals + (proposals === 1 ? ' proposal' : ' proposals');
   if (report.routeHasHints) info += ' · ' + hintsOf(row.frame_key).length + ' in the second reading';
   return info;
 });

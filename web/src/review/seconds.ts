@@ -63,6 +63,17 @@ function secondSpan(row: FrameRow): [number, number] | null {
   return [first, Math.max(decoded + 1, Math.min(first + CAMERA_FPS, count ?? Infinity))];
 }
 
+/** Which frame of its second's cell the frame is, [from 1, of how many]: 20 a second, fewer in the last second of a
+ * video whose count is known; null where the cell is its picture alone. */
+export function frameOfSecond(row: FrameRow): [number, number] | null {
+  const decoded = row.decoded_frame_index;
+  if (typeof decoded !== 'number' || !hasVideo(row.segment_index)) return null;
+  const first = Math.floor(decoded / CAMERA_FPS) * CAMERA_FPS;
+  const count = report.videos?.[row.segment_index] ?? null;
+  const place = decoded - first + 1;
+  return [place, Math.max(place, Math.min(CAMERA_FPS, (count ?? Infinity) - first))];
+}
+
 /** The frames between the seconds of the report in the cell of a picture at 1 a second (empty: none, or a cell of its
  * picture alone). */
 export function cellFrames(row: FrameRow): FrameRow[] {
