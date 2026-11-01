@@ -369,9 +369,10 @@ def test_refused_without_the_models_folder(comma):
 def test_refused_while_the_comma_does_not_prepare_them(comma):
     (comma['params'] / 'SpeedLimitVisionDisplay').write_text('0')
     refused(comma, 'turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data \\+ Vision')
-    # Map Data + Vision alone is enough.
-    (comma['params'] / 'SpeedLimitPolicy').write_text('5')
-    assert run_trial(comma, dry_run=True)['outcome'] == 'dry_run'
+    # Map Data + Vision or Vision Only alone is enough.
+    for policy in ('5', '6'):
+        (comma['params'] / 'SpeedLimitPolicy').write_text(policy)
+        assert run_trial(comma, dry_run=True)['outcome'] == 'dry_run'
 
 
 def test_refused_when_the_compiled_folder_is_unknown(comma):

@@ -298,7 +298,8 @@ This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 
   the process runs at niceness 10.
 - Shown by the sunnylink toggle Cruise › Speed Limits › Show Vision Speed Limit (`SpeedLimitVisionDisplay`), the
   round sign at the top right of the mici driving screen; used for the speed only with Speed Limit Source › Map Data +
-  Vision. speedvisiond runs when either is on.
+  Vision or, since 1 Nov 2026, Vision Only (`SpeedLimitPolicy` 6: the network's limit alone, no limit without it).
+  speedvisiond runs when any of them is on.
 - Known limits: no 120 km/h class, some 40 and 50 missed by the classifier on the test route, and no decider, so a
   sign of a side road can be read.
 - Speed Limit Assist (31 Oct 2026, `speed_limit_assist.py`, `longitudinal_planner.py`): with openpilot longitudinal on

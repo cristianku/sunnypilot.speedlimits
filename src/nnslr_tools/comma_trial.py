@@ -2,9 +2,10 @@
 
 A SignNet of this server and the classifier in use copied straight onto the comma over ssh, into the models folder of
 the build it runs (the submodule openpilot/sunnypilot/speed_limits/models): no publication, no build. The comma's
-speed_limits_warmup (offroad, while Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision) compiles
-every network whose compiled file is missing, and speedvisiond loads them when a drive starts: copying is enough. The
-trial lasts until the comma's next software update, which puts back the build's networks; --restore does it now.
+speed_limits_warmup (offroad, while Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision or Vision
+Only) compiles every network whose compiled file is missing, and speedvisiond loads them when a drive starts: copying is
+enough. The trial lasts until the comma's next software update, which puts back the build's networks; --restore does it
+now.
 
 1. Check the comma: it answers over ssh, it is parked (IsOnroad), its build runs the speed-limits networks
    (runner.py with MANIFEST_FORMAT = 2, warmup.py, vision.py) and prepares them (the toggle or the source), and where
@@ -67,8 +68,9 @@ MODELS_DIR = PACKAGE + '/models'
 HARDWARE = 'openpilot/common/hardware/hw.py'
 SSH_OPTIONS = ('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10')
 SSH_TIMEOUT = 120
-# The comma's params: Speed Limit Source Map Data + Vision is policy 5 (speed_limit/common.py Policy.map_data_vision).
-MAP_DATA_VISION = '5'
+# The comma's params: the Speed Limit Sources that use the networks, by their SpeedLimitPolicy (speed_limit/common.py
+# Policy.map_data_vision and Policy.vision_only).
+VISION_POLICIES = {'5': 'Map Data + Vision', '6': 'Vision Only'}
 POLL_SECONDS = 15
 WAIT_SECONDS = 360
 FRAMES = 5
@@ -80,8 +82,8 @@ CANCELLATION = 'cancellation'
 VISION_NAMES = ('SIGNNET_WIDTH', 'SIGNNET_HEIGHT', 'SIGNNET_STRIDE', 'CLASSIFIER_SIZE', 'CLASSIFIER_MEAN',
                 'CLASSIFIER_STD', 'SignNetInput', 'read_signs', 'class_speed')
 BUILD_NEEDED = 'a build is needed: use Publish'
-NOT_PREPARED = ("turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data + Vision, on the comma: it "
-                "prepares the networks only then")
+NOT_PREPARED = ("turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data + Vision or Vision Only, on "
+                "the comma: it prepares the networks only then")
 
 
 class CommaError(ValueError):
@@ -197,7 +199,7 @@ def check_comma(comma: Comma, *, restore: bool = False) -> dict:
                          'install the testing build first (Publish)')
     if restore:
         return state
-    if not (state['display'] or state['policy'] == MAP_DATA_VISION):
+    if not (state['display'] or state['policy'] in VISION_POLICIES):
         raise CommaError(NOT_PREPARED)
     if state['model_root'] is None:
         raise CommaError(f'where the comma keeps compiled networks is not readable (Paths.model_root in {HARDWARE})')
@@ -586,9 +588,9 @@ def try_on_comma(root: Path, signnet: Any, *, classifier: Any = None, comma: Com
     chosen = choose(root, signnet, classifier)
     say('== 1/5 Check the comma')
     state = check_comma(comma)
+    why = 'Show Vision Speed Limit is on' if state['display'] else f'Speed Limit Source is {VISION_POLICIES[state["policy"]]}'
     say(f'the comma{" (build " + state["commit"] + ")" if state["commit"] else ""} is parked, runs speed-limits '
-        f'{state["version"] or "networks"} and prepares new ones '
-        f'({"Show Vision Speed Limit is on" if state["display"] else "Speed Limit Source is Map Data + Vision"})')
+        f'{state["version"] or "networks"} and prepares new ones ({why})')
     work = root / 'tmp'
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='try-on-comma-', dir=work) as name:

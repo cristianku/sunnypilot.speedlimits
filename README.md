@@ -6,7 +6,7 @@
 
 <sub>The review page. You check the box around each sign, and what the sign says.</sub>
 
-> **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. The limit they read shows on the driving screen when sunnylink's **Show Vision Speed Limit** is on. Speed Limit Assist uses it only when the **Speed Limit Source** is **Map Data + Vision**: then the vision limit comes first, and the map fills in when vision has none. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
+> **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. The limit they read shows on the driving screen when sunnylink's **Show Vision Speed Limit** is on. Speed Limit Assist uses it only when the **Speed Limit Source** is **Map Data + Vision** (the vision limit first, the map when vision has none) or **Vision Only** (the vision limit alone, none without it). Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
 [Why](#why) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
@@ -48,7 +48,7 @@ flowchart TD
   cam --> rt["Scene<br/>town, rural, motorway…"]
   sig["Car signals<br/>speed, gyro, steering, blinkers"] --> rt
   rt -->|"general limit where<br/>no sign holds"| lim
-  lim --> res["sunnypilot resolver<br/>Map Data + Vision"]
+  lim --> res["sunnypilot resolver<br/>Map Data + Vision<br/>or Vision Only"]
   osm["Map<br/>OpenStreetMap"] --> res
 ```
 
@@ -56,7 +56,7 @@ flowchart TD
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
 - The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp, the acceleration lane after it, car park or garage. Where no sign holds, that gives the country's general limit; from the acceleration lane on, the carriageway's, not the ramp's. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 20 in a car park, 10 in a garage.
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
-- **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**.
+- **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**; with **Vision Only** the resolver takes the vision limit alone.
 
 ### The rules on the car
 
@@ -87,6 +87,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 
 **Speed Limit Assist** (sunnypilot's, changed on `speed-limits` for cars like the Peugeot, with openpilot longitudinal and the car's own cruise)
 
+- Speed Limit Source (sunnylink) **Map Data + Vision** (`SpeedLimitPolicy` 5): the vision limit, or the map's when vision has none. **Vision Only** (6, 1 Nov 2026): the vision limit alone; without it no limit is known, never the map's or the car's. Both start speedvisiond and show the fuchsia square, as Show Vision Speed Limit does. Choose Vision Only only once the comma runs a build that has it: an older build does not know the value.
 - Automatic: the limit applies as soon as it is known. No confirmation and no set speed of 120/130 to confirm with (the Peugeot has no button for it), and changing the set speed does not switch it off.
 - The set speed is the maximum: the car drives to the lower of the limit and the set speed. With no limit known, the set speed.
 - **Set Speed Only Engages (Alpha)**, a sunnylink option shown with Assist mode, off by default: the car drives to the limit even above the set speed, which only engages. Only with the big driving model on the external GPU: the small one makes mistakes, so without it the set speed is the maximum again, at once. Curves and a forced deceleration still win. The driving screen then shows a green see-through **AUTO** square with an eye in the bottom right corner, above the final limit, and no longer the MAX set speed on +/-.

@@ -10,7 +10,8 @@
 #
 #   1/5 Check    the comma answers over ssh (root's key, Host comma), is parked (IsOnroad), its build runs the
 #                speed-limits networks (runner.py with MANIFEST_FORMAT = 2, warmup.py, vision.py) and prepares them
-#                (Show Vision Speed Limit on, or Speed Limit Source Map Data + Vision). Its vision.py is copied here.
+#                (Show Vision Speed Limit on, or Speed Limit Source Map Data + Vision or Vision Only). Its vision.py is
+#                copied here.
 #   2/5 Export   the SignNet and the classifier to ONNX on the CPU, as Send to the car does.
 #   3/5 Check    them with the comma's code before copying anything: the contracts against its vision.py (SignNet's
 #                band 1x3x288x896, grid 8 px, one output of 5 channels, heat first; the classifier's 1x3x160x160 input,
