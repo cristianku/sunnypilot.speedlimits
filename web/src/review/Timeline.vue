@@ -6,24 +6,31 @@ import {thousands} from '../common/format';
 import {carDiffers, carLogs} from './car-moment';
 import {writeLocal} from './dom';
 import {DOUBT_LABELS, doubtCounts, routeCounts} from './current';
-import {aiConfirmed, doubtsOf, driveTime, framePlace, frameStatus, proposalsOf, reasonsOf, statusLabel} from './frames';
+import {aiConfirmed, commaReadText, doubtsOf, driveTime, framePlace, frameStatus, isReadFrame, proposalsOf, reasonsOf,
+  statusLabel} from './frames';
 import {openFrame, pickFilter} from './navigation';
 import {scrollTimelineToCurrent} from './scroll';
 import {hintsOf, report, state} from './store';
 import type {FrameRow, QualityFilter} from './types';
 
-/** One row of ticks per segment, with its label. */
+/** One row of ticks per segment, with its label: a cell per picture at 1 a second, and a thin bar between two
+ * cells for the frame of a sign the comma read there (at: how many cells come before it). */
 const segments = (() => {
-  const list: {segment: number; rows: FrameRow[]}[] = [];
+  const list: {segment: number; rows: FrameRow[]; reads: {row: FrameRow; at: number}[]}[] = [];
   for (const row of report.rows) {
-    const last = list[list.length - 1];
-    if (last === undefined || last.segment !== row.segment_index) list.push({segment: row.segment_index, rows: [row]});
+    let last = list[list.length - 1];
+    if (last === undefined || last.segment !== row.segment_index) {
+      last = {segment: row.segment_index, rows: [], reads: []};
+      list.push(last);
+    }
+    if (isReadFrame(row)) last.reads.push({row, at: last.rows.length});
     else last.rows.push(row);
   }
   return list;
 })();
-// The cells fill the width: one column per image of the longest segment.
+// The cells fill the width: one column per picture of the longest segment.
 const columns = String(Math.max(1, ...segments.map((segment) => segment.rows.length)));
+const hasReads = segments.some((segment) => segment.reads.length > 0);
 
 function tickClass(row: FrameRow): string {
   const key = row.frame_key;
@@ -43,6 +50,7 @@ function tickClass(row: FrameRow): string {
     cls = 'has';
   }
   if (carDiffers(row)) cls += ' differ';
+  if (isReadFrame(row)) cls += ' read';
   if (key === state.currentKey) cls += ' cur';
   return cls;
 }
@@ -51,7 +59,8 @@ function tickClass(row: FrameRow): string {
 function tickLabel(row: FrameRow): string {
   const place = driveTime(row) === null ? framePlace(row)
     : framePlace(row) + ' (segment ' + row.segment_index + ', image ' + row.output_index + ')';
-  return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '');
+  return place + ' · ' + statusLabel(row.frame_key).toLowerCase() + (carDiffers(row) ? ' · map ≠ vision' : '')
+    + (isReadFrame(row) ? ' · ' + commaReadText(row) : '');
 }
 
 /** "120/720 confirmed · 3 AI · 2 suspicious": the title of the folded card on a phone. */
@@ -117,6 +126,7 @@ function tickClicked(event: MouseEvent): void {
       <span><i class="l-dirty"></i>unsaved changes</span>
       <span><i class="l-error"></i>not saved</span>
       <span v-if="carLogs.phase === 'ready'"><i class="l-differ"></i>map ≠ vision in the car</span>
+      <span v-if="hasReads"><i class="l-read"></i>a sign the comma read</span>
     </div>
     <div class="timeline" id="timeline" :class="{'car-logs': carLogs.phase === 'ready'}" aria-label="All the frames of the route" :style="{'--tl-cols': columns}"
          @click="tickClicked">
@@ -125,6 +135,9 @@ function tickClicked(event: MouseEvent): void {
         <div class="tl-ticks">
           <button v-for="row in segment.rows" :key="row.frame_key" type="button" tabindex="-1" :data-key="row.frame_key"
                   :class="tickClass(row)" :title="tickLabel(row)" :aria-label="tickLabel(row)"></button>
+          <button v-for="read in segment.reads" :key="read.row.frame_key" type="button" tabindex="-1"
+                  :data-key="read.row.frame_key" :class="tickClass(read.row)" :style="{'--at': read.at}"
+                  :title="tickLabel(read.row)" :aria-label="tickLabel(read.row)"></button>
         </div>
       </div>
     </div>

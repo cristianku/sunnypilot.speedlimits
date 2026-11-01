@@ -22,6 +22,7 @@ from pathlib import Path
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl
 from nnslr_tools.carry_over import match_boxes
 from nnslr_tools.manifest import parse_route_id
+from nnslr_tools.sign_reads import frame_order
 
 TRACKS_RELATIVE_DIR = Path('derived') / 'tracks'
 
@@ -61,13 +62,13 @@ def link_tracks(frames: list[dict], *, width: float, height: float) -> list[dict
 
 def build_tracks(root: Path, route: str, rows: list[dict], reviews: list[dict]) -> dict:
     """Write tracks.jsonl of a route from its report ``rows`` and its saved ``reviews``; returns counts."""
-    order = sorted((row['segment_index'], row['output_index'], row['frame_key']) for row in rows
+    order = sorted((*frame_order(row), row['frame_key']) for row in rows
                    if isinstance(row.get('segment_index'), int) and isinstance(row.get('output_index'), int))
-    position = {key: index for index, (_segment, _output, key) in enumerate(order)}
+    position = {key: index for index, (_segment, _second, _output, key) in enumerate(order)}
     sizes = {row['frame_key']: (row.get('width') or 1344, row.get('height') or 760) for row in rows}
     confirmed = {review['frame_key']: review for review in reviews if review['confirmed']}
     frames = []
-    for segment, output, key in order:
+    for segment, _second, output, key in order:
         review = confirmed.get(key)
         if review is None:
             continue

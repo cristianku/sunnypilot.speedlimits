@@ -19,6 +19,8 @@ __NNSLR_SHARED_CSS__
   --ai-hatch: repeating-linear-gradient(135deg, var(--ok) 0 2px, transparent 2px 4px), var(--ok-soft);
   /* The top band of a frame confirmed with doubts. */
   --doubt: var(--todo);
+  /* A sign the comma read (sign_reads): its bar in the timeline and its words on the photo, in both themes. */
+  --read: #0ea5e9;
 }
 
 /* Layout: one compact bar on top; photo, its bar and the timeline card on the canvas; on a computer the inspector
@@ -188,6 +190,8 @@ input::placeholder { color: var(--placeholder); }
 .car-moment span span { font-weight: 700; }
 .car-moment .ahead { font-weight: 400; color: #9aa4b2; }
 .car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--bad); }
+/* The frame of a sign the comma read (sign_reads): said first, in the colour of its bar in the timeline. */
+.car-moment .read-here { font-weight: 700; color: var(--read); }
 .stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
 .stage-hint span {
   background: rgba(8, 11, 16, 0.8); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
@@ -289,8 +293,12 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .timeline { display: flex; flex-direction: column; gap: 3px; padding: 2px 20px 16px; }
 .tl-seg { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; }
 .tl-label { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tl-ticks { display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
+.tl-ticks { position: relative; display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
 .tl-ticks button { min-width: 0; height: 12px; border: 0; padding: 0; border-radius: 2px; background: var(--none-cell); }
+/* The frame of a sign the comma read: a thin bar, taller than the cells, in the gap after the --at cells before it;
+   its fill is the frame's state like a cell's, the colour of a read when nothing is proposed. */
+.tl-ticks button.read { position: absolute; z-index: 1; top: -3px; width: 4px; height: 18px; border-radius: 2px;
+  left: calc(var(--at) * (100% + 2px) / var(--tl-cols, 60) - 3px); background: var(--read); box-shadow: 0 0 0 1px var(--surface); }
 .tl-ticks button.has { background: var(--has); }
 .tl-ticks button.sus { background: var(--sus); }
 .tl-ticks button.dirty { background: var(--warn); }
@@ -305,6 +313,7 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .timeline.car-logs { gap: 6px; }
 .tl-ticks button.differ { position: relative; }
 .tl-ticks button.differ::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 2.5px; border-radius: 1px; background: var(--bad); }
+.legend .l-read { width: 4px; height: 14px; background: var(--read); }
 .legend .l-differ { height: 3px; margin-top: 7px; background: var(--bad); }
 .tl-ticks button.cur, .tl-ticks button.cur:hover { position: relative; z-index: 1; box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--fg); }
 .quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 20px; font-size: 13px; color: var(--muted); background: var(--surface-2); border-top: 1px solid var(--line); }

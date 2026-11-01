@@ -61,6 +61,9 @@ export interface FrameRow {
   /** Seconds into its segment (one minute each), when the extraction knows it. */
   media_time_s?: number | null;
   requested_sample_fps?: number | null;
+  /** The value of the sign the comma read at this frame (km/h; null: a sign without a number), only on the frames
+   * added at its reads (output index 1000 + the frame in the video). */
+  comma_read_kph?: number | null;
 }
 
 /** One sign seen by the second reading (nnslr_tools.review_hints). */

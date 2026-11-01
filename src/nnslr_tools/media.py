@@ -364,8 +364,14 @@ def extract_frames(
     route_id: str | None = None,
     segment_index: int | None = None,
     overwrite: bool = False,
+    decoded: Sequence[int] | None = None,
+    prefix: str = "frame",
+    index_base: int | None = None,
 ) -> list[ExtractedFrame]:
-    """Decode local video frames to PNG without resizing."""
+    """Decode local video frames to PNG without resizing. ``decoded``: these frames of the video (decoded frame
+    indices) instead of a sampling; ``prefix``: the name of the pictures (``<prefix>_<output index>.png``), only those
+    are replaced; ``index_base``: each picture's output index is index_base + its decoded frame index instead of its
+    number in the selection."""
     if not video.is_file():
         raise MediaToolError("video_not_found", str(video))
     if fps is not None and (not math.isfinite(fps) or fps <= 0):
@@ -378,21 +384,26 @@ def extract_frames(
         raise MediaToolError("invalid_range", f"{start_s}..{end_s}")
 
     # [frame-provenance] - START
-    existing = sorted(output_dir.glob("frame_*.png"))
+    existing = sorted(output_dir.glob(f"{prefix}_*.png"))
     if existing and not overwrite:
         raise MediaToolError("output_not_empty", str(output_dir))
     exe = _resolve_executable("ffmpeg", ffmpeg)
     source_hash = _file_sha256(video)
     timings = probe_frame_timestamps(video, ffprobe=ffprobe)
-    timed_selection = fps is not None or start_s is not None or end_s is not None
+    timed_selection = decoded is None and (fps is not None or start_s is not None or end_s is not None)
     if timed_selection and any(f.media_time_s is None for f in timings):
         raise MediaToolError("sampling_time_unknown", str(video))
     origin = timings[0].media_time_s if timings and timings[0].media_time_s is not None else 0.0
     selected = []
     next_sample = start_s or 0.0
     previous = None
+    wanted = None if decoded is None else set(decoded)
     for frame in timings:
         t = frame.media_time_s
+        if wanted is not None:
+            if frame.decoded_frame_index in wanted:
+                selected.append(frame)
+            continue
         if t is not None:
             if previous is not None and t <= previous:
                 raise MediaToolError("nonmonotonic_media_time", str(video))
@@ -427,10 +438,13 @@ def extract_frames(
         if _file_sha256(video) != source_hash:
             raise MediaToolError("source_video_changed", str(video))
         result = []
+        names = []
         for i, (path, frame) in enumerate(zip(files, selected)):
             width, height = png_dimensions(path)
+            index = i if index_base is None else index_base + frame.decoded_frame_index
+            names.append(f"{prefix}_{index:08d}.png")
             result.append(ExtractedFrame(
-                str(output_dir / path.name), i, str(video), fps, start_s, end_s,
+                str(output_dir / names[-1]), index, str(video), None if decoded is not None else fps, start_s, end_s,
                 frame.decoded_frame_index, infer_camera_stream(video), width, height,
                 frame.media_time_s, frame.media_time_source, source_hash, _file_sha256(path),
             ))
@@ -439,9 +453,9 @@ def extract_frames(
         if alignment is not None:
             extracted_frame_rows(result, route_id=route_id, segment_index=segment_index, alignment=alignment)
         # [dataset-review] - END
-        for path in files:
-            path.replace(output_dir / path.name)
-        current_names = {p.name for p in files}
+        for path, name in zip(files, names):
+            path.replace(output_dir / name)
+        current_names = set(names)
         for path in existing:
             if path.name not in current_names:
                 path.unlink()

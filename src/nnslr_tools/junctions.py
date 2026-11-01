@@ -55,6 +55,7 @@ from pathlib import Path
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, strict_json_loads
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, _angle, _bearing, _xy, our_road
+from nnslr_tools.sign_reads import is_read_frame
 
 JUNCTIONS_RELATIVE = Path('derived') / 'junctions'
 VERSION = 2
@@ -478,7 +479,8 @@ def junctions_path(root: Path, route: str) -> Path:
 
 def build_junctions(root: Path, route: str, positions: list[dict], junctions: Junctions) -> dict:
     """Write derived/junctions/<route>.json; returns its summary."""
-    found = route_junctions(junctions, positions)
+    # At 1 a second: the frames of the comma's reads (sign_reads) are only for the sign review.
+    found = route_junctions(junctions, [line for line in positions if not is_read_frame(line)])
     record = {'route_id': route, 'version': VERSION, 'rules': rules(), **found}
     atomic_write(junctions_path(root, route), (json.dumps(record, separators=(',', ':')) + '\n').encode())
     return {**summary(route, record), 'output': str(junctions_path(root, route))}

@@ -8,7 +8,7 @@ import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carMomentOf} from './car-moment';
 import {coarsePointer} from './dom';
-import {countryOf} from './frames';
+import {commaReadText, countryOf, isReadFrame} from './frames';
 import {drawAi, drawStage, sceneScale} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
 import {hintsOf, report, state} from './store';
@@ -43,6 +43,11 @@ const aiBoxes = computed(() => {
     props.row.width);
 });
 const moment = computed(() => carMomentOf(props.row));
+// "The comma read 20 here": the frame added at a sign the comma's vision read.
+const readText = computed(() => {
+  const text = commaReadText(props.row);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+});
 const country = computed(() => countryOf(props.row, props.work));
 /** The flag of a country code: its two letters as regional indicator symbols ("CH" → 🇨🇭). */
 function flagOf(code: string): string {
@@ -108,6 +113,7 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
     </svg>
     <div class="car-moment" id="carMoment" :class="{differ: moment?.differ}" :style="visibility">
       <span class="country" id="country" :data-country="country ?? ''" :title="countryText" :aria-label="countryText">{{ country ? flagOf(country) : '?' }}</span>
+      <span v-if="isReadFrame(row)" class="read-here" id="commaRead">{{ readText }}</span>
       <template v-if="moment">
         <span><b>Map</b> <span id="carMap">{{ moment.map }}</span><span v-if="moment.ahead" class="ahead"> → {{ moment.ahead }}</span></span>
         <span><b>Vision</b> <span id="carVision">{{ moment.vision }}</span></span>

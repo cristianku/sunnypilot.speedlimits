@@ -26,6 +26,7 @@ from pathlib import Path
 
 from nnslr_tools.annotations import strict_json_loads
 from nnslr_tools.manifest import parse_route_id
+from nnslr_tools.sign_reads import frame_order
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
 HINTS_RELATIVE_DIR = Path('derived') / 'hints'
@@ -358,8 +359,9 @@ def _ordered(rows: list[dict]) -> list[dict]:
         output = row.get('output_index')
         if not isinstance(key, str) or not isinstance(segment, int) or not isinstance(output, int):
             continue
-        frames.append({'key': key, 'segment': segment, 'output': output, 'detections': row.get('detections')})
-    frames.sort(key=lambda frame: (frame['segment'], frame['output']))
+        frames.append({'key': key, 'segment': segment, 'output': output, 'detections': row.get('detections'),
+                       'order': frame_order(row)})
+    frames.sort(key=lambda frame: frame['order'])
     return frames
 
 

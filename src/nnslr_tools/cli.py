@@ -1202,6 +1202,20 @@ def _cmd_drive_review(args: argparse.Namespace) -> int:
 # [drive-review] - END
 
 
+# [sign-reads] - START
+def _cmd_sign_reads(args: argparse.Namespace) -> int:
+    """The exact frame of every sign the comma read, added to Sign review (nnslr_tools.sign_reads)."""
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.sign_reads import extract_reads
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    for route in args.routes:
+        parse_route_id(route)
+        print(json.dumps(extract_reads(root, route, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, scan=not args.no_scan,
+                                       workers=args.workers), sort_keys=True), flush=True)
+    return 0
+# [sign-reads] - END
+
+
 # [localizer] - START
 def _cmd_localize(args: argparse.Namespace) -> int:
     """openpilot.distill's localizer on the segments of drives (nnslr_tools.localized): the precise position of every
@@ -2141,6 +2155,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_drive_review.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_drive_review.set_defaults(func=_cmd_drive_review)
     # [drive-review] - END
+
+    # [sign-reads] - START
+    p_sign_reads = sub.add_parser(
+        "sign-reads",
+        help="the exact frame of every sign the comma's vision read (signRead in the drive's logs), added to Sign "
+             "review next to the pictures at 1 a second: read_<1000 + frame>.png and sign_reads.jsonl per segment "
+             "(CPU only; reads the drive's logs first when Drive review has not; run preannotate after it)",
+    )
+    p_sign_reads.add_argument("routes", nargs="+", help="the drives, e.g. 00000160--ea56ae0f33")
+    p_sign_reads.add_argument("--no-scan", action="store_true", help="do not read the drive's logs, use the last scan")
+    p_sign_reads.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_sign_reads.add_argument("--ffmpeg")
+    p_sign_reads.add_argument("--ffprobe")
+    p_sign_reads.add_argument("--workers", type=int, default=int(os.environ.get("NNSLR_EXTRACT_WORKERS", EXTRACT_WORKERS)),
+                              help=f"segments at once (NNSLR_EXTRACT_WORKERS, default {EXTRACT_WORKERS})")
+    p_sign_reads.set_defaults(func=_cmd_sign_reads)
+    # [sign-reads] - END
 
     # [localizer] - START
     p_localize = sub.add_parser(

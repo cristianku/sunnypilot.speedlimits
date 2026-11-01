@@ -43,6 +43,7 @@ from pathlib import Path
 from nnslr_tools import localized
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl
 from nnslr_tools.manifest import parse_route_id
+from nnslr_tools.sign_reads import frame_order, frame_second
 
 GPS_RELATIVE_DIR = Path('derived') / 'gps'
 GPS_MAX_GAP_S = 2.0
@@ -131,12 +132,13 @@ def read_logs(paths: list[Path], *, python: str | None = None) -> dict[str, dict
     return result
 
 
-def _nearest_fix(segment_log_data: dict | None, output_index: int) -> tuple[list, float] | None:
-    """The fix nearest to frame ``output_index`` of the segment and its distance in time (s), within GPS_MAX_GAP_S."""
+def _nearest_fix(segment_log_data: dict | None, second: float) -> tuple[list, float] | None:
+    """The fix nearest to the frame at ``second`` of the segment (sign_reads.frame_second) and its distance in time
+    (s), within GPS_MAX_GAP_S."""
     if not segment_log_data or segment_log_data.get('first_frame_mono') is None or not segment_log_data['fixes']:
         return None
     fixes = segment_log_data['fixes']
-    when = segment_log_data['first_frame_mono'] + int(output_index * 1e9)
+    when = segment_log_data['first_frame_mono'] + int(second * 1e9)
     times = [fix[0] for fix in fixes]
     at = bisect.bisect_left(times, when)
     best = None
@@ -153,9 +155,9 @@ def _fix_position(fix: list) -> dict:
             'bearing_deg': round(fix[4], 1)}
 
 
-def frame_position(segment_log_data: dict | None, output_index: int) -> dict | None:
-    """The fix nearest to frame ``output_index`` of the segment, within GPS_MAX_GAP_S, or None."""
-    nearest = _nearest_fix(segment_log_data, output_index)
+def frame_position(segment_log_data: dict | None, second: float) -> dict | None:
+    """The fix nearest to the frame at ``second`` of the segment, within GPS_MAX_GAP_S, or None."""
+    nearest = _nearest_fix(segment_log_data, second)
     return None if nearest is None else _fix_position(nearest[0])
 
 
@@ -367,7 +369,7 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
     with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
         for part in pool.map(lambda group: read_logs(group, python=python), groups):
             data.update(part)
-    ordered = sorted(rows, key=lambda item: (item['segment_index'], item['output_index']))
+    ordered = sorted(rows, key=frame_order)
     fixes = []
     gaps = []
     errors = []
@@ -376,7 +378,7 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
         segment_data = data.get(str(path)) if path is not None else None
         if segment_data and segment_data.get('error'):
             errors.append(f"segment {row['segment_index']}: {segment_data['error']}")
-        nearest = _nearest_fix(segment_data, row['output_index'])
+        nearest = _nearest_fix(segment_data, frame_second(row))
         fixes.append(None if nearest is None else _fix_position(nearest[0]))
         gaps.append(None if nearest is None else nearest[1])
     precise, refused = localizer_positions(root, route, ordered, fixes, gaps, errors, distill)

@@ -11,12 +11,26 @@ export function currentRow(): FrameRow | null {
   return state.currentKey === null ? null : rowOf(state.currentKey);
 }
 
+/** The output index of the frames of the comma's reads: READ_INDEX_BASE + their frame in the video. */
+const READ_INDEX_BASE = 1000;
+
 /** The second of its segment's video a frame was taken at, else null. */
 export function segmentSecond(row: FrameRow): number | null {
   const fps = row.requested_sample_fps;
   const second = typeof row.media_time_s === 'number' ? row.media_time_s
     : typeof fps === 'number' && fps > 0 ? row.output_index / fps : null;
   return second === null || !Number.isFinite(second) ? null : second;
+}
+
+/** The frame of a sign the comma's vision read (nnslr_tools.sign_reads), between the pictures at 1 a second. */
+export function isReadFrame(row: FrameRow): boolean {
+  return row.output_index >= READ_INDEX_BASE;
+}
+
+/** "the comma read 20 here" (its value unknown: "the comma read a sign here"). */
+export function commaReadText(row: FrameRow): string {
+  const kph = row.comma_read_kph;
+  return 'the comma read ' + (typeof kph === 'number' ? kph : 'a sign') + ' here';
 }
 
 /** How far into the drive the frame is, "12:46" (1:02:05 past an hour): the segment's minute and the second in it;
@@ -28,7 +42,9 @@ export function driveTime(row: FrameRow): string | null {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return (hours > 0 ? hours + ':' + pad(minutes) : String(minutes)) + ':' + pad(total % 60);
+  // A frame of a comma read is between two seconds: "19:32.8".
+  const tenth = isReadFrame(row) ? '.' + (Math.floor(second * 10 + 1e-6) % 10) : '';
+  return (hours > 0 ? hours + ':' + pad(minutes) : String(minutes)) + ':' + pad(total % 60) + tenth;
 }
 
 /** "12:46 into the drive", else the segment and the image ("Segment 12 · image 46"). */

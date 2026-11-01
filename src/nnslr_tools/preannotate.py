@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools.manifest import parse_route_id, sha256_of
+from nnslr_tools.sign_reads import READS_MANIFEST, frame_order
 from nnslr_tools.sync import DEFAULT_DATA_ROOT
 from nnslr_tools.road_text import ROAD_MODEL_INFO, OCR_INFO
 
@@ -61,7 +62,12 @@ def discover_frames(root: Path, route: str) -> list[dict]:
         if not manifest.parent.name.isdigit():
             raise PreannotationError(f'non-numeric segment: {manifest.parent.name}')
         segment = int(manifest.parent.name)
-        for line in manifest.read_text().splitlines():
+        # The pictures at 1 a second, then the frames of the comma's reads (nnslr_tools.sign_reads).
+        reads = manifest.parent / READS_MANIFEST
+        lines = manifest.read_text().splitlines() + (reads.read_text().splitlines() if reads.is_file() else [])
+        for line in lines:
+            if not line.strip():
+                continue
             raw = json.loads(line)
             if not isinstance(raw, dict) or raw.get('route_id') != route or raw.get('segment_index') != segment:
                 raise PreannotationError(f'frame identity mismatch: {manifest}')
@@ -98,10 +104,11 @@ def discover_frames(root: Path, route: str) -> list[dict]:
                 'source_video_sha256': raw.get('source_video_sha256'),
                 'source_log_sha256': raw.get('source_log_sha256'),
                 # [frame-provenance] - END
+                **({'comma_read_kph': raw.get('comma_read_kph')} if 'comma_read_kph' in raw else {}),
             })
     if not rows:
         raise PreannotationError('frame manifests contain no frames')
-    return sorted(rows, key=lambda r: (r['segment_index'],r['output_index']))
+    return sorted(rows, key=frame_order)
 
 
 def model_path(root: Path) -> Path:

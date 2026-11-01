@@ -33,6 +33,7 @@ from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, MAX_DETECTIONS_PER_FRAME,
                                    REVIEW_CHANNELS, REVIEWER_KINDS, ReviewRejected, public_review,
                                    save_frame_review)
 from nnslr_tools.review_hints import frame_sizes_of, load_hints, suspicious_frames
+from nnslr_tools.sign_reads import frame_order
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
 GPS_FIELDS = ('latitude', 'longitude', 'speed_mps', 'bearing_deg')
@@ -102,10 +103,11 @@ class RouteSnapshot:
             output = row.get('output_index')
             if not isinstance(key, str) or type(segment) is not int or type(output) is not int:
                 continue
-            ordered.append((segment, output, key))
+            # In time order: the frames of the comma's reads between the pictures at 1 a second.
+            ordered.append((*frame_order(row), key))
         ordered.sort()
         self.order = []
-        for segment, output, key in ordered:
+        for _segment, _second, _output, key in ordered:
             self.order.append(key)
         self.position = {}
         for index in range(len(self.order)):

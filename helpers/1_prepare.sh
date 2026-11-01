@@ -3,6 +3,7 @@
 #   a. links the segments of the shared folder (COMMA_VIDEOS_DIR, the same videos
 #      openpilot.distill downloads) into data/raw/routes   (nnslr link-videos)
 #   b. extracts the frames (1 per second) of the routes not extracted yet   (nnslr extract-frames)
+#      plus the exact frame of every sign the comma read (signRead)         (nnslr sign-reads)
 #   c. proposes the signs on the frames of the routes without a report     (nnslr preannotate)
 #      and reads where the car was at each frame and in which country       (nnslr gps)
 # Already done work is skipped, so it can be run after every fetch. Next: helpers/2_review.sh.
@@ -18,7 +19,7 @@
 #
 # Without --again a route that already has a pre-annotation report is never processed again. With it,
 # the new report gets the confirmed frames of the old one (nnslr preannotate --keep-reviews), copied
-# before it becomes the current one. Segments of a route that arrive later stay unused (helpers/status.sh
+# before it becomes the current one; it also adds the frames of the comma's reads. Segments of a route that arrive later stay unused (helpers/status.sh
 # shows them).
 # Every route writes its own log in data/logs/prepare/<route>.log.
 # Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face), ours (our cutter,
@@ -71,6 +72,14 @@ write_batch() {
 # Extract (when needed) and pre-annotate one route; all its output goes to its log.
 # Re-extracting is safe here: only routes without a report get this far.
 # < /dev/null: ffmpeg reads commands from stdin and would eat the terminal (or the caller's script).
+# The exact frame of every sign the comma read, next to the pictures at 1 a second (nnslr sign-reads): without the
+# drive's logs there is none, and the route is proposed all the same.
+sign_reads() {
+  echo "$1: the frames of the signs the comma read..."
+  "$NN" sign-reads "$1" < /dev/null >> "$2" 2>&1 \
+    || echo "$1: frames of the comma's reads not added (see $2)"
+}
+
 prepare_route() {
   local route="$1"
   local log="$LOG_DIR/$route.log"
@@ -78,6 +87,7 @@ prepare_route() {
   if [ "${PREPARE_AGAIN:-0}" = 1 ]; then
     # A route with frames still to confirm: the confirmed ones are copied onto the new report.
     todo repropose | grep -qx "$route" || { echo "$route: every frame confirmed, left as it is"; return 0; }
+    sign_reads "$route" "$log"
     echo "$route: proposing the signs again (${NNSLR_PROPOSER:-vietnam})..."
     "$NN" preannotate --route "$route" --keep-reviews < /dev/null >> "$log" 2>&1 \
       || { echo "$route: proposing failed (see $log)"; return 1; }
@@ -91,6 +101,7 @@ prepare_route() {
     worked=1
   fi
   if todo preannotate | grep -qx "$route"; then
+    sign_reads "$route" "$log"
     echo "$route: proposing the signs (${NNSLR_PROPOSER:-vietnam})..."
     "$NN" preannotate --route "$route" < /dev/null >> "$log" 2>&1 \
       || { echo "$route: proposing failed (see $log)"; return 1; }

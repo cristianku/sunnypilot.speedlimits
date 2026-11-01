@@ -70,6 +70,7 @@ from nnslr_tools.annotations import atomic_write, jsonl_bytes, load_jsonl, stric
 from nnslr_tools.car_motion import frame_motion, load_motion
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
+from nnslr_tools.sign_reads import is_read_frame
 
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
@@ -384,7 +385,9 @@ def build_road_types(root: Path, route: str, positions: list[dict], road_map: Ro
                      parking: ParkingMap | None = None) -> dict:
     """Writes the road types of a route; returns how many frames of each type. parking: the car parks, read from the
     data root when not given."""
-    ordered = sorted(positions, key=lambda item: (item.get('segment_index') or 0, item.get('output_index') or 0))
+    # At 1 a second: the frames of the comma's reads (sign_reads) are only for the sign review.
+    ordered = sorted((item for item in positions if not is_read_frame(item)),
+                     key=lambda item: (item.get('segment_index') or 0, item.get('output_index') or 0))
     # The car's own speed where nnslr car-motion read the drive: the stretches without GPS in a garage.
     motion = load_motion(root, route)
     speeds = [(frame_motion(motion, item.get('segment_index'), item.get('output_index')) or {}).get('v_ego')
