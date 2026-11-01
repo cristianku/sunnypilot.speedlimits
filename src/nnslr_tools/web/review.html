@@ -177,11 +177,13 @@ input::placeholder { color: var(--placeholder); }
 .ai-box.delete { stroke-dasharray: 2 4; }
 .ai-tag { fill: var(--ov-ai); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
 #draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-/* What the comma had at this moment (car-moment.ts): on the photo, top left, never in the way of the pointer. */
-.car-moment { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 16px); display: flex; flex-wrap: wrap; gap: 2px 10px;
+/* The frame's country and what the comma had at this moment (car-moment.ts): on the photo, top left, never in the way
+   of the pointer. */
+.car-moment { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 16px); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
   padding: 4px 10px; border-radius: 10px; pointer-events: none; background: rgba(8, 11, 16, 0.72);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #e8ecf3; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .car-moment > span { white-space: nowrap; }
+.car-moment .country { font-size: 15px; line-height: 1.1; }
 .car-moment b { font-weight: 500; color: #9aa4b2; }
 .car-moment span span { font-weight: 700; }
 .car-moment .ahead { font-weight: 400; color: #9aa4b2; }
@@ -427,8 +429,6 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
 /* A variable speed limit: the numbers as its lit display, white on black inside the red ring. */
 .signs.led .sign:not(.unknown) { background: #111; color: #f5f5f5; }
-.country-line { display: flex; align-items: center; gap: 8px; margin: -4px 0 0; font-size: 13px; color: var(--muted); }
-.country-line .flag { font-size: 18px; line-height: 1; }
 .drive-link { margin: -6px 0 0; font-size: 13px; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }

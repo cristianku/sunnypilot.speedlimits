@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // The photo and what is drawn on it: the boxes with their dark under-stroke and labels, the corner handles of
 // the selected box, the boxes of the second reading, the AI suggestion not applied yet (it never takes the
-// pointer), the box being drawn, and what the comma had at that moment (map, vision memory, car: car-moment.ts).
+// pointer), the box being drawn, and on its top left the frame's country and what the comma had at that moment (map,
+// vision memory, car: car-moment.ts).
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carMomentOf} from './car-moment';
 import {coarsePointer} from './dom';
+import {countryOf} from './frames';
 import {drawAi, drawStage, sceneScale} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
-import {hintsOf, state} from './store';
+import {hintsOf, report, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
 import {useScreenSize} from './use-layout';
 
@@ -41,6 +43,18 @@ const aiBoxes = computed(() => {
     props.row.width);
 });
 const moment = computed(() => carMomentOf(props.row));
+const country = computed(() => countryOf(props.row, props.work));
+/** The flag of a country code: its two letters as regional indicator symbols ("CH" → 🇨🇭). */
+function flagOf(code: string): string {
+  return [...code.toUpperCase()].map((letter) => String.fromCodePoint(0x1f1a5 + letter.charCodeAt(0))).join('');
+}
+// From the GPS, shown only: the reviewer does not choose it (REST and MCP can still send another one).
+const countryText = computed(() => {
+  const code = country.value;
+  if (!code) return props.row.gps === undefined ? 'Country not known yet: GPS not read for this route' : 'Country not known: no GPS position';
+  const source = props.row.country_from === 'nearest_fix' ? 'from the GPS of a nearby frame' : 'from the GPS';
+  return (report.countries[code] ?? code) + ' · ' + source;
+});
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 </script>
 
@@ -92,11 +106,13 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
       <rect id="draft" :visibility="state.draft ? 'visible' : 'hidden'" :x="state.draft?.x" :y="state.draft?.y"
             :width="state.draft?.width" :height="state.draft?.height"></rect>
     </svg>
-    <div v-if="moment" class="car-moment" id="carMoment" :class="{differ: moment.differ}" :style="visibility"
-         title="What the comma had at this moment, from its logs (km/h)">
-      <span><b>Map</b> <span id="carMap">{{ moment.map }}</span><span v-if="moment.ahead" class="ahead"> → {{ moment.ahead }}</span></span>
-      <span><b>Vision</b> <span id="carVision">{{ moment.vision }}</span></span>
-      <span><b>Car</b> <span id="carLimit">{{ moment.car }}</span></span>
+    <div class="car-moment" id="carMoment" :class="{differ: moment?.differ}" :style="visibility">
+      <span class="country" id="country" :data-country="country ?? ''" :title="countryText" :aria-label="countryText">{{ country ? flagOf(country) : '?' }}</span>
+      <template v-if="moment">
+        <span><b>Map</b> <span id="carMap">{{ moment.map }}</span><span v-if="moment.ahead" class="ahead"> → {{ moment.ahead }}</span></span>
+        <span><b>Vision</b> <span id="carVision">{{ moment.vision }}</span></span>
+        <span><b>Car</b> <span id="carLimit">{{ moment.car }}</span></span>
+      </template>
     </div>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
   </div>

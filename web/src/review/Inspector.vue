@@ -14,7 +14,7 @@ import RoutePick from './RoutePick.vue';
 import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
 import {selectedBox} from './current';
-import {countryOf, reasonsOf, segmentSecond} from './frames';
+import {reasonsOf, segmentSecond} from './frames';
 import OtherFields from './OtherFields.vue';
 import SecondReading from './SecondReading.vue';
 import {report, state} from './store';
@@ -27,18 +27,6 @@ const carry = computed(() => carryState(props.row));
 // The previous frame has a confirmed sign and this one nothing: carrying it over is the likely next move.
 const carryHint = computed(() => carry.value.enabled
   && reasons.value.some((reason) => reason.rule === 'd' && reason.text.startsWith('the previous frame')));
-const country = computed(() => countryOf(props.row, props.work));
-/** The flag of a country code: its two letters as regional indicator symbols ("CH" → 🇨🇭). */
-function flagOf(code: string): string {
-  return [...code.toUpperCase()].map((letter) => String.fromCodePoint(0x1f1a5 + letter.charCodeAt(0))).join('');
-}
-// From the GPS, shown only: the reviewer does not choose it (REST and MCP can still send another one).
-const countryText = computed(() => {
-  const code = country.value;
-  if (!code) return props.row.gps === undefined ? 'Country not known yet: GPS not read for this route' : 'Country not known: no GPS position';
-  const source = props.row.country_from === 'nearest_fix' ? 'from the GPS of a nearby frame' : 'from the GPS';
-  return (report.countries[code] ?? code) + ' · ' + source;
-});
 // On the server: what the car did at this moment (its limit, the map's, the vision's), in Drive review.
 const driveHref = computed(() => report.apiBase === null ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
@@ -54,7 +42,6 @@ const driveHref = computed(() => report.apiBase === null ? null : '/drive-review
         <!-- Off, it still answers a press: the reason why appears on the status line. -->
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
-      <p class="country-line" id="country" :data-country="country ?? ''"><span v-if="country" class="flag" aria-hidden="true">{{ flagOf(country) }}</span>{{ countryText }}</p>
       <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Drive review →</a></p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}<button v-if="carryHint" type="button" class="btn small carry-hint" @click="applyPrevious(); releaseFocus($event)">Apply previous <kbd class="keycap">A</kbd></button></template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>
