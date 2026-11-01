@@ -22,6 +22,8 @@ import {sizeText, useModels} from './models';
 import {useNetworkStart} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
 import PipelineSection from './PipelineSection.vue';
+import {useRoadSigns} from './road-signs';
+import RoadSignsPicker from './RoadSignsPicker.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import TrainingCharts from './TrainingCharts.vue';
@@ -152,6 +154,8 @@ const versionsOf = (role: ModelRole) => roleOf(role)?.versions;
 const starts = {cutter: useNetworkStart('cutter', toRef(props, 'status'), versionsOf),
   decider: useNetworkStart('decider', toRef(props, 'status'), versionsOf),
   road_type: useNetworkStart('road_type', toRef(props, 'status'), versionsOf)};
+/** How the scene network reads the signs (road-signs.ts), the same in its section and in the pipeline. */
+const roadSigns = useRoadSigns(versionsOf);
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_cutter', 'A new SignNet, the cutter the comma runs, for ' + (cutterFamilies.value === 'all' ? 'every sign'
     : 'speed signs only') + starts.cutter.words + ': it looks at the ' + cutterBand.value + ' band at the top of the frame. '
@@ -167,7 +171,7 @@ const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
 const ROAD_ACTIONS = computed((): [ActionName, string][] => [
   ['train_road_type', 'Trains with memory and the motorway sign (where each entry ramp of the map starts), without the sign '
     + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car'
-    + starts.road_type.words + '. About 20 minutes, 40 the first time.'],
+    + starts.road_type.words + roadSigns.words + '. About 20 minutes, 40 the first time.'],
 ]);
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
@@ -286,11 +290,12 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'road'">
         <NetworkStartPicker :start="starts.road_type" id="train-road-start"/>
+        <RoadSignsPicker :signs="roadSigns" id="train-road-signs"/>
         <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, starts.road_type.option)"/>
+                    @run="(name, state) => emit('run', name, state, undefined, {...starts.road_type.option, ...roadSigns.option})"/>
         <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
       </template>
-      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :starts="starts" :fresh="numbers?.fresh ?? 0"
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :starts="starts" :road-signs="roadSigns" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
                        @run="(name, state, start) => emit('run', name, state, start)"/>

@@ -92,6 +92,10 @@ TRAININGS = {
          'help': 'Stretches of drive in each step of the training: more takes more of the GPU.', 'default': 12,
          'min': 1, 'max': 128, 'step': 1, 'unit': 'stretches'},
         _workers('The processes reading the frames.'),
+        {'key': 'sign_workers', 'env': 'NNSLR_SIGN_WORKERS', 'label': 'Processes reading the signs',
+         'help': 'The processes reading the signs and the car’s motion of the drives not read yet, each with its '
+                 'ffmpeg, on the CPU. Only the speed changes. Default: half the cores.',
+         'default': max(1, (os.cpu_count() or 8) // 2), 'min': 1, 'max': 64, 'step': 1, 'unit': 'workers'},
     ), 'fixed': ()},
 }
 

@@ -70,6 +70,11 @@ export interface ActionOptions {
    * network's start (train_cutter, train_decider, train_road_type): "fresh" (random weights for SignNet, ImageNet for the
    * others), or the id of a finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
+  /** The classifier that reads the signs of the drives for the scene network (train_road_type): "car" (the car's), or the
+   * id of a finished classifier of Models (classifier:<run>/classifier); and its board input: "auto" (when that
+   * classifier read the green boards on enough drives), "on" or "off" (road-signs.ts). */
+  classifier?: string;
+  boards?: 'auto' | 'on' | 'off';
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
 export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type';

@@ -75,6 +75,13 @@ CLASSIFIER_ID = re.compile(r'classifier:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/classi
 NETWORK_FRESH = 'fresh'
 NETWORK_STARTS = {'train_cutter': ('cutter', 'NNSLR_CUTTER_INIT_FROM'), 'train_decider': ('decider', 'NNSLR_DECIDER_INIT_FROM'),
                   'train_road_type': ('road_type', 'NNSLR_ROAD_TYPE_INIT_FROM')}
+# The classifier that reads the signs of the drives for the scene network ({'classifier': ...}): the car's (the default,
+# the one of the sunnypilot clone), or a finished classifier with "not a sign" of Models by its id, before it is on the
+# car (one that reads the green boards); its reader-best.pt becomes NNSLR_ROAD_TYPE_CLASSIFIER.
+ROAD_TYPE_CAR_CLASSIFIER = 'car'
+# The scene network's board input ({'boards': ...}, NNSLR_ROAD_TYPE_BOARDS): with it when the classifier read the green
+# boards on enough drives (auto, the default), always (on: refused when it read too few), never (off).
+ROAD_TYPE_BOARDS = {'auto': '', 'on': '1', 'off': '0'}
 # A split file's sha256 (splits/latest.json).
 SPLIT_SHA = re.compile(r'[0-9a-f]{64}')
 # The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
@@ -126,7 +133,8 @@ CUTTER_FAMILY = 'all'
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('families', 'start'), 'train_decider': ('start',), 'train_road_type': ('start',),
+ACTION_OPTIONS = {'train_cutter': ('families', 'start'), 'train_decider': ('start',),
+                  'train_road_type': ('start', 'classifier', 'boards'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
@@ -265,6 +273,13 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('from ' + fields['init'])
     if fields.get('dataset kind'):
         chips.append(fields['dataset kind'] + ' dataset')
+    # The scene network's signs (run_road_type.sh "signs read:   <a reader-best.pt>") and its board input.
+    if fields.get('signs read', '').endswith('.pt'):
+        chips.append('signs by ' + _start_words(fields['signs read']))
+    if '--boards' in flags:
+        chips.append('board input')
+    elif '--no-boards' in flags:
+        chips.append('no board input')
     return chips
 
 
@@ -1465,6 +1480,35 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
         return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
 
+    def _road_type_signs(self, classifier: object, boards: object) -> dict:
+        """The environment of how the scene network reads the signs: nothing for the car's classifier and the board
+        input when it read the boards (the defaults), else NNSLR_ROAD_TYPE_CLASSIFIER, the reader-best.pt of a finished
+        classifier with "not a sign" of Models given by its id ('classifier:<run>/classifier'), and
+        NNSLR_ROAD_TYPE_BOARDS (ROAD_TYPE_BOARDS)."""
+        environment = {}
+        if boards is not None:
+            if boards not in ROAD_TYPE_BOARDS:
+                raise PanelError(400, 'bad_option', 'The board input is auto, on or off.')
+            if ROAD_TYPE_BOARDS[boards]:
+                environment['NNSLR_ROAD_TYPE_BOARDS'] = ROAD_TYPE_BOARDS[boards]
+        if classifier is None or classifier == ROAD_TYPE_CAR_CLASSIFIER:
+            return environment
+        if not isinstance(classifier, str):
+            raise PanelError(400, 'bad_option', 'The classifier is a string: car or the id of a classifier.')
+        entry = next((entry for entry in self.models_index.artifacts(('classifier',))['classifier']
+                      if entry['id'] == classifier), None)
+        if entry is None or not CLASSIFIER_ID.fullmatch(classifier) or entry.get('part') != 'classifier':
+            raise PanelError(400, 'bad_option', 'Unknown classifier to read the signs: choose one with “not a sign” of Models.')
+        if not entry['finished']:
+            raise PanelError(400, 'bad_option', 'That classifier has not finished its training: choose a finished one.')
+        from nnslr_tools.chain import resolve_model
+        try:
+            weights = resolve_model(classifier, 'classifier', self.root)['path']
+        except ValueError:
+            raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
+        environment['NNSLR_ROAD_TYPE_CLASSIFIER'] = str(weights)
+        return environment
+
     def _network_start(self, action: str, start: object) -> dict:
         """The environment of where the cutter's, the applicability's or the scene network's training starts (one of
         NETWORK_STARTS): nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in
@@ -1573,6 +1617,11 @@ class Panel:
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
+        for key in ('classifier', 'boards'):
+            if (options or {}).get(key) is not None and action != 'train_road_type':
+                raise PanelError(400, 'bad_option', 'Only "Train the scene network" takes a ' + key + '.')
+        if action == 'train_road_type':
+            start_env.update(self._road_type_signs((options or {}).get('classifier'), (options or {}).get('boards')))
         cutter_choice = (options or {}).get('cutter')
         if cutter_choice is not None and action != 'train_classifier':
             raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')

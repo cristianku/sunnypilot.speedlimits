@@ -105,6 +105,8 @@ def test_the_same_defaults_as_the_scripts():
             default = _script_default(training['script'], setting['env'])
             if setting['key'] == 'workers':
                 assert default == '$WORKERS_DEFAULT'
+            elif setting['key'] == 'sign_workers':
+                assert default == '$SIGN_WORKERS_DEFAULT'
             elif setting.get('same_as'):
                 assert default == '$' + setting['same_as'].upper()
             else:

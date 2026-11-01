@@ -292,3 +292,51 @@ def test_the_fourth_version_shows_the_cars_motion_its_junction_branch_and_the_tu
                               'junction_branch': None, 'junction_stage': None})
     assert (older['motion'], older['speed_source']) == (False, 'gps')
     assert (older['junctions']['turn_rule'], older['junctions']['branch']) == (None, None)
+
+
+def test_the_scene_network_reads_the_signs_with_a_chosen_classifier_and_takes_the_board_input(root, checkout, monkeypatch):
+    import pytest
+
+    from nnslr_tools.panel import PanelError, _settings_of
+    from test_panel import finished, full_log
+    from test_panel_runs import make_classifier_run, write
+    script = road_type_script(checkout)
+    script.write_text(script.read_text() + 'echo "signs=${NNSLR_ROAD_TYPE_CLASSIFIER:-car} boards=${NNSLR_ROAD_TYPE_BOARDS:-auto}"\n')
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    done = make_classifier_run(root, 'c1')
+    make_classifier_run(root, 'c2', upto='classifier')
+    write(root / 'runs/r1/reader/reader-best.pt', 'weights')
+    # The car's classifier and the board input when it read the boards, as before: nothing in the environment.
+    job = panel.start('train_road_type', {'classifier': 'car', 'boards': 'auto'})
+    finished(panel, job['id'])
+    assert re.search(r'^signs=car boards=auto$', full_log(panel, job['id']), re.M)
+    import time
+    time.sleep(1.1)  # a job's log is named by its second
+    # A finished classifier with "not a sign" of Models, by its id: its reader-best.pt; the board input always.
+    job = panel.start('train_road_type', {'classifier': 'classifier:c1/classifier', 'boards': 'on'})
+    finished(panel, job['id'])
+    assert re.search(r'^signs=' + re.escape(str((done / 'classifier/reader-best.pt').resolve())) + ' boards=1$',
+                     full_log(panel, job['id']), re.M)
+    refused = {('classifier:nothing/classifier', None): 'Unknown classifier to read the signs: choose one with “not a sign” of Models.',
+               ('classifier:r1/reader', None): 'Unknown classifier to read the signs: choose one with “not a sign” of Models.',
+               ('/etc/passwd', None): 'Unknown classifier to read the signs: choose one with “not a sign” of Models.',
+               ('classifier:c2/classifier', None): 'That classifier has not finished its training: choose a finished one.',
+               (None, 'yes'): 'The board input is auto, on or off.'}
+    for (classifier, boards), message in refused.items():
+        with pytest.raises(PanelError) as error:
+            panel.start('train_road_type', {'classifier': classifier, 'boards': boards})
+        assert (error.value.status, error.value.message) == (400, message), (classifier, boards)
+    # Only the scene network takes them.
+    for key in ('classifier', 'boards'):
+        with pytest.raises(PanelError) as error:
+            panel.start('train_decider', {key: 'car'})
+        assert (error.value.status, error.value.message) == (400, 'Only "Train the scene network" takes a ' + key + '.')
+    # The job's chips: the classifier that read the signs, and the board input.
+    log = root / 'road-type.log'
+    log.write_text('== scripts/run_road_type.sh r\nrun:          r\nsettings:     --epochs 60 --boards\n'
+                   'signs read:   /d/runs/2026-11-01_1812-classifier/classifier/reader-best.pt\n')
+    assert _settings_of(log, 'train_road_type') == ['60 epochs', 'signs by 2026-11-01_1812-classifier', 'board input']
+    log.write_text('== scripts/run_road_type.sh r\nrun:          r\nsettings:     --epochs 60 --no-boards\n'
+                   'signs read:   by the classifier of the car\n')
+    assert _settings_of(log, 'train_road_type') == ['60 epochs', 'no board input']
