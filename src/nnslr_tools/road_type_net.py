@@ -3,7 +3,9 @@
 Each second the car gives it the road frame (resized to 256 x 144, road_type_data), its speed and, with signs=True,
 the seconds since its memory confirmed a motorway sign; with motion=True also its own motion of the last second
 (car_motion: the heading change and the largest yaw rate, the steering angle, the blinkers, each with a known flag;
-the car's own signals, never the map). A small pretrained encoder (torchvision's MobileNetV3-small, ImageNet weights)
+the car's own signals, never the map); with boards=True also the seconds since its memory confirmed a green board
+towards a motorway or an expressway (road_type_signs: in Switzerland where the entry ramp starts, and at the
+interchanges; the car never takes a limit from one, it only tells this network that a carriageway is near). A small pretrained encoder (torchvision's MobileNetV3-small, ImageNet weights)
 makes 128 numbers of the frame, the other inputs are added, and a GRU of 128 keeps what the network saw before: the merge of a ramp, the first houses of a town and the end of them are
 found from how the picture changes over seconds, not from one frame. The output is the probability of each class
 (road_type_data.CLASSES). ``memory='none'`` is the same encoder and speed with a small head per frame: the network
@@ -13,7 +15,7 @@ Training (train_road_type): windows of WINDOW seconds cut from the train sequenc
 them around a change of road type; half the batches start from the memory of BURN_IN seconds before the window (as on
 the car, where the memory is never empty after the first seconds), the others from zeros; per sequence the same
 random colour and framing; a second dropped now and then; the speed scaled by +-5 % and, in one sequence in ten,
-unknown; the sign missed or misread now and then; the car's motion unknown in MOTION_DROP_SHARE of the windows and its
+unknown; the sign and the board missed or misread now and then; the car's motion unknown in MOTION_DROP_SHARE of the windows and its
 yaw or its carState part in MOTION_PART_SHARE, so that the network still works without them. The speed input is
 carState.vEgo when the motion is read (the GPS speed where it is missing). Loss: cross-entropy weighted by the frame's
 weight (road_type_data) and by 1 / sqrt(class frequency); the best epoch by the road type's own measure on validation
@@ -33,7 +35,8 @@ per 10 km in town and outside; beside it the car's turn alone as a plain rule (t
 least TURN_DEGREES on a radius of at most TURN_RADIUS_M, the radius from the path and the heading).
 
 The ONNX export (export_road_type_onnx) is one STEP (step_input_names, step_output_names): image (1, 3, 144, 256)
-float RGB 0..1, speed (1, 2), sign (1, 2) with signs, motion (1, MOTION_INPUTS) with motion, hidden (1, 128) and
+float RGB 0..1, speed (1, 2), sign (1, 2) with signs, motion (1, MOTION_INPUTS) with motion, board (1, 2) with
+boards, hidden (1, 128) and
 junction_hidden (1, 128) with a junction GRU of its own in; probabilities (1, classes) and hidden_out (1, 128) out, then
 junction (1, 2) with the junction head and junction_hidden_out. The car keeps the hidden states and gives them back
 the next second (zeros at the start). The GRU is written out with matrix products, sigmoid and tanh (no ONNX GRU node), the
@@ -64,6 +67,8 @@ from nnslr_tools.road_type_metrics import (AFTER_MERGE_SECONDS, JUNCTION_GAP_SEC
 from nnslr_tools.road_type_signs import NO_SIGN
 
 SIGN_INPUTS = 2
+BOARD_INPUTS = 2
+BOARD_CLASS = 'other_sign:motorway_direction'  # the car's vision.BOARD_SIGNS
 JUNCTION_OUTPUTS = ('in_junction', 'passed')
 JUNCTION_SHARE = 0.2  # of the train windows around a "passed" (taken from the windows drawn anywhere)
 JUNCTION_LOSS = 1.0  # the junction head's loss beside the road type's
@@ -91,6 +96,10 @@ SIGN_FAKE_SHARE = 0.05
 # The sign of a train window comes up to SIGN_JITTER seconds earlier or later: the reviewed 4.01 signs were seen from
 # 7 s before to 6 s after the first second of the map's ramp, and the car confirms a sign while it sees it.
 SIGN_JITTER = 4.0
+# The board input (road_type_signs: the green boards the car's code confirmed) is missed, misread and moved as the sign
+# input is (SIGN_DROP_SHARE, SIGN_FAKE_SHARE, SIGN_JITTER), each on its own. A start without it (--init-from) gets its
+# columns of the memory's input as zeros: the network starts as the start and learns to read it.
+MIN_BOARD_DRIVES = 3  # boards=None: the board input when the car's code confirmed boards on at least so many drives
 # The car's own motion (car_motion: the turn of each second, the steering wheel, the blinkers): in MOTION_DROP_SHARE of
 # the windows all of it is unknown (a car or a log without it: the network must work without), in MOTION_PART_SHARE
 # one of its parts (the yaw, or the carState signals).
@@ -144,12 +153,14 @@ def _print(text: str) -> None:
 
 def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN,
                         signs: bool = False, junctions: bool = False, motion: bool = False,
-                        junction_branch: str = 'shared', classes: int | None = None):
+                        junction_branch: str = 'shared', classes: int | None = None, boards: bool = False):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, speed (B, T, 2), hidden (B, hidden)
-    or None, sign (B, T, 2) or None, motion (B, T, MOTION_INPUTS) or None, junction_hidden (B, hidden) or None) ->
+    or None, sign (B, T, 2) or None, motion (B, T, MOTION_INPUTS) or None, junction_hidden (B, hidden) or None,
+    board (B, T, 2) or None) ->
     (logits (B, T, classes), hidden (B, hidden), junction logits (B, T, 2) or None, junction hidden (B, hidden) or
     None). With signs, the input of the memory has the sign input too (road_type_signs.sign_features; None: no sign
-    seen); with motion, the car's own motion (car_motion.motion_features; None: unknown); with junctions, a junction
+    seen); with motion, the car's own motion (car_motion.motion_features; None: unknown); with boards, the board
+    input after it (road_type_signs.sign_features of the last green board; None: none seen); with junctions, a junction
     head (in_junction, passed: JUNCTION_OUTPUTS) on the same memory (junction_branch 'shared') or on a junction GRU of
     its own over the same input ('separate', with memory only: its own hidden state). classes: the road types it
     answers, len(CLASSES) when None (a checkpoint trained before zone30 has six)."""
@@ -161,7 +172,7 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
         raise ValueError(f'memory must be one of {sorted(MEMORY_NAMES)}')
     if junction_branch not in JUNCTION_BRANCHES or (junction_branch == 'separate' and (memory != 'gru' or not junctions)):
         raise ValueError(f'junction_branch {junction_branch!r}: shared, or separate with memory and the junction head')
-    extra = 2 + (SIGN_INPUTS if signs else 0) + (MOTION_INPUTS if motion else 0)
+    extra = 2 + (SIGN_INPUTS if signs else 0) + (MOTION_INPUTS if motion else 0) + (BOARD_INPUTS if boards else 0)
     classes = len(data.CLASSES) if classes is None else classes
 
     class RoadTypeNet(nn.Module):
@@ -169,7 +180,7 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
             super().__init__()
             backbone = mobilenet_v3_small(weights=MobileNet_V3_Small_Weights.IMAGENET1K_V1 if pretrained else None)
             self.memory, self.hidden_size, self.signs, self.junctions = memory, hidden, signs, junctions
-            self.motion, self.junction_branch = motion, junction_branch
+            self.motion, self.junction_branch, self.boards = motion, junction_branch, boards
             self.register_buffer('mean', torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1))
             self.register_buffer('std', torch.tensor(IMAGENET_STD).view(1, 3, 1, 1))
             self.backbone = backbone.features
@@ -203,9 +214,9 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
             x = self.backbone((images - self.mean) / self.std)
             return self.project(x.mean(dim=(2, 3)))
 
-        def inputs(self, encoded, speed, sign=None, motion=None):
-            """The input of the memory (..., features + 2 [+ 2] [+ MOTION_INPUTS]): the frame's numbers, the speed,
-            the sign input, the car's motion."""
+        def inputs(self, encoded, speed, sign=None, motion=None, board=None):
+            """The input of the memory (..., features + 2 [+ 2] [+ MOTION_INPUTS] [+ 2]): the frame's numbers, the
+            speed, the sign input, the car's motion, the board input."""
             parts = [encoded, speed.to(encoded.dtype)]
             if self.signs:
                 if sign is None:
@@ -215,12 +226,16 @@ def build_road_type_net(memory: str = 'gru', pretrained: bool = True, features: 
                 if motion is None:
                     motion = encoded.new_tensor(NO_MOTION).expand(*encoded.shape[:-1], MOTION_INPUTS)
                 parts.append(motion.to(encoded.dtype))
+            if self.boards:
+                if board is None:
+                    board = encoded.new_tensor(NO_SIGN).expand(*encoded.shape[:-1], BOARD_INPUTS)
+                parts.append(board.to(encoded.dtype))
             return torch.cat(parts, dim=-1)
 
-        def forward(self, images, speed, hidden=None, sign=None, motion=None, junction_hidden=None):
+        def forward(self, images, speed, hidden=None, sign=None, motion=None, junction_hidden=None, board=None):
             b, t = images.shape[:2]
-            return self.run(self.inputs(self.encode(images.flatten(0, 1)).view(b, t, -1), speed, sign, motion), hidden,
-                            junction_hidden)
+            return self.run(self.inputs(self.encode(images.flatten(0, 1)).view(b, t, -1), speed, sign, motion, board),
+                            hidden, junction_hidden)
 
         def run(self, x, hidden=None, junction_hidden=None):
             """The memory's input (B, T, features + extra) -> (logits, hidden, junction logits or None, junction
@@ -254,9 +269,10 @@ def gru_step(gru, x, hidden):
 
 
 def step_input_names(model) -> list[str]:
-    """The inputs of the car's step, in order: image, speed, [sign,] [motion,] hidden[, junction_hidden]."""
+    """The inputs of the car's step, in order: image, speed, [sign,] [motion,] [board,] hidden[, junction_hidden]."""
     return ['image', 'speed', *(['sign'] if getattr(model, 'signs', False) else []),
-            *(['motion'] if getattr(model, 'motion', False) else []), 'hidden',
+            *(['motion'] if getattr(model, 'motion', False) else []),
+            *(['board'] if getattr(model, 'boards', False) else []), 'hidden',
             *(['junction_hidden'] if getattr(model, 'junction_branch', 'shared') == 'separate' else [])]
 
 
@@ -268,13 +284,13 @@ def step_output_names(model) -> list[str]:
 
 def step_module(model):
     """The one-second step of the car: the inputs of step_input_names ((1, 3, H, W) 0..1, (1, 2), [(1, 2),]
-    [(1, MOTION_INPUTS),] (1, hidden)[, (1, hidden)]) -> the outputs of step_output_names (probabilities (1, classes),
+    [(1, MOTION_INPUTS),] [(1, 2),] (1, hidden)[, (1, hidden)]) -> the outputs of step_output_names (probabilities (1, classes),
     hidden_out (1, hidden)[, junction (1, 2): sigmoid probabilities of JUNCTION_OUTPUTS][, junction_hidden_out])."""
     torch = _torch()
     from torch import nn
 
-    def advance(image, speed, hidden, sign=None, motion=None, junction_hidden=None):
-        x = model.inputs(model.encode(image), speed, sign, motion)
+    def advance(image, speed, hidden, sign=None, motion=None, junction_hidden=None, board=None):
+        x = model.inputs(model.encode(image), speed, sign, motion, board)
         junction_out = None
         if model.memory == 'gru':
             hidden_out = gru_step(model.gru, x, hidden)
@@ -315,10 +331,10 @@ def step_module(model):
 
 
 def step_example(model, torch=None):
-    """Zero inputs of one step, in the order of step_input_names (no sign seen, the motion unknown)."""
+    """Zero inputs of one step, in the order of step_input_names (no sign or board seen, the motion unknown)."""
     torch = torch or _torch()
     values = {'image': torch.zeros(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), 'speed': torch.zeros(1, 2),
-              'sign': torch.tensor([NO_SIGN]), 'motion': torch.tensor([NO_MOTION]),
+              'sign': torch.tensor([NO_SIGN]), 'motion': torch.tensor([NO_MOTION]), 'board': torch.tensor([NO_SIGN]),
               'hidden': torch.zeros(1, model.hidden_size), 'junction_hidden': torch.zeros(1, model.hidden_size)}
     return tuple(values[name] for name in step_input_names(model))
 
@@ -396,6 +412,29 @@ def attach_signs(dataset: dict, root: Path, source: str = signs_data.DEFAULT_SOU
     return coverage
 
 
+def attach_boards(dataset: dict, root: Path) -> dict:
+    """The board input of every frame (dataset['boards'][route], (frames, 2)) from the green boards towards a motorway
+    the car's code confirmed (read before by nnslr road-type-signs; a drive read before the boards, or not read:
+    none seen) and their times (dataset['board_times']). Returns the coverage: the drives read with the boards, the
+    boards and the drives with one, and the classifier they were read with (None: the car's)."""
+    dataset['boards'], dataset['board_times'] = {}, {}
+    read, classifiers = [], set()
+    for route, frames in dataset['frames'].items():
+        record = signs_data.load_signs(root, route)
+        if record and 'boards' in record:
+            read.append(route)
+            classifiers.add(record.get('classifier'))
+        times = signs_data.board_times(record)
+        dataset['board_times'][route] = times
+        dataset['boards'][route] = signs_data.frame_sign_features(frames, times)
+    coverage = {'drives': len(dataset['frames']), 'read': len(read),
+                'boards': sum(len(t) for t in dataset['board_times'].values()),
+                'drives_with_boards': sum(1 for t in dataset['board_times'].values() if t),
+                'classifiers': sorted(str(c) for c in classifiers)}
+    dataset['board_coverage'] = coverage
+    return coverage
+
+
 def attach_motion(dataset: dict, root: Path, *, v_ego: bool = True) -> dict:
     """The car's own motion at every frame (dataset['motion'][route], (frames, MOTION_INPUTS); NO_MOTION where the
     drive's logs were not read: nnslr car-motion) and, with v_ego, the speed input from carState.vEgo
@@ -431,6 +470,7 @@ def _sequence_arrays(dataset: dict, run: dict) -> dict:
     frames = dataset['frames'][route]
     chosen = [frames[p] for p in positions]
     signs = dataset.get('signs', {}).get(route)
+    boards = dataset.get('boards', {}).get(route)
     emphasis = dataset.get('emphasis', {}).get(route)
     seconds = dataset.get('seconds', {}).get(route)
     motion = dataset.get('motion', {}).get(route)
@@ -445,6 +485,8 @@ def _sequence_arrays(dataset: dict, run: dict) -> dict:
                      ).astype(np.float32),
             'motion': (motion[positions] if motion is not None else
                        np.tile(np.float32(NO_MOTION), (len(chosen), 1))).astype(np.float32),
+            'board': (boards[positions] if boards is not None else np.tile(np.float32(NO_SIGN), (len(chosen), 1))
+                      ).astype(np.float32),
             'emphasis': (emphasis[positions] if emphasis is not None else np.ones(len(chosen))).astype(np.float32),
             'seconds': (seconds[positions] if seconds is not None else
                         np.array([signs_data.frame_seconds(f) for f in chosen], dtype=np.float64)),
@@ -544,10 +586,12 @@ def _augment(torch, images, generator_seed: int | None = None):
 
 
 class WindowSampler:
-    """Train windows: (route, positions, labels, weights, speed, sign, emphasis, junction, junction weight, motion) of
+    """Train windows: (route, positions, labels, weights, speed, sign, emphasis, junction, junction weight, motion,
+    board) of
     length burn + window, a second dropped now and then, merge_share of them around a merge, focus_share around a
     change of road type and junction_share (with the junction head) around a "passed"; the sign input missed or
-    misread now and then (SIGN_DROP_SHARE, SIGN_FAKE_SHARE) and confirmed up to SIGN_JITTER seconds earlier or later;
+    misread now and then (SIGN_DROP_SHARE, SIGN_FAKE_SHARE) and confirmed up to SIGN_JITTER seconds earlier or later,
+    the board input the same on its own;
     the car's motion unknown now and then (MOTION_DROP_SHARE, MOTION_PART_SHARE)."""
 
     def __init__(self, dataset: dict, runs: list[dict], rng: random.Random, junctions: bool = False, *,
@@ -556,6 +600,7 @@ class WindowSampler:
         self.rng = rng
         self.shares = (merge_share, focus_share, junction_share)
         self.times = dataset.get('sign_times', {})
+        self.board_times = dataset.get('board_times', {})
         self.runs = [(run, _sequence_arrays(dataset, run)) for run in runs]
         # With the junction head, JUNCTION_SHARE of the windows around a "passed" (none without: the draws stay those
         # of the road type alone).
@@ -605,7 +650,9 @@ class WindowSampler:
                 arrays['weights'][picks], arrays['speed'][picks].copy(),
                 self._sign(arrays['sign'][picks].copy(), arrays['seconds'][picks], self.times.get(run['route'], [])),
                 arrays['emphasis'][picks], arrays['junction'][picks], arrays['junction_weight'][picks],
-                self._motion(arrays['motion'][picks].copy()))
+                self._motion(arrays['motion'][picks].copy()),
+                self._sign(arrays['board'][picks].copy(), arrays['seconds'][picks],
+                           self.board_times.get(run['route'], [])))
 
     def _motion(self, motion: np.ndarray) -> np.ndarray:
         """The motion input of a window, all unknown (MOTION_DROP_SHARE) or its yaw or its carState part unknown
@@ -649,7 +696,7 @@ def _speed_noise(rng: random.Random, speed: np.ndarray) -> np.ndarray:
 
 def _predict_sequence(torch, model, store: FrameStore, route: str, positions: list[int], speed: np.ndarray,
                       device, chunk: int = 256, sign: np.ndarray | None = None, junction: bool = False,
-                      motion: np.ndarray | None = None):
+                      motion: np.ndarray | None = None, board: np.ndarray | None = None):
     """Probabilities (T, classes) of a whole sequence run from zeros with its memory, as the car would; with junction,
     (probabilities, junction probabilities (T, 2) or None)."""
     model.eval()
@@ -660,7 +707,8 @@ def _predict_sequence(torch, model, store: FrameStore, route: str, positions: li
             features.append(model.encode(images))
         x = model.inputs(torch.cat(features), torch.from_numpy(speed).to(device),
                          None if sign is None else torch.from_numpy(sign).to(device),
-                         None if motion is None else torch.from_numpy(motion).to(device))[None]
+                         None if motion is None else torch.from_numpy(motion).to(device),
+                         None if board is None else torch.from_numpy(board).to(device))[None]
         logits, _, crossing, _ = model.run(x)
         probabilities = torch.softmax(logits[0].float(), dim=1).cpu().numpy()
         if not junction:
@@ -685,7 +733,7 @@ def evaluate(torch, model, store: FrameStore, dataset: dict, runs: list[dict], d
         arrays = _sequence_arrays(dataset, run)
         probabilities, crossing = _predict_sequence(torch, model, store, run['route'], run['positions'],
                                                     arrays['speed'], device, sign=arrays['sign'], junction=True,
-                                                    motion=arrays['motion'])
+                                                    motion=arrays['motion'], board=arrays['board'])
         predicted = probabilities.argmax(axis=1)
         found.append({'labels': arrays['labels'], 'lead': arrays['lead'], 'weights': arrays['weights'],
                       'predicted': predicted})
@@ -795,7 +843,8 @@ def release_evaluation(torch, model, store: FrameStore, dataset: dict, device, *
             predicted = np.asarray(answers[key])
         else:
             predicted = _predict_sequence(torch, model, store, route, positions, arrays['speed'], device,
-                                          sign=arrays['sign'], motion=arrays['motion']).argmax(axis=1)
+                                          sign=arrays['sign'], motion=arrays['motion'],
+                                          board=arrays['board']).argmax(axis=1)
         held = debounced(predicted)
         age = signs_data.sign_ages(arrays['seconds'], dataset.get('sign_times', {}).get(route, []))
         joined = None  # the car's _joined_at: the last ramp's limit ended, measured or not
@@ -893,7 +942,7 @@ def _tensors(torch, windows: list, device, rng: random.Random) -> dict:
     return {'speed': torch.from_numpy(np.stack([_speed_noise(rng, w[4]) for w in windows])).to(device),
             'sign': stack(5), 'labels': stack(2),
             'frame_weights': torch.from_numpy(np.stack([w[3] * w[6] for w in windows])).to(device),
-            'targets': stack(7), 'target_weights': stack(8), 'motion': stack(9)}
+            'targets': stack(7), 'target_weights': stack(8), 'motion': stack(9), 'board': stack(10)}
 
 
 def _junction_loss(torch, crossing, targets, target_weights, balance):
@@ -943,7 +992,7 @@ def train_junction_stage(torch, model, store: FrameStore, dataset: dict, by_part
             with torch.no_grad(), torch.autocast(device.type, enabled=use_amp):
                 b, t = images.shape[:2]
                 x = model.inputs(model.encode(images.flatten(0, 1)).view(b, t, -1), batch_of['speed'],
-                                 batch_of['sign'], batch_of['motion'])
+                                 batch_of['sign'], batch_of['motion'], batch_of['board'])
             junction_hidden, targets, target_weights = None, batch_of['targets'], batch_of['target_weights']
             if warm:
                 with torch.no_grad(), torch.autocast(device.type, enabled=use_amp):
@@ -1112,9 +1161,10 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
     """The weights of the same network of an earlier run (nnslr train-road-type --init-from) in a fresh one: every
     layer of the same name and shape, the rows of the road-type head by class name (a class the start lacks keeps the
     fresh row); a layer the start has in another shape (a new input of the memory, the junction head it lacks) stays
-    fresh. The image backbone must be the start's whole. Returns what result.json records of it: its file and sha256,
-    run, epoch, split, the layers left fresh, and whether it was tested on the same drives as this one (its split.json
-    beside it; None when missing)."""
+    fresh, but for the board input added to a start without it: the start's columns of the memory's input as they
+    are, the board's two zeros (widened), so the network starts as the start. The image backbone must be the start's
+    whole. Returns what result.json records of it: its file and sha256, run, epoch, split, the layers left fresh and
+    widened, and whether it was tested on the same drives as this one (its split.json beside it; None when missing)."""
     path = Path(path)
     saved = torch.load(path, map_location='cpu', weights_only=False)
     if not isinstance(saved, dict) or saved.get('task') != 'road_type' or saved.get('memory') != memory:
@@ -1123,7 +1173,12 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
     state = {key: value.detach().clone() for key, value in model.state_dict().items()}
     head = 'head.' if memory == 'gru' else 'head.2.'
     rows = {label: row for row, label in enumerate(saved.get('classes') or [])}
-    fresh = []
+    # The memory's input layers (gru, junction_gru; the first layer of the heads without memory) take the board's
+    # columns last: a start with the same sign and motion inputs and no board fills every other column.
+    widen = (getattr(model, 'boards', False) and not saved.get('boards')
+             and bool(saved.get('signs')) == bool(model.signs) and bool(saved.get('motion')) == bool(model.motion))
+    inputs = ('gru.weight_ih_l0', 'junction_gru.weight_ih_l0', 'head.0.weight', 'junction_head.0.weight')
+    fresh, widened = [], []
     for key, current in state.items():
         if key in (head + 'weight', head + 'bias') and key in weights:
             for row, label in enumerate(data.CLASSES):
@@ -1133,6 +1188,11 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
                 fresh.append(key + ' (' + ', '.join(label for label in data.CLASSES if label not in rows) + ')')
         elif key in weights and tuple(weights[key].shape) == tuple(current.shape):
             state[key] = weights[key]
+        elif (widen and key in inputs and key in weights and weights[key].shape[0] == current.shape[0]
+              and current.shape[1] - weights[key].shape[1] == BOARD_INPUTS):
+            current.zero_()
+            current[:, :weights[key].shape[1]] = weights[key]
+            widened.append(key)
         else:
             fresh.append(key)
     if any(key.startswith('backbone.') for key in fresh):
@@ -1144,7 +1204,7 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
         tested = None
     return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'run': path.parents[2].name if len(path.parents) > 2 else None, 'epoch': saved.get('epoch'),
-            'split_sha256': saved.get('split_sha256'), 'fresh': fresh,
+            'split_sha256': saved.get('split_sha256'), 'fresh': fresh, 'widened': widened,
             'same_test_drives': None if not isinstance(tested, list)
             else sorted(tested) == sorted(split.get('test_routes') or [])}
 
@@ -1154,7 +1214,7 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
                     pretrained: bool | None = None, workers: int = 8, seed: int = 0, signs: bool = True,
                     sign_source: str = signs_data.DEFAULT_SOURCE, junctions: bool | None = None,
                     motion: bool | None = None, junction_epochs: int = JUNCTION_EPOCHS,
-                    init_from: Path | None = None, log=_print) -> dict:
+                    init_from: Path | None = None, boards: bool | None = None, log=_print) -> dict:
     """Train the road-type network on the drives with road types and measure it on validation and test (see the
     module's text). Writes into run_dir: split.json, dataset.json, road-type-best.pt, result.json and the answers on
     test and validation (answers-test.json, answers-validation.json). A dry run: the CPU, a few short sequences, one
@@ -1163,7 +1223,9 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     car-motion has read every drive; the speed input is then carState.vEgo, else the GPS speed). The road type's epoch
     is chosen by road_score on validation, and only it stops the training early; the junction head then gets its own
     stage (train_junction_stage, junction_epochs; 0: the shared head of the joint training as it is). init_from: the
-    road-type-best.pt of the same network of an earlier run to go on from (road_type_start), else ImageNet."""
+    road-type-best.pt of the same network of an earlier run to go on from (road_type_start), else ImageNet. boards:
+    with the board input (the green boards towards a motorway the car's code confirmed, nnslr road-type-signs; None:
+    when every drive was read with them and they were confirmed on MIN_BOARD_DRIVES drives at least)."""
     torch = _torch()
     data_root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1186,6 +1248,18 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
         raise ValueError(f"the car's motion was read on {motion_read} of {len(dataset['frames'])} drives: run nnslr "
                          'car-motion --all first (or train with --no-motion)')
     motion_coverage = attach_motion(dataset, data_root, v_ego=every_drive)
+    board_coverage = attach_boards(dataset, data_root)
+    boards_read = board_coverage['read'] == board_coverage['drives']
+    if boards is None:
+        boards = boards_read and board_coverage['drives_with_boards'] >= MIN_BOARD_DRIVES
+    if boards and not dry_run:
+        if not boards_read:
+            raise ValueError(f"the green boards were read on {board_coverage['read']} of {board_coverage['drives']} "
+                             'drives: run nnslr road-type-signs again (or train with --no-boards)')
+        if board_coverage['drives_with_boards'] < MIN_BOARD_DRIVES:
+            raise ValueError(f"the car's code confirmed green boards on {board_coverage['drives_with_boards']} drives "
+                             f'(at least {MIN_BOARD_DRIVES}): the classifier does not read them yet; train it with more '
+                             'boxed boards (or train with --no-boards)')
     runs = _dry_runs(dataset['sequences']) if dry_run else dataset['sequences']
     by_partition = {name: [run for run in runs if run['partition'] == name] for name in data.PARTITIONS}
     labelled = sum(1 for frames in dataset['frames'].values() for f in frames if f.get('junction_known'))
@@ -1207,15 +1281,19 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
            f"{coverage['drives']} drives" if signs else 'no sign input')
         + (f"; the car's motion of {motion_read} drives (yaw known {motion_coverage['yaw'] / max(1, motion_coverage['frames']):.1%} "
            f"of the frames)" if motion else "; without the car's motion")
+        + (f"; board input: {board_coverage['boards']} green boards on {board_coverage['drives_with_boards']} drives"
+           if boards else '; no board input')
         + f"; speed from {motion_coverage['speed_source']}")
     pictures = runs if dry_run else runs + drive_runs(dataset)
     store = FrameStore(_load_pictures(data_root, dataset, pictures, dry_run=dry_run, workers=workers, log=log), device)
-    model = build_road_type_net(memory, pretrained=pretrained, signs=signs, junctions=junctions, motion=motion)
+    model = build_road_type_net(memory, pretrained=pretrained, signs=signs, junctions=junctions, motion=motion,
+                                boards=boards)
     start = None
     if init_from is not None:
         start = road_type_start(torch, model, Path(init_from), memory, dataset['split'])
         log(f"{name} starts from {start['run']} (epoch {start['epoch']}): every layer"
             + (f" but {', '.join(start['fresh'])}" if start['fresh'] else '')
+            + (f"; the board's columns added to {', '.join(start['widened'])}" if start['widened'] else '')
             + ('; tested on other drives' if start['same_test_drives'] is False else ''))
     model = model.to(device)
     weights_of_class = torch.tensor(class_weights(dataset, by_partition['train']), device=device)
@@ -1251,6 +1329,7 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
               'junctions': junctions, 'motion': motion, 'motion_fields': list(motion_data.MOTION_FIELDS) if motion else [],
               'motion_drop_share': MOTION_DROP_SHARE, 'motion_part_share': MOTION_PART_SHARE,
               'motion_coverage': motion_coverage, 'speed_source': motion_coverage['speed_source'],
+              'boards': boards, 'board_coverage': board_coverage,
               'selection': {'road': 'road_score: macro F1 + %g x after-merge (debounced) - %g x false switches/h '
                                     '(debounced), on validation' % (ROAD_SCORE_MERGE, ROAD_SCORE_SWITCHES),
                             'junction': 'its own stage: the junction F1 at 2 s on validation'}}
@@ -1268,7 +1347,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
                     'junctions': junctions, 'junction_outputs': list(JUNCTION_OUTPUTS) if junctions else [],
                     'junction_branch': model.junction_branch, 'motion': motion,
                     'motion_fields': list(motion_data.MOTION_FIELDS) if motion else [],
-                    'speed_source': motion_coverage['speed_source'],
+                    'speed_source': motion_coverage['speed_source'], 'boards': boards,
+                    'board_signs': [BOARD_CLASS] if boards else [],
                     'state_dict': model.state_dict(), 'epoch': epoch,
                     'config': config, 'split_sha256': dataset['split_sha256'],
                     'dataset_sha256': _dataset_sha256(dataset),
@@ -1287,16 +1367,18 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
             speed, sign, labels, frame_weights = (batch_of['speed'], batch_of['sign'], batch_of['labels'],
                                                   batch_of['frame_weights'])
             targets, target_weights, motion_in = batch_of['targets'], batch_of['target_weights'], batch_of['motion']
+            board = batch_of['board']
             hidden = None
             if warm:
                 with torch.no_grad(), torch.autocast(device.type, enabled=use_amp):
-                    hidden = model(images[:, :burn], speed[:, :burn], None, sign[:, :burn], motion_in[:, :burn])[1]
+                    hidden = model(images[:, :burn], speed[:, :burn], None, sign[:, :burn], motion_in[:, :burn],
+                                   board=board[:, :burn])[1]
                 hidden = hidden.float()
-                images, speed, sign, labels, frame_weights, targets, target_weights, motion_in = (
+                images, speed, sign, labels, frame_weights, targets, target_weights, motion_in, board = (
                     images[:, burn:], speed[:, burn:], sign[:, burn:], labels[:, burn:], frame_weights[:, burn:],
-                    targets[:, burn:], target_weights[:, burn:], motion_in[:, burn:])
+                    targets[:, burn:], target_weights[:, burn:], motion_in[:, burn:], board[:, burn:])
             with torch.autocast(device.type, enabled=use_amp):
-                logits, _, crossing, _ = model(images, speed, hidden, sign, motion_in)
+                logits, _, crossing, _ = model(images, speed, hidden, sign, motion_in, board=board)
             known = labels >= 0
             per_frame = torch.nn.functional.cross_entropy(logits.float().flatten(0, 1), labels.clamp(min=0).flatten(),
                                                           reduction='none').view_as(frame_weights)
@@ -1367,7 +1449,7 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
             f", best stage epoch {stage['best_epoch']})")
         save(best_epoch)
     result = {'task': 'road_type', 'memory': memory, 'signs': signs, 'sign_source': sign_source, 'name': name,
-              'dry_run': dry_run, 'junctions': junctions, 'motion': motion,
+              'dry_run': dry_run, 'junctions': junctions, 'motion': motion, 'boards': boards,
               'speed_source': motion_coverage['speed_source'], 'junction_branch': model.junction_branch,
               'architecture': saved['architecture'], 'classes': list(data.CLASSES), 'best_epoch': best_epoch,
               'history': history, 'config': config, 'parameters': count_parameters(model),
@@ -1444,7 +1526,7 @@ def load_road_type(checkpoint: Path, device: str = 'cpu'):
     model = build_road_type_net(saved['memory'], pretrained=False, signs=bool(saved.get('signs', False)),
                                 junctions=bool(saved.get('junctions', False)), motion=bool(saved.get('motion', False)),
                                 junction_branch=saved.get('junction_branch') or 'shared',
-                                classes=len(saved.get('classes') or data.CLASSES))
+                                classes=len(saved.get('classes') or data.CLASSES), boards=bool(saved.get('boards', False)))
     model.load_state_dict(saved['state_dict'])
     return model.to(device).eval(), saved
 
@@ -1469,12 +1551,13 @@ def release_of_checkpoint(data_root: Path, checkpoint: Path, output: Path | None
     model, saved = load_road_type(checkpoint, device=str(device))
     dataset = data.load_dataset(data_root)
     attach_signs(dataset, data_root, sign_source)
+    attach_boards(dataset, data_root)
     moved = every_drive_moved(data_root, dataset)
     attach_motion(dataset, data_root, v_ego=saved.get('speed_source') == 'v_ego')
     store = FrameStore(_load_pictures(data_root, dataset, dataset['sequences'] + drive_runs(dataset), dry_run=False,
                                       workers=8, log=_print), device)
     result = {'checkpoint': str(checkpoint), 'memory': saved['memory'], 'signs': bool(saved.get('signs', False)),
-              'junctions': bool(model.junctions), 'motion': bool(model.motion),
+              'junctions': bool(model.junctions), 'motion': bool(model.motion), 'boards': bool(model.boards),
               'speed_source': saved.get('speed_source', 'gps'), 'junction_branch': model.junction_branch,
               'epoch': saved.get('epoch'), 'split_sha256': dataset['split_sha256'], 'metrics': {},
               'release': release_evaluation(torch, model, store, dataset, device)}
@@ -1798,11 +1881,12 @@ def motion_steps() -> list[str]:
 
 
 def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGHT, signs: bool = False,
-                   junctions: dict | None = None, motion: bool = False, separate: bool = False) -> dict:
+                   junctions: dict | None = None, motion: bool = False, separate: bool = False,
+                   boards: bool = False) -> dict:
     """How the car makes the inputs of a step from the narrow road camera (sunnypilot's speed_limits/vision.py) and,
     with signs, from speedvisiond's memory of the signs, with motion from livePose and carState; junctions: the
     operating point of the junction head ({'decode', 'threshold'}) when it has one; separate: the junction head has a
-    memory of its own (junction_hidden)."""
+    memory of its own (junction_hidden); boards: the board input, from the same memory."""
     sign_steps = [
         'age = now - memory._road_sign_at  # speedvisiond\'s SpeedLimitMemory: when it last confirmed '
         'other_sign:motorway_start or expressway_start (read 5 times a second, MIN_CONFIDENCE, CONFIRM_FRAMES within '
@@ -1810,7 +1894,14 @@ def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGH
         f'sign = [[min(age, {signs_data.SIGN_HORIZON:g}) / {signs_data.SIGN_SCALE:g}, 1.0]] if age <= '
         f'{signs_data.SIGN_HORIZON:g} else [{list(NO_SIGN)}]  # road_type_signs.sign_features',
     ] if signs else []
-    names_in = ['image', 'speed', *(['sign'] if signs else []), *(['motion'] if motion else []), 'hidden',
+    board_steps = [
+        f'age = memory.board_age(now)  # now - _board_at: when it last confirmed {BOARD_CLASS} (as the signs, never '
+        'a limit); inf before the first',
+        f'board = [[min(age, {signs_data.SIGN_HORIZON:g}) / {signs_data.SIGN_SCALE:g}, 1.0]] if age <= '
+        f'{signs_data.SIGN_HORIZON:g} else [{list(NO_SIGN)}]  # vision.age_input',
+    ] if boards else []
+    names_in = ['image', 'speed', *(['sign'] if signs else []), *(['motion'] if motion else []),
+                *(['board'] if boards else []), 'hidden',
                 *(['junction_hidden'] if separate else [])]
     names_out = ['probabilities', 'hidden', *(['junction'] if junctions else []),
                  *(['junction_hidden'] if separate else [])]
@@ -1829,6 +1920,7 @@ def car_input_spec(width: int = data.FRAME_WIDTH, height: int = data.FRAME_HEIGH
             '[[0, 0]] when unknown',
             *sign_steps,
             *(motion_steps() if motion else []),
+            *board_steps,
             'hidden = zeros((1, 128), float32) at the start of the drive (and after more than 5 s without a step); '
             'then the hidden_out of the previous step' + ('; junction_hidden the same with junction_hidden_out'
                                                            if separate else ''),
@@ -1866,6 +1958,7 @@ def _random_inputs(torch, model, generator) -> tuple:
     values = {'image': lambda: torch.rand(1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH, generator=generator),
               'speed': lambda: torch.rand(1, 2, generator=generator),
               'sign': lambda: torch.rand(1, 2, generator=generator) * 2,
+              'board': lambda: torch.rand(1, 2, generator=generator) * 2,
               'motion': lambda: torch.cat([torch.rand(1, 2, generator=generator) * 2 - 1,
                                            torch.randint(0, 2, (1, 1), generator=generator).float(),
                                            torch.rand(1, 1, generator=generator) * 2 - 1,
@@ -1884,7 +1977,7 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
     checkpoint, output = Path(checkpoint), Path(output)
     model, saved = load_road_type(checkpoint)
     step = step_module(model)
-    hidden_size, signs, motion = model.hidden_size, model.signs, model.motion
+    hidden_size, signs, motion, boards = model.hidden_size, model.signs, model.motion, model.boards
     separate = model.junction_branch == 'separate'
     example = _random_inputs(torch, model, torch.Generator().manual_seed(1))
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -1937,7 +2030,8 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         if not passed:
             raise ValueError(f'road-type ONNX differs from PyTorch: max abs error {worst}')
     shapes = {'image': [1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH], 'speed': [1, 2], 'sign': [1, SIGN_INPUTS],
-              'motion': [1, MOTION_INPUTS], 'hidden': [1, hidden_size], 'junction_hidden': [1, hidden_size]}
+              'motion': [1, MOTION_INPUTS], 'board': [1, BOARD_INPUTS], 'hidden': [1, hidden_size],
+              'junction_hidden': [1, hidden_size]}
     meanings = {
         'speed': [f'min(max(vEgo m/s, 0), {data.SPEED_MAX}) / {data.SPEED_SCALE}', '1 when the speed is known, else 0 '
                   '(and the first value 0)'],
@@ -1945,6 +2039,11 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
                  'SpeedLimitMemory last confirmed a motorway or expressway sign (now - _road_sign_at)',
                  f'1 when that is at most {signs_data.SIGN_HORIZON:g} s ago, else 0; never or longer ago: '
                  f'{list(NO_SIGN)}'],
+        'board': [f'min(age, {signs_data.SIGN_HORIZON:g}) / {signs_data.SIGN_SCALE:g}: age = seconds since '
+                  'SpeedLimitMemory last confirmed a green board towards a motorway or an expressway (now - _board_at, '
+                  'its board_age; never a limit)',
+                  f'1 when that is at most {signs_data.SIGN_HORIZON:g} s ago, else 0; never or longer ago: '
+                  f'{list(NO_SIGN)}'],
         'motion': [f'heading change of the last second: mean yaw rate deg/s (left positive) / '
                    f'{motion_data.YAW_SCALE:g}, clipped to +-{motion_data.YAW_CLIP:g}',
                    f'largest |yaw rate| in it deg/s / {motion_data.YAW_SCALE:g}, clipped to 0..{motion_data.YAW_CLIP:g}',
@@ -1991,10 +2090,12 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         'output': {'name': 'probabilities', 'shape': [1, len(classes)], 'classes': classes,
                    'decode': 'softmax probabilities; the class is the argmax'},
         'outputs': outputs,
-        'step': {'rate_hz': 1.0, 'memory': saved['memory'], 'signs': signs, 'motion': motion,
+        'step': {'rate_hz': 1.0, 'memory': saved['memory'], 'signs': signs, 'motion': motion, 'boards': boards,
+                 'board_signs': list(saved.get('board_signs') or ([BOARD_CLASS] if boards else [])),
                  'junctions': bool(model.junctions), 'junction_branch': model.junction_branch,
                  'speed_source': saved.get('speed_source', 'gps'), 'inputs': names_in, 'outputs': names_out},
-        'car_input': car_input_spec(signs=signs, junctions=operating, motion=motion, separate=separate),
+        'car_input': car_input_spec(signs=signs, junctions=operating, motion=motion, separate=separate,
+                                    boards=boards),
         'verification': verification,
     }
     if motion:
@@ -2025,6 +2126,7 @@ def _rollout_check(torch, model, step, session, data_root: Path, seconds: int = 
     dataset = data.load_dataset(data_root)
     attach_signs(dataset, data_root)
     attach_motion(dataset, data_root, v_ego=speed_source == 'v_ego')
+    attach_boards(dataset, data_root)
     tests = [run for run in dataset['sequences'] if run['partition'] == 'test']
     if not tests:
         return {'checked': False}
@@ -2046,7 +2148,7 @@ def _rollout_check(torch, model, step, session, data_root: Path, seconds: int = 
         at = begin + offset
         given = {'image': data.resized_frame(frame['image']).transpose(2, 0, 1)[None].astype(np.float32) / 255,
                  'speed': arrays['speed'][at][None].astype(np.float32), 'sign': arrays['sign'][at][None],
-                 'motion': arrays['motion'][at][None]}
+                 'motion': arrays['motion'][at][None], 'board': arrays['board'][at][None]}
         with torch.no_grad():
             out_t = step(*(state_t[n] if n in state_t else torch.from_numpy(given[n]) for n in names_in))
         out_o = session.run(None, {n: state_o[n] if n in state_o else given[n] for n in names_in})

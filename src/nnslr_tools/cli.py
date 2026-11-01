@@ -1741,7 +1741,16 @@ def build_parser() -> argparse.ArgumentParser:
                                  "shared head of the joint training)")
     p_road_net.add_argument("--init-from", default=None,
                             help="the road-type-best.pt of the same network (same memory) of an earlier run to go on "
-                                 "from, instead of ImageNet: every layer of the same shape")
+                                 "from, instead of ImageNet: every layer of the same shape (a start without the board "
+                                 "input gets its columns as zeros)")
+    p_road_boards = p_road_net.add_mutually_exclusive_group()
+    p_road_boards.add_argument("--boards", action="store_true", default=None,
+                               help="with the board input: the seconds since the car's code confirmed a green board "
+                                    "towards a motorway (nnslr road-type-signs; refused while the classifier reads too "
+                                    "few). Default: with it when every drive was read with the boards and they were "
+                                    "confirmed on 3 drives at least")
+    p_road_boards.add_argument("--no-boards", dest="boards", action="store_false",
+                               help="without the board input")
     p_road_net.add_argument("--dry-run", action="store_true",
                             help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
     p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1754,7 +1763,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "
                                                    "/root/sunnypilot); read only")
     p_road_signs.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
-                              help="processes (default: a quarter of the cores)")
+                              help="processes (default: half the cores)")
+    p_road_signs.add_argument("--classifier", default=None,
+                              help="a v2 classifier (reader-best.pt) to read with instead of the car's, e.g. one not "
+                                   "on the car yet that reads the green boards: exported once to ONNX (checked against "
+                                   "PyTorch, .venv-gpu) into derived/road_type_signs/classifiers/")
     p_road_signs.add_argument("--device", choices=("auto", "cpu"), default="auto",
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
@@ -2665,14 +2678,15 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
                              signs=not args.no_sign, sign_source=args.sign_source,
                              junctions=False if args.no_junctions else None,
                              motion=False if args.no_motion else None, junction_epochs=args.junction_epochs,
-                             init_from=Path(args.init_from) if args.init_from else None)
+                             init_from=Path(args.init_from) if args.init_from else None, boards=args.boards)
     test = result["test"]
     operating = result.get("junction_operating") or {}
     junction_test = (test.get("junctions", {}).get("decodes", {}).get(operating.get("decode"), {})
                      .get(f"{operating['threshold']:g}") if operating else None) or {}
     print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "signs": not args.no_sign,
                       "sign_source": args.sign_source, "junctions": result.get("junctions", False),
-                      "motion": result.get("motion", False), "speed_source": result.get("speed_source"),
+                      "motion": result.get("motion", False), "boards": result.get("boards", False),
+                      "speed_source": result.get("speed_source"),
                       "junction_branch": result.get("junction_branch"),
                       "test_junction_f1": junction_test.get("f1_2s"),
                       "test_false_passed_per_hour": junction_test.get("false_per_hour"),
@@ -2687,18 +2701,22 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
 def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.road_type_data import road_type_routes
-    from nnslr_tools.road_type_signs import build_signs, package_path, sign_times
+    from nnslr_tools.road_type_signs import board_times, build_signs, package_path, sign_times
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.classifier and not Path(args.classifier).is_file():
+        raise ValueError(f"--classifier is not a file: {args.classifier}")
     routes = road_type_routes(root)
     if not routes:
         print("nnslr road-type-signs: no drive with road types (nnslr road-types)", file=sys.stderr)
         return 2
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
-                          workers=args.workers or None, device=args.device, log=lambda line: print(line, flush=True))
+                          workers=args.workers or None, device=args.device,
+                          classifier=Path(args.classifier) if args.classifier else None,
+                          log=lambda line: print(line, flush=True))
     for route, record in records.items():
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
-              f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}",
-              flush=True)
+              f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}, "
+              f"green boards at {', '.join(f'{t:.0f} s' for t in board_times(record)) or 'none'}", flush=True)
     return 0
 
 

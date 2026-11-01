@@ -79,6 +79,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 **The scene, where no sign holds**
 
 - The scene network's answer counts after 3 equal answers in a row, one a second (*setting*).
+- A green board towards a motorway or expressway (`other_sign:motorway_direction`: places, arrows, the motorway pictogram on a direction board) never sets a limit: in Switzerland it stands at the start of the entry ramp, where the limit is not yet 120. Confirmed as a sign is (2 pictures within 1.5 s), it only gives the scene network one more input, the seconds since the last board, from which the network learns that a ramp or a motorway is coming. Only a scene network trained with that input reads it, and only with a classifier that has the class; until then the input stays "no board".
 - At the start of a drive, or out of a car park, the road type gives its general limit. Such a limit follows another road type only after 10 s of it (*setting*). A sign always wins over the scene.
 - A 30 zone (the network at least 90 % sure, *setting*) seen for 10 s after the last sign lowers a town's 50 to 30. A higher number read (60, 80) holds: the network can be wrong.
 - A car park: seen for 5 s below 25 km/h (*setting*), it gives 20 km/h in the open and 10 km/h in a garage (*settings*) and drops the road's limit before; inside, a sign counts only when lower. Out of it, a road seen for 3 s (*setting*) gives that road's limit.

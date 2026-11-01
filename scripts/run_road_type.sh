@@ -19,13 +19,16 @@ set -euo pipefail
 #   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
 #      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, decoded and
 #      read on the GPU (NVDEC and onnxruntime-gpu of .venv, the CPU when there is none);
-#      data/derived/road_type_signs): the comma's rule measured with the signs the car confirms today; and the car's
+#      data/derived/road_type_signs; NNSLR_ROAD_TYPE_CLASSIFIER: another classifier's reader-best.pt instead of the
+#      car's, exported once to ONNX): the comma's rule measured with the signs the car confirms today, and the green
+#      boards towards a motorway it confirms (the board input; never a limit); and the car's
 #      own motion of every second from the drives' rlogs (nnslr car-motion --all: deviceMotion/livePose yaw rate,
 #      carState steering angle, blinkers and vEgo; data/derived/car_motion);
 #   5. trains the network with memory, the sign input and the car's motion (nnslr train-road-type --memory gru; the
 #      sign input is the seconds since a motorway sign, placed at the start of every entry ramp of the map:
-#      --sign-source map; the speed input is carState.vEgo); the road type's epoch is chosen on its own measure, then
-#      the junction head gets a stage of its own;
+#      --sign-source map; the speed input is carState.vEgo; the board input when the classifier read the boards on
+#      enough drives, NNSLR_ROAD_TYPE_BOARDS); the road type's epoch is chosen on its own measure, then the junction
+#      head gets a stage of its own;
 #   6. the same without the car's motion, to compare (--no-motion);
 #   7. the same with the sign input but without memory, to compare (--memory none);
 #   8. compares them (comparison.txt: the comma's rule on every merge of validation and test, when the ramp's limit
@@ -46,7 +49,10 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
-# NNSLR_SIGN_WORKERS (processes reading the signs and the car's motion: a quarter of the cores, each with its ffmpeg), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
+# NNSLR_SIGN_WORKERS (processes reading the signs and the car's motion: half the cores, each with its ffmpeg), NNSLR_SUNNYPILOT_CLONE (/root/sunnypilot),
+# NNSLR_ROAD_TYPE_CLASSIFIER (a classifier's reader-best.pt to read the signs with instead of the car's: one that reads
+# the green boards before it is on the car), NNSLR_ROAD_TYPE_BOARDS (1: with the board input, refused when the
+# classifier read too few boards; 0: without; empty, the default: with it when it read them on enough drives),
 # NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ROAD_TYPE_INIT_FROM (the
 # road-type folder of an earlier run: each network goes on from its own there, one it lacks from ImageNet; Train ›
 # Scene › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
@@ -62,10 +68,13 @@ BATCH="${NNSLR_ROAD_TYPE_BATCH:-12}"
 CORES="$(nproc 2>/dev/null || echo 8)"
 WORKERS_DEFAULT=$(( CORES / 2 < 4 ? 4 : (CORES / 2 > 16 ? 16 : CORES / 2) ))
 NUM_WORKERS="${NNSLR_NUM_WORKERS:-$WORKERS_DEFAULT}"
-SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$(( CORES / 4 > 1 ? CORES / 4 : 1 ))}"
+SIGN_WORKERS_DEFAULT=$(( CORES / 2 > 1 ? CORES / 2 : 1 ))
+SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
 BASELINE="${NNSLR_ROAD_TYPE_BASELINE:-}"
 JUNCTIONS="${NNSLR_ROAD_TYPE_JUNCTIONS:-1}"
 START="${NNSLR_ROAD_TYPE_INIT_FROM:-}"
+CLASSIFIER="${NNSLR_ROAD_TYPE_CLASSIFIER:-}"
+BOARDS="${NNSLR_ROAD_TYPE_BOARDS:-}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -91,6 +100,16 @@ done
 
 if [[ -n "$START" && ! -d "$START" ]]; then
   echo "error: NNSLR_ROAD_TYPE_INIT_FROM is not a folder: $START" >&2
+  exit 2
+fi
+
+if [[ -n "$CLASSIFIER" && ! -f "$CLASSIFIER" ]]; then
+  echo "error: NNSLR_ROAD_TYPE_CLASSIFIER is not a file: $CLASSIFIER" >&2
+  exit 2
+fi
+
+if [[ -n "$BOARDS" && "$BOARDS" != "0" && "$BOARDS" != "1" ]]; then
+  echo "error: NNSLR_ROAD_TYPE_BOARDS must be 0, 1 or empty: $BOARDS" >&2
   exit 2
 fi
 
@@ -154,6 +173,11 @@ SETTINGS=(--epochs "$EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH" --num-
 if [[ "$JUNCTIONS" == "0" ]]; then
   SETTINGS+=(--no-junctions)
 fi
+if [[ "$BOARDS" == "1" ]]; then
+  SETTINGS+=(--boards)
+elif [[ "$BOARDS" == "0" ]]; then
+  SETTINGS+=(--no-boards)
+fi
 
 echo "== Road type with memory =="
 echo "run:          $RUN_ID"
@@ -166,6 +190,8 @@ if [[ -n "$START" ]]; then
   echo "init:         $(basename "$(dirname "$START")")"
 fi
 echo "junctions:    $([[ "$JUNCTIONS" == "0" ]] && echo "no head" || echo "with the junction head")"
+echo "signs read:   ${CLASSIFIER:-by the classifier of the car}"
+echo "boards:       $([[ "$BOARDS" == "1" ]] && echo "with the board input" || ([[ "$BOARDS" == "0" ]] && echo "no board input" || echo "the board input when the classifier read the boards"))"
 echo
 
 echo "== 1/8 Check the road types, the split and the pipeline (CPU-only) =="
@@ -190,7 +216,18 @@ echo "== 4/8 Read the motorway signs as the car does (GPU) and the car's motion 
 # The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
-"$SIGNS_NN" road-type-signs --num-workers "$SIGN_WORKERS"
+SIGN_ARGS=()
+if [[ -n "$CLASSIFIER" ]]; then
+  # Exported to ONNX once here, with torch: the reading in .venv then finds it.
+  "$VENV/bin/python" -c '
+import sys
+from pathlib import Path
+from nnslr_tools.road_type_signs import classifier_onnx
+print("classifier as ONNX:", classifier_onnx(Path(sys.argv[1]), Path(sys.argv[2])))
+' "$DATA_ROOT" "$CLASSIFIER"
+  SIGN_ARGS=(--classifier "$CLASSIFIER")
+fi
+"$SIGNS_NN" road-type-signs --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT" "${SIGN_ARGS[@]}"
 "$NN" car-motion --all --num-workers "$SIGN_WORKERS"
 
 train() {

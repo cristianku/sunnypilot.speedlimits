@@ -150,7 +150,34 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
             raise ValueError(f'{entry["id"]} has no weights on this server')
         found[network] = {'id': entry['id'], 'run': entry['run'], 'weights': weights}
     found['road_type'] = _road_type(runs, index)
+    _check_boards(runs, found, chosen)
     return found
+
+
+def _check_boards(runs: RunsIndex, found: dict, classifier: dict) -> None:
+    """A scene network with the board input only with a classifier that has the green boards towards a motorway among
+    its classes: with another one the car never confirms a board, and the input stays "no board" for ever. A check of
+    the class's name only (its result.json), not of how well it reads the boards: that is its validation report."""
+    road_type = found.get('road_type')
+    if not road_type:
+        return
+    try:
+        step = json.loads(Path(road_type['contract']).read_text(encoding='utf-8')).get('step') or {}
+    except (OSError, ValueError):
+        raise ValueError(f'the contract of the scene network {road_type["id"]} cannot be read') from None
+    if not step.get('boards'):
+        return
+    run = runs._run_dir(classifier['run'])
+    result = None if run is None else runs._file(run, f'{classifier["part"]}/result.json')
+    try:
+        classes = json.loads(Path(result).read_text(encoding='utf-8')).get('classes') if result else None
+    except (OSError, ValueError):
+        classes = None
+    wanted = step.get('board_signs') or []
+    if not isinstance(classes, list) or not set(wanted) <= set(classes):
+        raise ValueError(f'the scene network {road_type["id"]} reads the green boards towards a motorway '
+                         f'({", ".join(wanted)}), and the classifier {classifier["id"]} has no such class: choose a '
+                         'classifier that has it, or a scene network without the board input')
 
 
 def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:

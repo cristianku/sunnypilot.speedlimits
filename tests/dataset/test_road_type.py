@@ -308,6 +308,40 @@ def test_confirmations_are_those_of_the_cars_memory():
     assert signs.sign_times({'confirmed': [[10.2, 'motorway'], [50.2, 'town']]}) == [10.2]
 
 
+def test_board_confirmations_are_those_of_the_cars_memory_and_never_a_road_sign():
+    from nnslr_tools import road_type_signs as signs
+    package = signs.package_path()
+    if not (package / 'vision.py').is_file():
+        pytest.skip('no sunnypilot clone with the car code')
+    vision = signs.load_vision(package)
+    if not hasattr(vision, 'BOARD_SIGNS'):
+        assert signs.board_confirmations(vision, [(1.0, [['other_sign:motorway_direction', 0.9]])]) == []
+        pytest.skip('a car code without the green boards')
+    board = [['other_sign:motorway_direction', 0.9]]
+    readings = [(10.0, board), (10.2, board),  # twice within 1.5 s: confirmed at the 2nd
+                (30.0, board),  # once only
+                (50.0, board + [['maximum_speed:80', 0.9]]), (50.2, board + [['maximum_speed:80', 0.9]])]
+    assert signs.board_confirmations(vision, readings) == [10.2, 50.2]
+    # A board is never a motorway sign: the sign input stays empty.
+    assert signs.confirmations(vision, readings) == []
+    assert signs.board_times({'boards': [50.2, 10.2]}) == [10.2, 50.2] and signs.board_times(None) == []
+
+
+def test_a_chosen_classifier_is_part_of_the_readings_fingerprint(tmp_path):
+    from nnslr_tools import road_type_signs as signs
+    package = tmp_path / 'package'
+    (package / 'models').mkdir(parents=True)
+    (package / 'vision.py').write_text('# car code\n')
+    for file in signs.NETWORK_FILES.values():
+        (package / 'models' / file).write_bytes(b'car ' + file.encode())
+    other = tmp_path / 'other' / 'classifier.onnx'
+    other.parent.mkdir()
+    other.write_bytes(b'another classifier')
+    assert signs.network_paths(package, other)['classifier'] == other
+    assert signs.fingerprint(package) != signs.fingerprint(package, other)
+    assert signs.fingerprint(package)['version'] == signs.CACHE_VERSION == 2
+
+
 # -- the comma's rule on the merges (road_type_metrics) ---------------------------------------------------------------
 def _entry_drive():
     """60 s of town, 20 s of ramp, 100 s of motorway."""
@@ -528,6 +562,92 @@ def test_onnx_step_contract_with_the_sign_input(root, tmp_path):
     assert seen.shape == (1, len(data.CLASSES)) and not np.allclose(seen, unseen)
 
 
+def test_onnx_step_contract_with_the_board_input(root, tmp_path):
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('onnxruntime')
+    pytest.importorskip('torchvision')
+    import numpy as np
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    model = net.build_road_type_net('gru', pretrained=False, signs=True, motion=True, boards=True).eval()
+    assert model.gru.input_size == net.FEATURES + 2 + net.SIGN_INPUTS + net.MOTION_INPUTS + net.BOARD_INPUTS
+    checkpoint = tmp_path / 'road-type-best.pt'
+    torch.save({'task': 'road_type', 'architecture': 'mobilenet_v3_small+gru', 'memory': 'gru', 'signs': True,
+                'motion': True, 'boards': True, 'board_signs': [net.BOARD_CLASS], 'classes': list(data.CLASSES),
+                'state_dict': model.state_dict(), 'epoch': 1, 'split_sha256': 's', 'dataset_sha256': 'd'}, checkpoint)
+    result = net.export_road_type_onnx(checkpoint, tmp_path / 'road-type.onnx', data_root=root)
+    contract = json.loads(Path(result['contract']).read_text())
+    assert contract['verification']['passed'] is True and contract['step']['boards'] is True
+    assert contract['step']['board_signs'] == ['other_sign:motorway_direction']
+    assert [i['name'] for i in contract['inputs']] == ['image', 'speed', 'sign', 'motion', 'board', 'hidden']
+    assert any('board_age' in line for line in contract['car_input']['steps'])
+    import onnxruntime
+    session = onnxruntime.InferenceSession(result['onnx'], providers=['CPUExecutionProvider'])
+    from nnslr_tools.car_motion import NO_MOTION
+    image = np.random.default_rng(0).random((1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH), dtype=np.float32)
+    feeds = {'image': image, 'speed': np.array([[0.5, 1.0]], np.float32), 'sign': np.array([[2.0, 0.0]], np.float32),
+             'motion': np.array([NO_MOTION], np.float32), 'hidden': np.zeros((1, net.HIDDEN), np.float32)}
+    seen = session.run(None, {**feeds, 'board': np.array([[0.1, 1.0]], np.float32)})[0]
+    unseen = session.run(None, {**feeds, 'board': np.array([[2.0, 0.0]], np.float32)})[0]
+    assert not np.allclose(seen, unseen)
+
+
+def test_a_start_without_the_board_input_goes_on_as_it_was(tmp_path):
+    torch = pytest.importorskip('torch')
+    pytest.importorskip('torchvision')
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    torch.manual_seed(0)
+    old = net.build_road_type_net('gru', pretrained=False, signs=True, motion=True).eval()
+    path = tmp_path / 'run' / 'road-type' / 'gru' / 'road-type-best.pt'
+    path.parent.mkdir(parents=True)
+    torch.save({'task': 'road_type', 'memory': 'gru', 'signs': True, 'motion': True, 'classes': list(data.CLASSES),
+                'state_dict': old.state_dict(), 'epoch': 7}, path)
+    new = net.build_road_type_net('gru', pretrained=False, signs=True, motion=True, boards=True).eval()
+    start = net.road_type_start(torch, new, path, 'gru', {'test_routes': []})
+    assert start['widened'] == ['gru.weight_ih_l0'] and start['fresh'] == []
+    images = torch.rand(1, 3, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH)
+    speed, sign = torch.rand(1, 3, 2), torch.rand(1, 3, 2)
+    motion = torch.rand(1, 3, net.MOTION_INPUTS)
+    with torch.no_grad():
+        before = old(images, speed, None, sign, motion)[0]
+        for board in (torch.tensor([[[0.1, 1.0]] * 3]), None):
+            assert torch.allclose(new(images, speed, None, sign, motion, board=board)[0], before, atol=1e-6)
+    # A start with other inputs is not widened: its memory starts fresh.
+    other = net.build_road_type_net('gru', pretrained=False, signs=True, motion=False, boards=True)
+    assert 'gru.weight_ih_l0' in net.road_type_start(torch, other, path, 'gru', {'test_routes': []})['fresh']
+
+
+def test_train_windows_carry_the_board_input(root):
+    import random
+
+    import numpy as np
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    from nnslr_tools import road_type_signs as signs
+    dataset = data.load_dataset(root)
+    net.attach_signs(dataset, root)
+    net.attach_motion(dataset, root)
+    coverage = net.attach_boards(dataset, root)
+    # Not read with the boards: none seen.
+    assert coverage['read'] == 0 and coverage['boards'] == 0
+    runs = [run for run in dataset['sequences'] if run['partition'] == 'train']
+    route = runs[0]['route']
+    runs = [run for run in runs if run['route'] == route]
+    seconds = dataset['seconds'][route]
+    dataset['board_times'][route] = [float(seconds[runs[0]['positions'][5]])]
+    dataset['boards'][route] = signs.features_at(seconds, dataset['board_times'][route])
+    sampler = net.WindowSampler(dataset, runs, random.Random(1))
+    kinds = {'seen': 0, 'none': 0}
+    for _ in range(200):
+        board = sampler.window(20)[10]
+        assert board.shape == (20, 2)
+        kinds['seen' if board[:, 1].any() else 'none'] += 1
+    assert kinds['seen'] and kinds['none']
+
+
 # -- the junction head (nnslr_tools.junctions labels, road_type_metrics junction measure) -----------------------------
 def test_junction_events_and_their_matching():
     import numpy as np
@@ -729,7 +849,7 @@ def test_train_windows_carry_the_motion_and_drop_it_now_and_then(root):
     kinds = {'kept': 0, 'none': 0, 'no_yaw': 0, 'no_car': 0}
     for _ in range(400):
         window = sampler.window(20)
-        assert len(window) == 10
+        assert len(window) == 11
         motion = window[9]
         assert motion.shape == (20, car_motion.MOTION_INPUTS)
         if (motion == turning).all():

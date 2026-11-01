@@ -21,6 +21,12 @@ changed. On the GPU when there is one (device 'auto'): the video decoded by NVDE
 decoding is), the two networks under onnxruntime-gpu (their outputs differ from the CPU's by about 1e-6); else, or
 with device 'cpu', ffmpeg and onnxruntime on the CPU.
 
+The same reading gives the green boards towards a motorway or an expressway the car's memory confirms (its
+BOARD_SIGNS, the classifier's other_sign:motorway_direction): the network's input board, the seconds since one (record
+'boards'). In Switzerland they stand where the entry ramp starts, and at the interchanges; the car never takes a limit
+from them. Only a classifier with that class reads them: the car's of the sunnypilot clone, or another one chosen
+(classifier: a v2 reader-best.pt, exported once to ONNX into derived/road_type_signs/classifiers/).
+
 Two sources of the sign times (SIGN_SOURCES):
 - 'car': the signs the car's code confirms, as above. On the first 12 drives (October 2026) the car's classifier
   confirmed no motorway sign at all: its motorway_start probability stays below 0.03 on the boxes of the reviewed
@@ -47,7 +53,8 @@ PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
 SUNNYPILOT_ENV, SUNNYPILOT_DEFAULT = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'
 NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
-CACHE_VERSION = 1
+CACHE_VERSION = 2  # 2: the boards
+CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
 VIDEO_FPS = 20
 VIDEO_STEP = 4  # 20 fps / 4: the 5 frames a second of speedvisiond (PERIOD 0.2 s)
 SEGMENT_SECONDS = 60
@@ -83,12 +90,39 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def fingerprint(package: Path) -> dict:
-    """What the readings depend on: the car's vision.py and its two networks (sha256), the rate."""
+def network_paths(package: Path, classifier: Path | None = None) -> dict[str, Path]:
+    """The ONNX of the two networks: the car's of the sunnypilot clone, the classifier another one when given (an
+    ONNX with its .contract.json beside it)."""
+    paths = {name: Path(package) / 'models' / file for name, file in NETWORK_FILES.items()}
+    if classifier is not None:
+        paths['classifier'] = Path(classifier)
+    return paths
+
+
+def fingerprint(package: Path, classifier: Path | None = None) -> dict:
+    """What the readings depend on: the car's vision.py and the two networks (sha256), the rate."""
     package = Path(package)
     return {'version': CACHE_VERSION, 'video_step': VIDEO_STEP,
             'vision': _sha256(package / 'vision.py'),
-            **{name: _sha256(package / 'models' / file) for name, file in NETWORK_FILES.items()}}
+            **{name: _sha256(path) for name, path in network_paths(package, classifier).items()}}
+
+
+def classifier_onnx(root: Path, weights: Path) -> Path:
+    """A v2 classifier (reader-best.pt) as the car runs it: exported once (checked against PyTorch) to
+    derived/road_type_signs/classifiers/<sha256 of the weights>/classifier.onnx, with its contract."""
+    from nnslr_tools.exporting import export_reader_onnx
+    folder = Path(root) / CLASSIFIERS_RELATIVE / _sha256(Path(weights))[:16]
+    onnx = folder / NETWORK_FILES['classifier']
+    if not (onnx.is_file() and onnx.with_name(onnx.name + '.contract.json').is_file()):
+        folder.mkdir(parents=True, exist_ok=True)
+        export_reader_onnx(Path(weights), onnx, verify=True)
+    return onnx
+
+
+def classifier_classes(path: Path) -> list[str]:
+    """The classes of a classifier's ONNX, from its contract."""
+    path = Path(path)
+    return json.loads(path.with_name(path.name + '.contract.json').read_text('utf-8'))['output']['classes']
 
 
 def load_vision(package: Path):
@@ -127,13 +161,11 @@ class _Network:
 _WORKER: dict = {}
 
 
-def _worker_start(package: str, gpu: bool = False) -> None:
-    package = Path(package)
-    vision = load_vision(package)
-    contract = json.loads((package / 'models' / (NETWORK_FILES['classifier'] + '.contract.json')).read_text('utf-8'))
-    _WORKER.update(vision=vision, finder=_Network(package / 'models' / NETWORK_FILES['finder'], gpu),
-                   classifier=_Network(package / 'models' / NETWORK_FILES['classifier'], gpu),
-                   classes=contract['output']['classes'], nvdec=gpu)
+def _worker_start(package: str, gpu: bool = False, classifier: str | None = None) -> None:
+    paths = network_paths(Path(package), Path(classifier) if classifier else None)
+    _WORKER.update(vision=load_vision(Path(package)), finder=_Network(paths['finder'], gpu),
+                   classifier=_Network(paths['classifier'], gpu), classes=classifier_classes(paths['classifier']),
+                   nvdec=gpu)
 
 
 def _video_size(video: Path) -> tuple[int, int]:
@@ -197,6 +229,22 @@ def confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
     return found
 
 
+def board_confirmations(vision, readings: list[tuple[float, list]]) -> list[float]:
+    """When SpeedLimitMemory confirms a green board towards a motorway (its BOARD_SIGNS) from the readings, as
+    speedvisiond's memory does: [seconds, ...], the moments it sets _board_at. Empty with a vision.py without them."""
+    if not hasattr(vision, 'BOARD_SIGNS'):
+        return []
+    memory, found = vision.SpeedLimitMemory(), []
+    for now, signs in readings:
+        classes = [name for name, _ in signs]
+        speeds = [vision.class_speed(name) for name in classes]
+        before = memory._board_at
+        memory.update(float(now), [speed for speed in speeds if speed is not None], classes)
+        if memory._board_at != before:
+            found.append(float(now))
+    return found
+
+
 def number_confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
     """The speed signs SpeedLimitMemory confirms from the readings, as speedvisiond's memory does: [[seconds, km/h],
     ...], the moments a number (not the end of a limit) became the limit held. The junction head's measure counts the
@@ -239,12 +287,14 @@ def load_signs(root: Path, route: str) -> dict | None:
 
 
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
-                device: str = 'auto', log=print) -> dict[str, dict]:
+                device: str = 'auto', classifier: Path | None = None, log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
-    The segments of all drives are read in parallel by workers processes (default a quarter of the cores), on the GPU
-    when there is one (device 'auto'; 'cpu' never)."""
+    The segments of all drives are read in parallel by workers processes (default half the cores), on the GPU when
+    there is one (device 'auto'; 'cpu' never). classifier: a v2 reader-best.pt to read with instead of the car's
+    (classifier_onnx)."""
     package = package_path() if package is None else Path(package)
-    stamp = fingerprint(package)
+    onnx = classifier_onnx(root, classifier) if classifier is not None else None
+    stamp = fingerprint(package, onnx)
     records, tasks, stamps = {}, [], {}
     for route in routes:
         videos = _videos(root, route)
@@ -255,12 +305,14 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
             continue
         tasks += [(route, segment, str(path)) for segment, path in videos.items()]
     if tasks:
-        workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 4))
+        workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 2))
+        which = f'the classifier {classifier}' if classifier is not None else "the car's classifier"
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
-            f'SignNet and classifier, 5 frames a second, {workers} processes')
+            f'SignNet and {which}, 5 frames a second, {workers} processes')
         results: dict[str, list] = {}
         gpu = device != 'cpu'
-        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start, initargs=(str(package), gpu)) as pool:
+        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start,
+                                 initargs=(str(package), gpu, str(onnx) if onnx else None)) as pool:
             done = 0
             for (route, _, _), result in zip(tasks, pool.map(read_segment, [(v, s) for _, s, v in tasks])):
                 results.setdefault(route, []).append(result)
@@ -278,7 +330,9 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
             record = {'route': route, 'fingerprint': stamp, 'videos': stamps[route],
                       'frames': {str(item['segment']): item['frames'] for item in segments},
                       'readings': [[round(t, 3), signs] for t, signs in readings],
-                      'confirmed': confirmations(vision, readings)}
+                      'confirmed': confirmations(vision, readings),
+                      'boards': board_confirmations(vision, readings),
+                      'classifier': str(classifier) if classifier is not None else None}
             path = cache_path(root, route)
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = path.with_suffix('.json.tmp')
@@ -293,6 +347,11 @@ def sign_times(record: dict | None) -> list[float]:
     if not record:
         return []
     return sorted(float(t) for t, road in record.get('confirmed', []) if road in SIGN_ROADS)
+
+
+def board_times(record: dict | None) -> list[float]:
+    """When a green board towards a motorway was confirmed in a drive (seconds from its start, in order)."""
+    return sorted(float(t) for t in (record or {}).get('boards', []))
 
 
 def frame_seconds(frame: dict) -> float:

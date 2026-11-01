@@ -291,6 +291,27 @@ def test_only_a_road_type_with_memory_and_its_exported_step_goes_on_the_car(tmp_
         car_release.choose(data, 's1')
 
 
+def test_a_road_type_with_the_board_input_goes_only_with_a_classifier_that_has_the_boards(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    model_id = road_type_run(data, 't1', b'road')
+    contract = data / 'runs/t1/road-type/export/road-type.onnx.contract.json'
+    value = json.loads(contract.read_text())
+    write(contract, {**value, 'step': {'boards': True, 'board_signs': ['other_sign:motorway_direction']}})
+    use_road_type(data, model_id)
+    # The classifier in use (classifier:r1/reader) has no such class: refused.
+    with pytest.raises(ValueError, match='reads the green boards towards a motorway .* has no such class'):
+        car_release.choose(data, 's1')
+    classes = data / 'runs/r1/reader/result.json'
+    result = json.loads(classes.read_text()) if classes.is_file() else {}
+    write(classes, {**result, 'classes': ['maximum_speed:50', 'other_sign:motorway_direction']})
+    assert car_release.choose(data, 's1')['road_type']['id'] == model_id
+    # A scene network without the board input goes with any classifier.
+    write(contract, {**value, 'step': {'boards': False, 'board_signs': []}})
+    write(classes, {**result, 'classes': ['maximum_speed:50']})
+    assert car_release.choose(data, 's1')['road_type']['id'] == model_id
+
+
 def test_a_dry_run_exports_and_compares_only(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)
