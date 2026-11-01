@@ -97,6 +97,7 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'direction_right', label: 'Direction →', chip: 'Right →', short: '→'},
     {id: 'direction_straight', label: 'Direction ↑', chip: '↑ Straight', short: '↑'},
     {id: 'direction_several', label: 'Directions, several', chip: 'Several', short: 'directions'},
+    {id: 'motorway_direction', label: 'Motorway direction (green)', chip: 'Motorway direction', short: 'motorway dir.'},
   ]},
   {label: 'Other', kinds: [{id: 'other', label: 'Something else', chip: 'Something else', short: 'other'}]},
 ];
