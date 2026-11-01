@@ -42,6 +42,8 @@ export interface CarMoment {
   ahead: string;
   vision: string;
   car: string;
+  /** Where the car's limit came from (the resolver's source: vision, map…), '' when not in the log. */
+  source: string;
   /** Both limits known and DIFFER_KPH or more apart. */
   differ: boolean;
 }
@@ -86,7 +88,8 @@ export function carMomentOf(row: FrameRow): CarMoment | null {
     map: kph(map, 'none'),
     ahead: typeof ahead === 'number' && typeof distance === 'number' ? ahead + ' in ' + Math.round(distance) + ' m' : '',
     vision: kph(vision, 'none'),
-    car: kph(limitOf(valueAt(carLogs.series['res_limit'], s)), 'none') + (typeof source === 'string' && source ? ' · ' + source : ''),
+    car: kph(limitOf(valueAt(carLogs.series['res_limit'], s)), 'none'),
+    source: typeof source === 'string' ? source : '',
     differ: apart(map, vision),
   };
 }

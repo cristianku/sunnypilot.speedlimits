@@ -111,7 +111,7 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
       <template v-if="moment">
         <span><b>Map</b> <span id="carMap">{{ moment.map }}</span><span v-if="moment.ahead" class="ahead"> → {{ moment.ahead }}</span></span>
         <span><b>Vision</b> <span id="carVision">{{ moment.vision }}</span></span>
-        <span><b>Car</b> <span id="carLimit">{{ moment.car }}</span></span>
+        <span><b>Car</b> <span id="carLimit">{{ moment.car }}</span><span v-if="moment.source" class="ahead"> from {{ moment.source }}</span></span>
       </template>
     </div>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
