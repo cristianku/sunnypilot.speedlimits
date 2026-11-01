@@ -340,3 +340,29 @@ def test_the_scene_network_reads_the_signs_with_a_chosen_classifier_and_takes_th
     log.write_text('== scripts/run_road_type.sh r\nrun:          r\nsettings:     --epochs 60 --no-boards\n'
                    'signs read:   by the classifier of the car\n')
     assert _settings_of(log, 'train_road_type') == ['60 epochs', 'no board input']
+
+
+def test_the_classifier_and_the_board_input_reach_the_panel_over_http(root, checkout):
+    from review_helpers import RunningServer, json_of
+
+    from test_panel import finished, full_log
+    from test_panel_runs import make_classifier_run
+    script = road_type_script(checkout)
+    script.write_text(script.read_text() + 'echo "signs=${NNSLR_ROAD_TYPE_CLASSIFIER:-car} boards=${NNSLR_ROAD_TYPE_BOARDS:-auto}"\n')
+    done = make_classifier_run(root, 'c1')
+    server = RunningServer(root)
+    server.app.panel = Panel(root, repo=checkout)
+    server.app.panel.activities = list
+    try:
+        # Train › Scene's own button: a wrong choice is refused, never dropped (nothing starts).
+        status, _, data = server.request('POST', '/api/panel/run/train_road_type', body={'boards': 'x'})
+        assert status == 400 and json_of(data)['error'] == 'bad_option'
+        status, _, data = server.request('POST', '/api/panel/run/train_road_type',
+                                         body={'classifier': 'classifier:c1/classifier', 'boards': 'on'})
+        assert status == 200, data
+        job = json_of(data)['id']
+        finished(server.app.panel, job)
+        assert re.search(r'^signs=' + re.escape(str((done / 'classifier/reader-best.pt').resolve())) + ' boards=1$',
+                         full_log(server.app.panel, job), re.M)
+    finally:
+        server.close()
