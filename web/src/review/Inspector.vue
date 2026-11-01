@@ -14,7 +14,7 @@ import RoutePick from './RoutePick.vue';
 import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
 import {selectedBox} from './current';
-import {countryOf, reasonsOf} from './frames';
+import {countryOf, reasonsOf, segmentSecond} from './frames';
 import OtherFields from './OtherFields.vue';
 import SecondReading from './SecondReading.vue';
 import {report, state} from './store';
@@ -39,6 +39,9 @@ const countryText = computed(() => {
   const source = props.row.country_from === 'nearest_fix' ? 'from the GPS of a nearby frame' : 'from the GPS';
   return (report.countries[code] ?? code) + ' · ' + source;
 });
+// On the server: what the car did at this moment (its limit, the map's, the vision's), in Drive review.
+const driveHref = computed(() => report.apiBase === null ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
+  + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
 </script>
 
 <template>
@@ -52,6 +55,7 @@ const countryText = computed(() => {
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
       <p class="country-line" id="country" :data-country="country ?? ''"><span v-if="country" class="flag" aria-hidden="true">{{ flagOf(country) }}</span>{{ countryText }}</p>
+      <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Drive review →</a></p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}<button v-if="carryHint" type="button" class="btn small carry-hint" @click="applyPrevious(); releaseFocus($event)">Apply previous <kbd class="keycap">A</kbd></button></template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>
       <BoxList :row="row" :work="work"/>

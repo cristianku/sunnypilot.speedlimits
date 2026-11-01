@@ -78,7 +78,7 @@ The core needs Python 3.11 or newer and has no dependencies. The optional extras
 |---|---|---|
 | `.[preannotate]` | onnxruntime, Pillow, numpy, rapidocr 3.4.0 | `nnslr preannotate` on the CPU |
 | `.[preannotate-gpu]` | onnxruntime-gpu below 1.27, with CUDA and cuDNN wheels | the same on an NVIDIA GPU. Never install it together with `preannotate`. |
-| `.[log-reader]` | pycapnp, zstandard | reading comma logs: `nnslr gps`, `log-metadata`, `align-route` and the comma download |
+| `.[log-reader]` | pycapnp, zstandard | reading comma logs: `nnslr gps`, `log-metadata`, `align-route`, `drive-review`, Data › Drive review and the comma download |
 | `.[mcp]` | the MCP SDK | `nnslr mcp`, and the portal's `/mcp` endpoint |
 | `.[training]` | wandb, huggingface-hub | training logs and model downloads; `scripts/setup_v100_training_env.sh` installs it into `.venv-gpu` |
 
@@ -184,6 +184,7 @@ These helpers are the daily flow, and the portal's buttons run them. Each one sk
 | `mine-hard-examples` | extracts the errors from an evaluation report | writes data |
 | `replay` | runs detector then reader offline over the extracted frames of a route | GPU, writes data |
 | `drive-video ROUTE` | joins the comma's minutes of road video (`fcamera.hevc`, 1344 × 760, 20 fps) into one H.264 MP4 960 px wide with the start of each minute, `data/derived/video/<route>.mp4` and `.json`: what the Drive view of Results plays. The site makes it by itself the first time Drive shows the drive (8 minutes encoded side by side, 2 threads each at low priority, then joined: about 46 s for 30 minutes of drive, about 3 MB a minute); `--again` makes it again | CPU, writes data |
+| `drive-review scan [ROUTE ...] [--all]` | Data › Drive review from the shell: records the drive's comma logs (the download's and the ones sent from the page), reads the best one of each minute (rlog before qlog; cached in `data/derived/drive_logs/`), joins them on the comma's monotonic clock and finds the episodes (interventions, vision against map) into `data/annotations/drive_review.sqlite`. `--all`: every drive never scanned, out of date or with logs not read yet. Needs `.[log-reader]`; the log schema of the runtime branch is downloaded once into `~/.cache/comma-fetch-log` and checked by SHA-256 (`NNSLR_DRIVE_SCHEMA` names another folder). Portal: **Look on the server**, **Look for episodes in every drive** | CPU, writes data |
 
 **Export and packaging**
 

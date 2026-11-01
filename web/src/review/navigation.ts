@@ -3,7 +3,7 @@ import {nextTick} from 'vue';
 import {thousands} from '../common/format';
 import {readLocal, writeLocal} from './dom';
 import {
-  aiConfirmed, confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, visibleRows, workOf,
+  aiConfirmed, confirmedFilter, currentRow, frameStatus, isQualityFilter, matchesFilter, segmentSecond, visibleRows, workOf,
 } from './frames';
 import {revealStage, scrollTimelineToCurrent} from './scroll';
 import {indexOf, report, rowOf, state} from './store';
@@ -134,10 +134,36 @@ export function pickFilter(filter: Filter): void {
   else setFilter(filter);
 }
 
-/** The frame last open in this browser, else the first of the filter, else the first one. */
+/** Opened from Drive review ("?segment=3&second=12.5"): the frame nearest that moment, else null. */
+function linkedFrame(): string | null {
+  const query = new URLSearchParams(window.location.search);
+  const segment = Number(query.get('segment'));
+  const second = Number(query.get('second') ?? 0);
+  if (query.get('segment') === null || !Number.isInteger(segment) || !Number.isFinite(second)) return null;
+  const target = segment * 60 + second;
+  let best: string | null = null;
+  let gap = Infinity;
+  for (const row of report.rows) {
+    const distance = Math.abs(row.segment_index * 60 + (segmentSecond(row) ?? 0) - target);
+    if (distance < gap) {
+      gap = distance;
+      best = row.frame_key;
+    }
+  }
+  return best;
+}
+
+/** The frame Drive review asked for, else the frame last open in this browser, else the first of the filter, else
+ * the first one. */
 export function pickStartFrame(): string | null {
   // The drive at work opens on its newest frame, and follows (review/busy.ts).
   if (report.atWork) return report.rows[report.rows.length - 1]?.frame_key ?? null;
+  // From Drive review every frame is shown (not saved as the filter): the moment asked for may be confirmed already.
+  const linked = linkedFrame();
+  if (linked !== null) {
+    state.filter = 'all';
+    return linked;
+  }
   const last = readLocal(report.lastKeyStorage, null);
   if (last !== null && rowOf(last)) return last;
   const first = report.rows.find((row) => matchesFilter(row, state.filter)) ?? report.rows[0];

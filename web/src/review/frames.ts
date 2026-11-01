@@ -11,13 +11,19 @@ export function currentRow(): FrameRow | null {
   return state.currentKey === null ? null : rowOf(state.currentKey);
 }
 
-/** How far into the drive the frame is, "12:46" (1:02:05 past an hour): the segment's minute and the second in it;
- * null when the extraction did not record the second. */
-export function driveTime(row: FrameRow): string | null {
+/** The second of its segment's video a frame was taken at, else null. */
+export function segmentSecond(row: FrameRow): number | null {
   const fps = row.requested_sample_fps;
   const second = typeof row.media_time_s === 'number' ? row.media_time_s
     : typeof fps === 'number' && fps > 0 ? row.output_index / fps : null;
-  if (second === null || !Number.isFinite(second)) return null;
+  return second === null || !Number.isFinite(second) ? null : second;
+}
+
+/** How far into the drive the frame is, "12:46" (1:02:05 past an hour): the segment's minute and the second in it;
+ * null when the extraction did not record the second. */
+export function driveTime(row: FrameRow): string | null {
+  const second = segmentSecond(row);
+  if (second === null) return null;
   const total = Math.floor(row.segment_index * 60 + second + 1e-6);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);

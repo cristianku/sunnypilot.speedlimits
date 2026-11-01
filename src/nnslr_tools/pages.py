@@ -54,7 +54,7 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
-                                  ('roads', '/roads', 'Roads'),
+                                  ('drivereview', '/drive-review', 'Drive review'), ('roads', '/roads', 'Roads'),
                                   ('dataset', '/dataset', 'Training dataset'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
@@ -67,7 +67,7 @@ SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages o
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads',
-                '/train': 'train', '/evaluate': 'evaluate', '/models': 'models',
+                '/drive-review': 'drivereview', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models',
                 '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
