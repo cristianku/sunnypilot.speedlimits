@@ -179,16 +179,16 @@ input::placeholder { color: var(--placeholder); }
 .ai-box.delete { stroke-dasharray: 2 4; }
 .ai-tag { fill: var(--ov-ai); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
 #draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
-/* The frame's country and what the comma had at this moment (car-moment.ts): on the photo, top left, never in the way
-   of the pointer. */
-.car-moment { position: absolute; left: 8px; top: 8px; max-width: calc(100% - 16px); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
-  padding: 4px 10px; border-radius: 10px; pointer-events: none; background: rgba(8, 11, 16, 0.72);
-  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #e8ecf3; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+/* The bar above the photo (CarMoment.vue): the frame's country and what the comma had at this moment. Above the
+   photo, never on it; its height stays the same from frame to frame, so the photo does not move. */
+.car-moment { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; min-height: 36px; margin-bottom: 10px;
+  padding: 5px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow);
+  color: var(--fg); font-size: 13px; line-height: 1.35; font-variant-numeric: tabular-nums; }
 .car-moment > span { white-space: nowrap; }
-.car-moment .country { font-size: 15px; line-height: 1.1; }
-.car-moment b { font-weight: 500; color: #9aa4b2; }
+.car-moment .country { font-size: 16px; line-height: 1.1; }
+.car-moment b { font-weight: 500; color: var(--muted); }
 .car-moment span span { font-weight: 700; }
-.car-moment .ahead { font-weight: 400; color: #9aa4b2; }
+.car-moment .ahead { font-weight: 400; color: var(--muted); }
 .car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--bad); }
 /* The frame of a sign the comma read (sign_reads): said first, in the colour of its bar in the timeline. */
 .car-moment .read-here { font-weight: 700; color: var(--read); }
@@ -600,7 +600,8 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
      follows, folded under its title. */
   .workspace { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
   .stage-col { display: contents; }
-  .stage { order: 1; }
+  .car-moment, .stage { order: 1; }
+  .car-moment { margin-bottom: 0; }
   .stage-bar { order: 2; margin-top: 0; }
   .panel { order: 3; }
   .tl-card { order: 4; margin-top: 0; }
@@ -680,6 +681,8 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   #statePill { grid-area: pill; width: auto; height: 32px; }
   .stage-bar .data { grid-area: data; font-size: 13px; line-height: 1.4; }
   #hintToggle { grid-area: hint; justify-self: start; }
+  /* Two lines kept for it on a phone: the photo under it never moves. */
+  .car-moment { min-height: 46px; gap: 1px 12px; font-size: 12.5px; }
   .panel { border-radius: 16px; }
   .panel section { padding: 14px 16px; }
   .tl-card { border-radius: 16px; }

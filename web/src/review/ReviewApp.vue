@@ -9,6 +9,7 @@ import {aiPhase, loadAiState} from './ai';
 import {watchAiLive} from './ai-live';
 import {watchBusy} from './busy';
 import {loadCarLogs} from './car-moment';
+import CarMoment from './CarMoment.vue';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
@@ -99,6 +100,7 @@ onBeforeUnmount(() => {
     <div id="workspace" class="workspace" :class="{'tl-open': state.timelineOpen}" :hidden="!hasFrames">
       <template v-if="row && work">
         <div class="stage-col">
+          <CarMoment :row="row" :work="work"/>
           <Stage :row="row" :work="work"/>
           <StageBar :row="row"/>
           <Timeline/>

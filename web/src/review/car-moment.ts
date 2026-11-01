@@ -1,6 +1,6 @@
 // What the comma had at the moment of a frame, from its own logs as Drive review read them: the map's limit (and the
-// one ahead), the limit the vision memory held (speedVisionSP) and the one the car used (the resolver), on the photo,
-// and the frames where map and vision differ, underlined in the timeline. Shown only: the two sources stay separate
+// one ahead), the limit the vision memory held (speedVisionSP, with how far it saw the sign when the car logs it) and
+// the one the car used (the resolver), in the bar above the photo (CarMoment.vue), and the frames where map and vision differ, underlined in the timeline. Shown only: the two sources stay separate
 // on the car, only the resolver weighs them. Read once per drive, on the server.
 import {shallowReactive} from 'vue';
 import {type Series, type SyncSegment, type Timeline, limitOf, secondOf, valueAt} from '../control/drive-review';
@@ -9,7 +9,7 @@ import {call} from './server';
 import {report} from './store';
 import type {FrameRow} from './types';
 
-const SERIES = ['map_valid', 'map_limit', 'map_ahead', 'map_ahead_dist', 'vis_limit', 'res_limit', 'res_source'];
+const SERIES = ['map_valid', 'map_limit', 'map_ahead', 'map_ahead_dist', 'vis_limit', 'vis_sign_dist', 'res_limit', 'res_source'];
 
 /** Map and vision differ at a frame when their limits are this far apart (drive_episodes.DISAGREE_KPH). */
 const DIFFER_KPH = 5;
@@ -41,6 +41,8 @@ export interface CarMoment {
   map: string;
   ahead: string;
   vision: string;
+  /** How far the vision saw the sign ("40 m"), '' when the car's build does not log it (speedVisionSP.signDistance). */
+  visionDistance: string;
   car: string;
   /** Where the car's limit came from (the resolver's source: vision, map…), '' when not in the log. */
   source: string;
@@ -84,10 +86,12 @@ export function carMomentOf(row: FrameRow): CarMoment | null {
   const ahead = limitOf(valueAt(carLogs.series['map_ahead'], s));
   const distance = valueAt(carLogs.series['map_ahead_dist'], s);
   const source = valueAt(carLogs.series['res_source'], s);
+  const signDistance = valueAt(carLogs.series['vis_sign_dist'], s);
   return {
     map: kph(map, 'none'),
     ahead: typeof ahead === 'number' && typeof distance === 'number' ? ahead + ' in ' + Math.round(distance) + ' m' : '',
     vision: kph(vision, 'none'),
+    visionDistance: typeof signDistance === 'number' && signDistance > 0 ? Math.round(signDistance) + ' m' : '',
     car: kph(limitOf(valueAt(carLogs.series['res_limit'], s)), 'none'),
     source: typeof source === 'string' ? source : '',
     differ: apart(map, vision),
