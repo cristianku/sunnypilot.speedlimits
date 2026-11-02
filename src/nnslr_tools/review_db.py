@@ -399,6 +399,44 @@ class ReviewStore:
                 connection.close()
         return changed
 
+    def withdraw_ai_reviews(self, *, client: str, dry_run: bool = False) -> list[dict]:
+        """Mark every frame an AI confirmed (reviewer_kind 'ai', all runs) as no longer confirmed, as withdraw_review
+        does: the AI's boxes stay as the frame's last payload, a new revision is recorded in the history, and the next
+        import takes the frame out of the dataset. Frames a person confirmed are left alone. Returns the frames
+        changed (or to change, with dry_run)."""
+        now = utc_now()
+        changed = []
+        with self._write_lock:
+            connection = self._connect()
+            try:
+                connection.execute('BEGIN IMMEDIATE')
+                try:
+                    rows = connection.execute(
+                        "SELECT * FROM frame_reviews WHERE reviewer_kind = 'ai' AND confirmed = 1 "
+                        'ORDER BY route_id, run_id, segment_index, output_index').fetchall()
+                    for row in rows:
+                        review = _review_from_row(row)
+                        revision = review['revision'] + 1
+                        changed.append({'route_id': review['route_id'], 'run_id': review['run_id'],
+                                        'frame_key': review['frame_key'], 'reviewer': review['reviewer'],
+                                        'revision': revision})
+                        if dry_run:
+                            continue
+                        connection.execute(
+                            'UPDATE frame_reviews SET confirmed = 0, revision = ?, updated_at = ? '
+                            'WHERE route_id = ? AND run_id = ? AND frame_key = ?',
+                            (revision, now, review['route_id'], review['run_id'], review['frame_key']))
+                        _append_history(connection, review['route_id'], review['run_id'], review['frame_key'],
+                                        revision, row['payload'], review['reviewer'], 0, now, client, 'ai',
+                                        review['channel'])
+                    connection.execute('ROLLBACK' if dry_run else 'COMMIT')
+                except BaseException:
+                    connection.execute('ROLLBACK')
+                    raise
+            finally:
+                connection.close()
+        return changed
+
     def review(self, route_id: str, run_id: str, frame_key: str) -> dict | None:
         connection = self._connect()
         try:

@@ -1612,7 +1612,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_reclassify.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_reclassify.add_argument("--dry-run", action="store_true", help="only count what would change")
     p_reclassify.set_defaults(func=_cmd_review_reclassify)
-    p_mcp = sub.add_parser("mcp", help="MCP server (stdio) with the review tools, for Claude Code, Codex and other "
+    p_withdraw_ai = sub.add_parser(
+        "review-withdraw-ai",
+        help="mark every frame an AI confirmed (reviewer ai/<name>) as not confirmed: the boxes stay, a new revision "
+             "goes in the history, the next import takes the frames out of the dataset; a person reviews them again. "
+             "A copy of the database is made first")
+    p_withdraw_ai.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_withdraw_ai.add_argument("--dry-run", action="store_true", help="only count what would change")
+    p_withdraw_ai.set_defaults(func=_cmd_review_withdraw_ai)
+    p_mcp =sub.add_parser("mcp", help="MCP server (stdio) with the review tools, for Claude Code, Codex and other "
                                        "MCP clients; needs the optional [mcp] dependencies. The review server "
                                        "also serves MCP over HTTP at /mcp")
     p_mcp.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -2455,6 +2463,36 @@ def _cmd_review_reclassify(args: argparse.Namespace) -> int:
         for item in changed:
             routes[item["route_id"] + " " + item["run_id"]] += 1
         report["reviewers"][reviewer] = {"frames": len(changed), "by_route_run": dict(sorted(routes.items()))}
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_review_withdraw_ai(args: argparse.Namespace) -> int:
+    import sqlite3
+    from collections import Counter
+    from datetime import datetime, timezone
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.review_db import ReviewStore, db_path
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    path = db_path(root)
+    store = ReviewStore(path)
+    report = {"dry_run": args.dry_run, "database": str(path)}
+    if not args.dry_run:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        copy = path.with_name(f"{path.name}.bak-withdraw-ai-{stamp}")
+        source = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        target = sqlite3.connect(str(copy))
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+        report["copy"] = str(copy)
+    changed = store.withdraw_ai_reviews(client="review-withdraw-ai", dry_run=args.dry_run)
+    reviewers = Counter(item["reviewer"] for item in changed)
+    routes = Counter(item["route_id"] + " " + item["run_id"] for item in changed)
+    report.update({"frames": len(changed), "by_reviewer": dict(reviewers.most_common()),
+                   "by_route_run": dict(sorted(routes.items()))})
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0
 
