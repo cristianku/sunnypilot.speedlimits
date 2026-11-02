@@ -657,7 +657,9 @@ def _reviewed_detection(item, originals: dict):
     if 'detection_id' in item:
         detection['detection_id'] = detection_id
     detection['review_state'] = 'reviewed'
-    if detection.get('value_kph') is None:
+    if detection.get('sign_value') is not None and detection.get('value_kph') is None:
+        detection['value_kph'] = detection['sign_value']  # written digits, never mph converted to km/h
+    if detection.get('sign_value') is None and detection.get('value_kph') is None:
         detection['value_state'] = 'unknown'
     else:
         detection['value_state'] = 'reviewed'

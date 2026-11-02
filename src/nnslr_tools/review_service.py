@@ -439,7 +439,7 @@ class ReviewService:
                     continue
                 family = detection.get('family')
                 if family in ('maximum_speed', 'zone', 'variable_display', 'road_marking_candidate') \
-                        and detection.get('value_kph') is None:
+                        and detection.get('value_kph') is None and detection.get('sign_value') is None:
                     flags.add('unknown_value')
                 if family == 'unreadable':
                     flags.add('unreadable')
@@ -970,8 +970,11 @@ def review_schema() -> dict:
                             'box. Fields left out are copied from that proposal',
             'bbox_xyxy': '[x1, y1, x2, y2] in pixels of the original image, inside it, x1 < x2 and y1 < y2',
             'family': list(DETECTION_FAMILIES),
-            'value_kph': f'integer between {MIN_VALUE_KPH} and {MAX_VALUE_KPH}, or null when the number cannot be '
+            'value_kph': f'legacy alias of the written number, never unit-converted; integer between {MIN_VALUE_KPH} and {MAX_VALUE_KPH}, or null when the number cannot be '
                          f'read. Only with ' + ', '.join(VALUE_FAMILIES) + '; null with the other families',
+            'sign_value': 'optional original written integer; preferred over legacy value_kph. If both are '
+                          'present they must agree. 25 mph is 25, never 40',
+            'sign_unit': 'optional km/h, mph or unknown; separate from the classifier numeric class',
             'applicability': sorted(ENUMS['applicability']),
             'visibility': sorted(ENUMS['visibility']),
             'occlusion': sorted(ENUMS['occlusion']),

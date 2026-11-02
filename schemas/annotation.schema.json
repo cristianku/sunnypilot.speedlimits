@@ -472,6 +472,23 @@
         null
       ],
       "description": "an other_sign box painted on the road (true), its sign_type still what it means; optional"
+    },
+    "sign_value": {
+      "description": "Original written number. value_kph is a legacy alias, never a conversion.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 5,
+      "maximum": 250
+    },
+    "sign_unit": {
+      "enum": [
+        "km/h",
+        "mph",
+        "unknown",
+        null
+      ]
     }
   },
   "required": [

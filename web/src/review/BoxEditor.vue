@@ -160,7 +160,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
     <div :class="['signs', {led: variable}]" id="quickValues" role="group" aria-label="Speed">
       <button v-for="value in QUICK_VALUES" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
-              :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' km/h'"
+              :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' written on sign'"
               @click="setValue(value); releaseFocus($event)">{{ value }}</button>
       <button type="button" class="sign unknown" :aria-pressed="noValue" data-value="unknown" title="Number not readable"
               aria-label="Number not readable" @click="setValue(null); releaseFocus($event)">?</button>
@@ -174,7 +174,12 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <label for="value">Other value</label>
       <input v-fill="detection?.value_kph === null || detection?.value_kph === undefined ? '' : String(detection.value_kph)"
              type="number" id="value" min="5" max="250" step="1" inputmode="numeric" placeholder="–" @change="valueChanged">
-      <span>km/h</span>
+      <select aria-label="Sign unit" :value="detection?.sign_unit ?? 'unknown'"
+              @change="setField('sign_unit', ($event.target as HTMLSelectElement).value as 'km/h' | 'mph' | 'unknown')">
+        <option value="unknown">Unit not recorded</option>
+        <option value="km/h">km/h</option>
+        <option value="mph">mph</option>
+      </select>
       <span v-if="state.typing" class="typing" role="status">typing {{ state.typing }}…</span>
     </div>
     <p class="field-error" id="valueError" :hidden="!state.valueError">Type a whole number from 5 to 250, or leave it empty if it cannot be read.</p>

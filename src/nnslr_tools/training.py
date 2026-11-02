@@ -41,7 +41,7 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
                                      DETECTOR_ANCHOR_MAX_RATIO, MAX_DETECTOR_INPUT_SIDE, atomic_torch_save,
                                      build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
 from nnslr_tools.progress import report as report_progress
-from nnslr_tools.annotations import load_jsonl, validate_dataset
+from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
 from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
 
 # The kind of a "not a sign" box on a vehicle.
@@ -110,7 +110,7 @@ def _reader_label(row: dict[str, Any]) -> str | None:
         return None
 
     value_state = row.get("value_state")
-    value = row.get("value_kph")
+    value = written_sign_value(row)
     if value_state == "read" and isinstance(value, int) and not isinstance(value, bool):
         return f"{family}:{value}"
     if family in {"cancellation", "unreadable", "other_sign"}:
@@ -476,6 +476,7 @@ def prepare_reader_training(
             "sign_family": row.get("sign_family"),
             "value_state": row.get("value_state"),
             "value_kph": row.get("value_kph"),
+            **{k: row[k] for k in ('sign_value', 'sign_unit') if k in row},
             "route_id": row.get("route_id"),
             "segment_index": row.get("segment_index"),
             "decoded_frame_index": row.get("decoded_frame_index"),
@@ -537,6 +538,7 @@ def _record(row: dict[str, Any], split: str, label: str, source: str, **extra: A
         "sign_type": row.get("sign_type"),
         "value_state": row.get("value_state"),
         "value_kph": row.get("value_kph"),
+        **{k: row[k] for k in ('sign_value', 'sign_unit') if k in row},
         "route_id": row.get("route_id"),
         "segment_index": row.get("segment_index"),
         "decoded_frame_index": row.get("decoded_frame_index"),
@@ -810,7 +812,7 @@ OFF_DISPLAY_NOTE = re.compile(r"(?<!cut )\b(off|blank|unlit|not active|spent[oai
 def off_display(row: dict[str, Any]) -> bool:
     """A variable_display row without a value whose note says the panel is off or blank: an ignore box for the
     detector (neither a sign to find nor background), see prepare_detector_training."""
-    if row.get("sign_family") != "variable_display" or row.get("value_kph") is not None:
+    if row.get("sign_family") != "variable_display" or written_sign_value(row) is not None:
         return False
     return OFF_DISPLAY_NOTE.search(str(row.get("notes") or "").lower()) is not None
 

@@ -60,6 +60,18 @@ def ai_body(run_id=RUN_ID, base_revision=0, detections=None, **extra):
     return body
 
 
+def test_rest_service_preserves_original_mph_number_with_legacy_alias(tmp_path):
+    from nnslr_tools.review_service import ReviewService
+    make_report(tmp_path)
+    service=ReviewService(tmp_path,ReviewStore(db_path(tmp_path)))
+    result=service.save_review(ROUTE,'0/0',ai_body(country='US',detections=[{
+        'detection_id':'0/0/0','value_kph':None,'sign_value':25,'sign_unit':'mph',
+        'applicability':'own_road'}]),client='unit-test',channel='rest')
+    d=result['review']['detections'][0]
+    assert (d['value_kph'],d['sign_value'],d['sign_unit'])==(25,25,'mph')
+    assert service.progress(ROUTE)['confirmed_with_doubts']['unknown_value']==[]
+
+
 def test_api_needs_the_token_in_a_header_even_on_loopback(api):
     server, root, rows = api
     assert server.app.token is None and not server.app.require_token

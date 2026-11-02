@@ -60,8 +60,18 @@ Families: maximum_speed, cancellation, zone, variable_display, other_sign,
 not_a_sign, unreadable, road_marking. The last two preserve unreadable-family
 and reviewed asphalt evidence; a road marking is not silently promoted to a
 vertical regulatory sign. Values are read/unreadable/unknown/not_applicable;
-a read value is an integer in the existing core domain 5..250 km/h. This numeric
+a read value is an integer in the existing numeric domain 5..250. This numeric
 domain is a plausibility constraint, not a claim about local road law.
+`value_kph` is the historical name for the **written number**, not a converted
+physical speed. Optional `sign_value` records those same digits and `sign_unit`
+records `km/h`, `mph` or `unknown` (null/missing: not recorded). The canonical
+writer mirrors `sign_value` into `value_kph` for old consumers; conflicting aliases
+or a canonical row with `sign_value` but a null alias are rejected. Old rows need
+no rewrite. A 25 mph sign has numeric class `maximum_speed:25`, never `:40`.
+The reader export declares `number_semantics=written_sign_value` and
+`unit_source=runtime_country`; this adds metadata without reordering classes.
+See [the preparation report](2026-11-02-speed-vision-units-report.md) for runtime,
+replay and remaining validation limits. No existing data has been migrated.
 Applicability is own_road/other_road/unresolved. Panel presence, visibility,
 occlusion, temporary status and variable-display status remain independent.
 

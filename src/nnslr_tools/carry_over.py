@@ -48,10 +48,10 @@ TURN_COST = 0.3
 MAX_TURN_UP = 0.1
 # The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
 CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
-                'sign_type', 'painted', 'notes')
+                'sign_type', 'painted', 'notes', 'sign_value', 'sign_unit')
 # The labels that tell whether the reviewer already changed a box (the review page's fields).
 LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_type', 'painted')
+              'temporary', 'variable_display', 'sign_type', 'painted', 'sign_value', 'sign_unit')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 CHECK_FIELD = 'check_position'
 FROM_FIELD = 'carried_from'
@@ -309,13 +309,17 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
                     and old.get('family') in VALUE_FAMILIES + ('unreadable',)
                     and target.get('family') in VALUE_FAMILIES)
     reading = (target.get('family'), read_here)
+    original_reading = {k: target[k] for k in ('sign_value','sign_unit') if k in target}
     for key in CARRIED_KEYS:
         if key in old:
             target[key] = copy.deepcopy(old[key])
+        elif key in ('sign_value','sign_unit'):
+            target.pop(key, None)
     if keep_reading:
         if old.get('family') == 'unreadable':
             target['family'] = reading[0]
         target['value_kph'] = reading[1]
+        target.update(original_reading)
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
     target.pop(CHECK_FIELD, None)
     target[FROM_FIELD] = source_key

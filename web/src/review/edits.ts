@@ -28,6 +28,8 @@ function editSelected(change: (d: Detection) => void): void {
   const row = currentRow();
   if (!d || !row || refuseChange()) return;
   change(d);
+  // value_kph is the compatible written-number alias. Keep original digits coherent when edited.
+  if (d.sign_value !== undefined) d.sign_value = d.value_kph ?? null;
   dropStaleKind(d);
   changed(row);
 }
@@ -112,6 +114,7 @@ export function setValue(value: number | null): void {
   editSelected((d) => {
     if (!familyHasValue(d.family)) d.family = 'maximum_speed';
     d.value_kph = value;
+    d.sign_value = value;
     d.value_state = value === null ? 'unknown' : 'reviewed';
     state.valueError = false;
   });

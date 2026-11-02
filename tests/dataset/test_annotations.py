@@ -45,6 +45,33 @@ def write(root, rows):
     return source
 
 
+def test_original_mph_number_survives_review_and_canonicalization(tmp_path):
+    from nnslr_tools.annotations import reviewed_frame_annotations, validate_annotation
+    from nnslr_tools.review_db import _reviewed_detection
+    frame = reviewed(tmp_path)
+    frame['country'] = 'US'
+    d = dict(frame['detections'][0], value_kph=None, sign_value=25, sign_unit='mph')
+    frame['detections'] = [_reviewed_detection(d, {})]
+    rows = reviewed_frame_annotations(frame, 'a' * 64)
+    row = rows[0]
+    assert (row['value_kph'], row['sign_value'], row['sign_unit'], row['value_state']) == (25,25,'mph','read')
+    validate_annotation(row, tmp_path)
+    from nnslr_tools.annotations import DatasetError
+    row['value_kph'] = None
+    with pytest.raises(DatasetError, match='sign_value_legacy_alias_missing'):
+        validate_annotation(row,tmp_path)
+
+
+@pytest.mark.parametrize('changes', [dict(sign_value=25, value_kph=40),
+                                    dict(sign_value=True), dict(sign_value=25,sign_unit='knots')])
+def test_invalid_original_number_metadata_rejected(tmp_path, changes):
+    from nnslr_tools.annotations import reviewed_frame_annotations, DatasetError
+    frame = reviewed(tmp_path)
+    frame['detections'][0].update(changes)
+    with pytest.raises(DatasetError):
+        reviewed_frame_annotations(frame, 'a' * 64)
+
+
 def test_import_reviewed_frame_default_output_and_negative(tmp_path, capsys):
     source=write(tmp_path,[reviewed(tmp_path), reviewed(tmp_path,"00000002--abcdef1234",negative=True)])
     code,out=invoke(capsys,"import-annotations",str(source),"--data-root",str(tmp_path))

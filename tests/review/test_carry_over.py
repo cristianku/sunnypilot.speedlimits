@@ -35,6 +35,25 @@ def proposal(box, ident, family='other_sign', value=None):
             'applicability': 'unresolved', 'supplementary_panel': 'unknown', 'detection_id': ident}
 
 
+def test_original_mph_digits_and_unit_are_carried_together():
+    box=box_at(560,330,30)
+    old=confirmed(box,family='maximum_speed',value=25,sign_value=25,sign_unit='mph')
+    now=proposal(closer(box,1.3),'p')
+    result=carry_over([old],[now],width=W,height=H,source_key='1/2',proposals=[now])
+    carried=result['detections'][0]
+    assert (carried['value_kph'],carried['sign_value'],carried['sign_unit'])==(25,25,'mph')
+
+
+def test_legacy_previous_number_drops_stale_original_metadata():
+    box=box_at(560,330,30)
+    old=confirmed(box,family='maximum_speed',value=80)
+    now=dict(proposal(closer(box,1.3),'p'),sign_value=25,sign_unit='mph')
+    result=carry_over([old],[now],width=W,height=H,source_key='1/2',proposals=[now])
+    carried=result['detections'][0]
+    assert carried['value_kph']==80
+    assert 'sign_value' not in carried and 'sign_unit' not in carried
+
+
 def test_the_same_sign_grown_takes_the_labels_and_other_boxes_stay():
     left = box_at(560, 330, 30)
     right = box_at(840, 330, 30)

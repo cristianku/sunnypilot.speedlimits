@@ -165,7 +165,7 @@ export function describe(d: Detection): string {
   if (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE) return 'Not a sign: on a vehicle';
   const family = familyOf(d.family);
   let text = family ? family.brief ?? family.label : String(d.family || 'No type');
-  if (hasValue(d)) text += ' · ' + d.value_kph + ' km/h';
+  if (hasValue(d)) text += ' · ' + d.value_kph + (d.sign_unit === 'mph' || d.sign_unit === 'km/h' ? ' ' + d.sign_unit : ' (unit not recorded)');
   return text;
 }
 

@@ -12,6 +12,13 @@ cd ~/sunnypilot.speedlimits
 
 Every operation below is a script of the repository: there are no manual steps to remember. If something is done often and is not a script yet, add it as a helper and document it here.
 
+International sign units (runtime integrated locally on `speed-limits`, no deployment):
+[plan](2026-11-02-speed-vision-units-plan.md) and
+[verification report](2026-11-02-speed-vision-units-report.md).
+`scripts/replay_speed_vision_country.py --help` describes the read-only local GPS
+replay. It requires explicit border and experimental policy files; it downloads
+nothing, runs no network inference, changes no review/dataset, and contacts no car.
+
 ## 1. The full loop
 
 | Step | Command | What you do |

@@ -12,6 +12,8 @@ export interface Detection {
   bbox_xyxy: Box;
   family: string;
   value_kph?: number | null | undefined;
+  sign_value?: number | null | undefined;
+  sign_unit?: 'km/h' | 'mph' | 'unknown' | null | undefined;
   value_state?: 'unknown' | 'reviewed';
   score?: number | null;
   model_label?: string | null;

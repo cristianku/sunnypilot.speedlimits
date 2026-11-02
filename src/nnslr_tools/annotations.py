@@ -44,18 +44,18 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
-    "country", "gps", "sign_type", "painted",
+    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit",
 }
 # Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
 # position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
 # the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
 # uses gps.
-OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted"}
+OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
 LABEL_KEYS = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display')
+              'temporary', 'variable_display', 'sign_value', 'sign_unit')
 
 
 class DatasetError(ValueError):
@@ -67,6 +67,22 @@ class DatasetError(ValueError):
 def require(condition: bool, reason: str, detail: str = "") -> None:
     if not condition:
         raise DatasetError(reason, detail)
+
+
+def written_sign_value(row: dict):
+    """Original digits, never a physical conversion. value_kph is the legacy numeric alias.
+
+    Input reviews may use sign_value and leave value_kph null; canonical rows
+    mirror the digits in value_kph for existing consumers. When both are present
+    they must agree, so a 25 mph crop cannot silently train the class 40.
+    """
+    unit = row.get('sign_unit')
+    require(unit is None or unit in ('km/h', 'mph', 'unknown'), 'invalid_sign_unit')
+    value, legacy = row.get('sign_value'), row.get('value_kph')
+    if value is not None:
+        require(type(value) is int and MIN_VALUE_KPH <= value <= MAX_VALUE_KPH, 'illegal_speed', 'sign_value')
+        require(legacy is None or (type(legacy) is int and legacy == value), 'sign_value_conflict')
+    return legacy if value is None else value
 
 
 def _nonfinite(value):
@@ -224,7 +240,9 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
                 "capture_time_inconsistency", "exact capture needs video/log provenance")
     else:
         require(capture is None and row['capture_time_provenance'] == 'unknown', "capture_time_inconsistency")
-    value = row['value_kph']
+    value = written_sign_value(row)
+    require(row.get('sign_value') is None or row['value_kph'] == row['sign_value'],
+            'sign_value_legacy_alias_missing', 'canonical rows mirror written digits in value_kph')
     if row['value_state'] == 'read':
         require(type(value) is int and MIN_VALUE_KPH <= value <= MAX_VALUE_KPH, "illegal_speed")
         require(row['sign_family'] in {'maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking'}, "value_family_mismatch")
@@ -352,7 +370,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
     family = d.get('family', 'not_a_sign')
     require(isinstance(family, str), 'unknown_enum', 'sign_family')
     family = {'road_marking_candidate': 'road_marking'}.get(family, family)
-    value = d.get('value_kph')
+    value = written_sign_value(d)
     value_state = 'read' if value is not None else 'not_applicable' if negative or family == 'not_a_sign' else 'unreadable' if family == 'unreadable' else 'unknown'
     unchanged = original is not None and all(d.get(k) == original.get(k) for k in LABEL_KEYS)
     object_id = 'negative-frame' if negative else d.get('detection_id')
@@ -378,6 +396,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
                                      'image_path','width','height','reviewer','review_timestamp','source_video_sha256','source_log_sha256','site_group','encounter_id')},
         'image_sha256': frame.get('frame_sha256'), 'bbox_xyxy': d.get('bbox_xyxy'), 'sign_family': family,
         'value_state': value_state, 'value_kph': value,
+        **{k: d[k] for k in ('sign_value', 'sign_unit') if k in d},
         'applicability': d.get('applicability', 'unresolved'), 'supplementary_panel': d.get('supplementary_panel', 'unknown'),
         'visibility': d.get('visibility', 'unknown'), 'occlusion': d.get('occlusion', 'unknown'),
         'temporary': d.get('temporary'), 'variable_display': d.get('variable_display'),

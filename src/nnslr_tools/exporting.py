@@ -95,6 +95,8 @@ def reader_io_contract(checkpoint: dict[str, Any]) -> dict[str, Any]:
             "dtype": "float32",
             "classes": classes,
             "decode": "argmax",
+            "number_semantics": "written_sign_value",
+            "unit_source": "runtime_country",
         },
         "dataset_sha256": checkpoint.get("dataset_sha256"),
         "split_sha256": checkpoint.get("split_sha256"),
