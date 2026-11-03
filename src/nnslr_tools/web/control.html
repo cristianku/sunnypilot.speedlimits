@@ -1584,6 +1584,14 @@ width:min(100%,calc((100dvh - 370px) * var(--sd-aspect)));min-width:min(100%,420
 align-self:center;border-radius:12px;overflow:hidden;background:var(--stage)}
 .sd-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-select:none}
 .sd-stage.empty .dr-stage-note,.sd-stage .dr-stage-note{top:50%;bottom:auto;transform:translate(-50%,-50%)}
+/* The road camera alone, or beside it the same frame of the wide road camera (side by side, stacked on a phone). */
+.sd-stages{display:flex;flex-direction:column;align-items:center;gap:8px}
+.sd-stages.two{display:grid;grid-template-columns:1fr;align-items:start}
+.sd-stages.two .sd-stage{width:100%;min-width:0}
+.sd-view:has(.sd-stages.two){max-width:1440px}
+.sd-cam{position:absolute;top:8px;left:8px;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.58);color:#fff;
+font-size:12px;font-weight:600;letter-spacing:-.005em;pointer-events:none}
+@media (min-width:600px){.sd-stages.two{grid-template-columns:1fr 1fr}}
 /* Under the picture, never on it: what the car's screen showed on this frame, and the person's mark on it. */
 .sd-stage-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;min-height:32px}
 .sd-chip-vision,.sd-chip-mine{padding:5px 12px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:-.01em;

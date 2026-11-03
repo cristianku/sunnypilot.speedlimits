@@ -30,6 +30,7 @@ from pathlib import Path
 
 from nnslr_tools.sign_reads import CAMERA_FPS, READ_INDEX_BASE, frame_second
 
+WIDE_VIDEO = 'ecamera.hevc'
 VIDEO_MANIFEST = 'video_frames.jsonl'
 VIDEO_PREFIX = 'video'
 CACHE_DIR = 'derived/video_cache'
@@ -63,6 +64,18 @@ def video_of(root: Path, route: str, segment: int) -> Path:
     video = Path(root) / 'raw/routes' / route / str(int(segment)) / 'fcamera.hevc'
     if not video.is_file():
         raise VideoFrameError(f'no road video for segment {segment}')
+    return video
+
+
+def wide_video_of(root: Path, route: str, segment: int) -> Path:
+    """The wide road camera's video of a segment (ecamera.hevc), only when it has as many frames as the road video:
+    loggerd starts and cuts both on the same frame id, so its frame n is the road video's frame n (the same frameId at
+    each of the 1200 indices of narrowRoadEncodeIdx and wideRoadEncodeIdx, 00000165 minute 5, 3 Nov 2026)."""
+    video = Path(root) / 'raw/routes' / route / str(int(segment)) / WIDE_VIDEO
+    if not video.is_file():
+        raise VideoFrameError(f'no wide road video for segment {segment}')
+    if frame_count(video) != frame_count(video_of(root, route, segment)):
+        raise VideoFrameError(f'the wide road video of segment {segment} has not the frames of the road video')
     return video
 
 
@@ -215,9 +228,10 @@ def kept_seconds(root: Path, route: str, segment: int) -> list[int] | None:
     return sorted({int(frame_second(row)) for row in pictures})
 
 
-def _cache_dir(root: Path, route: str, segment: int, video: Path) -> Path:
-    """The cache folder of a segment, emptied when its video is not the one the previews came from."""
-    folder = Path(root) / CACHE_DIR / route / str(int(segment))
+def _cache_dir(root: Path, route: str, segment: int, video: Path, wide: bool = False) -> Path:
+    """The cache folder of a segment (<segment>-wide for the wide camera), emptied when its video is not the one the
+    previews came from."""
+    folder = Path(root) / CACHE_DIR / route / (str(int(segment)) + ('-wide' if wide else ''))
     stat = video.stat()
     identity = {'video': str(video.resolve()), 'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
     stamp = folder / 'video.json'
@@ -226,21 +240,22 @@ def _cache_dir(root: Path, route: str, segment: int, video: Path) -> Path:
     except (OSError, ValueError):
         current = False
     if not current:
-        with _lock('cache', route, int(segment)):
+        with _lock('cache', route, int(segment), wide):
             shutil.rmtree(folder, ignore_errors=True)
             folder.mkdir(parents=True, exist_ok=True)
             stamp.write_text(json.dumps(identity))
     return folder
 
 
-def preview(root: Path, route: str, segment: int, decoded: int) -> Path:
-    """The JPEG of a frame of the road video, its GOP taken out when the cache does not have it."""
+def preview(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> Path:
+    """The JPEG of a frame of the road video (wide: of the wide road camera, the same frame), its GOP taken out when
+    the cache does not have it."""
     root = Path(root)
-    video = video_of(root, route, segment)
+    video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
     first, last = gop_of(video, decoded)
-    folder = _cache_dir(root, route, segment, video)
+    folder = _cache_dir(root, route, segment, video, wide)
     wanted = folder / f'{decoded}.jpg'
-    with _lock('gop', route, int(segment), first):
+    with _lock('gop', route, int(segment), first, wide):
         if not wanted.is_file():
             with tempfile.TemporaryDirectory(prefix='.gop-', dir=folder) as temporary:
                 staging = Path(temporary)

@@ -89,6 +89,37 @@ def test_a_gop_has_the_pixels_of_a_decode_of_the_whole_video(drive, tmp_path):
     assert not list((root / video_frames.CACHE_DIR).glob('*/*/*.jpg'))
 
 
+def wide_video(root, frames_s, source='smptebars'):
+    """A wide road video of segment 0 (ecamera.hevc), another picture from the road video's."""
+    video = root / 'raw/routes' / ROUTE / '0' / video_frames.WIDE_VIDEO
+    made = subprocess.run([
+        'ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'{source}=s=64x48:r=20:d={frames_s}', '-pix_fmt',
+        'yuv420p', '-c:v', 'libx265', '-x265-params',
+        'pools=1:frame-threads=1:log-level=error:bframes=0:keyint=20:min-keyint=20', '-f', 'hevc', str(video)],
+        capture_output=True, text=True)
+    assert made.returncode == 0, made.stderr
+    return video
+
+
+def test_the_wide_camera_gives_the_same_frame_only_with_the_frames_of_the_road_video(drive, tmp_path):
+    root, video, _rows, _server = drive
+    with pytest.raises(video_frames.VideoFrameError, match='no wide road video'):
+        video_frames.preview(root, ROUTE, 0, 25, wide=True)
+    wide = wide_video(root, 3)
+    reference = tmp_path / 'wide-reference.jpg'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', str(wide), '-vf', 'select=eq(n\\,25)', '-vsync',
+                    '0', '-q:v', video_frames.JPEG_QUALITY, str(reference)], check=True)
+    shown = video_frames.preview(root, ROUTE, 0, 25, wide=True)
+    assert shown.read_bytes() == reference.read_bytes() and shown.parent.name == '0-wide'
+    assert shown.read_bytes() != video_frames.preview(root, ROUTE, 0, 25).read_bytes()
+    # One frame short of the road video: its frame n may not be the road's, so it is not shown.
+    wide_video(root, 2.95)
+    with pytest.raises(video_frames.VideoFrameError, match='not the frames of the road video'):
+        video_frames.wide_video_of(root, ROUTE, 0)
+    video_frames.prune(root, budget=0)
+    assert not list((root / video_frames.CACHE_DIR).glob('*/*/*.jpg'))
+
+
 def test_a_frame_between_the_seconds_is_saved_with_a_box_and_kept_by_propose_again(drive, capsys):
     root, video, rows, server = drive
     manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST

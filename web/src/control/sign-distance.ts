@@ -132,7 +132,8 @@ export interface SignView {
   unit: 'm' | 'ft';
   unit_known: boolean;
   sign: Sign;
-  window: {from_s: number | null; to_s: number | null; frames: WindowFrame[]};
+  /** wide_segments: the minutes whose wide road camera has the same frames, shown beside the road camera. */
+  window: {from_s: number | null; to_s: number | null; frames: WindowFrame[]; wide_segments?: number[]};
   series: {vision_m: [number, number | null][]; size_px: [number, number | null][]; speed_kmh: [number, number | null][]};
   sync: {segment: number; precision: SyncPrecision; max_error_ms: number | null; frames_log: number | null;
     frames_video: number | null}[];
@@ -172,8 +173,10 @@ export function driveHref(route: string, sign: string | null = null): string {
   return '/sign-distance?drive=' + encodeURIComponent(route) + (sign ? '&sign=' + encodeURIComponent(sign) : '');
 }
 
-export function frameUrl(route: string, frame: Pick<WindowFrame, 'segment' | 'frame'>): string {
-  return API + '/drives/' + encodeURIComponent(route) + '/frames/' + frame.segment + '/' + frame.frame + '.jpg';
+/** The picture of a frame of the road camera, or (wide) the same frame of the wide road camera. */
+export function frameUrl(route: string, frame: Pick<WindowFrame, 'segment' | 'frame'>, wide = false): string {
+  return API + '/drives/' + encodeURIComponent(route) + '/frames/' + frame.segment + '/' + frame.frame
+    + (wide ? '-wide' : '') + '.jpg';
 }
 
 /** The tone of a drive's state, with the classes of Drive review (dr-muted, dr-todo, dr-ok, dr-bad, dr-busy). */

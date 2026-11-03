@@ -770,13 +770,25 @@ def sign_view(store: drive_review.DriveReviewStore, route: str, key: str) -> dic
 
     return {'ok': True, 'route': route, 'unit': layer['unit'], 'unit_known': layer['unit_known'], 'sign': public,
             'window': {'from_s': _seconds(sign['window'][0], t0), 'to_s': _seconds(sign['window'][1], t0),
-                       'frames': frames},
+                       'frames': frames, 'wide_segments': _wide_segments(store.root, route, frames)},
             'series': {'vision_m': points('dist', 2), 'size_px': points('size', 2), 'speed_kmh': points('speed', 1)},
             'sync': [{name: info[name] for name in ('segment', 'precision', 'max_error_ms', 'frames_log',
                                                     'frames_video')} for info in syncs],
             'warnings': _warnings(sign, syncs),
             'prev': before[-1] if before else None, 'next': after[0] if after else None,
             'position': position + 1 if position is not None else None, 'of': len(included)}
+
+
+def _wide_segments(root: Path, route: str, frames: list[dict]) -> list[int]:
+    """The minutes of a window whose wide road camera can be shown beside the road one (video_frames.wide_video_of)."""
+    found = []
+    for segment in sorted({frame['segment'] for frame in frames}):
+        try:
+            video_frames.wide_video_of(root, route, segment)
+        except (video_frames.VideoFrameError, OSError):
+            continue
+        found.append(segment)
+    return found
 
 
 def frame_allowed(store: drive_review.DriveReviewStore, route: str, segment: int, decoded: int) -> bool:
@@ -798,12 +810,14 @@ def frame_allowed(store: drive_review.DriveReviewStore, route: str, segment: int
     return False
 
 
-def frame_jpeg(store: drive_review.DriveReviewStore, route: str, segment: int, decoded: int) -> bytes:
-    """The JPEG of a frame frame_allowed lets through; SignDistanceError 404 for any other."""
+def frame_jpeg(store: drive_review.DriveReviewStore, route: str, segment: int, decoded: int, *,
+               wide: bool = False) -> bytes:
+    """The JPEG of a frame frame_allowed lets through (wide: the same frame of the wide road camera); SignDistanceError
+    404 for any other."""
     if not frame_allowed(store, route, segment, decoded):
         raise SignDistanceError(404, 'unknown_frame', 'This frame is not one of the frames of a sign.')
     try:
-        return video_frames.preview(store.root, route, segment, decoded).read_bytes()
+        return video_frames.preview(store.root, route, segment, decoded, wide=wide).read_bytes()
     except (video_frames.VideoFrameError, OSError) as exc:
         raise SignDistanceError(404, 'no_video_frame', 'This frame of the video cannot be shown.') from exc
 

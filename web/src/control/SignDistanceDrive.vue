@@ -14,7 +14,8 @@ import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {toast} from '../composables/toast';
 import {API, classText, type DriveView, type Drive, frameIndex, frameUrl, lateSentence, type MarkName,
-  markLabel, nearestFrame, screenText, type Sign, signedMetres, type SignView, statusTone, timeText, toMark}
+  markLabel, nearestFrame, screenText, type Sign, signedMetres, type SignView, statusTone, timeText, toMark,
+  type WindowFrame}
   from './sign-distance';
 import {goTo, showSign, tabSign} from './tabs';
 
@@ -125,10 +126,32 @@ const pictureUrl = computed(() => onScreen.value ? frameUrl(props.route, onScree
 const ready = computed(() => onScreen.value !== null && shownIndex.value === index.value && !failed.value);
 /** The picture's own shape, width over height (the stage is a road camera's 1344 x 760 until it is in). */
 const ratio = ref('');
-function pictureLoaded(event: Event): void {
+const wideRatio = ref('');
+function shapeOf(event: Event): string {
   const image = event.target as HTMLImageElement;
-  if (image.naturalWidth > 0 && image.naturalHeight > 0) ratio.value = (image.naturalWidth / image.naturalHeight).toFixed(4);
+  return image.naturalWidth > 0 && image.naturalHeight > 0 ? (image.naturalWidth / image.naturalHeight).toFixed(4) : '';
 }
+function pictureLoaded(event: Event): void {
+  ratio.value = shapeOf(event) || ratio.value;
+}
+function widePictureLoaded(event: Event): void {
+  wideRatio.value = shapeOf(event) || wideRatio.value;
+}
+
+// -- the wide road camera: the same frame beside the road one, where its minute has the same frames -----------------
+const wideSegments = computed(() => {
+  const list = view.value?.window.wide_segments;
+  return new Set(Array.isArray(list) ? list : []);
+});
+/** Some minute of the window has the wide camera: the page shows the two pictures. */
+const twoCameras = computed(() => wideSegments.value.size > 0);
+function hasWide(frame: WindowFrame): boolean {
+  return wideSegments.value.has(frame.segment);
+}
+/** The wide picture of the frame on screen decoded (true), not there or not shown (false); it never holds up the road
+ * picture's frame, and is never one of another frame. */
+const wideShown = ref(false);
+const widePictureUrl = computed(() => onScreen.value && wideShown.value ? frameUrl(props.route, onScreen.value, true) : null);
 
 function startIndex(answer: SignView): number {
   const list = answer.window.frames;
@@ -151,7 +174,7 @@ function load(url: string): Promise<boolean> {
       return false;
     });
     cache.set(url, loaded);
-    if (cache.size > 64) cache.delete(cache.keys().next().value as string);
+    if (cache.size > 128) cache.delete(cache.keys().next().value as string);
   }
   return loaded;
 }
@@ -169,14 +192,18 @@ async function pump(): Promise<void> {
         break;
       }
       if (target === shownIndex.value && !failed.value) break;
-      const ok = await load(frameUrl(props.route, frame));
+      const wide = hasWide(frame);
+      const [ok, wideOk] = await Promise.all([load(frameUrl(props.route, frame)),
+        wide ? load(frameUrl(props.route, frame, true)) : Promise.resolve(false)]);
       if (index.value !== target || frames.value[target] !== frame) continue;
       failed.value = !ok;
       if (ok) {
         shownIndex.value = target;
+        wideShown.value = wideOk;
         for (let step = 1; step <= 5; step += 1) {
           const ahead = frames.value[target + step];
           if (ahead) void load(frameUrl(props.route, ahead));
+          if (ahead && hasWide(ahead)) void load(frameUrl(props.route, ahead, true));
         }
       }
       break;
@@ -514,10 +541,21 @@ const visionAtMark = computed(() => {
           <p>Left out: {{ sign.excluded_message }}</p>
         </div>
         <template v-else>
-          <div class="sd-stage" :class="{empty: !pictureUrl}" :style="ratio ? {'--sd-aspect': ratio} : undefined">
-            <img v-if="pictureUrl" :src="pictureUrl" alt="The road at the frame shown" draggable="false" @load="pictureLoaded">
-            <span v-if="failed" class="dr-stage-note">This frame cannot be shown.</span>
-            <span v-else-if="!pictureUrl" class="dr-stage-note">Loading the frame…</span>
+          <div class="sd-stages" :class="{two: twoCameras}">
+            <div class="sd-stage" :class="{empty: !pictureUrl}" :style="ratio ? {'--sd-aspect': ratio} : undefined">
+              <img v-if="pictureUrl" :src="pictureUrl" alt="The road at the frame shown" draggable="false" @load="pictureLoaded">
+              <span v-if="failed" class="dr-stage-note">This frame cannot be shown.</span>
+              <span v-else-if="!pictureUrl" class="dr-stage-note">Loading the frame…</span>
+              <span v-if="twoCameras" class="sd-cam">Road camera</span>
+            </div>
+            <div v-if="twoCameras" class="sd-stage sd-stage-wide" id="sd-wide" :class="{empty: !widePictureUrl}"
+                 :style="wideRatio ? {'--sd-aspect': wideRatio} : ratio ? {'--sd-aspect': ratio} : undefined">
+              <img v-if="widePictureUrl" :src="widePictureUrl" alt="The same frame from the wide road camera" draggable="false"
+                   @load="widePictureLoaded">
+              <span v-else-if="onScreen && !failed" class="dr-stage-note">{{ hasWide(onScreen) ? 'The wide picture of this frame cannot be shown.' : 'No wide picture in this minute.' }}</span>
+              <span v-else class="dr-stage-note">Loading the frame…</span>
+              <span class="sd-cam">Wide camera, same frame</span>
+            </div>
           </div>
           <div class="sd-stage-bar">
             <span v-if="chip" class="sd-chip-vision" :class="{zero: chip.zero}" :title="chip.title" id="sd-vision-chip">{{ chip.text }}</span>

@@ -131,11 +131,12 @@ def comma_drive(root: Path, route: str = ROUTE, segments=SEGMENTS, *, video: boo
         (folder / 'rlog.zst').write_bytes(segment_log(segment, **options))
 
 
-def real_video(root: Path, segment: int = 0, route: str = ROUTE) -> None:
-    """A real HEVC road video of a minute, 200 frames (the encode index's), a keyframe every 20."""
+def real_video(root: Path, segment: int = 0, route: str = ROUTE, name: str = 'fcamera.hevc') -> None:
+    """A real HEVC road video of a minute, 200 frames (the encode index's), a keyframe every 20 (name ecamera.hevc:
+    the wide road camera's)."""
     if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
         pytest.skip('ffmpeg/ffprobe required for local media integration')
-    video = root / 'raw/routes' / route / str(segment) / 'fcamera.hevc'
+    video = root / 'raw/routes' / route / str(segment) / name
     video.parent.mkdir(parents=True, exist_ok=True)
     made = subprocess.run([
         'ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc=s=64x48:r=20:d={SECONDS}', '-pix_fmt', 'yuv420p',
@@ -394,6 +395,7 @@ def test_sign_view_lists_its_frames_series_and_sync(tmp_path):
     assert {item['precision'] for item in sign['sync']} == {'unknown'}
     assert {item['code'] for item in sign['warnings']} == {'sync_unknown'}
     assert (sign['prev'], sign['next'], sign['position'], sign['of']) == (None, None, 1, 1)
+    assert window['wide_segments'] == []
     excluded = sign_distance.sign_view(store, ROUTE, key_of(view, 2))
     assert excluded['window']['frames'] == [] and excluded['sign']['excluded'] == 'cut'
 
@@ -680,12 +682,15 @@ def test_a_real_video_in_sync_counts_in_the_medians_and_serves_its_frames(tmp_pa
     comma_drive(tmp_path)
     real_video(tmp_path, 0)
     real_video(tmp_path, 1)
+    real_video(tmp_path, 0, name='ecamera.hevc')
     store = scanned(tmp_path)
     server = RunningServer(tmp_path)
     try:
         view = json_of(get(server, f'/api/sign-distance/drives/{ROUTE}')[2])
         sign = json_of(get(server, f'/api/sign-distance/drives/{ROUTE}/signs/{key_of(view, 1)}')[2])
         assert {item['precision'] for item in sign['sync']} == {'frame'} and sign['warnings'] == []
+        # The wide road camera only where the minute has its video, frame for frame.
+        assert sign['window']['wide_segments'] == [0]
         status, answer = post(server, f'/api/sign-distance/drives/{ROUTE}/marks', mark_body(view))
         assert status == 200 and answer['line']['sync'] == 'frame' and answer['warnings'] == []
         summary = json_of(get(server, '/api/sign-distance/summary')[2])['summary']
@@ -696,8 +701,14 @@ def test_a_real_video_in_sync_counts_in_the_medians_and_serves_its_frames(tmp_pa
         assert status == 200 and data[:2] == b'\xff\xd8'
         assert response.getheader('Content-Type') == 'image/jpeg'
         assert response.getheader('Cache-Control') == 'private, max-age=3600'
+        status, response, wide = get(server, f'/api/sign-distance/drives/{ROUTE}/frames/0/{MARK_FRAME}-wide.jpg')
+        assert status == 200 and wide[:2] == b'\xff\xd8' and response.getheader('Content-Type') == 'image/jpeg'
+        status, _response, data = get(server, f'/api/sign-distance/drives/{ROUTE}/frames/1/10-wide.jpg')
+        assert (status, json_of(data)['error']) == (404, 'no_video_frame')
         # A frame outside every window of an included sign is not served.
         status, _response, data = get(server, f'/api/sign-distance/drives/{ROUTE}/frames/0/5.jpg')
+        assert (status, json_of(data)['error']) == (404, 'unknown_frame')
+        status, _response, data = get(server, f'/api/sign-distance/drives/{ROUTE}/frames/0/5-wide.jpg')
         assert (status, json_of(data)['error']) == (404, 'unknown_frame')
     finally:
         server.close()

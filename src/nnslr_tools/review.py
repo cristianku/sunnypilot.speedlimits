@@ -1288,9 +1288,10 @@ def make_handler(app: ReviewApp):
                 if match:
                     self._json(200, sign_distance.sign_view(store, match.group(1), match.group(2)))
                     return
-                match = re.fullmatch(drive + r'/frames/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
+                match = re.fullmatch(drive + r'/frames/([0-9]{1,4})/([0-9]{1,6})(-wide)?\.jpg', path)
                 if match:
-                    data = sign_distance.frame_jpeg(store, match.group(1), int(match.group(2)), int(match.group(3)))
+                    data = sign_distance.frame_jpeg(store, match.group(1), int(match.group(2)), int(match.group(3)),
+                                                    wide=match.group(4) is not None)
                     self.send_response(200)
                     self.send_header('Content-Type', 'image/jpeg')
                     self.send_header('Content-Length', str(len(data)))
