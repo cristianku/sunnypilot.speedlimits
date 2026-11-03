@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from nnslr_tools.gps import DETAILED_BORDERS, GpsError, country_of, frame_position, positions_path, recountry_positions
+from nnslr_tools.gps import (DETAILED_BORDERS, GpsError, country_names, country_of, frame_country, frame_position,
+                             positions_path, recountry_positions)
 from nnslr_tools.sign_types import SIGN_TYPES
 from review_helpers import ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report, page_body
 
@@ -21,6 +22,34 @@ CATALOG = Path(__file__).resolve().parents[2] / 'web/src/review/catalog.ts'
     (48.86, 2.35, 'FR'), (47.48, 8.05, 'CH'), (40.0, -40.0, None), (None, None, None)])
 def test_the_country_of_a_position(latitude, longitude, code):
     assert country_of(latitude, longitude) == code
+
+
+
+def test_a_frame_outside_europe_takes_the_country_of_the_world_borders(tmp_path):
+    # A drive in Illinois: no country in the European borders, the United States in the world's, with its name.
+    assert country_of(41.57, -87.48) is None and frame_country(41.57, -87.48) == 'US'
+    assert country_names()['US'] == 'United States of America' and country_names()['CH'] == 'Switzerland'
+    # At sea, and in Europe where the European borders say nothing (the finer file of the data root), still none.
+    assert frame_country(40.0, -40.0) is None and frame_country(None, None) is None
+    assert frame_country(47.37, 8.54) == 'CH'
+    target = tmp_path / DETAILED_BORDERS
+    target.parent.mkdir(parents=True)
+    target.write_bytes(gzip.compress(json.dumps({'countries': [_square('DE', 7.0, 47.55, 9.0, 48.0)]}).encode()))
+    assert frame_country(48.86, 2.35, tmp_path) is None and frame_country(41.57, -87.48, tmp_path) == 'US'
+
+    # A route read before: its frames get the country now, and a review saved then without one takes it at import.
+    from nnslr_tools.review_db import _with_position
+    lines = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': 41.57, 'longitude': -87.48,
+              'country': None, 'country_from': None},
+             {'frame_key': '0/1', 'segment_index': 0, 'output_index': 1, 'latitude': None, 'longitude': None,
+              'country': None, 'country_from': None}]
+    path = positions_path(tmp_path, ROUTE)
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+    assert recountry_positions(tmp_path, ROUTE)['changed'] == {'None->US': 2}
+    saved = {'route_id': ROUTE, 'segment_index': 0, 'output_index': 1, 'gps': None, 'country': None}
+    assert _with_position(saved, tmp_path, {})['country'] == 'US'
+    assert _with_position({**saved, 'country': 'CA'}, tmp_path, {})['country'] == 'CA'
 
 
 def _square(code, west, south, east, north):

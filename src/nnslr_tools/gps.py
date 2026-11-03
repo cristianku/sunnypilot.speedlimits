@@ -20,7 +20,8 @@ bearing turned round). A frame without a GPS fix keeps no position, as before, e
 nnslr_tools.road_types takes a slow stretch without GPS for a garage.
 
 The country comes from the borders in ``data/countries.json.gz`` (Natural Earth 1:10 million, public domain;
-scripts/make_country_borders.py), Europe only: elsewhere it is None. Natural Earth is coarse where a border
+scripts/make_country_borders.py), Europe only; outside Europe the coarser world borders give it (frame_country: a
+drive in the United States is "US"), at sea it is None. Natural Earth is coarse where a border
 follows a river: along the Rhine from Wallbach to Laufenburg it puts Bad Säckingen and Rheinfelden (Baden) in
 Switzerland. ``<data root>/derived/gps/borders.json.gz``, when there (GISCO 1:1 million, EuroGeographics:
 non-commercial use, so never in git; ``scripts/make_country_borders.py --gisco``), takes its place. ``nnslr gps
@@ -206,8 +207,22 @@ def country_of(latitude: float | None, longitude: float | None, root: Path | Non
 
 
 def country_names() -> dict[str, str]:
-    """{code: English name} of the countries the shipped borders know (the finer ones have the same codes)."""
-    return {country['code']: country['name'] for country in _borders()}
+    """{code: English name} of the countries the shipped borders know (the finer ones have the same codes), and of
+    the world borders' other countries, the ones frame_country gives outside Europe."""
+    names = {country['code']: country['name'] for country in _borders()}
+    names.update({country['code']: country['name'] for country in _world() if country['code'] not in names})
+    return names
+
+
+def frame_country(latitude: float | None, longitude: float | None, root: Path | None = None) -> str | None:
+    """The country of a frame at a position: the European borders (country_of), else, outside Europe, the world's
+    (a drive in the United States: "US"); a frame in Europe the European borders leave out (at sea) stays None, as
+    before the world borders."""
+    code = country_of(latitude, longitude, root)
+    if code is not None or latitude is None or longitude is None:
+        return code
+    found = _country_in(_world(), latitude, longitude)
+    return found['code'] if found is not None and found['continent'] != 'europe' else None
 
 
 # Every country of the world, coarser (Natural Earth 1:50m, public domain), each with its continent
@@ -387,7 +402,7 @@ def build_positions(root: Path, route: str, rows: list[dict], *, python: str | N
     countries: dict[str, int] = {}
     for index, row in enumerate(ordered):
         position, source = (precise[index], 'localizer') if index in precise else (fixes[index], 'gps')
-        country = country_of(position['latitude'], position['longitude'], root) if position else None
+        country = frame_country(position['latitude'], position['longitude'], root) if position else None
         line = {'frame_key': row['frame_key'], 'segment_index': row['segment_index'],
                 'output_index': row['output_index'], 'latitude': None, 'longitude': None, 'speed_mps': None,
                 'bearing_deg': None, 'position_from': None, 'country': country,
@@ -440,7 +455,7 @@ def _nearest_countries(lines: list[dict]) -> None:
 
 
 def recountry_positions(root: Path, route: str) -> dict:
-    """The country of every frame of positions.jsonl again, from its position and the borders now (country_of):
+    """The country of every frame of positions.jsonl again, from its position and the borders now (frame_country):
     the logs are not read again. Returns counts, with the frames whose country changed."""
     path = positions_path(root, route)
     if not path.is_file():
@@ -449,7 +464,7 @@ def recountry_positions(root: Path, route: str) -> dict:
     before = [line.get('country') for line in lines]
     countries: dict[str, int] = {}
     for line in lines:
-        country = country_of(line.get('latitude'), line.get('longitude'), root)
+        country = frame_country(line.get('latitude'), line.get('longitude'), root)
         line['country'], line['country_from'] = country, 'gps' if country else None
         if country:
             countries[country] = countries.get(country, 0) + 1

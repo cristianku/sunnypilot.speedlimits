@@ -934,8 +934,10 @@ def _dataset_line(review: dict) -> dict:
 
 def _with_position(line: dict, root: Path, cache: dict) -> dict:
     """The line with gps and country: a review saved before they existed takes them from the positions of its
-    route (nnslr gps), when there are any; the reviewer's country, when given, stays."""
-    if 'gps' in line and 'country' in line:
+    route (nnslr gps), when there are any; the reviewer's country, when given, stays. A review saved without a
+    country (its GPS gave none then: a drive outside Europe before frame_country) takes the one its position gives
+    now."""
+    if 'gps' in line and line.get('country') is not None:
         return line
     route = line.get('route_id')
     if route not in cache:
@@ -954,7 +956,7 @@ def _with_position(line: dict, root: Path, cache: dict) -> dict:
         line['gps'] = None
         if position is not None and position.get('latitude') is not None:
             line['gps'] = {name: position.get(name) for name in ('latitude', 'longitude', 'speed_mps', 'bearing_deg')}
-    if 'country' not in line:
+    if line.get('country') is None:
         line['country'] = position.get('country')
     return line
 
