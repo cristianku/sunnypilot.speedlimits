@@ -355,6 +355,15 @@ const nextKey = computed((): string | null => {
 function nextSign(): void {
   if (nextKey.value) openSign(nextKey.value);
 }
+/** The signs before and after the one asked for, in the order of the numbers at the top (a sign left out too): from
+ * the one in the address, so two quick steps go two signs on even while the first is still loading. */
+const here = computed(() => signs.value.findIndex((item) => item.key === (tabSign.value ?? sign.value?.key)));
+const signBefore = computed((): Sign | null => here.value > 0 ? signs.value[here.value - 1] ?? null : null);
+const signAfter = computed((): Sign | null => here.value >= 0 ? signs.value[here.value + 1] ?? null : null);
+function stepSign(step: -1 | 1): void {
+  const to = step < 0 ? signBefore.value : signAfter.value;
+  if (to) openSign(to.key);
+}
 const nextDriveBusy = ref(false);
 async function nextDrive(): Promise<void> {
   nextDriveBusy.value = true;
@@ -386,15 +395,21 @@ function onKey(event: KeyboardEvent): void {
   if ((tag === 'INPUT' && !range) || tag === 'SELECT' || tag === 'TEXTAREA') return;
   const key = event.key;
   if (key === 'ArrowLeft' || key === 'ArrowRight') {
-    // On the slider its own keys move one frame; Shift moves five, here.
-    if (range && !event.shiftKey) return;
+    // Shift goes to the sign before or after; on the slider its own keys move one frame.
+    if (event.shiftKey) {
+      event.preventDefault();
+      stepSign(key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
+    if (range) return;
     event.preventDefault();
-    seek(index.value + (key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 5 : 1));
+    seek(index.value + (key === 'ArrowLeft' ? -1 : 1));
     return;
   }
   if (event.shiftKey) return;
   const lower = key.toLowerCase();
-  if (lower === 'z') void send('zero');
+  if (key === ',' || key === '.') seek(index.value + (key === ',' ? -5 : 5));
+  else if (lower === 'z') void send('zero');
   else if (lower === 'c') void send('cant_tell');
   else if (lower === 'u') void undo();
   else if (lower === 'n') nextSign();
@@ -522,10 +537,10 @@ const visionAtMark = computed(() => {
                    aria-label="Frame" :aria-valuetext="sliderText"
                    @input="seek(Number(($event.target as HTMLInputElement).value))">
             <div class="rt-controls sd-controls">
-              <button type="button" class="btn small sd-step" aria-label="Back five frames" title="Back five frames (Shift+←)" @click="seek(index - 5)">«</button>
+              <button type="button" class="btn small sd-step" aria-label="Back five frames" title="Back five frames (,)" @click="seek(index - 5)">«</button>
               <button type="button" class="btn small sd-step" aria-label="Back one frame" title="Back one frame (←)" @click="seek(index - 1)">‹</button>
               <button type="button" class="btn small sd-step" aria-label="Forward one frame" title="Forward one frame (→)" @click="seek(index + 1)">›</button>
-              <button type="button" class="btn small sd-step" aria-label="Forward five frames" title="Forward five frames (Shift+→)" @click="seek(index + 5)">»</button>
+              <button type="button" class="btn small sd-step" aria-label="Forward five frames" title="Forward five frames (.)" @click="seek(index + 5)">»</button>
               <span class="rt-pos sd-pos" id="sd-pos"><b>{{ shownTime }}</b> · {{ position }}</span>
             </div>
             <div class="sd-jumps">
@@ -577,7 +592,13 @@ const visionAtMark = computed(() => {
         </ul>
 
         <div class="sd-next">
-          <button v-if="nextKey && nextKey !== sign.key" type="button" class="btn" id="sd-next" @click="nextSign">Next sign
+          <div class="sd-step-signs" role="group" aria-label="Sign before or after">
+            <button type="button" class="btn" id="sd-sign-before" :disabled="!signBefore" @click="stepSign(-1)"><span
+              aria-hidden="true">‹</span> Sign before <kbd class="sd-kbd">⇧←</kbd></button>
+            <button type="button" class="btn" id="sd-sign-after" :disabled="!signAfter" @click="stepSign(1)">Sign after <span
+              aria-hidden="true">›</span> <kbd class="sd-kbd">⇧→</kbd></button>
+          </div>
+          <button v-if="nextKey && nextKey !== sign.key" type="button" class="btn" id="sd-next" @click="nextSign">Next to mark
             <kbd class="sd-kbd">N</kbd></button>
           <template v-if="!remaining">
             <span v-if="compared" class="sd-done">All signs of this drive are marked.</span>
@@ -587,8 +608,9 @@ const visionAtMark = computed(() => {
           <span v-else class="dr-hint">{{ remaining }} to mark</span>
           <a class="link-button sd-car" :href="'/drive-review?drive=' + encodeURIComponent(route)">What the car did here ›</a>
         </div>
-        <p class="dr-hint sd-keys">Keys: ← → one frame, Shift five;<template v-if="writable && sign.included"> Z zero here, C can't
-          tell,</template><template v-if="writable && (sign.included || sign.mark)"> U undo,</template> N next sign.</p>
+        <p class="dr-hint sd-keys">Keys: ← → one frame, , . five, Shift+← → the sign before or after;<template
+          v-if="writable && sign.included"> Z zero here, C can't tell,</template><template v-if="writable && (sign.included
+          || sign.mark)"> U undo,</template> N next to mark.</p>
       </template>
     </template>
   </section>
