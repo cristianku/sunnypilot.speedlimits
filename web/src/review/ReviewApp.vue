@@ -8,6 +8,7 @@ import {computed, nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
 import {aiPhase, loadAiState} from './ai';
 import {watchAiLive} from './ai-live';
 import {watchBusy} from './busy';
+import {useCarReading} from './car';
 import {loadCarLogs} from './car-moment';
 import CarMoment from './CarMoment.vue';
 import {ensureCurrentFrame, row, status, work} from './current';
@@ -35,6 +36,7 @@ if (startRow !== null && workOf(startRow).detections.length > 0) state.selected 
 if (report.apiBase) state.server = 'loading';
 ensureCurrentFrame();
 useKeyboard();
+useCarReading();
 // The drive at work has none until its first proposals come (review/busy.ts adds them).
 const hasFrames = computed(() => report.rows.length > 0);
 

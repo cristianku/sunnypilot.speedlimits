@@ -44,6 +44,9 @@ _locks_guard = threading.Lock()
 # The frame timings of the videos last saved from (timings_of), oldest first.
 TIMINGS_KEPT = 16
 _timings: dict[tuple, tuple] = {}
+# The GOPs last decoded to NV12 (nv12_frame), oldest first: about 30 MB each for the road camera.
+NV12_GOPS_KEPT = 2
+_nv12: dict[tuple, bytes] = {}
 
 
 class VideoFrameError(ValueError):
@@ -156,6 +159,51 @@ def gop_bytes(video: Path, first: int, last: int) -> bytes:
     with open(video, 'rb') as source:
         source.seek(offsets[first])
         return header + source.read(offsets[last + 1] - offsets[first] if last + 1 < len(offsets) else -1)
+
+
+@lru_cache(maxsize=512)
+def _size(path: str, mtime_ns: int, size: int) -> tuple[int, int]:
+    del mtime_ns, size
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+                            '-of', 'csv=p=0', path], capture_output=True, text=True, check=False)
+    try:
+        width, height = (int(value) for value in probe.stdout.strip().split(',')[:2])
+    except ValueError:
+        raise VideoFrameError('the size of the road video cannot be read: ' + probe.stderr.strip()[:200]) from None
+    return width, height
+
+
+def video_size(video: Path) -> tuple[int, int]:
+    """(width, height) of a video."""
+    stat = video.stat()
+    return _size(str(video), stat.st_mtime_ns, stat.st_size)
+
+
+def nv12_frame(video: Path, decoded: int) -> tuple[bytes, int, int]:
+    """(NV12 bytes, width, height) of a frame of the road video, the road camera's pixel format (the one speedvisiond
+    reads): its GOP decoded on its own (gop_bytes), the last NV12_GOPS_KEPT GOPs kept."""
+    first, last = gop_of(video, decoded)
+    width, height = video_size(video)
+    size = width * height * 3 // 2
+    stat = video.stat()
+    key = (str(video), stat.st_mtime_ns, stat.st_size, first)
+    with _lock('nv12', str(video), first):
+        with _locks_guard:
+            frames = _nv12.get(key)
+        if frames is None:
+            decode = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', '-', '-vsync', '0', '-pix_fmt',
+                                     'nv12', '-f', 'rawvideo', '-'], input=gop_bytes(video, first, last),
+                                    capture_output=True, check=False)
+            frames = decode.stdout
+            if decode.returncode != 0 or len(frames) != (last - first + 1) * size:
+                raise VideoFrameError(f'GOP {first}..{last} not decoded: '
+                                      + decode.stderr.decode(errors='replace').strip()[:200])
+            with _locks_guard:
+                _nv12[key] = frames
+                while len(_nv12) > NV12_GOPS_KEPT:
+                    del _nv12[next(iter(_nv12))]
+    at = (decoded - first) * size
+    return frames[at:at + size], width, height
 
 
 def kept_seconds(root: Path, route: str, segment: int) -> list[int] | None:

@@ -310,6 +310,29 @@ class ReviewService:
             raise ReviewRejected(404, 'image_not_found', 'This frame of the video cannot be shown: ' + str(exc)) from exc
         return row, snapshot.run_id, path
 
+    def car_reading(self, route, frame_key) -> dict:
+        """What the car's networks read on a frame (nnslr_tools.car_reading), for the button "Car networks" of Sign
+        review: a row of the report or a frame of the video between the seconds not saved yet (video_stand_in), its
+        boxes in the pixels of the frame's picture. Nothing is saved. 404 for a frame that is not one of a road video
+        here, 503 when the sunnypilot clone has no release of the networks."""
+        from nnslr_tools import car_reading
+        key = frame_key_of(frame_key)
+        snapshot = self.snapshot(route)
+        row = snapshot.by_key.get(key) or self.video_stand_in(snapshot, key)
+        segment, decoded = row.get('segment_index'), row.get('decoded_frame_index')
+        if type(segment) is not int or type(decoded) is not int:
+            raise ReviewRejected(404, 'no_video_frame',
+                                 "This frame has no place in a road video: the car's networks read only those.")
+        try:
+            found = car_reading.read_frame(self.root, snapshot.route, segment, decoded, width=row.get('width'),
+                                           height=row.get('height'))
+        except (video_frames.VideoFrameError, OSError) as exc:
+            raise ReviewRejected(404, 'no_video_frame',
+                                 "The car's networks cannot read this frame: " + str(exc)) from exc
+        except car_reading.CarReadingError as exc:
+            raise ReviewRejected(503, 'no_car_networks', str(exc)) from exc
+        return {'route_id': snapshot.route, 'run_id': snapshot.run_id, 'frame_key': key, **found}
+
     def videos(self, route: str, rows: list[dict]) -> dict[str, int | None]:
         """{segment: frames of its road video} for the segments that have one: Sign review counts the frames of each
         second (a cell of its timeline is confirmed when they all are). Counted only where a frame between the seconds

@@ -54,7 +54,7 @@
 --has:#d9a93a;--none-cell:#2a3242;--disabled:#5d6675;--stage:#05070b;
 --sign-face:#ffffff;--sign-ink:#111111;--sign-ring:#e3001b;
 --ov-speed:#ff5964;--ov-cancel:#d4d9df;--ov-other:#ffa94d;--ov-none:#8a929c;--ov-selected:#ffd60a;--ov-hint:#64d2ff;
---ov-text:#fff3b0;--ov-halo:#0d0f12;--ov-ai:#ff6fd8}
+--ov-text:#fff3b0;--ov-halo:#0d0f12;--ov-ai:#ff6fd8;--ov-car:#b5f23d}
 :root[data-theme="light"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);
 --has:#e0b13f;--none-cell:#e3e8f0;--disabled:#9aa3b2;--stage:#0b0f16}
 @media (prefers-color-scheme:light){:root[data-theme="auto"]{--sus:#7e22ce;--sus-soft:rgba(147,51,234,.10);--warn:#c2410c;--warn-soft:rgba(234,88,12,.11);

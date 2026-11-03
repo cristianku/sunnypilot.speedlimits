@@ -178,6 +178,15 @@ input::placeholder { color: var(--placeholder); }
 .ai-box { fill: none; stroke: var(--ov-ai); stroke-width: 2.25; stroke-dasharray: 9 4; vector-effect: non-scaling-stroke; }
 .ai-box.delete { stroke-dasharray: 2 4; }
 .ai-tag { fill: var(--ov-ai); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
+/* What the car's networks read (review/car.ts): lime; solid when the car takes it, dashed when it takes nothing for
+   the limit, dotted and faded when it drops it; never in the way of the pointer. */
+#carLayer { pointer-events: none; }
+.car-box { fill: none; stroke: var(--ov-car); stroke-width: 2.25; vector-effect: non-scaling-stroke; }
+.car-box.surest { stroke-width: 3; }
+.car-box.nothing { stroke-dasharray: 7 4; }
+.car-box.unsure { stroke-dasharray: 2 3; opacity: 0.7; }
+.car-tag { fill: var(--ov-car); stroke: var(--ov-halo); stroke-opacity: 0.9; stroke-linejoin: round; paint-order: stroke; font-family: var(--font-ui); font-weight: 650; }
+.car-tag.unsure { opacity: 0.75; }
 #draft { fill: rgba(255, 214, 10, 0.18); stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 /* The bar above the photo (CarMoment.vue): the frame's country and what the comma had at this moment. Above the
    photo, never on it; its height stays the same from frame to frame, so the photo does not move. */
@@ -412,6 +421,21 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .ai-row .what { font-size: 13.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-row .ai-notes { grid-column: 3; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .ai-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Car networks (CarSection.vue): Read / Hide in the head, then one row per box the car finds. */
+.car-section .section-head { align-items: center; }
+.car-section .section-head h2 { flex: none; white-space: nowrap; }
+.car-section .car-release { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.car-section .btn.car-ask { flex: none; min-height: 30px; padding: 4px 12px; font-size: 12.5px; gap: 6px; }
+.car-section .btn.car-ask[aria-pressed="true"] { border-color: var(--ov-car); }
+.car-spin { border-top-color: var(--ov-car); }
+.hint-row.car-row { grid-template-columns: 24px minmax(0, 1fr) auto; background: var(--surface-2); border-color: var(--line); }
+.car-row .n {
+  width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ov-car) 26%, transparent); color: var(--fg);
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.car-row .pill { padding: 1px 8px; font-size: 11.5px; }
+.car-row[data-use="unsure"] .hint-what { color: var(--muted); }
+.car-row .conf.low { color: var(--bad); background: var(--bad-soft); }
 .ai-actions .btn { min-width: 96px; }
 /* No box: a quiet empty state, a dashed sign outline beside the sentence. */
 .empty-note {
@@ -654,7 +678,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   :root { --control: 44px; }
   .chip, .chips.minor .chip { min-height: 44px; padding: 5px 14px; }
   .segmented button, .filters button { min-height: 40px; }
-  .btn.small, .stage-tools .btn, .ai-section .btn.ai-ask { min-height: 44px; }
+  .btn.small, .stage-tools .btn, .ai-section .btn.ai-ask, .car-section .btn.car-ask { min-height: 44px; }
   .qchip { min-height: 36px; padding: 4px 12px; }
   .box-main { min-height: 54px; }
   .box-del { width: 44px; height: 44px; margin-right: 2px; }

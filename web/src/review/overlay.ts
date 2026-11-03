@@ -3,6 +3,7 @@
 // applied yet, and the view of the zoom of the selected box. Sizes are in image pixels: k is the on-screen size
 // of one image pixel.
 import type {AiAction, AiSuggestion} from '../common/ai-types';
+import type {CarSign, CarUse} from './car';
 import {boxColor, hintLabel, shortName} from './catalog';
 import {boxArea, boxesOverlap, freeLabelY, labelWidth, rectOf, type PlacedLabel} from './geometry';
 import type {Box, Corner, Detection, Hint} from './types';
@@ -52,6 +53,14 @@ export interface Handle {
 /** A box of the AI suggestion: one it keeps, corrects or adds, or one of the frame it would delete. */
 export interface DrawnAi {
   kind: AiAction | 'delete';
+  rect: Rect;
+  label: Label;
+}
+
+/** A box of the car's networks (car.ts): what the car does with it, and whether it is the frame's reading. */
+export interface DrawnCar {
+  use: CarUse;
+  surest: boolean;
   rect: Rect;
   label: Label;
 }
@@ -200,6 +209,28 @@ export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>,
   });
   for (const d of suggestion.deleted) add('delete', d.bbox_xyxy, '✕ ' + d.number);
   return drawn;
+}
+
+/**
+ * The boxes of the car's networks on the photo, in their own colour: "car n · 80 · 97%" under each (n: its row in
+ * "Car networks"; names: each as a box of the review, car.ts carDetection); dashed when the car takes nothing for
+ * the limit from it, dotted when it drops it.
+ */
+export function drawCar(signs: readonly CarSign[], names: readonly Detection[], surest: number | null,
+  imageHeight: number, k: number, imageWidth = Number.POSITIVE_INFINITY): DrawnCar[] {
+  const fontSize = 12 / k;
+  const placed: PlacedLabel[] = [];
+  return signs.map((sign, i) => {
+    const b = sign.box;
+    const name = names[i];
+    const text = 'car ' + (i + 1) + ' · ' + (name ? shortName(name) : sign.class) + ' · '
+      + Math.round(sign.confidence * 100) + '%';
+    const width = labelWidth(text, fontSize);
+    const x = labelX(b[0], width, imageWidth, k);
+    const y = Math.min(imageHeight, freeLabelY(placed, x, b[3] + fontSize * 1.05, width, fontSize, fontSize));
+    placed.push({x, y, w: width, h: fontSize, text});
+    return {use: sign.use, surest: i === surest, rect: rectOf(b), label: label(text, x, y, fontSize, k)};
+  });
 }
 
 /** The part of the photo the zoom shows: the box with a margin, inside the image. */

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 // The photo and what is drawn on it: the boxes with their dark under-stroke and labels, the corner handles of
-// the selected box, the boxes of the second reading, the AI suggestion not applied yet (it never takes the
-// pointer) and the box being drawn. The frame's country and what the comma had at that moment are in the bar above
+// the selected box, the boxes of the second reading, the AI suggestion not applied yet and what the car's networks
+// read (car.ts; neither takes the pointer) and the box being drawn. The frame's country and what the comma had at that moment are in the bar above
 // it (CarMoment.vue).
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
+import {carAskOf, carDetection} from './car';
 import {coarsePointer} from './dom';
-import {drawAi, drawStage, sceneScale} from './overlay';
+import {drawAi, drawCar, drawStage, sceneScale} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
 import {hintsOf, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
@@ -40,6 +41,12 @@ const aiBoxes = computed(() => {
   return drawAi(ask.suggestion, props.row.height, sceneScale(size.value, props.row.width, props.row.height),
     props.row.width);
 });
+const carBoxes = computed(() => {
+  const reading = carAskOf(props.row.frame_key)?.reading;
+  if (!reading) return [];
+  return drawCar(reading.signs, reading.signs.map(carDetection), reading.surest, props.row.height,
+    sceneScale(size.value, props.row.width, props.row.height), props.row.width);
+});
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 </script>
 
@@ -59,6 +66,15 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
                 :height="hint.rect.height"/>
           <text v-if="hint.label" :x="hint.label.x" :y="hint.label.y" class="hint-tag" :font-size="hint.label.fontSize"
                 :stroke-width="hint.label.strokeWidth" paint-order="stroke">{{ hint.label.text }}</text>
+        </template>
+      </g>
+      <g id="carLayer" :style="visibility">
+        <template v-for="(box, i) in carBoxes" :key="i">
+          <rect class="box-under" :x="box.rect.x" :y="box.rect.y" :width="box.rect.width" :height="box.rect.height"/>
+          <rect :class="'car-box ' + box.use + (box.surest ? ' surest' : '')" :x="box.rect.x" :y="box.rect.y"
+                :width="box.rect.width" :height="box.rect.height"/>
+          <text :x="box.label.x" :y="box.label.y" :class="'car-tag ' + box.use" :font-size="box.label.fontSize"
+                :stroke-width="box.label.strokeWidth" paint-order="stroke">{{ box.label.text }}</text>
         </template>
       </g>
       <g id="overlays" :style="visibility">

@@ -773,6 +773,12 @@ def make_handler(app: ReviewApp):
                 self._json(200, {'ok': True, **app.video_gop(match.group(1), int(match.group(2)),
                                                               int(match.group(3)))})
                 return
+            # What the car's cutter and classifier read on a frame, for "Car networks" (nnslr_tools.car_reading).
+            match = re.fullmatch(r'/api/route/([^/]+)/car/([0-9]{1,4})/([0-9]{1,6})', path)
+            if match:
+                self._json(200, {'ok': True, **app.car_reading(match.group(1),
+                                                                match.group(2) + '/' + match.group(3))})
+                return
             match = re.fullmatch(r'/route/([^/]+)', path)
             if match:
                 route = self._route_or_none(match.group(1))

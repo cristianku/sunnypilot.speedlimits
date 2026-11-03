@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // The inspector, docked on the right on a computer and under the photo on a phone: the drive, the boxes of the
-// frame, the second reading, the AI reviewer, the editor of the selected one, "More", the confirm block.
+// frame, the second reading, what the car's networks read, the AI reviewer, the editor of the selected one, "More",
+// the confirm block.
 import {computed} from 'vue';
 import AiSection from './AiSection.vue';
 import BoxEditor from './BoxEditor.vue';
 import BoxList from './BoxList.vue';
 import AiLiveBanner from './AiLiveBanner.vue';
 import BusyBanner from './BusyBanner.vue';
+import CarSection from './CarSection.vue';
 import {boxCountText} from './boxes';
 import {applyPrevious, carryState} from './carry';
 import ConfirmArea from './ConfirmArea.vue';
@@ -51,6 +53,7 @@ const driveHref = computed(() => report.apiBase === null ? null : '/drive-review
     </section>
     <!-- Right under the list: what another model saw is compared with the boxes, before any of them is edited. -->
     <SecondReading :row="row" :work="work"/>
+    <CarSection :row="row" :work="work"/>
     <AiSection :row="row"/>
     <BoxEditor :row="row" :detection="selectedBox"/>
     <OtherFields :row="row" :work="work"/>
