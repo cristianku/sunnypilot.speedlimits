@@ -383,6 +383,11 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
   - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with PaddleOCR PP-OCRv4 (Apache-2.0), for numbers painted on the road.
 - The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0): optional extra sign crops for the classifier (`helpers/mapillary.sh`) and windows for the cutter (`helpers/mapillary_windows.sh`), both off by default. Never committed; a classifier or a cutter trained with it, or started from one that was, carries its non-commercial terms.
 - The table of Mapillary's old image keys and current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); positions from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
+- Planned for the scene network, not downloaded or used yet. They would teach it what a town and open country look like, by day and night and in bad weather, in many countries; none of them marks where a town ends:
+  - [BDD100K](https://www.bdd100k.com) (Berkeley DeepDrive; educational, research and not-for-profit use): its 100K images only, with their scene, weather and time-of-day labels, not the videos.
+  - [ACDC](https://acdc.vision.ee.ethz.ch) (ETH Zurich; its own non-commercial terms): drives in Switzerland at night, in fog, rain and snow.
+  - [Mapillary Vistas](https://www.mapillary.com/dataset/vistas) (CC BY-NC-SA 4.0): left out for now, its download is about 60 GB.
+  - Town exits from the [Mapillary API](https://www.mapillary.com/developer/api-documentation): for each photo of the Mapillary Traffic Sign Dataset with an end-of-town sign, the photos before and after it in its sequence.
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL, read offline.
 - Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain).
 - The site is built with [Vue 3](https://vuejs.org) (MIT), Vite and TypeScript.
