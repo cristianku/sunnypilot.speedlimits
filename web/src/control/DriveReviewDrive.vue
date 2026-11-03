@@ -36,6 +36,10 @@ async function read(): Promise<void> {
   try {
     const answer = await api<Timeline>('/api/drive-review/drives/' + encodeURIComponent(props.route) + '/timeline');
     if (ticket !== asked) return;
+    // A cut answer (the page left while it came) reads as {message} in api(): never a drive without its scan.
+    if (!answer || typeof answer.scan !== 'object' || answer.scan === null || !Array.isArray(answer.scan.kinds)) {
+      throw new Error('The server sent a drive this page cannot read.');
+    }
     view.value = answer;
     error.value = '';
     document.title = 'Speed limits · ' + (answer.title ?? 'Drive review');
@@ -430,10 +434,10 @@ watch(() => props.route, () => {
     <p v-else-if="!view" class="empty">Loading…</p>
     <template v-else>
       <div v-if="scan && scan.state !== 'done' && scan.state !== 'no_episodes'" class="dr-banner" :class="'dr-' + scanText(scan).tone" id="dr-scan-state">
-        <p>{{ scanText(scan).text }}<template v-if="scan.state === 'no_logs'"> The video below plays all the same.</template></p>
+        <p>{{ scanText(scan).text }}<template v-if="scan.state === 'no_logs' || scan.state === 'unreadable_logs'"> The video below plays all the same.</template></p>
         <div class="dr-banner-actions">
           <button v-if="scan.state !== 'queued' && scan.state !== 'scanning'" type="button" class="btn small" :class="{primary: scan.state !== 'no_logs'}"
-                  :disabled="readOnly" @click="search">{{ scan.state === 'no_logs' ? 'Look on the server' : 'Search the logs' }}</button>
+                  :disabled="readOnly" @click="search">{{ scan.state === 'no_logs' || scan.state === 'unreadable_logs' ? 'Look on the server' : 'Search the logs' }}</button>
           <button type="button" class="btn small" :disabled="readOnly || sending !== null" @click="folderInput?.click()">Send a folder of logs</button>
           <button type="button" class="btn small" :disabled="readOnly || sending !== null" @click="filesInput?.click()">Send log files</button>
         </div>

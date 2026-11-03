@@ -38,9 +38,9 @@ const busy = computed(() => (drives.value ?? []).some((drive) => drive.scan.stat
 /** The drives shown: from the first day on (and those of a day unknown). */
 const reviewed = computed(() => (drives.value ?? []).filter((drive) => !drive.before_review));
 const early = computed(() => (drives.value ?? []).length - reviewed.value.length);
-/** Drives whose logs wait for a search: not searched, out of date, or found on the server and not imported. */
-const toSearch = computed(() => reviewed.value.filter((drive) => drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated'
-  || (drive.scan.state === 'no_logs' && (drive.logs_found ?? 0) > 0)).length);
+/** Drives whose logs wait for a search, by the server's one rule (DriveReviewStore.needs_scan, the same as Search all
+ * and Sign distance): not searched, out of date, a search that stopped, logs not imported yet or readable again. */
+const toSearch = computed(() => reviewed.value.filter((drive) => drive.needs_scan).length);
 const withoutLogs = computed(() => (drives.value ?? []).filter((drive) => drive.scan.state === 'no_logs' && !drive.logs_found).length);
 const searched = computed(() => (drives.value ?? []).filter((drive) => drive.scan.state === 'done' || drive.scan.state === 'no_episodes').length);
 const titleOf = (route: string): string => {
@@ -260,9 +260,9 @@ onBeforeUnmount(() => window.clearTimeout(timer));
             </p>
             <span class="data-chev rt-go" aria-hidden="true">›</span>
           </a>
-          <div v-if="!readOnly && !drive.before_review && (drive.scan.state === 'not_scanned' || drive.scan.state === 'outdated' || drive.scan.state === 'failed'
-                 || (drive.scan.state === 'no_logs' && drive.logs_found))" class="dr-drive-actions">
-            <button type="button" class="btn small" @click="searchOne(drive.route)">{{ drive.scan.state === 'no_logs' ? 'Import and search' : 'Search again' }}</button>
+          <div v-if="!readOnly && !drive.before_review && drive.needs_scan" class="dr-drive-actions">
+            <button type="button" class="btn small" @click="searchOne(drive.route)">{{ drive.scan.state === 'no_logs'
+              || drive.scan.state === 'unreadable_logs' ? 'Import and search' : 'Search again' }}</button>
           </div>
         </li>
       </ul>

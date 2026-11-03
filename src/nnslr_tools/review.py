@@ -59,7 +59,7 @@ PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/set
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
 PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|publish|panoramica|prepara|allena|pannello|stato|account|'
-                     r'settings|review|route/[^/]+(/(index\.html)?)?)?')
+                     r'settings|review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # A drive page whose route has no report (or an id that is no route), in words.
 UNKNOWN_DRIVE_MESSAGE = 'This drive is not on the server, or it is not prepared yet.'
@@ -652,6 +652,12 @@ def make_handler(app: ReviewApp):
                 self._drive_review_get(path)
                 return
             # [drive-review] - END
+            # [sign-distance] - START
+            # Data › Sign distance (nnslr_tools.sign_distance): the drives, a drive's signs, a sign with its frames.
+            if path.startswith('/api/sign-distance/'):
+                self._sign_distance_get(path)
+                return
+            # [sign-distance] - END
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
@@ -852,6 +858,21 @@ def make_handler(app: ReviewApp):
                 self._json(200, app.next_frame(match.group(1), frame_filter=values.get('filter'),
                                                after=values.get('after')))
                 return
+            # [sign-distance] - START
+            # Sign distance, reading only: an agent never sets a zero (the marks are a signed-in person's, on the site).
+            sign_distance_drive = re.fullmatch(r'/api/v1/sign-distance/([0-9a-f]{8}--[0-9a-f]{10})', path)
+            if path == '/api/v1/sign-distance' or sign_distance_drive:
+                from nnslr_tools import drive_review, sign_distance
+                store = drive_review.store_for(app.root)
+                try:
+                    if path == '/api/v1/sign-distance':
+                        self._json(200, sign_distance.overview(store))
+                    else:
+                        self._json(200, sign_distance.drive_view(store, sign_distance_drive.group(1)))
+                except sign_distance.SignDistanceError as exc:
+                    self._problem(exc.status, exc.reason, exc.message, True)
+                return
+            # [sign-distance] - END
             match = re.fullmatch(r'/api/v1/routes/([^/]+)/frames/([0-9]{1,9})/([0-9]{1,9})(/[a-z-]+)?', path)
             if match is None:
                 self._problem(404, 'not_found', 'Invalid API address.', True)
@@ -1216,9 +1237,9 @@ def make_handler(app: ReviewApp):
                     for route in drive_review.all_routes(app.root):
                         if route in early:
                             continue
-                        state = store.scan_state(route)['state']
-                        if state in ('not_scanned', 'outdated') or (
-                                state == 'no_logs' and drive_logs.discover(app.root, route)):
+                        # The one rule of every caller (DriveReviewStore.needs_scan): an unreadable log is not
+                        # read again until it can be opened.
+                        if store.needs_scan(route):
                             store.queue_scan(route)
                             queued.append(route)
                     self._json(200, {'ok': True, 'queued': queued})
@@ -1237,6 +1258,88 @@ def make_handler(app: ReviewApp):
                 return
             self._problem(404, 'not_found', 'Not found.', True)
         # [drive-review] - END
+
+        # [sign-distance] - START
+        def _sign_distance_get(self, path):
+            """Data › Sign distance, reading only: the drives and their figures, a drive's signs, a sign with the
+            frames of its window, the JPEG of one of them (only a frame of an included sign, never a second that was
+            not kept)."""
+            from nnslr_tools import drive_review, sign_distance
+            store = drive_review.store_for(app.root)
+            drive = r'/api/sign-distance/drives/([0-9a-f]{8}--[0-9a-f]{10})'
+            try:
+                if path == '/api/sign-distance/drives':
+                    self._json(200, {'ok': True, 'drives': sign_distance.overview(store)['drives']})
+                    return
+                if path == '/api/sign-distance/summary':
+                    self._json(200, {'ok': True, 'summary': sign_distance.overview(store)['summary']})
+                    return
+                match = re.fullmatch(drive, path)
+                if match:
+                    self._json(200, sign_distance.drive_view(store, match.group(1)))
+                    return
+                match = re.fullmatch(drive + r'/signs/([0-9]{1,20})', path)
+                if match:
+                    self._json(200, sign_distance.sign_view(store, match.group(1), match.group(2)))
+                    return
+                match = re.fullmatch(drive + r'/frames/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
+                if match:
+                    data = sign_distance.frame_jpeg(store, match.group(1), int(match.group(2)), int(match.group(3)))
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'image/jpeg')
+                    self.send_header('Content-Length', str(len(data)))
+                    self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                if re.fullmatch(drive + r'/(marks|undo)', path):
+                    self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                    return
+            except sign_distance.SignDistanceError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+                return
+            self._problem(404, 'not_found', 'Not found.', True)
+
+        def _sign_distance_post(self, path):
+            """A person's mark on a sign ({"sign", "mark", "segment", "frame"}) or Undo of a sign's last mark
+            ({"sign"}): same origin, JSON, a person signed in on the site (never the access token alone: an agent never
+            sets a zero) and a panel that is not read-only. The time of the frame is the server's, never the
+            browser's."""
+            from nnslr_tools import drive_review, sign_distance
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return
+            self._require_ai_session()
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            match = re.fullmatch(r'/api/sign-distance/drives/([0-9a-f]{8}--[0-9a-f]{10})/(marks|undo)', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            body = self._read_json()
+            who, _via = self._who()
+            reviewer = who or 'local'
+            route = match.group(1)
+            store = drive_review.store_for(app.root)
+            try:
+                if match.group(2) == 'marks':
+                    answer = sign_distance.mark(store, route, body, reviewer)
+                    line = answer['line']
+                    print(f'Sign distance: {route} sign {terminal_text(line["sign"])} {line["mark"]} '
+                          f'({terminal_text(reviewer)})', flush=True)
+                else:
+                    answer = sign_distance.undo(store, route, body, reviewer)
+                    print(f'Sign distance: {route} sign {terminal_text(answer["undone"]["sign"])} '
+                          f'{answer["undone"]["mark"]} undone ({terminal_text(reviewer)})', flush=True)
+            except sign_distance.SignDistanceError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+                return
+            self._json(200, answer)
+        # [sign-distance] - END
 
         def _send_reviews(self, route):
             try:
@@ -1317,6 +1420,11 @@ def make_handler(app: ReviewApp):
                 self._drive_review_post(path)
                 return
             # [drive-review] - END
+            # [sign-distance] - START
+            if path.startswith('/api/sign-distance/'):
+                self._sign_distance_post(path)
+                return
+            # [sign-distance] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)

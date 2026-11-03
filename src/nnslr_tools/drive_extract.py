@@ -15,7 +15,11 @@ clock, which runs on across the segments of a drive); the civil time of the GPS 
   (segmentId, its index in fcamera.hevc in presentation order) and the start of its exposure (timestampSof, the same
   monotonic clock). This joins the logs to the video, never the file times or the names.
 - gps: [[t, lat, lon, unix ms]] about once a second, with a fix only.
-- meta: the build (initData), the car (carParams), the counts of messages per service and the span of the log.
+- meta: the build (initData: version, branch, commit, its date, device), the unit the car shows (is_metric, the
+  IsMetric param initData logs; None when the log has none), the car (carParams), the counts of messages per service
+  and the span of the log. sign_dist_exact (SIGN_DIST_VERSION): the distance to the sign and its size are written at
+  every change (no tolerance), the distance as the log has it, unrounded (the car's screen rounds that very value): an
+  extract without it, or with an older value, rounded them (drive_logs.stale_extract).
 
 The schema is the one of the runtime branch (drive_logs.schema_dir): speedVisionSP, longitudinalPlanSP.speedLimit
 and liveMapDataSP are sunnypilot's (cereal/custom.capnp). A field the schema or an older log lacks reads as None.
@@ -69,9 +73,10 @@ SERIES = (
     ('vis_raw_speed', 'speedVisionSP', 'rawSignSpeed', 'num', 0.5, 1),
     ('vis_raw_conf', 'speedVisionSP', 'rawSignConfidence', 'num', 0.01, 1),
     ('vis_raw_taken', 'speedVisionSP', 'rawSignTaken', 'bool', 0, 1),
-    # The distance (m) to the round sign ahead the screen shows (0 without one) and its size on the camera (px).
-    ('vis_sign_dist', 'speedVisionSP', 'signDistance', 'num', 2, 1),
-    ('vis_sign_size', 'speedVisionSP', 'signSize', 'num', 2, 1),
+    # The distance (m) to the round sign ahead the screen shows (0 without one) and its size on the camera (px):
+    # every change, as Sign distance needs the very sample the screen reaches 0 at (sign_distance).
+    ('vis_sign_dist', 'speedVisionSP', 'signDistance', 'num', 0, 1),
+    ('vis_sign_size', 'speedVisionSP', 'signSize', 'num', 0, 1),
     ('map_valid', 'liveMapDataSP', 'speedLimitValid', 'bool', 0, 1),
     ('map_limit', 'liveMapDataSP', 'speedLimit', 'num', 0.5, 3.6),
     ('map_ahead_valid', 'liveMapDataSP', 'speedLimitAheadValid', 'bool', 0, 1),
@@ -92,6 +97,14 @@ GPS = ('gpsLocationExternal', 'gpsLocation')
 EVENT_FLAGS = ('enable', 'noEntry', 'warning', 'userDisable', 'softDisable', 'immediateDisable', 'preEnable',
                'permanent', 'overrideLateral', 'overrideLongitudinal')
 COUNTED = tuple(sorted({item[1] for item in SERIES} | set(ENCODE) | set(GPS) | {'onroadEvents', 'onroadEventsSP'}))
+# The key of meta that says vis_sign_dist and vis_sign_size are written without a tolerance, and its value now: 2, the
+# distance also unrounded (True, the first value, still rounded it to 2 decimals). An extract with a smaller value that
+# holds a distance is read again (drive_logs.stale_extract).
+SIGN_DIST_EXACT = 'sign_dist_exact'
+SIGN_DIST_VERSION = 2
+# The series kept as the log has them, never rounded: the car's screen shows round(signDistance) (m, or ft), and a
+# value rounded first (0.504 to 0.5) would reach its zero a sample early.
+UNROUNDED = frozenset(('vis_sign_dist',))
 
 
 def _get(obj, path: str):
@@ -103,7 +116,7 @@ def _get(obj, path: str):
     return obj
 
 
-def _value(raw, kind: str, scale: float):
+def _value(raw, kind: str, scale: float, exact: bool = False):
     if raw is None:
         return None
     if kind == 'bool':
@@ -111,9 +124,10 @@ def _value(raw, kind: str, scale: float):
     if kind == 'str':
         return str(raw)
     try:
-        return round(float(raw) * scale, 2)
+        value = float(raw) * scale
     except (TypeError, ValueError):
         return None
+    return value if exact else round(value, 2)
 
 
 def _messages(path: Path, cereal: Path, car: Path):
@@ -133,6 +147,19 @@ def _messages(path: Path, cereal: Path, car: Path):
     if not data:
         raise ValueError('empty log')
     yield from schema.Event.read_multiple_bytes(data)
+
+
+def _is_metric(init) -> bool | None:
+    """The IsMetric param initData logs (the unit the car's screen shows): None when the log does not have it."""
+    for entry in _get(init, 'params.entries') or ():
+        if str(_get(entry, 'key')) != 'IsMetric':
+            continue
+        try:
+            text = bytes(_get(entry, 'value') or b'').decode('utf-8', 'replace').strip().lower()
+        except (TypeError, ValueError):
+            return None
+        return text in ('1', 'true') if text in ('0', '1', 'true', 'false') else None
+    return None
 
 
 def _events_of(which: str, payload) -> list[list]:
@@ -157,7 +184,7 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
     gps: list[list] = []
     gps_service = None
     counts: dict[str, int] = {}
-    meta: dict = {}
+    meta: dict = {SIGN_DIST_EXACT: SIGN_DIST_VERSION}
     first = last = None
     total = 0
 
@@ -178,7 +205,9 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
         if which == 'initData':
             init = message.initData
             meta['build'] = {'version': _get(init, 'version'), 'branch': _get(init, 'gitBranch'),
-                             'commit': _get(init, 'gitCommit'), 'device': str(_get(init, 'deviceType'))}
+                             'commit': _get(init, 'gitCommit'), 'commit_date': _get(init, 'gitCommitDate') or None,
+                             'device': str(_get(init, 'deviceType'))}
+            meta['is_metric'] = _is_metric(init)
             continue
         total += 1
         first = t if first is None else min(first, t)
@@ -202,7 +231,8 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
             last_seen[which] = t
             detail = which != 'speedVisionSP' or bool(_get(payload, 'speedLimitState'))
             for name, _service, field, kind, tolerance, scale in specs:
-                value = _value(_get(payload, field), kind, scale) if detail or name not in VISION_DETAIL else None
+                value = (_value(_get(payload, field), kind, scale, name in UNROUNDED)
+                         if detail or name not in VISION_DETAIL else None)
                 put(name, t, value, tolerance)
             if which == 'carState':
                 for button in _get(payload, 'buttonEvents') or ():

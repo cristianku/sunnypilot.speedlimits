@@ -20,7 +20,8 @@ runtime branch (speed-limits of cristianku/sunnypilot: speedVisionSP, longitudin
 below by commit and SHA-256 and downloaded once into ~/.cache/comma-fetch-log (NNSLR_DRIVE_SCHEMA: a folder with
 log.capnp, custom.capnp, deprecated.capnp, include/c++.capnp and car.capnp instead). Its result is cached per file
 and EXTRACT_VERSION in ``<data root>/derived/drive_logs/<route>/<segment>.<sha16>.v<version>.json.gz``: a scan reads
-again only the segments that are new or changed.
+again only the segments that are new or changed, and a cached extract from before the distance to the sign was written
+exactly that holds such a distance (stale_extract).
 
 How they are joined. ``merge`` puts the segments of a drive in order on the comma's monotonic clock (logMonoTime runs
 on across the segments of a drive): a missing segment ends every series with None (no value is carried over a hole),
@@ -31,6 +32,7 @@ names are never used to align anything.
 """
 from __future__ import annotations
 
+import bisect
 import gzip
 import hashlib
 import json
@@ -42,7 +44,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from nnslr_tools.drive_extract import EXTRACT_VERSION
+from nnslr_tools.drive_extract import EXTRACT_VERSION, SIGN_DIST_EXACT, SIGN_DIST_VERSION
 
 ROUTE = re.compile(r'[0-9a-f]{8}--[0-9a-f]{10}')
 # A log file as the comma names it.
@@ -271,11 +273,24 @@ def load_extract(root: Path, route: str, segment: int, sha256: str) -> dict | No
         return None
 
 
+def stale_extract(value: dict | None) -> bool:
+    """A cached extract written before the distance to the sign was kept exactly (drive_extract.SIGN_DIST_EXACT below
+    SIGN_DIST_VERSION: no marker, or True, which still rounded it) that holds such a distance: it is read again from its
+    log. One without a distance (an older build, no sign) stays."""
+    if not value:
+        return False
+    marker = (value.get('meta') or {}).get(SIGN_DIST_EXACT)
+    if type(marker) is int and marker >= SIGN_DIST_VERSION:
+        return False
+    return any(isinstance(point[1], (int, float)) and point[1] > 0
+               for point in (value.get('series') or {}).get('vis_sign_dist') or ())
+
+
 def extract(root: Path, route: str, segment: int, sha256: str, path: str, *, schema: Path | None = None) -> dict:
-    """The series of one log file, from the cache or read now in a child process. Raises DriveLogError when the file
-    cannot be read (its reason is recorded with the file)."""
+    """The series of one log file, from the cache or read now in a child process (a stale cache too: stale_extract).
+    Raises DriveLogError when the file cannot be read (its reason is recorded with the file)."""
     cached = load_extract(root, route, segment, sha256)
-    if cached is not None:
+    if cached is not None and not stale_extract(cached):
         return cached
     folder = schema or schema_dir()
     try:
@@ -362,6 +377,44 @@ def merge(extracts: dict[int, dict]) -> dict:
             'holes': holes, 'left_out': left_out, 't0': t0, 'span': [t0, end], 'meta': meta}
 
 
+def frame_index(merged: dict) -> list[tuple]:
+    """The road camera's encode index of a joined drive, for frame_at: [(first exposure start, segment, exposure
+    starts, decoded frame indices)] in time order, each segment's frames sorted by their exposure start."""
+    segments = []
+    for segment, frames in (merged.get('frames') or {}).items():
+        sof, ids = frames.get('sof') or [], frames.get('ids') or []
+        if sof and len(sof) == len(ids):
+            pairs = sorted(zip(sof, ids))
+            segments.append((pairs[0][0], int(segment), [p[0] for p in pairs], [int(p[1]) for p in pairs]))
+    segments.sort()
+    return segments
+
+
+def frame_at(index: list[tuple], t_ns: int) -> tuple[int, int, int] | None:
+    """(segment, decoded frame index, its exposure start) of the frame the road camera was showing at a log time:
+    the last frame whose exposure started at or before it. None before the first frame, or more than two frames after
+    the last one exposed (a hole of the index, or past the end of a segment)."""
+    at = bisect.bisect_right([item[0] for item in index], t_ns) - 1
+    if at < 0:
+        return None
+    _first, segment, sof, ids = index[at]
+    position = bisect.bisect_right(sof, t_ns) - 1
+    if position < 0 or t_ns - sof[position] > 2e9 / FPS:
+        return None
+    return segment, ids[position], sof[position]
+
+
+def frame_time(index: list[tuple], segment: int, decoded: int) -> int | None:
+    """The exposure start of a decoded frame of a segment (the encode index's), None when the index lacks it."""
+    for _first, number, sof, ids in index:
+        if number == segment:
+            try:
+                return sof[ids.index(decoded)]
+            except ValueError:
+                return None
+    return None
+
+
 def sync(merged: dict, video_index: dict | None) -> list[dict]:
     """Per segment, how a time of the logs becomes a time of the drive's video: the exposure start of frame 0
     (seconds from t0) and the frame period fitted on the encode index (frame id -> exposure start), the largest
@@ -392,14 +445,22 @@ def sync(merged: dict, video_index: dict | None) -> list[dict]:
             if error * 1000 > 500 / FPS:
                 info['exact'] = [[i, round(t, 3)] for i, t in zip(ids, times)]
             made = video.get(segment)
-            if made is None:
-                info['precision'] = 'no_video'
-            else:
+            if made is not None:
                 info.update(frames_video=made['frames'], video_start=made['start'])
-                same = abs(made['frames'] - count) <= 1 and info['missing_ids'] == 0
-                info['precision'] = 'frame' if same and error * 1000 <= 500 / FPS else 'degraded'
+            info['precision'] = precision(info)
         out.append(info)
     return out
+
+
+def precision(info: dict) -> str:
+    """The precision of a segment of sync from its numbers (frames_log, frames_video, missing_ids, max_error_ms): the
+    one rule of sync, also for a caller that counts the video's frames itself (Sign distance)."""
+    if not info.get('frames_log'):
+        return 'no_index'
+    if info.get('frames_video') is None:
+        return 'no_video'
+    same = abs(info['frames_video'] - info['frames_log']) <= 1 and info.get('missing_ids') == 0
+    return 'frame' if same and (info.get('max_error_ms') or 0) <= 500 / FPS else 'degraded'
 
 
 def civil_start(merged: dict) -> int | None:

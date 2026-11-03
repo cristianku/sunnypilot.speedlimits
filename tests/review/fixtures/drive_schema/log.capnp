@@ -6,6 +6,14 @@
 
 using Car = import "car.capnp";
 
+struct Map(Key, Value) {
+  entries @0 :List(Entry);
+  struct Entry {
+    key @0 :Key;
+    value @1 :Value;
+  }
+}
+
 struct InitData {
   version @0 :Text;
   gitBranch @1 :Text;
@@ -17,6 +25,8 @@ struct InitData {
     tizi @2;
     mici @3;
   }
+  gitCommitDate @4 :Text;
+  params @5 :Map(Text, Data);
 }
 
 struct SelfdriveState {

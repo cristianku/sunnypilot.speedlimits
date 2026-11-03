@@ -7,6 +7,8 @@ here touches that one, the dataset or a training:
 
 - log_files: every log of a drive the portal knows, by drive, segment, kind and the SHA-256 of its content, with
   where it came from and what it covers once read (drive_logs). Importing the same files again adds nothing.
+- log_errors: the logs of a drive found on this server that could not be opened (a file of another user, unreadable
+  for this server): never read until they can be, and shown as such (state unreadable_logs when they are all it has).
 - scans: the last scan of each drive: its state (queued, scanning, done, failed), progress, the scanner's and the
   extractor's versions, the files it read, what the logs cover and the date of the drive.
 - episodes: what the scanner found (drive_episodes). A scan again keeps the id of an episode it finds again (the
@@ -49,6 +51,9 @@ SCHEMA_STATEMENTS = (
         error TEXT, first_ns INTEGER, last_ns INTEGER, messages INTEGER, counts TEXT, extract_version INTEGER,
         added_at TEXT NOT NULL, read_at TEXT,
         PRIMARY KEY (route, segment, kind, sha256))''',
+    '''CREATE TABLE IF NOT EXISTS log_errors (
+        route TEXT NOT NULL, path TEXT NOT NULL, segment INTEGER NOT NULL, kind TEXT NOT NULL, error TEXT NOT NULL,
+        seen_at TEXT NOT NULL, PRIMARY KEY (route, path))''',
     '''CREATE TABLE IF NOT EXISTS file_hashes (
         path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, sha256 TEXT NOT NULL)''',
     '''CREATE TABLE IF NOT EXISTS scans (
@@ -118,6 +123,8 @@ class DriveReviewStore:
         self._worker: threading.Thread | None = None
         self._worker_lock = threading.Lock()
         self._merged: dict[str, tuple] = {}
+        # Per cached extract (its path): (mtime_ns, stale) - drive_logs.stale_extract, read once per version of it.
+        self._stale: dict[str, tuple[int, bool]] = {}
         self._initialize()
 
     # ---------- database ----------
@@ -187,6 +194,7 @@ class DriveReviewStore:
 
     def import_logs(self, route: str) -> dict:
         """Records the logs of a drive found on this server (drive_logs.discover); the same content is recorded once.
+        A file that cannot be opened is recorded in log_errors (and forgotten there once it can, or is gone).
         {found, new, files}."""
         drive_logs.check_route(route)
         found = drive_logs.discover(self.root, route)
@@ -194,10 +202,13 @@ class DriveReviewStore:
                  self._rows('SELECT * FROM log_files WHERE route = ?', (route,))}
         statements, new = [], 0
         now = utc_now()
+        failed: list[tuple] = []
         for item in found:
             try:
                 sha, size = self._sha(item['path'])
-            except OSError:
+            except OSError as exc:
+                failed.append((route, item['path'], item['segment'], item['kind'],
+                               f'{type(exc).__name__}: {exc.strerror or "cannot be read"}'[:200], now))
                 continue
             key = (item['segment'], item['kind'], sha)
             row = known.get(key)
@@ -211,9 +222,16 @@ class DriveReviewStore:
                 # The same content, moved: read it where it is now.
                 statements.append(('UPDATE log_files SET path = ?, source = ? WHERE route = ? AND segment = ? '
                                    'AND kind = ? AND sha256 = ?', (item['path'], item['source'], route, *key)))
-        if statements:
-            self._run(statements)
+        statements.append(('DELETE FROM log_errors WHERE route = ?', (route,)))
+        statements.extend(('INSERT INTO log_errors (route, path, segment, kind, error, seen_at) '
+                           'VALUES (?, ?, ?, ?, ?, ?)', row) for row in failed)
+        self._run(statements)
         return {'found': len(found), 'new': new, 'files': len(known)}
+
+    def log_errors(self, route: str) -> list[dict]:
+        """The logs of a drive found but not readable by this server: [{segment, kind, error, seen_at}] (no path)."""
+        return [dict(row) for row in self._rows('SELECT segment, kind, error, seen_at FROM log_errors WHERE route = ? '
+                                                'ORDER BY segment, kind', (route,))]
 
     def add_upload(self, route: str, segment: int, kind: str, ext: str, stream, length: int) -> dict:
         """A log sent from the portal: kept under raw/drive_logs, recorded, and the drive queued for a scan. The same
@@ -421,29 +439,52 @@ class DriveReviewStore:
         if statements:
             self._run(statements)
 
+    def _stale_files(self, route: str, files: dict) -> bool:
+        """Any cached extract a scan read (summary files) is stale (drive_logs.stale_extract): the scan reads it again.
+        Remembered per file and modification time, so the extract written again by that scan is looked at anew."""
+        for segment, item in (files or {}).items():
+            path = drive_logs.extract_path(self.root, route, int(segment), item['sha256'])
+            try:
+                mtime = path.stat().st_mtime_ns
+            except OSError:
+                continue
+            known = self._stale.get(str(path))
+            if known is None or known[0] != mtime:
+                known = (mtime, drive_logs.stale_extract(drive_logs.load_extract(self.root, route, int(segment),
+                                                                                  item['sha256'])))
+                self._stale[str(path)] = known
+            if known[1]:
+                return True
+        return False
+
     def scan_state(self, route: str) -> dict:
-        """What the page says of a drive's logs and scan: state no_logs, not_scanned, queued, scanning, failed,
-        outdated (new logs, or a newer scanner), no_episodes or done."""
+        """What the page says of a drive's logs and scan: state no_logs, unreadable_logs (logs found that this server
+        cannot open, and no other), not_scanned, queued, scanning, failed, outdated (new logs, a newer scanner or
+        extractor, or a cached extract to read again), no_episodes or done. unreadable_files: the logs found that
+        cannot be opened, in any state (a drive can have some of each)."""
         files = self._rows("SELECT segment, kind, sha256, state FROM log_files WHERE route = ?", (route,))
         rows = self._rows('SELECT * FROM scans WHERE route = ?', (route,))
         scan = dict(rows[0]) if rows else None
         summary = _loads(scan['summary']) if scan else None
+        errors = self.log_errors(route)
         base = {'route': route, 'files': len(files), 'segments': len({row['segment'] for row in files}),
                 'kinds': sorted({row['kind'] for row in files}), 'progress': scan['progress'] if scan else 0,
                 'error': scan['error'] if scan else None, 'finished_at': scan['finished_at'] if scan else None,
                 'scanner_version': scan['scanner_version'] if scan else None,
                 'coverage': (summary or {}).get('coverage'), 'counts': (summary or {}).get('counts'),
-                'dashcam': (summary or {}).get('dashcam'), 'unreadable': (summary or {}).get('unreadable', [])}
+                'dashcam': (summary or {}).get('dashcam'), 'unreadable': (summary or {}).get('unreadable', []),
+                'unreadable_files': errors}
         if scan and scan['state'] in ('queued', 'scanning', 'failed'):
             return {**base, 'state': scan['state']}
         if not files:
-            return {**base, 'state': 'no_logs'}
+            return {**base, 'state': 'unreadable_logs' if errors else 'no_logs'}
         if scan is None or scan['state'] != 'done':
             return {**base, 'state': 'not_scanned'}
         seen = set((summary or {}).get('seen') or ())
         newer = (scan['scanner_version'] != drive_episodes.SCANNER_VERSION
                  or scan['extract_version'] != EXTRACT_VERSION
-                 or any(row['sha256'] not in seen for row in files))
+                 or any(row['sha256'] not in seen for row in files)
+                 or self._stale_files(route, _loads(scan['files'], {})))
         if newer:
             return {**base, 'state': 'outdated'}
         if (summary or {}).get('t0_ns') is None:
@@ -451,6 +492,28 @@ class DriveReviewStore:
         count = self._rows("SELECT COUNT(*) FROM episodes WHERE route = ? AND active = 1 AND channel != 'spot_check'",
                            (route,))[0][0]
         return {**base, 'state': 'done' if count else 'no_episodes', 'episodes': count}
+
+    def needs_scan(self, route: str, state: dict | None = None) -> bool:
+        """The one rule of every caller (Drive review's Find episodes, Sign distance, nnslr sign-reads) for a drive to
+        scan now: never scanned, out of date, a scan that stopped (interrupted, an error), or logs on this server not
+        imported yet, or recorded as unreadable and readable now (a real open: never the mode bits, which an NFS share
+        does not honour as root). A drive whose logs were all read and none could be read is not scanned again."""
+        state = state or self.scan_state(route)
+        name = state['state']
+        if name in ('queued', 'scanning'):
+            return False
+        if name in ('not_scanned', 'outdated'):
+            return True
+        if name == 'failed':
+            rows = self._rows('SELECT state FROM scans WHERE route = ?', (route,))
+            if rows and rows[0]['state'] == 'failed':
+                return True
+        errors = {row['path'] for row in self._rows('SELECT path FROM log_errors WHERE route = ?', (route,))}
+        if any(_readable(path) for path in errors):
+            return True
+        if name in ('no_logs', 'unreadable_logs'):
+            return any(item['path'] not in errors for item in drive_logs.discover(self.root, route))
+        return False
 
     def summary(self, route: str) -> dict | None:
         rows = self._rows('SELECT summary, files FROM scans WHERE route = ?', (route,))
@@ -463,8 +526,9 @@ class DriveReviewStore:
 
     # ---------- the joined drive ----------
 
-    def merged(self, route: str) -> dict | None:
-        """The drive as the last scan read it (the cached extracts of its files), joined; None before a scan."""
+    def merged(self, route: str, *, keep: bool = True) -> dict | None:
+        """The drive as the last scan read it (the cached extracts of its files), joined; None before a scan. keep:
+        remembered for the next call (the last few drives); False for a pass over many drives."""
         summary = self.summary(route)
         if summary is None:
             return None
@@ -478,6 +542,8 @@ class DriveReviewStore:
             if value is not None:
                 extracts[int(segment)] = value
         merged = drive_logs.merge(extracts)
+        if not keep:
+            return merged
         if len(self._merged) > 4:
             self._merged.pop(next(iter(self._merged)))
         self._merged[route] = (signature, merged)
@@ -507,6 +573,16 @@ class DriveReviewStore:
             return None
         return next((item for item in self.episodes(rows[0]['route'], active=False) if item['id'] == episode_id),
                     None)
+
+def _readable(path: str) -> bool:
+    """The file opens and reads for this process now."""
+    try:
+        with open(path, 'rb') as handle:
+            handle.read(1)
+        return True
+    except OSError:
+        return False
+
 
 def _seconds(t, t0) -> float | None:
     return None if t is None or t0 is None else round((t - t0) / NS, 3)
@@ -709,7 +785,8 @@ def store_for(root: Path) -> DriveReviewStore:
 
 
 def drives_view(store: DriveReviewStore) -> list[dict]:
-    """Every drive of the portal for the page: its name, when, its logs and scan, how many episodes it has."""
+    """Every drive of the portal for the page: its name, when, its logs and scan, whether Find episodes reads it
+    (needs_scan, the store's one rule), how many episodes it has."""
     from nnslr_tools import drive_video
     from nnslr_tools.drives import drive_of
     episodes = store.episodes()
@@ -723,10 +800,12 @@ def drives_view(store: DriveReviewStore) -> list[dict]:
         if not drive.get('title') and summary.get('gps'):
             drive['title'] = _title(store.root, summary['gps'])
         state = store.scan_state(route)
-        found = len(drive_logs.discover(store.root, route)) if state['state'] == 'no_logs' else None
+        found = (len(drive_logs.discover(store.root, route)) if state['state'] in ('no_logs', 'unreadable_logs')
+                 else None)
         out.append({'route': route, 'title': drive.get('title'), 'when': when, 'when_certain': certain, 'day': day,
                     'before_review': before_review(day, review_from),
                     'minutes': drive.get('minutes'), 'scan': state, 'logs_found': found,
+                    'needs_scan': store.needs_scan(route, state),
                     'video_segments': len(drive_video.minutes(store.root, route)),
                     'episodes': sum(1 for item in episodes
                                     if item['route'] == route and item['channel'] != 'spot_check')})

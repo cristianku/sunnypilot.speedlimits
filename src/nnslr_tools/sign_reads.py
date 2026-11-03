@@ -17,7 +17,6 @@ Only the camera and the car's own logs: no map.
 """
 from __future__ import annotations
 
-import bisect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -54,6 +53,7 @@ def frame_order(row: dict) -> tuple:
 def read_frames(merged: dict) -> dict[int, list[dict]]:
     """{segment: [{'decoded', 'kph', 't_ns'}]}: the frame of each run of comma reads (see the module's text), from
     a drive as Drive review joins it (drive_logs.merge)."""
+    from nnslr_tools.drive_logs import frame_at, frame_index
     reads = sorted((event[0], event[2]) for event in merged.get('events') or ()
                    if len(event) >= 3 and event[1] == 'sign' and isinstance(event[0], int))
     starts = []
@@ -62,26 +62,17 @@ def read_frames(merged: dict) -> dict[int, list[dict]]:
         if previous is None or kph != previous[1] or t - previous[0] >= READ_GAP_S * 1e9:
             starts.append((t, kph))
         previous = (t, kph)
-    segments = []
-    for segment, frames in (merged.get('frames') or {}).items():
-        sof, ids = frames.get('sof') or [], frames.get('ids') or []
-        if sof and len(sof) == len(ids):
-            pairs = sorted(zip(sof, ids))
-            segments.append((pairs[0][0], int(segment), [p[0] for p in pairs], [p[1] for p in pairs]))
-    segments.sort()
+    index = frame_index(merged)
     found: dict[int, list[dict]] = {}
     for t, kph in starts:
-        at = bisect.bisect_right([item[0] for item in segments], t) - 1
-        if at < 0:
-            continue
-        _first, segment, sof, ids = segments[at]
         # The last frame exposed at or before the read; past the end of the segment (a hole) it is not this one.
-        index = bisect.bisect_right(sof, t) - 1
-        if index < 0 or t - sof[index] > 1e9 / CAMERA_FPS * 2:
+        frame = frame_at(index, t)
+        if frame is None:
             continue
+        segment, decoded, _sof = frame
         chosen = found.setdefault(segment, [])
-        if all(item['decoded'] != ids[index] for item in chosen):
-            chosen.append({'decoded': int(ids[index]), 'kph': kph, 't_ns': t})
+        if all(item['decoded'] != decoded for item in chosen):
+            chosen.append({'decoded': decoded, 'kph': kph, 't_ns': t})
     return found
 
 
@@ -113,7 +104,7 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
                   scan: bool = True, workers: int = 4) -> dict:
     """Write the pictures of the comma's reads of a drive (see the module's text); returns what was done. scan: read
     the drive's logs first when Drive review has not (or not with these files); workers: segments at once."""
-    from nnslr_tools import drive_logs, drive_review
+    from nnslr_tools import drive_review
     from nnslr_tools.media import extract_frames, extracted_frame_rows
     from nnslr_tools.route_io import discover_segment_dirs
     from nnslr_tools.sync import SLOW_ONLY_MARK
@@ -122,9 +113,9 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
     if not frames_dir.is_dir():
         raise FileNotFoundError(f'no pictures of {route}; run: nnslr extract-frames --route {route}')
     store = drive_review.DriveReviewStore(root)
-    state = store.scan_state(route)['state']
-    if scan and (state in ('not_scanned', 'outdated', 'failed')
-                 or (state == 'no_logs' and drive_logs.discover(root, route))):
+    current = store.scan_state(route)
+    state = current['state']
+    if scan and store.needs_scan(route, current):
         state = store.scan(route)['state']
     merged = store.merged(route)
     reads = read_frames(merged) if merged else {}

@@ -86,10 +86,14 @@ Base: `http://<server>:8765/api/v1`. Tutte le risposte sono JSON (tranne le imma
 | `GET /api/v1/routes/{route}/frames/{seg}/{img}/image?variant=&crop=&long_side=` | L'immagine: `variant=preview` (JPEG del report, default) o `original` (PNG estratto); `crop=x1,y1,x2,y2` in pixel originali e `long_side=32..2048` richiedono Pillow sul server |
 | `GET /api/v1/routes/{route}/frames/{seg}/{img}/history` | Cronologia: ogni revisione con revisore, tipo, canale, ora e riquadri |
 | `POST /api/v1/routes/{route}/frames/{seg}/{img}/review` | Salva conferma, correzione o ritiro |
+| `GET /api/v1/sign-distance` | Data › Sign distance, read only: every drive with its state (`signs`, `unread`, `unreadable`, `no_logs`, `build_too_old`, `no_sign_seen`, `no_video`, `reading`) and its counts, and `summary` (the median `late_s` with its count, smallest and largest, `late_m` with its `note`, the signs left out by reason, the marks out of the medians, the orphan marks, `by_drive`) |
+| `GET /api/v1/sign-distance/{route}` | One drive of Sign distance, read only: its state, its signs (vision's zero `zero_s`, the last sighting, `included` or `excluded` with the reason, the `mark` in effect and its `metrics`: `late_s`, `late_m`, `vision_m`, `v_kmh`) and its `orphans` |
 
 Gli endpoint della pagina (`GET /api/routes`, `GET /api/route/{route}/reviews`, `POST /api/route/{route}/frame/{seg}/{img}`) restano identici, con cookie o `X-Review-Token` come prima. `GET /api/route/{route}/reviews` ora indica anche `reviewer_kind` e `channel` di ogni revisione.
 
 Every frame of the video (the page only): `GET /api/route/{route}/video/{seg}/{frame}` decodes the GOP of that frame of the segment's video (20 a second) and gives `frame_count`, `gop` (first and last frame), `seconds` (the seconds a segment kept only at the signs has, else `null`) and `frames`, each with its `frame_key`: the key of the picture of the report when there is one, else `{seg}/{1000 + frame}`; `GET /route/{route}/video/{seg}/{frame}.jpg` is its picture. `POST /api/route/{route}/frame/{seg}/{1000 + frame}` with `confirmed: true` takes such a frame into the report (its own PNG, `video_frames.jsonl`) and saves the review, with its boxes or with none (no sign); `.../apply-previous` and `.../fit` take such a frame too (they save nothing), with the frame of the report just before it as the previous one. The page's payload has `videos`: for every segment whose road video is on the server, its frame count (`null` until a frame of its video is saved). The REST API and MCP save only frames of the report, and `next`/`next_frame` never walk the frames of the video that are not saved.
+
+Sign distance (Data › Sign distance: how late the comma's countdown to the sign ahead reaches zero, against the frame a person marks as zero) is **read only** for the REST API: `GET /api/v1/sign-distance` and `GET /api/v1/sign-distance/{route}` above, with the same Bearer token. `late_s` is the main figure (vision's zero minus the person's, in seconds: + late, − early); `late_m` is secondary and includes speedvisiond's processing delay times the speed. **An agent never sets a zero**: the marks are made only by a person on the site (the page's `POST /api/sign-distance/drives/{route}/marks` and `.../undo`): signed in, with the session cookie and never the token alone, or the person at the server itself on a site served only on 127.0.0.1 without sign-in (reviewer `local`). There is no REST write and no MCP tool for them: a `POST` under `/api/v1/sign-distance` answers 404. The marks are kept in `data/annotations/sign_distance/<route>.jsonl`, a file only ever added to.
 
 ### Ordine, cursori e ripresa
 
@@ -230,6 +234,7 @@ saved = call('POST', f"/routes/{route}/frames/{frame['frame_key']}/review", {
 - Gli errori arrivano come risultato con `isError: true` e testo `Error executing tool <nome>: {"error": ..., "status": ..., "message": ...}`, con gli stessi codici della REST API.
 - `save_frame_review` salva sempre come revisore AI (sezione 3). Con `NNSLR_MCP_READ_ONLY=1` (servizio) o `--read-only` (stdio) lo strumento non è offerto: utile per una **prova senza salvataggio**.
 - Il server MCP manda al client anche istruzioni brevi sul flusso e sulle regole (non inventare valori, salvare solo se autorizzati, rileggere dopo un 409).
+- Sign distance has no MCP tool: an agent never sets a zero (section 4; the REST API only reads it).
 
 ### Installare solo le dipendenze MCP
 

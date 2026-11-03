@@ -9,7 +9,15 @@
 export type Value = number | string | boolean | null;
 export type Series = [number, Value][];
 
-export type ScanName = 'no_logs' | 'not_scanned' | 'queued' | 'scanning' | 'failed' | 'outdated' | 'no_episodes' | 'done';
+export type ScanName = 'no_logs' | 'unreadable_logs' | 'not_scanned' | 'queued' | 'scanning' | 'failed' | 'outdated'
+  | 'no_episodes' | 'done';
+/** A log of the drive found on the server that this server cannot open (drive_review.log_errors: no path). */
+export interface UnreadableLog {
+  segment: number;
+  kind: string;
+  error: string;
+  seen_at: string | null;
+}
 export interface ScanState {
   route: string;
   state: ScanName;
@@ -24,6 +32,8 @@ export interface ScanState {
   counts: Record<string, number> | null;
   dashcam: boolean | null;
   unreadable: {segment: number; error: string}[];
+  /** The logs found that cannot be opened, in any state; their permissions are Cristian's to fix, never the page's. */
+  unreadable_files?: UnreadableLog[];
   episodes?: number;
 }
 
@@ -40,6 +50,8 @@ export interface DriveRow {
   scan: ScanState;
   /** Logs found on the server and not imported yet (only for a drive without logs). */
   logs_found: number | null;
+  /** Find episodes reads this drive now (DriveReviewStore.needs_scan, the one rule of every caller). */
+  needs_scan: boolean;
   video_segments: number;
   episodes: number;
 }
@@ -202,6 +214,7 @@ export const CHANNEL_LABEL: Record<Channel, string> = {
 export function scanText(scan: ScanState): {text: string; tone: 'muted' | 'todo' | 'ok' | 'bad' | 'busy'} {
   switch (scan.state) {
     case 'no_logs': return {text: NO_LOGS, tone: 'muted'};
+    case 'unreadable_logs': return {text: 'Logs found, but this server cannot open them (their file permissions).', tone: 'bad'};
     case 'not_scanned': return {text: 'Logs imported, not searched yet.', tone: 'todo'};
     case 'queued': return {text: 'Waiting to search the logs…', tone: 'busy'};
     case 'scanning': return {text: 'Searching the logs… ' + Math.round((scan.progress || 0) * 100) + '%', tone: 'busy'};

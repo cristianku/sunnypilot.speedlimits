@@ -1541,6 +1541,102 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
 .dr-episode{fill:var(--todo);opacity:.55}.dr-episode.intervention{fill:var(--accent)}.dr-episode.both{fill:var(--bad)}
 .dr-episode.current{opacity:1}
 @media (max-width:560px){.dr-lanes{--dr-name:62px}.dr-lane-name{font-size:11px}}
+/* Data › Sign distance (SignDistanceTab.vue, SignDistanceDrive.vue): the median of how late vision's zero comes, the
+   drives with signs to mark, then one sign at a time: the road frame as large as the column leaves with what the car's
+   screen showed on it (the car's own fuchsia), vision's distance over the window under it, the marks and the figures.
+   One column on every width. */
+:root{--sd-vision:rgb(226,120,248);--sd-vision-soft:rgba(226,120,248,.16)}
+:root[data-theme="light"]{--sd-vision:rgb(176,38,212);--sd-vision-soft:rgba(176,38,212,.10)}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--sd-vision:rgb(176,38,212);--sd-vision-soft:rgba(176,38,212,.10)}}
+.sd-summary,.sd-drives{display:flex;flex-direction:column;gap:12px}
+.sd-purpose{margin:0;font-size:14px;color:var(--muted);max-width:68ch}
+.sd-figure{display:flex;flex-direction:column;gap:3px}
+.sd-figure strong{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.2;font-variant-numeric:tabular-nums}
+.sd-figure span{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sd-figure-empty{margin:0;font-size:15px;font-weight:600}
+.sd-second{margin:0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sd-facts{margin:0;display:flex;flex-wrap:wrap;gap:2px 14px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sd-warn{color:var(--warn)}
+.sd-line{margin:0;font-size:13px}
+.sd-late{font-weight:600;color:var(--fg)}
+.sd-others summary{cursor:pointer;font-size:14px;font-weight:500;color:var(--accent);padding:4px 0}
+.sd-others .rt-list{margin-top:8px}
+.sd-drive .dr-drive-state a{margin-left:6px}
+.sd-files{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);font-family:var(--font-data);overflow-wrap:anywhere}
+.sd-files-note{list-style:none;margin-left:-18px;font-family:var(--font-ui)}
+.dr-banner .sd-files{flex:1 1 100%}
+.sd-drive .dr-drive-state,.sd-view .dr-banner p{overflow-wrap:anywhere}
+.sd-view{max-width:980px;width:100%;margin:0 auto;gap:12px}
+.sd-signs{display:flex;flex-wrap:wrap;gap:6px}
+.sd-sign-chip{appearance:none;min-width:34px;height:34px;padding:0 9px;border-radius:999px;border:1.5px solid var(--line-strong);
+background:transparent;color:var(--fg);font:inherit;font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer}
+.sd-sign-chip.zero{background:var(--accent);border-color:var(--accent);color:#fff}
+.sd-sign-chip.cant{background:var(--surface-3);border-color:var(--surface-3);color:var(--muted)}
+.sd-sign-chip.out{border-style:dashed;color:var(--muted);text-decoration:line-through}
+.sd-sign-chip[aria-current="true"]{outline:2px solid var(--fg);outline-offset:2px}
+.sd-sign-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sd-sign-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px}
+.sd-sign-head h3{margin:0;font-size:17px;font-weight:650;letter-spacing:-.015em;font-variant-numeric:tabular-nums}
+.sd-sign-head span{font-size:13.5px;color:var(--muted)}
+/* The picture's own shape once it is in (--sd-aspect, set by the page), a comma road camera's 1344 x 760 until then. */
+.sd-stage{--sd-aspect:calc(1344 / 760);position:relative;aspect-ratio:var(--sd-aspect);
+width:min(100%,calc((100dvh - 370px) * var(--sd-aspect)));min-width:min(100%,420px);
+align-self:center;border-radius:12px;overflow:hidden;background:var(--stage)}
+.sd-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none;-webkit-user-select:none}
+.sd-stage.empty .dr-stage-note,.sd-stage .dr-stage-note{top:50%;bottom:auto;transform:translate(-50%,-50%)}
+/* Under the picture, never on it: what the car's screen showed on this frame, and the person's mark on it. */
+.sd-stage-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;min-height:32px}
+.sd-chip-vision,.sd-chip-mine{padding:5px 12px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:-.01em;
+font-variant-numeric:tabular-nums;line-height:1.2}
+.sd-chip-vision{background:var(--sd-vision-soft);color:var(--sd-vision);border:1.5px solid var(--sd-vision)}
+.sd-chip-vision.zero{background:rgb(176,38,212);color:#fff;border-color:rgb(176,38,212)}
+.sd-chip-mine{background:var(--accent);color:#fff;border:1.5px solid var(--accent)}
+.sd-chip-mine.cant{background:var(--surface-3);color:var(--fg);border-color:var(--surface-3)}
+.sd-time{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sd-curve{display:block;width:100%;height:60px;cursor:pointer;touch-action:none;border-radius:8px}
+.sd-curve-base{fill:var(--surface-2)}
+.sd-curve-kept{fill:var(--surface-3)}
+.sd-curve-line{fill:none;stroke:var(--sd-vision);stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.sd-curve line{stroke-width:2;vector-effect:non-scaling-stroke}
+.sd-m-seen{stroke:var(--muted);stroke-dasharray:4 3}
+.sd-m-vision{stroke:var(--sd-vision)}
+.sd-m-mine{stroke:var(--accent)}
+.sd-m-cant{stroke:var(--muted)}
+.sd-m-now{stroke:var(--fg)}
+.sd-range{width:100%;margin:0;accent-color:var(--accent);min-height:28px}
+.sd-controls{gap:8px}
+.sd-step{min-width:44px;font-size:17px;padding:5px 10px}
+.sd-pos{margin-left:auto;white-space:normal}
+.sd-jumps{display:flex;flex-wrap:wrap;gap:6px}
+.sd-jumps .dr-chip{min-height:28px;padding:3px 11px;font-size:12.5px}
+.sd-j-vision{background:var(--sd-vision-soft);color:var(--sd-vision)}
+.sd-j-mine{background:var(--accent-soft);color:var(--accent)}
+.sd-actions{display:flex;flex-wrap:wrap;gap:8px}
+.sd-actions .btn{min-height:44px}
+.sd-kbd{font-family:var(--font-data);font-size:11px;font-weight:600;padding:1px 6px;border-radius:5px;background:rgba(127,127,127,.22);
+color:inherit;opacity:.85}
+.sd-result{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border-radius:12px;background:var(--surface-2)}
+.sd-result strong{font-size:19px;font-weight:700;letter-spacing:-.015em;font-variant-numeric:tabular-nums}
+.sd-result strong.sd-late{font-size:21px}
+.sd-result span{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sd-result .sd-second{font-size:12.5px}
+.sd-result .sd-warn{color:var(--warn)}
+.sd-who{font-size:12px!important}
+.sd-notes{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted)}
+.sd-next{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px}
+.sd-done{font-size:14px;font-weight:600;color:var(--ok)}
+.sd-car{margin-left:auto;font-size:14px;text-decoration:none}
+.sd-readonly{font-size:13.5px}
+@media (max-width:860px),(pointer:coarse){.sd-view .btn.small{min-height:44px}.sd-sign-chip{min-width:40px;height:40px}}
+@media (max-width:560px){
+  .sd-figure strong{font-size:21px}
+  .sd-stage{width:100%;min-width:0}
+  .sd-pos{flex:1 1 100%;margin-left:0}
+  .sd-actions .btn{flex:1 1 calc(50% - 4px)}
+  .sd-car{margin-left:0}
+  .sd-keys,.sd-kbd{display:none}
+}
+@media (pointer:coarse){.sd-keys,.sd-kbd{display:none}}
 </style>
 </head>
 <body>
