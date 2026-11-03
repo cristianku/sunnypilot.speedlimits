@@ -217,6 +217,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 - `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
+- `helpers/mapillary.sh`, `helpers/mapillary_windows.sh`, `helpers/mapillary_locations.sh`: the Mapillary Traffic Sign Dataset, as crops for the classifier, as windows for the cutter, and where its photos were taken (CPU; the last one asks the Mapillary API).
 - `scripts/train_box_fit.sh`: trains the review page's **Fit box** on the boxes people drew, on the CPU in about 15 minutes.
 
 ## More
@@ -380,7 +381,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
   - [`star092304/traffic-sign-detection-vietnam-yolo`](https://huggingface.co/star092304/traffic-sign-detection-vietnam-yolo) (YOLO, 82 classes of Vietnamese signs). Its model card says Apache-2.0, but the model file says AGPL-3.0. Not resolved.
   - [`Xenova/segformer-b0-finetuned-cityscapes-1024-1024`](https://huggingface.co/Xenova/segformer-b0-finetuned-cityscapes-1024-1024), from NVIDIA SegFormer. [NVIDIA's licence](https://github.com/NVlabs/SegFormer/blob/master/LICENSE) allows non-commercial research only; Cityscapes has its own terms.
   - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with PaddleOCR PP-OCRv4 (Apache-2.0), for numbers painted on the road.
-- The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0): optional extra sign crops for the classifier (`helpers/mapillary.sh`, off by default). Never committed; a classifier trained with it carries its non-commercial terms.
+- The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0): optional extra sign crops for the classifier (`helpers/mapillary.sh`) and windows for the cutter (`helpers/mapillary_windows.sh`), both off by default. Never committed; a classifier or a cutter trained with it, or started from one that was, carries its non-commercial terms.
 - The table of Mapillary's old image keys and current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); positions from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
 - Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), ODbL, read offline.
 - Country borders from [Natural Earth](https://www.naturalearthdata.com) (public domain).

@@ -1665,6 +1665,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--split", default=None, help="default: <data root>/splits/latest.json")
     p_signnet.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
     p_signnet.add_argument("--families", default="all", choices=("all", "speed"), help="speed or all, as the cutter")
+    p_signnet.add_argument("--mapillary", default=None,
+                           help="add the train windows of the Mapillary Traffic Sign Dataset (nnslr mapillary-windows: "
+                                "<data root>/external/mapillary/windows.jsonl) to our train frames; they are the car's "
+                                "band, so --band-width 896 or a width with the same rows")
+    p_signnet.add_argument("--mapillary-region", default="all",
+                           help="the Mapillary windows of these continents (europe, north_america...) or countries "
+                                "(CH, DE...), comma-separated, by the photos' positions (nnslr mapillary-locations); "
+                                "default all")
+    p_signnet.add_argument("--mapillary-share", type=float, default=100.0,
+                           help="the percentage of the Mapillary windows taken, the same each time, after the region "
+                                "(more than 0, at most 100; default 100)")
+    p_signnet.add_argument("--mapillary-ratio", type=float, default=None,
+                           help="the Mapillary speed boxes at most this many times our train speed boxes (every speed "
+                                "family, unreadable, zone and road marking too), whole photos in a fixed order "
+                                "(default 1: as many as ours); not with --mapillary-only")
+    p_signnet.add_argument("--mapillary-only", action="store_true",
+                           help="train on the Mapillary windows alone, none of our train frames (the first stage of "
+                                "a two-stage cutter); validation and test stay ours")
     p_signnet.add_argument("--stride", type=int, default=signnet_settings.CAR_STRIDE, choices=(4, 8),
                            help=f"the heat map's stride (default {signnet_settings.CAR_STRIDE}, the car's)")
     p_signnet.add_argument("--fuse-kernel", type=int, default=signnet_settings.CAR_FUSE_KERNEL, choices=(1, 3),
@@ -1825,6 +1843,27 @@ def build_parser() -> argparse.ArgumentParser:
                                                           "archives (may be the annotations folder)")
     p_mapillary.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_mapillary.set_defaults(func=_cmd_mapillary_crops)
+    p_windows = sub.add_parser("mapillary-windows", help="cut windows of the fully annotated Mapillary Traffic Sign "
+                                                         "Dataset that look like our camera's band (1344x432, a speed "
+                                                         "sign at our signs' sizes and places) into <data root>/"
+                                                         "external/mapillary/windows and windows.jsonl: extra train "
+                                                         "frames of the cutter (nnslr train-signnet --mapillary); CPU "
+                                                         "only, no network")
+    p_windows.add_argument("--mtsd", default=None,
+                           help="the folder of MTSD's .zip archives as downloaded, read where they are (default "
+                                "/data/mapillary/zips); only the fully annotated ones are opened")
+    p_windows.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_windows.add_argument("--workers", type=int, default=None,
+                           help="processes that cut the photos (default: the cores, at most 8)")
+    p_windows.add_argument("--limit", type=int, default=None,
+                           help="only the first N photos with a window of each split (a trial cut)")
+    p_windows.add_argument("--with-val", action="store_true",
+                           help="also cut MTSD's val split (default train only: the cutter is measured on ours)")
+    p_windows.add_argument("--other-windows", type=int, default=0,
+                           help="windows per photo around another sign (default 0: the windows add speed signs only)")
+    p_windows.add_argument("--dry-run", action="store_true",
+                           help="read the annotation archive only and print what a cut would give; write nothing")
+    p_windows.set_defaults(func=_cmd_mapillary_windows)
     p_places = sub.add_parser("mapillary-locations", help="fetch from Mapillary where each photo of the Mapillary "
                                                           "Traffic Sign Dataset was taken, with its country and "
                                                           "continent, into <data root>/external/mapillary/"
@@ -2601,6 +2640,22 @@ def _cmd_mapillary_crops(args: argparse.Namespace) -> int:
     return 0 if header["crops"] else 1
 
 
+def _cmd_mapillary_windows(args: argparse.Namespace) -> int:
+    from nnslr_tools.mtsd_windows import DEFAULT_MTSD_DIR, make_windows
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.limit is not None and args.limit < 1:
+        raise ValueError(f"--limit {args.limit}: at least 1 photo")
+    if args.other_windows < 0:
+        raise ValueError(f"--other-windows {args.other_windows}: 0 or more")
+    workers = args.workers if args.workers is not None else min(8, os.cpu_count() or 1)
+    header = make_windows(Path(args.mtsd) if args.mtsd else DEFAULT_MTSD_DIR, root, workers=max(1, workers),
+                          other_windows=args.other_windows, limit=args.limit, with_val=args.with_val,
+                          dry_run=args.dry_run, log=lambda line: print(line, flush=True))
+    print(json.dumps(header, sort_keys=True), flush=True)
+    return 0 if (header["counts"].get("train") or {}).get("windows") else 1
+
+
 def _cmd_mapillary_locations(args: argparse.Namespace) -> int:
     """nnslr mapillary-locations: the token only from the environment (MAPILLARY_TOKEN), never printed."""
     from nnslr_tools.mapillary import (IMAGE_IDS_FILE, IMAGE_IDS_URL, TOKEN_ENV, LocationsError, download_image_ids,
@@ -2640,22 +2695,65 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
         raise ValueError(f"invalid --widths {args.widths!r}: four whole numbers separated by commas") from exc
     if len(widths) != 4 or min(widths) < 1:
         raise ValueError(f"invalid --widths {args.widths!r}: four whole numbers separated by commas")
+    if args.mapillary_ratio is not None and args.mapillary is None:
+        raise ValueError("--mapillary-ratio caps the Mapillary windows: add --mapillary")
+    if args.mapillary_ratio is not None and args.mapillary_only:
+        raise ValueError("--mapillary-ratio caps the Mapillary windows added to ours: not with --mapillary-only, "
+                         "which takes them all")
+    if args.mapillary:
+        from nnslr_tools.mtsd_windows import WINDOW
+        from nnslr_tools.signnet import CAR_BAND
+        band = band_size(args.band_width)
+        # A window is the frame's top 1344x432 pixels, the car's band exactly: a band of other rows would cut the
+        # bottom of every window (its signs there learnt as background) or pad it.
+        if band[1] * WINDOW[0] != WINDOW[1] * band[0]:
+            raise ValueError(f"--mapillary: the windows are the car's band ({CAR_BAND[0]}x{CAR_BAND[1]}, the frame's top "
+                             f"{WINDOW[0]}x{WINDOW[1]}); --band-width {args.band_width} makes a {band[0]}x{band[1]} "
+                             "band of other rows")
     plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"),
                                      Path(args.split or root / "splits" / "latest.json"), root,
-                                     dataset_kind=args.dataset_kind, families=args.families)
+                                     dataset_kind=args.dataset_kind, families=args.families,
+                                     mapillary=Path(args.mapillary) if args.mapillary else None,
+                                     mapillary_region=args.mapillary_region, mapillary_share=args.mapillary_share,
+                                     mapillary_only=args.mapillary_only,
+                                     mapillary_ratio=1.0 if args.mapillary_ratio is None else args.mapillary_ratio)
     if args.init_from and not Path(args.init_from).is_file():
         raise ValueError(f"--init-from is not a file: {args.init_from}")
+    mapillary = plan.get("mapillary")
+    if mapillary:
+        trained = plan["trained_on"]
+        # Our speed boxes: every speed family, the unreadable signs, zones and road markings too (the ratio's ours).
+        print(f"mapillary: train holds {trained['ours']} of our frames ({trained['ours_boxes']} boxes, "
+              f"{0 if plan.get('mapillary_only') else mapillary['ours_train_speed_boxes']} of the speed signs, "
+              "unreadable, zone and road marking included) and "
+              f"{trained['mapillary_windows']} "
+              f"Mapillary windows ({trained['mapillary_boxes']} speed boxes"
+              + (f", at most {mapillary['ratio']:g} times ours: {mapillary['before_cap']['speed_boxes']} before the cap"
+                 if mapillary.get("ratio") is not None else ", all of the region and share") + ")",
+              file=sys.stderr, flush=True)
+    train_frames = sum(1 for frame in plan["frames"] if frame["split"] == "train")
+    # One batch at least (the loader drops a last smaller one): a narrow region or share of the windows can hold
+    # fewer; so the check of the population stops it before the GPU.
+    short = bool(mapillary) and train_frames < args.batch
+    trainable = bool(plan.get("trainable")) and not short
     if args.dry_run:
         print(json.dumps({"dry_run": True, "task": "signnet", "dataset_sha256": plan.get("dataset_sha256"),
                           "split_sha256": plan.get("split_sha256"), "families": plan.get("families"),
                           "counts_by_split": plan.get("counts_by_split"), "boxes_by_split": plan.get("boxes_by_split"),
+                          "boxes_by_family": plan.get("boxes_by_family"), "mapillary": mapillary,
+                          "mapillary_only": bool(plan.get("mapillary_only")), "trained_on": plan.get("trained_on"),
+                          "train_frames": train_frames, "batch": args.batch,
                           "band": list(band_size(args.band_width)), "stride": args.stride,
                           "fits_the_car": fits_the_car(band_size(args.band_width), args.stride),
-                          "trainable": bool(plan.get("trainable"))},
+                          "trainable": trainable},
                          sort_keys=True), flush=True)
-        return 0 if plan.get("trainable") else 1
-    if not plan.get("trainable"):
-        raise ValueError(signnet_not_trainable(plan))
+        if short:
+            print(f"not trainable: {train_frames} train frames, fewer than one batch of {args.batch}",
+                  file=sys.stderr, flush=True)
+        return 0 if trainable else 1
+    if not trainable:
+        raise ValueError(signnet_not_trainable(plan)
+                         + (f"; {train_frames} train frames, fewer than one batch of {args.batch}" if short else ""))
     result = train_signnet(plan, root, Path(args.run_dir), widths=widths, stride=args.stride, epochs=args.epochs,
                            batch=args.batch, learning_rate=args.learning_rate, workers=args.workers,
                            band_width=args.band_width, fuse_kernel=args.fuse_kernel,

@@ -231,6 +231,51 @@ def test_a_tiny_training_logs_its_lines_and_saves_the_data(tmp_path):
         assert set(result[split]['car']) == set(result[split]['by_box_budget']['5'])
 
 
+def test_the_mapillary_stage_names_its_lines_and_keeps_the_epoch_of_the_speed_signs(tmp_path):
+    from PIL import Image
+    frames = []
+    for index, split in enumerate(['train'] * 4 + ['validation', 'test']):
+        image = Image.new('RGB', (128, 96), (90, 90, 90))
+        image.paste((240, 20, 20), (40 + index, 6, 56 + index, 22))
+        image.save(tmp_path / f'f{index}.jpg')
+        frames.append({'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
+                       'boxes': [[40.0 + index, 6.0, 56.0 + index, 22.0]], 'box_families': ['maximum_speed'],
+                       'source': 'mapillary' if split == 'train' else None})
+    summary = {'frames': 4, 'boxes_by_family': {'maximum_speed': 4}}
+    plan = {'frames': frames, 'dataset_sha256': 'd' * 64, 'split_sha256': 's' * 64, 'families': 'all',
+            'trainable': True, 'mapillary': summary, 'mapillary_only': True,
+            'trained_on': {'ours': 0, 'ours_boxes': 0, 'mapillary_windows': 4, 'mapillary_boxes': 4}}
+    lines = []
+    result = train_signnet(plan, tmp_path, tmp_path / 'run' / 'pretrain', widths=(4, 4, 4, 4), epochs=2, batch=2,
+                           workers=0, band_width=96, log=lines.append)
+    assert lines[0].startswith('signnet_pretrain keeps the epoch with the best validation recall of the speed signs')
+    assert [line.split(' train_loss ')[0] for line in lines[1:3]] == ['signnet_pretrain epoch 1/2',
+                                                                      'signnet_pretrain epoch 2/2']
+    assert all(' val_speed_recall ' in line for line in lines[1:3])
+    assert lines[-1] == f"Mapillary stage complete: {tmp_path / 'run' / 'pretrain'}"
+    assert result['best_epoch_by'] == 'validation_speed_recall_at_5' and result['mapillary_only'] is True
+    assert result['mapillary'] == summary and result['trained_on'] == plan['trained_on']
+    assert result['synthetic_end_of_limit']['paintable_train_boxes'] == 0  # no synthetic sign on a window
+    assert all('validation_speed_recall_at_5' in epoch for epoch in result['history'])
+    stage = tmp_path / 'run' / 'pretrain' / 'signnet-best.pt'
+    saved = torch.load(stage, map_location='cpu', weights_only=True)
+    assert saved['mapillary_only'] is True and saved['mapillary'] == summary and saved['uses_mapillary'] is True
+    # The second stage, from it: its lines say so, and its result keeps what the start learnt from.
+    ours = [{**frame, 'source': None} for frame in frames]
+    lines = []
+    second = train_signnet({**plan, 'frames': ours, 'mapillary': None, 'mapillary_only': False}, tmp_path,
+                           tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96,
+                           init_from=stage, log=lines.append)
+    assert lines[0].startswith("signnet starts from run's Mapillary stage: every layer of its epoch ")
+    assert second['start']['mapillary_only'] is True and second['start']['mapillary'] == summary
+    assert second['start']['run'] == 'run' and second['start']['mapillary_stage'] is True
+    assert second['best_epoch_by'] == 'validation_recall_at_5' and lines[-1].startswith('SignNet complete: ')
+    # The licence goes with the weights: the second stage's file alone says it learnt from a Mapillary stage.
+    kept = torch.load(tmp_path / 'run' / 'signnet-best.pt', map_location='cpu', weights_only=True)
+    assert kept['mapillary'] is None and kept['uses_mapillary'] is True and second['uses_mapillary'] is True
+    assert kept['start']['run'] == 'run' and kept['start']['mapillary_stage'] is True
+
+
 def test_a_plan_that_cannot_train_is_refused_before_training(tmp_path):
     plan = {'frames': [], 'trainable': False, 'families': 'all', 'counts_by_split': {'train': 0},
             'boxes_by_split': {'train': 0}}

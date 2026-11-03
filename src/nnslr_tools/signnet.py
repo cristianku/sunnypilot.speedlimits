@@ -126,15 +126,16 @@ def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kern
     return SignNet()
 
 
-def band_boxes(boxes: list[list[float]], width: int, band_width: int = BAND_WIDTH) -> list[list[float]]:
-    """Reviewed boxes in the band's pixels (the frame scaled to band_width): those whose centre is in the band."""
+def band_boxes(boxes: list[list[float]], width: int, band_width: int = BAND_WIDTH, *, ignore: bool = False) -> list[list[float]]:
+    """Reviewed boxes in the band's pixels (the frame scaled to band_width): those whose centre is in the band;
+    with ``ignore`` (ignore boxes) every box that reaches into it, cut to the band."""
     scale = band_width / float(width)
     band_height = band_size(band_width)[1]
     kept = []
     for x1, y1, x2, y2 in boxes:
         box = [x1 * scale, y1 * scale, x2 * scale, y2 * scale]
-        if (box[1] + box[3]) / 2 < band_height:
-            kept.append([box[0], box[1], box[2], min(box[3], float(band_height))])
+        if (box[1] < band_height if ignore else (box[1] + box[3]) / 2 < band_height):
+            kept.append([box[0], max(0, box[1]), box[2], min(box[3], float(band_height))])
     return kept
 
 
@@ -245,6 +246,37 @@ def frame_boxes_of(heat, shape, stride: int, band_width: int, frame_width: float
             for p in decode(heat, shape, stride, limit=limit, min_score=min_score)[0]]
 
 
+def paints(frame: dict[str, Any], train: bool) -> bool:
+    """Whether a frame gets synthetic end-of-limit signs (synthetic_signs.paint_frame): our train frames only, never
+    a Mapillary window (source 'mapillary'), whose signs are other countries' real ones."""
+    return bool(train) and frame.get('source') != 'mapillary'
+
+
+def paintable_train_boxes(frames: list[dict[str, Any]]) -> int:
+    """How many train boxes synthetic_signs may draw over: those of the frames that paints."""
+    return sum(synthetic_signs.paintable(box, family) for frame in frames if paints(frame, True)
+               for box, family in zip(frame['boxes'], frame.get('box_families') or []))
+
+
+def start_run(path: Path) -> tuple[str, bool]:
+    """The run of a start's weights and whether they are its Mapillary stage: (<run>, True) for
+    runs/<run>/pretrain/signnet-best.pt (the first stage of a two-stage cutter), (<run>, False) for
+    runs/<run>/signnet-best.pt."""
+    path = Path(path)
+    if path.parent.name == 'pretrain' and len(path.parts) >= 3:
+        return path.parts[-3], True
+    return path.parent.name, False
+
+
+def learnt_mapillary(plan: dict[str, Any], start: dict[str, Any] | None) -> bool:
+    """Whether a network learnt from the Mapillary windows (MTSD, CC BY-NC-SA 4.0): its own plan took them, or its
+    start did, anywhere in that start's chain (signnet_start's 'uses_mapillary'). signnet-best.pt and result.json
+    keep it, so the licence goes with the weights even without the folders of the starts."""
+    start = start if isinstance(start, dict) else {}
+    return bool(plan.get('mapillary') or plan.get('mapillary_only') or start.get('uses_mapillary')
+                or start.get('mapillary') or start.get('mapillary_only'))
+
+
 def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, seed: int, band_width: int = BAND_WIDTH):
     _torch()
     from torch.utils.data import Dataset
@@ -256,7 +288,7 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
         def __getitem__(self, index):
             frame = frames[index]
             paint = None
-            if train:
+            if paints(frame, train):
                 # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones are
                 # not enough to learn them. Python's random is seeded apart in every DataLoader worker.
                 def paint(image):
@@ -264,7 +296,7 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
                                                        random)[0]
             image, width = _band_image(data_root / frame['image_path'], band_width, paint)
             boxes = band_boxes(frame['boxes'], width, band_width)
-            ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width)
+            ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width, ignore=True)
             image = image.float() / 255.0
             if train:
                 # Python's random is seeded apart in every DataLoader worker (base seed + worker id).
@@ -362,12 +394,17 @@ def car_measure(measured: Any, *, match: str = 'iou') -> dict[str, Any] | None:
 
 
 def checkpoint_of(model, plan: dict[str, Any], *, widths, stride: int, fuse_kernel: int, band_width: int,
-                  epoch: int) -> dict[str, Any]:
+                  epoch: int, start: dict[str, Any] | None = None) -> dict[str, Any]:
     """What signnet-best.pt holds: the weights, the network's settings, and the data it learnt from (DATA_KEYS:
-    the cutter's checks of the same split and its families read them, as a detector's)."""
+    the cutter's checks of the same split and its families read them, as a detector's; and whether it learnt the
+    Mapillary windows, the licence of the networks it starts). ``start``: signnet_start's record of the weights it
+    went on from, kept with 'uses_mapillary' (learnt_mapillary) so a copy of this file alone still names the licence
+    of a Mapillary stage before it."""
     return {'task': 'signnet', 'state_dict': model.state_dict(), 'widths': list(widths), 'stride': stride,
             'fuse_kernel': fuse_kernel, 'band': list(band_size(band_width)), 'epoch': epoch,
-            **{key: plan.get(key) for key in DATA_KEYS}}
+            **{key: plan.get(key) for key in DATA_KEYS},
+            'mapillary': plan.get('mapillary'), 'mapillary_only': bool(plan.get('mapillary_only')),
+            'trained_on': plan.get('trained_on'), 'start': start, 'uses_mapillary': learnt_mapillary(plan, start)}
 
 
 def checkpoint_data(checkpoint: dict[str, Any], checkpoint_path: Path) -> dict[str, Any]:
@@ -389,17 +426,21 @@ def checkpoint_data(checkpoint: dict[str, Any], checkpoint_path: Path) -> dict[s
 
 def signnet_not_trainable(plan: dict[str, Any]) -> str:
     """Why a plan cannot train a SignNet: it needs frames and boxes in train and validation (the plan's
-    ``trainable``, as the old Detector's)."""
+    ``trainable``, as the old Detector's). Those counts are our frames; with the Mapillary windows, what train
+    really holds (plan['trained_on']) comes after them."""
+    trained_on = plan.get('trained_on')
     return ("training_plan_not_trainable: SignNet needs frames with boxes in train and validation; this plan has "
             f"frames {plan.get('counts_by_split') or {}} and boxes {plan.get('boxes_by_split') or {}} "
-            f"(families {plan.get('families')!r})")
+            f"(families {plan.get('families')!r})"
+            + (f"; train holds {trained_on}" if plan.get('mapillary') and trained_on else ''))
 
 
 def signnet_start(path: Path, *, widths, stride: int, fuse_kernel: int, band_width: int) -> tuple[dict, dict]:
     """The weights of a finished SignNet to start from (nnslr train-signnet --init-from) and what result.json records
-    of it: its file and sha256, its run, the epoch, split and families it learnt. The heat says "a sign is here" whatever
-    the families, so a start of any families fits; its widths, grid, fuse convolution and band must be this network's
-    (every layer is copied as it is)."""
+    of it: its file and sha256, its run (start_run), the epoch, split and families it learnt, and whether it learnt
+    the Mapillary windows (its own 'mapillary' and 'mapillary_only', so the lineage survives the start). The heat says
+    "a sign is here" whatever the families, so a start of any families fits; its widths, grid, fuse convolution and
+    band must be this network's (every layer is copied as it is)."""
     torch, _ = _torch()
     from nnslr_tools.exporting import sha256_file
     path = Path(path)
@@ -412,9 +453,15 @@ def signnet_start(path: Path, *, widths, stride: int, fuse_kernel: int, band_wid
     different = [f'{key} {found[key]} (this run {wanted[key]})' for key in wanted if found[key] != wanted[key]]
     if different:
         raise ValueError(f'the start is another network: {", ".join(different)}: {path}')
-    return saved['state_dict'], {'path': str(path), 'sha256': sha256_file(path), 'run': path.parent.name,
+    run, stage = start_run(path)
+    # Whether the start learnt MTSD itself or went on from weights that did (a checkpoint of before uses_mapillary
+    # says it by its own mapillary fields only).
+    uses = bool(saved.get('uses_mapillary') or saved.get('mapillary') or saved.get('mapillary_only'))
+    return saved['state_dict'], {'path': str(path), 'sha256': sha256_file(path), 'run': run, 'mapillary_stage': stage,
                                  'epoch': saved.get('epoch'), 'split_sha256': saved.get('split_sha256'),
-                                 'dataset_sha256': saved.get('dataset_sha256'), 'families': saved.get('families')}
+                                 'dataset_sha256': saved.get('dataset_sha256'), 'families': saved.get('families'),
+                                 'mapillary': saved.get('mapillary'),
+                                 'mapillary_only': bool(saved.get('mapillary_only')), 'uses_mapillary': uses}
 
 
 def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, widths=CAR_WIDTHS,
@@ -426,9 +473,19 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     SignNet (CAR_*). init_from: a finished SignNet whose weights it goes on from (signnet_start), else random weights.
     Every epoch logs one line (the panel reads it): ``signnet epoch E/N train_loss L val_recall R
     val_false_per_frame F Ss``, with the validation at 5 boxes a frame. ``log`` defaults to a print that flushes:
-    the script tees it into a file, and the panel follows the epochs as they come."""
+    the script tees it into a file, and the panel follows the epochs as they come.
+
+    A plan of the Mapillary windows alone (plan['mapillary_only'], the first stage of a two-stage cutter) is named
+    signnet_pretrain in those lines and ends with "Mapillary stage complete: <dir>". Its windows have speed signs
+    only, so it keeps the epoch with the best validation recall of the speed signs (val_speed_recall in its line):
+    its recall over every family, the other signs of our validation included, is low by design."""
     if not plan.get('trainable'):
         raise ValueError(signnet_not_trainable(plan))
+    train_count = sum(1 for frame in plan['frames'] if frame['split'] == 'train')
+    if train_count < batch:
+        # The loader drops a last batch smaller than the others: fewer frames than one batch would train nothing
+        # (a narrow region or share of the Mapillary windows alone can hold so few).
+        raise ValueError(f"{signnet_not_trainable(plan)}; {train_count} train frames, fewer than one batch of {batch}")
     if log is None:
         def log(line):
             print(line, flush=True)
@@ -443,13 +500,19 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     for frame in plan['frames']:
         by_split.setdefault(frame['split'], []).append(frame)
     train_frames, validation, test = by_split.get('train', []), by_split.get('validation', []), by_split.get('test', [])
+    pretrain = bool(plan.get('mapillary_only'))
+    name = 'signnet_pretrain' if pretrain else 'signnet'
+    if pretrain:
+        log(f"{name} keeps the epoch with the best validation recall of the speed signs at 5 boxes a frame: the "
+            "Mapillary windows have speed signs only, so the recall over every family is low by design")
     model = build_signnet(widths, stride, fuse_kernel)
     start = None
     if init_from is not None:
         weights, start = signnet_start(init_from, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
                                        band_width=band_width)
         model.load_state_dict(weights, strict=True)
-        log(f"signnet starts from {start['run']}: every layer of its epoch {start['epoch']}"
+        log(f"{name} starts from {start['run']}" + ("'s Mapillary stage" if start['mapillary_stage'] else '')
+            + f": every layer of its epoch {start['epoch']}"
             + ('' if start['split_sha256'] == plan.get('split_sha256') else ', learnt on another split'))
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -475,17 +538,23 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         steps = max(len(loader), 1)
         checked = measure(model, validation, data_root, stride, device, workers=workers,
                           band_width=band_width)['by_box_budget']['5']
+        speed = ((checked.get('recall_by_family') or {}).get('speed') or {}).get('recall')
         history.append({'epoch': epoch, 'loss': total / steps, 'focal': parts['focal'] / steps,
                         'shape': parts['shape'] / steps, 'validation_recall_at_5': checked['recall_iou'],
                         'validation_false_positives_per_image_at_5': checked['false_positives_per_image'],
                         'seconds': round(time.monotonic() - started, 1)})
-        log(f"signnet epoch {epoch}/{epochs} train_loss {total / steps:.4f} val_recall {checked['recall_iou']:.3f} "
-            f"val_false_per_frame {checked['false_positives_per_image']:.2f} {history[-1]['seconds']:.0f}s")
-        if checked['recall_iou'] > best:
-            best, best_epoch = checked['recall_iou'], epoch
+        if pretrain:
+            history[-1]['validation_speed_recall_at_5'] = speed
+        log(f"{name} epoch {epoch}/{epochs} train_loss {total / steps:.4f} val_recall {checked['recall_iou']:.3f} "
+            f"val_false_per_frame {checked['false_positives_per_image']:.2f} "
+            + (f"val_speed_recall {speed if speed is not None else checked['recall_iou']:.3f} " if pretrain else '')
+            + f"{history[-1]['seconds']:.0f}s")
+        chosen = speed if pretrain and speed is not None else checked['recall_iou']
+        if chosen > best:
+            best, best_epoch = chosen, epoch
             torch.save(checkpoint_of(model, plan, widths=widths, stride=stride, fuse_kernel=fuse_kernel,
-                                     band_width=band_width, epoch=epoch), run_dir / 'signnet-best.pt')
-    log(f"signnet measure the best epoch {best_epoch} on validation and test")
+                                     band_width=band_width, epoch=epoch, start=start), run_dir / 'signnet-best.pt')
+    log(f"{name} measure the best epoch {best_epoch} on validation and test")
     checkpoint = torch.load(run_dir / 'signnet-best.pt', map_location=device, weights_only=True)
     model.load_state_dict(checkpoint['state_dict'])
     result = {
@@ -495,15 +564,18 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'dataset_sha256': plan.get('dataset_sha256'), 'split_sha256': plan.get('split_sha256'),
         'families': plan.get('families'), 'start': start, 'counts_by_split': plan.get('counts_by_split'),
         'boxes_by_split': plan.get('boxes_by_split'), 'ignore_boxes_by_split': plan.get('ignore_boxes_by_split'),
-        'synthetic_end_of_limit': {**synthetic_signs.summary(), 'paintable_train_boxes': sum(
-            synthetic_signs.paintable(box, family) for frame in train_frames
-            for box, family in zip(frame['boxes'], frame.get('box_families') or []))},
+        'boxes_by_family': plan.get('boxes_by_family'), 'mapillary': plan.get('mapillary'),
+        'mapillary_only': pretrain, 'trained_on': plan.get('trained_on'),
+        'uses_mapillary': learnt_mapillary(plan, start),
+        'best_epoch_by': 'validation_speed_recall_at_5' if pretrain else 'validation_recall_at_5',
+        'synthetic_end_of_limit': {**synthetic_signs.summary(), 'paintable_train_boxes': paintable_train_boxes(
+            train_frames)},
         'history': history,
         'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width),
         'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width),
     }
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
-    log(f"SignNet complete: {run_dir}")
+    log(f"Mapillary stage complete: {run_dir}" if pretrain else f"SignNet complete: {run_dir}")
     return result
 
 

@@ -8,21 +8,35 @@ set -euo pipefail
 # validation recall in the 5 best boxes of a frame (the car keeps 5); that epoch is then measured on validation
 # and test (result.json).
 #
+# The Mapillary windows (helpers/mapillary_windows.sh: pieces of the Mapillary Traffic Sign Dataset's photos cut to
+# look like our band, other countries' speed signs at our signs' sizes): NNSLR_CUTTER_MAPILLARY=1 adds them to our
+# train frames, their speed boxes at most NNSLR_CUTTER_MAPILLARY_RATIO times ours (default 1); =pretrain trains in
+# two stages, as scripts/run_classifier.sh: first the windows alone (pretrain/, from random weights or
+# NNSLR_CUTTER_INIT_FROM; the epoch chosen on the recall of the speed signs of our validation), then our frames alone
+# from its best weights (the root, --init-from pretrain/signnet-best.pt). Validation and test are always ours.
+#
 # usage: scripts/run_signnet.sh NAME
 #
-# Writes only into $DATA_ROOT/runs/NAME/: signnet-best.pt, result.json (nnslr train-signnet --run-dir) and
-# signnet.log (everything this script prints). It never imports reviews, builds splits, kills GPU processes,
-# exports, deploys or puts the SignNet in use (Models > Use this one). A NAME holding another kind of run or a
-# finished SignNet is refused; a NAME with signnet-best.pt but no result.json (a training stopped half way: SignNet
-# has no resume) is trained again from scratch. The log of a NAME tried before is moved to signnet.log.1 (replacing
-# an older one), so the new run's epochs never mix with the old ones.
+# Writes only into $DATA_ROOT/runs/NAME/: signnet-best.pt, result.json (nnslr train-signnet --run-dir), pretrain/
+# (the same for the first stage of NNSLR_CUTTER_MAPILLARY=pretrain) and signnet.log (everything this script prints,
+# both stages). It never imports reviews, builds splits, kills GPU processes, exports, deploys or puts the SignNet in
+# use (Models > Use this one). A NAME holding another kind of run or a finished SignNet is refused; a NAME with
+# signnet-best.pt but no result.json (a training stopped half way: SignNet has no resume) is trained again from
+# scratch, and a first stage with its result.json is not trained again ("skip trained"; one trained with other
+# settings, pretrain/settings.txt, is refused: remove pretrain/ or use the same settings). The log of a NAME tried
+# before is moved to signnet.log.1 (replacing an older one), so the new run's epochs never mix with the old ones.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_DATASET_KIND (gold), NNSLR_GPU_VENV (.venv-gpu),
 # NNSLR_CUTTER_FAMILIES (all: the speed signs and the other traffic signs; speed: the speed signs only),
 # NNSLR_SIGNNET_EPOCHS (40), NNSLR_SIGNNET_BATCH (16), NNSLR_SIGNNET_LEARNING_RATE (0.003), NNSLR_NUM_WORKERS (half the
 # cores, 4 to 16) (the portal sets those changed in Train › Cutter › Settings, nnslr_tools.train_settings),
 # NNSLR_CUTTER_INIT_FROM (a finished SignNet's signnet-best.pt to go on from, instead of random weights: Train › Cutter
-# › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# › Start from; with NNSLR_CUTTER_MAPILLARY=pretrain the start of the first stage), NNSLR_CUTTER_MAPILLARY (0, 1 or
+# pretrain; default 0), NNSLR_CUTTER_MAPILLARY_REGION (all; or continents and countries, comma-separated: europe or
+# CH,DE,IT; needs the positions of helpers/mapillary_locations.sh), NNSLR_CUTTER_MAPILLARY_SHARE (100: the percentage
+# of the region's windows, always the same ones for the same share), NNSLR_CUTTER_MAPILLARY_RATIO (1: the Mapillary
+# speed boxes per one of ours, NNSLR_CUTTER_MAPILLARY=1 only), NNSLR_CUTTER_PRETRAIN_EPOCHS (the first stage's
+# epochs; default NNSLR_SIGNNET_EPOCHS), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -32,6 +46,7 @@ DATASET_KIND="${NNSLR_DATASET_KIND:-gold}"
 VENV="${NNSLR_GPU_VENV:-$ROOT_DIR/.venv-gpu}"
 FAMILIES="${NNSLR_CUTTER_FAMILIES:-all}"
 EPOCHS="${NNSLR_SIGNNET_EPOCHS:-40}"
+PRETRAIN_EPOCHS="${NNSLR_CUTTER_PRETRAIN_EPOCHS:-$EPOCHS}"
 BATCH="${NNSLR_SIGNNET_BATCH:-16}"
 # The processes reading the frames: half the cores, 4 to 16 (nnslr_tools.training.DEFAULT_WORKERS).
 CORES="$(nproc 2>/dev/null || echo 8)"
@@ -45,6 +60,11 @@ FUSE_KERNEL=1
 WIDTHS=16,24,32,48
 LEARNING_RATE="${NNSLR_SIGNNET_LEARNING_RATE:-0.003}"
 INIT_FROM="${NNSLR_CUTTER_INIT_FROM:-}"
+MAPILLARY_MODE="${NNSLR_CUTTER_MAPILLARY:-0}"
+MAPILLARY_REGION="${NNSLR_CUTTER_MAPILLARY_REGION:-all}"
+MAPILLARY_SHARE="${NNSLR_CUTTER_MAPILLARY_SHARE:-100}"
+MAPILLARY_RATIO="${NNSLR_CUTTER_MAPILLARY_RATIO:-}"
+WINDOWS="$DATA_ROOT/external/mapillary/windows.jsonl"
 
 if [[ -z "$RUN_ID" || $# -gt 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -67,7 +87,7 @@ if [[ "$FAMILIES" != "all" && "$FAMILIES" != "speed" ]]; then
   exit 2
 fi
 
-for setting in EPOCHS BATCH NUM_WORKERS; do
+for setting in EPOCHS PRETRAIN_EPOCHS BATCH NUM_WORKERS; do
   if [[ ! "${!setting}" =~ ^[1-9][0-9]*$ ]]; then
     echo "error: $setting must be a whole number above 0: ${!setting}" >&2
     exit 2
@@ -82,6 +102,31 @@ fi
 
 if [[ -n "$INIT_FROM" && ! -f "$INIT_FROM" ]]; then
   echo "error: NNSLR_CUTTER_INIT_FROM is not a file: $INIT_FROM" >&2
+  exit 2
+fi
+
+if [[ "$MAPILLARY_MODE" != "0" && "$MAPILLARY_MODE" != "1" && "$MAPILLARY_MODE" != "pretrain" ]]; then
+  echo "error: NNSLR_CUTTER_MAPILLARY must be 0, 1 or pretrain: $MAPILLARY_MODE" >&2
+  exit 2
+fi
+if [[ "$MAPILLARY_MODE" == "0" && ( "$MAPILLARY_REGION" != "all" || "$MAPILLARY_SHARE" != "100" ) ]]; then
+  echo "error: NNSLR_CUTTER_MAPILLARY_REGION and _SHARE choose Mapillary windows: add NNSLR_CUTTER_MAPILLARY=1" >&2
+  exit 2
+fi
+if [[ -n "$MAPILLARY_RATIO" && "$MAPILLARY_MODE" != "1" ]]; then
+  echo "error: NNSLR_CUTTER_MAPILLARY_RATIO caps the Mapillary windows added to ours: only with NNSLR_CUTTER_MAPILLARY=1" >&2
+  exit 2
+fi
+if [[ -n "$MAPILLARY_RATIO" && ! "$MAPILLARY_RATIO" =~ ^([0-9]*\.)?[0-9]+([eE][-+]?[0-9]+)?$ ]]; then
+  echo "error: NNSLR_CUTTER_MAPILLARY_RATIO must be a number: $MAPILLARY_RATIO" >&2
+  exit 2
+fi
+if [[ "$MAPILLARY_MODE" != "0" && ! -s "$WINDOWS" ]]; then
+  echo "error: the Mapillary windows are not cut: run helpers/mapillary_windows.sh first" >&2
+  exit 2
+fi
+if [[ "$MAPILLARY_MODE" != "0" && "$MAPILLARY_REGION" != "all" && ! -s "$DATA_ROOT/external/mapillary/locations.jsonl" ]]; then
+  echo "error: the positions of the Mapillary photos are not fetched: run helpers/mapillary_locations.sh first" >&2
   exit 2
 fi
 
@@ -113,10 +158,12 @@ if [[ -n "$BUSY" && "${NNSLR_ALLOW_BUSY_GPU:-0}" != "1" ]]; then
 fi
 
 RUN_ROOT="$DATA_ROOT/runs/$RUN_ID"
-# A folder of another kind of run (the training pipeline, experiment B, the detector sizes, a classifier, the road
-# type) is never written into.
-for part in detector reader export bundle evaluation experiment-b detector-sizes classifier pretrain negatives.jsonl \
-            classifier.log road-type road-type.log; do
+PRETRAIN_ROOT="$RUN_ROOT/pretrain"
+# A folder of another kind of run (the training pipeline, experiment B, the detector sizes, a classifier and its
+# Mapillary stage, the road type) is never written into. pretrain/ alone is a cutter's own first stage.
+for part in detector reader export bundle evaluation experiment-b detector-sizes classifier pretrain/reader-best.pt \
+            pretrain/training-plan.json pretrain/training-state.pt negatives.jsonl classifier.log road-type \
+            road-type.log; do
   if [[ -e "$RUN_ROOT/$part" ]]; then
     echo "error: $RUN_ROOT is another kind of run (it has $part): choose a new NAME" >&2
     exit 3
@@ -126,9 +173,65 @@ if [[ -f "$RUN_ROOT/result.json" ]]; then
   echo "error: $RUN_ROOT already holds a finished SignNet (result.json): choose a new NAME" >&2
   exit 3
 fi
+if [[ "$MAPILLARY_MODE" != "pretrain" && ( -e "$PRETRAIN_ROOT/signnet-best.pt" || -e "$PRETRAIN_ROOT/result.json" ) ]]; then
+  echo "error: $RUN_ROOT has a Mapillary stage (pretrain/): go on with NNSLR_CUTTER_MAPILLARY=pretrain or choose a new NAME" >&2
+  exit 3
+fi
 RESTART=0
 if [[ -e "$RUN_ROOT/signnet-best.pt" ]]; then
   RESTART=1
+fi
+PRETRAIN_RESTART=0
+if [[ "$MAPILLARY_MODE" == "pretrain" && -e "$PRETRAIN_ROOT/signnet-best.pt" && ! -f "$PRETRAIN_ROOT/result.json" ]]; then
+  PRETRAIN_RESTART=1
+fi
+
+SETTINGS=(--families "$FAMILIES" --band-width "$BAND_WIDTH" --stride "$STRIDE" --fuse-kernel "$FUSE_KERNEL"
+          --widths "$WIDTHS" --epochs "$EPOCHS" --batch "$BATCH" --learning-rate "$LEARNING_RATE")
+# The Mapillary windows: those of the region and share asked (both left out at their defaults).
+MAPILLARY=()
+if [[ "$MAPILLARY_MODE" != "0" ]]; then
+  MAPILLARY=(--mapillary "$WINDOWS")
+  if [[ "$MAPILLARY_REGION" != "all" ]]; then
+    MAPILLARY+=(--mapillary-region "$MAPILLARY_REGION")
+  fi
+  if [[ "$MAPILLARY_SHARE" != "100" ]]; then
+    MAPILLARY+=(--mapillary-share "$MAPILLARY_SHARE")
+  fi
+fi
+# The two stages (NNSLR_CUTTER_MAPILLARY=pretrain): the first on the windows alone, from random weights or
+# NNSLR_CUTTER_INIT_FROM; the second on our frames alone, from the first's best epoch. Else one training, with the
+# windows added (=1) or not, from random weights or the weights of a finished SignNet it goes on from.
+PRETRAIN_SETTINGS=()
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  PRETRAIN_SETTINGS=(--families "$FAMILIES" --band-width "$BAND_WIDTH" --stride "$STRIDE" --fuse-kernel "$FUSE_KERNEL"
+                     --widths "$WIDTHS" --epochs "$PRETRAIN_EPOCHS" --batch "$BATCH" --learning-rate "$LEARNING_RATE"
+                     "${MAPILLARY[@]}" --mapillary-only)
+  if [[ -n "$INIT_FROM" ]]; then
+    PRETRAIN_SETTINGS+=(--init-from "$INIT_FROM")
+  fi
+  # The check of the second stage's plan cannot name the first stage's weights: they do not exist yet.
+  CHECK_SETTINGS=("${SETTINGS[@]}")
+  SETTINGS+=(--init-from "$PRETRAIN_ROOT/signnet-best.pt")
+else
+  SETTINGS+=("${MAPILLARY[@]}")
+  if [[ -n "$MAPILLARY_RATIO" ]]; then
+    SETTINGS+=(--mapillary-ratio "$MAPILLARY_RATIO")
+  fi
+  if [[ -n "$INIT_FROM" ]]; then
+    SETTINGS+=(--init-from "$INIT_FROM")
+  fi
+  CHECK_SETTINGS=("${SETTINGS[@]}")
+fi
+NN="$VENV/bin/nnslr"
+# A first stage is only skipped when it was trained with these settings (pretrain/settings.txt, written once it
+# completes): one of other settings would start the second stage from other weights than those asked for.
+PRETRAIN_RECORD="$PRETRAIN_ROOT/settings.txt"
+PRETRAIN_KEY="--dataset-kind $DATASET_KIND ${PRETRAIN_SETTINGS[*]}"
+if [[ "$MAPILLARY_MODE" == "pretrain" && -f "$PRETRAIN_ROOT/result.json" && -f "$PRETRAIN_RECORD" ]] \
+   && [[ "$(cat "$PRETRAIN_RECORD")" != "$PRETRAIN_KEY" ]]; then
+  echo "error: $PRETRAIN_ROOT was trained with other settings ($(cat "$PRETRAIN_RECORD")), not $PRETRAIN_KEY: remove pretrain/ or use the same settings" >&2
+  exit 3
 fi
 
 mkdir -p "$RUN_ROOT"
@@ -148,17 +251,13 @@ export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 # while it trains (nnslr train-signnet flushes them too).
 export PYTHONUNBUFFERED=1
 
-SETTINGS=(--families "$FAMILIES" --band-width "$BAND_WIDTH" --stride "$STRIDE" --fuse-kernel "$FUSE_KERNEL"
-          --widths "$WIDTHS" --epochs "$EPOCHS" --batch "$BATCH" --learning-rate "$LEARNING_RATE")
-# Where it starts: random weights, or the weights of a finished SignNet it goes on from.
-if [[ -n "$INIT_FROM" ]]; then
-  SETTINGS+=(--init-from "$INIT_FROM")
-fi
-NN="$VENV/bin/nnslr"
 
 echo "== scripts/run_signnet.sh $RUN_ID"
 echo "run:          $RUN_ID"
 echo "band:         ${BAND_WIDTH}x${BAND_HEIGHT}"
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "pretraining:  ${PRETRAIN_SETTINGS[*]}"
+fi
 echo "settings:     ${SETTINGS[*]}"
 echo "workers:      $NUM_WORKERS"
 echo "output:       $RUN_ROOT"
@@ -167,7 +266,15 @@ echo "dataset kind: $DATASET_KIND"
 echo "physical GPU: $GPU_INDEX"
 echo "boxes:        $FAMILIES (all: the speed signs and the other traffic signs; speed: the speed signs only)"
 echo "best epoch:   validation recall in the 5 best boxes of a frame (the car keeps 5)"
+if [[ "$MAPILLARY_MODE" == "1" ]]; then
+  echo "mapillary:    the windows of $MAPILLARY_REGION, ${MAPILLARY_SHARE}%, added to our train frames, at most ${MAPILLARY_RATIO:-1} times our speed boxes"
+elif [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "mapillary:    first the windows of $MAPILLARY_REGION, ${MAPILLARY_SHARE}%, alone ($PRETRAIN_EPOCHS epochs, best epoch by the recall of the speed signs), then our frames alone from them"
+fi
 echo
+if [[ "$PRETRAIN_RESTART" == "1" ]]; then
+  echo "restart the first stage from scratch: $PRETRAIN_ROOT/signnet-best.pt has no result.json"
+fi
 if [[ "$RESTART" == "1" ]]; then
   echo "restart from scratch: $RUN_ROOT/signnet-best.pt has no result.json (a training stopped half way; SignNet has no resume)"
 fi
@@ -176,15 +283,35 @@ if [[ "$OLD_LOG" == "1" ]]; then
 fi
 
 echo "== 1/3 Check the training population (CPU-only) =="
-CUDA_VISIBLE_DEVICES= "$NN" train-signnet --dry-run --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${SETTINGS[@]}"
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  CUDA_VISIBLE_DEVICES= "$NN" train-signnet --dry-run --run-dir "$PRETRAIN_ROOT" --dataset-kind "$DATASET_KIND" \
+    "${PRETRAIN_SETTINGS[@]}"
+fi
+CUDA_VISIBLE_DEVICES= "$NN" train-signnet --dry-run --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${CHECK_SETTINGS[@]}"
 
 echo "== 2/3 Explicit CUDA smoke test =="
 # CUDA_VISIBLE_DEVICES maps the selected physical GPU to logical cuda:0.
 "$NN" env --gpu-smoke --gpu-device 0
 
 echo "== 3/3 Train SignNet =="
-# The epoch lines ("signnet epoch N/M train_loss ... val_recall ... val_false_per_frame ... 87s"), the measure of the
-# best epoch and "SignNet complete: <run>" go to the terminal and to signnet.log.
+# The epoch lines ("signnet epoch N/M train_loss ... val_recall ... val_false_per_frame ... 87s"; the first stage's
+# "signnet_pretrain epoch N/M ... val_speed_recall ... 87s"), the measure of the best epoch and "SignNet complete:
+# <run>" (the first stage's "Mapillary stage complete: <run>/pretrain") go to the terminal and to signnet.log.
+if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  echo "-- the first stage: the Mapillary windows alone --"
+  if [[ -f "$PRETRAIN_ROOT/result.json" ]]; then
+    echo "skip trained: $PRETRAIN_ROOT/result.json"
+    if [[ ! -f "$PRETRAIN_RECORD" ]]; then
+      echo "note: $PRETRAIN_RECORD is missing (a stage of before 3 Nov 2026): its settings are not checked"
+    fi
+  else
+    "$NN" train-signnet --run-dir "$PRETRAIN_ROOT" --dataset-kind "$DATASET_KIND" "${PRETRAIN_SETTINGS[@]}" \
+      --workers "$NUM_WORKERS"
+    mkdir -p "$PRETRAIN_ROOT"
+    printf '%s\n' "$PRETRAIN_KEY" > "$PRETRAIN_RECORD"
+  fi
+  echo "-- the second stage: our frames alone, from the first --"
+fi
 "$NN" train-signnet --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${SETTINGS[@]}" --workers "$NUM_WORKERS"
 
 echo

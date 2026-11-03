@@ -832,6 +832,11 @@ def prepare_detector_training(
     *,
     dataset_kind: str = "gold",
     families: str = DEFAULT_CUTTER_FAMILIES,
+    mapillary: Path | None = None,
+    mapillary_region: str = "all",
+    mapillary_share: float = 100.0,
+    mapillary_only: bool = False,
+    mapillary_ratio: float | None = 1.0,
 ) -> dict[str, Any]:
     """Build a full-frame detector plan from reviewed annotations.
 
@@ -842,9 +847,26 @@ def prepare_detector_training(
     whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
     (ignore_boxes): SignNet neither learns it as a sign nor as background and is not measured on it; the cutter
     reads boxes only, so for it the panel is background.
+
+    mapillary: the windows file of nnslr mapillary-windows (nnslr_tools.mtsd_windows), whose train windows of the
+    region and share asked (percent) are added to train (source 'mapillary'), their speed boxes at most
+    ``mapillary_ratio`` times our own train speed boxes (whole photos, a fixed order; None: no cap): MTSD's
+    positives would else outweigh ours in the loss. mapillary_only, the first stage of a two-stage cutter: every
+    window of the region and share and none of our train frames; validation and test stay ours, so both stages choose
+    their epoch on our camera. counts_by_split, boxes_by_split, boxes_by_family and the dataset and split digests stay
+    ours in every case (remeasure-signnet and the comparisons of Models read them); plan['mapillary'] has the
+    windows' summary and plan['trained_on'] what train holds.
     """
     if families not in CUTTER_FAMILIES:
         raise ValueError(f"unknown cutter families {families!r}: one of {', '.join(CUTTER_FAMILIES)}")
+    from nnslr_tools.mapillary import FULL_SHARE, check_share, region_text
+    if mapillary is None and (region_text(mapillary_region) != "all" or check_share(mapillary_share) != FULL_SHARE):
+        raise ValueError("--mapillary-region and --mapillary-share choose Mapillary windows: add --mapillary")
+    if mapillary_only and mapillary is None:
+        raise ValueError("--mapillary-only trains on the Mapillary windows alone: add --mapillary")
+    if mapillary_ratio is not None and not mapillary_ratio > 0:
+        raise ValueError(f"--mapillary-ratio {mapillary_ratio!r}: more than 0, the Mapillary speed boxes per one of "
+                         "ours")
     positive_families = CUTTER_FAMILIES[families]
     dataset_path = Path(dataset_path)
     split_path = Path(split_path)
@@ -964,7 +986,7 @@ def prepare_detector_training(
     if dataset_kind == "training-candidate":
         limitations.append("model_review_candidates_are_not_human_gold")
 
-    return {
+    plan = {
         "schema_version": TRAINING_SCHEMA_VERSION,
         "task": "detector",
         "families": families,
@@ -985,6 +1007,32 @@ def prepare_detector_training(
         "trainable": trainable,
         "limitations": limitations,
     }
+    ours_train = [frame for frame in frames if frame["split"] == TRAIN_SPLIT]
+    ours_speed = sum(1 for frame in ours_train for family in frame["box_families"] if family in DETECTOR_FAMILIES)
+    plan["mapillary"] = None
+    plan["mapillary_only"] = bool(mapillary_only)
+    plan["trained_on"] = {"ours": len(ours_train), "ours_boxes": sum(len(frame["boxes"]) for frame in ours_train),
+                          "mapillary_windows": 0, "mapillary_boxes": 0}
+    if mapillary is not None:
+        from nnslr_tools.mtsd_windows import plan_frames
+        cap = None if mapillary_only or mapillary_ratio is None else math.floor(mapillary_ratio * ours_speed)
+        extra, summary = plan_frames(Path(mapillary), data_root, families=positive_families,
+                                     region=mapillary_region, share=mapillary_share, own_frames=frames,
+                                     max_speed_boxes=cap)
+        summary.update({"ratio": None if mapillary_only else mapillary_ratio, "ours_train_speed_boxes": ours_speed})
+        if mapillary_only:
+            frames = [frame for frame in frames if frame["split"] != TRAIN_SPLIT]
+        frames = frames + extra
+        mapillary_boxes = sum(len(frame["boxes"]) for frame in extra)
+        plan["frames"] = frames
+        plan["mapillary"] = summary
+        plan["trained_on"] = {"ours": 0 if mapillary_only else len(ours_train),
+                              "ours_boxes": 0 if mapillary_only else plan["trained_on"]["ours_boxes"],
+                              "mapillary_windows": len(extra), "mapillary_boxes": mapillary_boxes}
+        train_boxes = plan["trained_on"]["ours_boxes"] + mapillary_boxes
+        plan["trainable"] = (train_boxes > 0 and counts_by_split[VALIDATION_SPLIT] > 0
+                             and boxes_by_split[VALIDATION_SPLIT] > 0)
+    return plan
 
 
 def _tracking_config(plan: dict[str, Any], config: Any, architecture: str) -> dict[str, Any]:

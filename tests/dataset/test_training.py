@@ -4,6 +4,8 @@ import hashlib
 import json
 import sys
 
+import pytest
+
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.training import prepare_detector_training, prepare_reader_training
 from test_annotations import invoke, reviewed, write
@@ -219,3 +221,104 @@ def test_training_plans_carry_who_confirmed_each_label(tmp_path, capsys):
     for frame in detector["frames"]:
         assert {rows[i] for i in frame["annotation_ids"]} == {frame["label_basis"]}
     assert "human_review" in {r["label_basis"] for r in reader["records"]}
+
+
+def test_the_mapillary_windows_join_train_and_the_plan_stays_ours(tmp_path, capsys):
+    from test_mtsd_windows import _windows_file
+    dataset, _, latest = _training_fixture(tmp_path, capsys)
+    base = prepare_detector_training(dataset, latest, tmp_path)
+    windows = _windows_file(tmp_path, {f"k{number:02d}": [1] for number in range(10)})
+    plan = prepare_detector_training(dataset, latest, tmp_path, mapillary=windows, mapillary_ratio=None)
+
+    added = [frame for frame in plan["frames"] if frame.get("source") == "mapillary"]
+    assert len(added) == 10 and {frame["split"] for frame in added} == {"train"}
+    assert [frame for frame in plan["frames"] if frame.get("source") != "mapillary"] == base["frames"]
+    # The digests and the counts stay ours: remeasure-signnet and the comparisons of Models read them.
+    for key in ("dataset_sha256", "split_sha256", "counts_by_split", "boxes_by_split", "boxes_by_family"):
+        assert plan[key] == base[key], key
+    ours = [frame for frame in base["frames"] if frame["split"] == "train"]
+    assert base["mapillary"] is None and base["mapillary_only"] is False
+    assert base["trained_on"] == {"ours": len(ours), "ours_boxes": sum(len(f["boxes"]) for f in ours),
+                                  "mapillary_windows": 0, "mapillary_boxes": 0}
+    assert plan["trained_on"] == {**base["trained_on"], "mapillary_windows": 10, "mapillary_boxes": 10}
+    assert plan["mapillary"]["boxes_by_family"] == {"maximum_speed": 10} and plan["mapillary"]["ratio"] is None
+    assert plan["mapillary"]["ours_train_speed_boxes"] == len(ours) == 2
+
+
+def test_the_ratio_caps_the_mapillary_speed_boxes_at_a_part_of_ours(tmp_path, capsys):
+    from test_mtsd_windows import _windows_file
+    dataset, _, latest = _training_fixture(tmp_path, capsys)
+    windows = _windows_file(tmp_path, {f"k{number:02d}": [1] for number in range(10)})
+
+    def taken(**kwargs):
+        plan = prepare_detector_training(dataset, latest, tmp_path, mapillary=windows, **kwargs)
+        return {frame["window_id"] for frame in plan["frames"] if frame.get("source") == "mapillary"}, plan
+
+    # Our train holds 2 speed boxes: as many Mapillary ones by default, a part of them at 0.5, three times at 3.
+    one, plan = taken()
+    half, _ = taken(mapillary_ratio=0.5)
+    three, _ = taken(mapillary_ratio=3)
+    assert len(half) == 1 and len(one) == 2 and len(three) == 6 and half < one < three
+    assert plan["mapillary"]["ratio"] == 1.0 and plan["mapillary"]["max_speed_boxes"] == 2
+    assert plan["mapillary"]["before_cap"] == {"windows": 10, "speed_boxes": 10}
+    with pytest.raises(ValueError, match="mapillary-ratio"):
+        taken(mapillary_ratio=0)
+
+
+def test_the_mapillary_stage_trains_on_the_windows_alone(tmp_path, capsys):
+    from test_mtsd_windows import _windows_file
+    dataset, _, latest = _training_fixture(tmp_path, capsys)
+    base = prepare_detector_training(dataset, latest, tmp_path)
+    windows = _windows_file(tmp_path, {f"k{number:02d}": [1] for number in range(10)})
+    plan = prepare_detector_training(dataset, latest, tmp_path, mapillary=windows, mapillary_only=True)
+
+    train = [frame for frame in plan["frames"] if frame["split"] == "train"]
+    assert len(train) == 10 and all(frame["source"] == "mapillary" for frame in train)
+    assert ([frame for frame in plan["frames"] if frame["split"] != "train"]
+            == [frame for frame in base["frames"] if frame["split"] != "train"])
+    assert plan["trainable"] is True and plan["mapillary_only"] is True and plan["mapillary"]["ratio"] is None
+    assert plan["trained_on"] == {"ours": 0, "ours_boxes": 0, "mapillary_windows": 10, "mapillary_boxes": 10}
+    assert plan["counts_by_split"] == base["counts_by_split"] and plan["split_sha256"] == base["split_sha256"]
+
+
+def test_the_mapillary_choices_need_the_windows(tmp_path, capsys):
+    dataset, _, latest = _training_fixture(tmp_path, capsys)
+    with pytest.raises(ValueError, match="add --mapillary"):
+        prepare_detector_training(dataset, latest, tmp_path, mapillary_region="europe")
+    with pytest.raises(ValueError, match="add --mapillary"):
+        prepare_detector_training(dataset, latest, tmp_path, mapillary_share=50)
+    with pytest.raises(ValueError, match="add --mapillary"):
+        prepare_detector_training(dataset, latest, tmp_path, mapillary_only=True)
+    with pytest.raises(ValueError, match="mapillary_share"):
+        prepare_detector_training(dataset, latest, tmp_path, mapillary_share=0)
+
+
+def test_the_signnet_dry_run_says_what_train_holds(tmp_path, capsys):
+    from test_mtsd_windows import _windows_file
+    dataset, _, _ = _training_fixture(tmp_path, capsys)
+    windows = _windows_file(tmp_path, {f"k{number:02d}": [1] for number in range(10)})
+
+    def signnet(*options, batch="2"):
+        return invoke(capsys, "train-signnet", "--run-dir", str(tmp_path / "run"), "--data-root", str(tmp_path),
+                      "--dry-run", "--batch", batch, *options)
+
+    code, out = signnet("--mapillary", str(windows), "--mapillary-ratio", "2")
+    assert code == 0, out.err + out.out
+    summary = json.loads(out.out)
+    assert summary["trained_on"]["mapillary_windows"] == 4 and summary["mapillary"]["frames"] == 4
+    assert "and 4 Mapillary windows (4 speed boxes, at most 2 times ours: 10 before the cap)" in out.err
+    code, out = signnet("--mapillary", str(windows), "--mapillary-only", "--mapillary-ratio", "2")
+    assert code == 2 and "not with --mapillary-only" in out.err
+    code, out = signnet("--mapillary-ratio", "2")
+    assert code == 2 and "add --mapillary" in out.err
+    code, out = signnet("--mapillary", str(windows), "--mapillary-only")
+    assert code == 0 and ("train holds 0 of our frames (0 boxes, 0 of the speed signs, unreadable, zone and road "
+                          "marking included) and 10 Mapillary") in out.err
+    assert json.loads(out.out)["train_frames"] == 10
+    # Fewer windows than one batch would train nothing (the loader drops a last smaller batch): stopped here.
+    code, out = signnet("--mapillary", str(windows), "--mapillary-only", batch="16")
+    assert code == 1 and json.loads(out.out)["trainable"] is False and "fewer than one batch of 16" in out.err
+    # The windows are the car's band: a band of other rows would cut them.
+    code, out = signnet("--mapillary", str(windows), "--band-width", "1344")
+    assert code == 2 and "the windows are the car's band" in out.err
+    assert "torch" not in sys.modules
