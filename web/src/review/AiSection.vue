@@ -1,14 +1,13 @@
 <script setup lang="ts">
-// "AI reviewer" in the inspector, between the boxes and the editor of the selected one: Ask AI (key I) asks the
-// model chosen in Settings about this frame; its answer box by box (Keep, Correct, Add, Delete, Not judged),
-// drawn on the photo in its own colour; Apply makes it the frame's edits (saved only by Confirm, as the
-// reviewer's own review), Dismiss drops it. A frame of the route's "Try without saving" opens with that suggestion,
-// marked as such. Hidden offline.
+// "AI reviewer" under the bar of the photo, only once Ask AI (its button in the bar, key I) was pressed on this frame:
+// the model chosen in Settings at work, or its answer box by box (Keep, Correct, Add, Delete, Not judged), drawn on
+// the photo in its own colour; Apply makes it the frame's edits (saved only by Confirm, as the reviewer's own review),
+// Dismiss drops it. A frame of the route's "Try without saving" opens with that suggestion, marked as such. Hidden
+// offline.
 import {computed} from 'vue';
 import {isoWhen} from '../common/format';
-import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
-import {ai, aiBlocker, aiPhase, applyAi, askAi, dismissAi, VERDICT} from './ai';
+import {ai, aiPhase, applyAi, dismissAi, VERDICT} from './ai';
 import {describe} from './catalog';
 import {releaseFocus} from './dom';
 import {report} from './store';
@@ -18,9 +17,7 @@ const props = defineProps<{row: FrameRow}>();
 const now = useNow();
 const ask = computed(() => ai.asks[props.row.frame_key] ?? null);
 const phase = computed(() => aiPhase(props.row.frame_key));
-const blocker = computed(() => aiBlocker());
 const provider = computed(() => ai.state?.provider ?? null);
-const unset = computed(() => ai.state !== null && ai.state.provider === null && phase.value === 'none');
 const waited = computed(() => (ask.value?.phase === 'asking' ? Math.max(0, Math.floor((now.value - ask.value.since) / 1000)) : 0));
 const suggestion = computed(() => (ask.value?.phase === 'ready' ? ask.value.suggestion : null));
 
@@ -58,23 +55,15 @@ const trialText = computed(() => {
   const when = isoWhen(trial.at);
   return 'From “Try without saving”' + (when ? ' · ' + when : '');
 });
-const askLabel = computed(() => (phase.value === 'asking' ? 'Asking…' : phase.value === 'none' ? 'Ask AI' : 'Ask again'));
 </script>
 
 <template>
-  <!-- No AI reviewer chosen in Settings: one line to set it up, instead of a button that never works. -->
-  <section v-if="report.apiBase && unset" class="ai-section ai-unset" id="aiSection" data-ai-phase="none">
-    <p class="ai-note" id="aiReason">No AI reviewer yet. <a href="/account#ai-reviewer">Set up AI review ›</a></p>
-  </section>
-  <section v-else-if="report.apiBase" class="ai-section" id="aiSection" :data-ai-phase="phase" aria-labelledby="aiTitle">
+  <section v-if="report.apiBase && phase !== 'none'" class="ai-section stage-extra" id="aiSection" :data-ai-phase="phase"
+           aria-labelledby="aiTitle">
     <div class="section-head">
       <h2 id="aiTitle">AI reviewer</h2>
       <span class="count ai-model" id="aiModel" :title="provider?.reviewer_name">{{ provider ? provider.name + ' · ' + provider.model : '' }}</span>
-      <button type="button" class="btn small ai-ask" id="askAi" :disabled="blocker !== '' || phase === 'asking'"
-              :title="blocker || 'Ask the AI about this frame (I). Nothing is saved.'"
-              @click="askAi(); releaseFocus($event)"><Icon name="ai"/>{{ askLabel }}<kbd class="keycap" aria-hidden="true">I</kbd></button>
     </div>
-    <p v-if="blocker !== '' && phase === 'none'" class="ai-note" id="aiReason">{{ blocker }} <a v-if="ai.state && !ai.state.available" href="/account#ai-reviewer">Open Settings</a></p>
     <p v-if="phase === 'asking'" class="ai-note ai-wait" id="aiWait" role="status"><span class="ai-spin" aria-hidden="true"></span>Asking {{ provider?.model ?? 'the AI' }}… {{ waited }} s</p>
     <template v-else-if="phase === 'failed'">
       <p class="ai-note ai-error" id="aiError" role="alert">{{ ask?.error }}</p>

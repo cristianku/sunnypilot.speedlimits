@@ -6,11 +6,13 @@
 // confirm, server, export) and the components below draw it.
 import {computed, nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
 import {aiPhase, loadAiState} from './ai';
+import AiSection from './AiSection.vue';
 import {watchAiLive} from './ai-live';
 import {watchBusy} from './busy';
 import {useCarReading} from './car';
 import {loadCarLogs} from './car-moment';
 import CarMoment from './CarMoment.vue';
+import CarSection from './CarSection.vue';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
@@ -105,6 +107,8 @@ onBeforeUnmount(() => {
           <CarMoment :row="row" :work="work"/>
           <Stage :row="row" :work="work"/>
           <StageBar :row="row"/>
+          <CarSection :row="row" :work="work"/>
+          <AiSection :row="row"/>
           <Timeline/>
         </div>
         <Inspector :row="row" :work="work"/>

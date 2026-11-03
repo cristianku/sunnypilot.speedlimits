@@ -1,8 +1,13 @@
 <script setup lang="ts">
 // The bar under the photo: position in the route, which frames to show (ReviewFilters.vue), state tag, frame data,
-// drawing and removing boxes, the second reading shown or not.
+// Car networks (T) and Ask AI (I), whose answers appear under the bar (CarSection.vue, AiSection.vue), drawing and
+// removing boxes, the second reading shown or not.
 import {computed} from 'vue';
+import Icon from '../components/Icon.vue';
+import {ai, aiBlocker, aiPhase, askAi} from './ai';
+import {car, carAvailable, toggleCar} from './car';
 import {position, selectedBox, status} from './current';
+import {releaseFocus} from './dom';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {thousands} from '../common/format';
 import {aiConfirmed, framePlace, isBetweenFrame, proposalsOf, reasonsOf, statusLabel} from './frames';
@@ -41,6 +46,17 @@ const frameTitle = computed(() => {
   return 'Segment ' + row.segment_index + ', frame ' + row.decoded_frame_index + ' of the video';
 });
 
+const aiAt = computed(() => aiPhase(props.row.frame_key));
+// No AI reviewer chosen in Settings: the button leads there instead of never working.
+const aiUnset = computed(() => ai.state !== null && ai.state.provider === null && aiAt.value === 'none');
+const aiBlock = computed(() => aiBlocker());
+const aiLabel = computed(() => (aiAt.value === 'asking' ? 'Asking…' : aiAt.value === 'none' ? 'Ask AI' : 'Ask again'));
+const aiTitle = computed(() => {
+  if (aiBlock.value !== '') return aiBlock.value;
+  const provider = ai.state?.provider;
+  return (provider ? provider.name + ' · ' + provider.model + ': ' : '') + 'ask the AI about this frame (I). Nothing is saved.';
+});
+
 function hintsSwitched(event: Event): void {
   if ((event.target as HTMLInputElement).checked !== state.showHints) toggleHints();
 }
@@ -62,6 +78,14 @@ function hintsSwitched(event: Event): void {
     <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData" :title="frameTitle">{{ frameData }}</span>
+    <div v-if="report.apiBase" class="stage-helpers">
+      <button v-if="carAvailable()" type="button" class="btn car-ask" id="carToggle" :aria-pressed="car.shown"
+              title="What the car's cutter and classifier read on this frame (T). Nothing is saved."
+              @click="toggleCar(); releaseFocus($event)">Car networks<kbd class="keycap" aria-hidden="true">T</kbd></button>
+      <a v-if="aiUnset" class="btn ai-ask" id="aiSetup" href="/account#ai-reviewer" title="No AI reviewer yet: choose one in Settings"><Icon name="ai"/>Set up AI review</a>
+      <button v-else type="button" class="btn ai-ask" id="askAi" :disabled="aiBlock !== '' || aiAt === 'asking'" :title="aiTitle"
+              @click="askAi(); releaseFocus($event)"><Icon name="ai"/>{{ aiLabel }}<kbd class="keycap" aria-hidden="true">I</kbd></button>
+    </div>
     <div class="stage-tools">
       <button type="button" class="btn" :class="{on: state.drawing}" id="draw" :disabled="report.readOnly" @click="toggleDrawing">{{ state.drawing ? 'Cancel' : '+ Box' }}</button>
       <button type="button" class="btn danger" id="remove" :disabled="selectedBox === null" @click="removeSelected">Delete</button>

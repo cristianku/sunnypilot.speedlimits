@@ -49,7 +49,7 @@ with sync_playwright() as p:
     assert pos() == '1 / 4', pos()
     assert page.locator('#frameData').inner_text().startswith('0:00 into the drive'), page.locator('#frameData').inner_text()
     assert page.locator('.route-title').inner_text() == route
-    assert 'Set up AI review' in page.locator('#aiReason').inner_text()
+    assert page.locator('#aiSetup').get_attribute('href') == '/account#ai-reviewer'
     page.locator('summary', has_text='More').click()
     assert 'Vietnamese roads' in page.locator('#proposedBy').inner_text()
 
