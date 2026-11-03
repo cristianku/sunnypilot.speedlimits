@@ -8,18 +8,24 @@
 #      it (nnslr localize --all; about 20 s of a core a segment, 6 side by side; skipped without distill's .venv),
 #      then the GPS position of the frames of the drives prepared without it or localized since (nnslr gps --all
 #      --missing)
-#   b. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a
+#   b. the maps the drives need: the Geofabrik extracts that hold a drive's positions and are not in raw/osm yet,
+#      downloaded (scripts/osm_maps.py, at most 5 GB a run; derived/osm/maps.json for Data › Roads). Only Geofabrik's
+#      index and the extracts are fetched: no position of the drives leaves the server. A download that fails leaves
+#      the maps present, and the job goes on: the drives outside them stay without a road type
+#   c. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a
 #      garage of the map, is a garage when it is slow                                (nnslr car-motion --all, cached)
-#   c. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
-#      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are)
-#   d. the road type of every frame                                                (nnslr road-types --all)
-#   e. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
+#   d. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
+#      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are),
+#      and the names of the places that name the drives, again when the map is newer (scripts/osm_places.py)
+#   e. the road type of every frame                                                (nnslr road-types --all)
+#   f. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
 #      --all, data/derived/junctions; a person's corrections, annotations/junctions, are never touched)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
-# No network but uv's first download of osmium and the localizer's GNSS orbits and ionosphere maps of a new day (laika,
-# from comma's gnss-data mirror); about 2 minutes when the map is read, seconds otherwise, plus about a minute for the
-# logs of each new drive.
+# No network but Geofabrik's index once a month and the extracts the drives miss (download.geofabrik.de), uv's first
+# download of osmium and the localizer's GNSS orbits and ionosphere maps of a new day (laika, from comma's gnss-data
+# mirror); about 2 minutes when the map is read, seconds otherwise, plus about a minute for the logs of each new drive
+# and one or two for each map downloaded.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA="${NNSLR_DATA_ROOT:-$ROOT/data}"
@@ -34,10 +40,10 @@ done
 MAPS="$DATA/raw/osm"
 ROADS="$DATA/derived/osm/roads.jsonl"
 PARKING="$DATA/derived/osm/parking.jsonl"
-if [ -z "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -print -quit 2>/dev/null)" ]; then
-    echo "The map is missing: no $MAPS/*.osm.pbf (the Geofabrik extracts, see docs/COMMANDS.md)" >&2
-    exit 2
-fi
+PLACES="$DATA/derived/osm/places.jsonl"
+# The site starts this with the service's PATH, without ~/.local/bin where uv usually is.
+UV="$(command -v uv || true)"
+if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then UV="$HOME/.local/bin/uv"; fi
 
 echo "== a. GPS of the drives"
 # Without openpilot.distill (or for a segment it cannot use) the frames keep the position of the GPS.
@@ -47,12 +53,28 @@ echo "== a. GPS of the drives"
 "$NN" gps --all --missing --data-root "$DATA" < /dev/null \
     || echo "GPS position not read for some drives: their frames stay without a road type"
 
-echo "== b. Speed of the drives"
+echo "== b. Maps the drives need"
+# shapely (the outlines of the extracts) is in the site's .venv with the OCR; without it, from uv's cache.
+if "$ROOT/.venv/bin/python" -c 'import shapely' 2>/dev/null; then
+    "$ROOT/.venv/bin/python" "$ROOT/scripts/osm_maps.py" --data-root "$DATA" < /dev/null \
+        || echo "Not every map the drives need is here: the maps present are used, the job goes on"
+elif [ -n "$UV" ]; then
+    (cd "$ROOT" && "$UV" run --no-project --with shapely python scripts/osm_maps.py --data-root "$DATA" < /dev/null) \
+        || echo "Not every map the drives need is here: the maps present are used, the job goes on"
+else
+    echo "uv is missing: the maps the drives need are not looked for (see docs/INSTALL.md)"
+fi
+if [ -z "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -print -quit 2>/dev/null)" ]; then
+    echo "The map is missing: no $MAPS/*.osm.pbf, and none could be downloaded (see above)" >&2
+    exit 2
+fi
+
+echo "== c. Speed of the drives"
 # Without it the stretches without GPS stay unknown (or the map's car park); the rest is as before.
 "$NN" car-motion --all --data-root "$DATA" < /dev/null \
     || echo "Speed not read for some drives: their stretches without GPS stay without a garage"
 
-echo "== c. Map roads and car parks near the drives"
+echo "== d. Map roads and car parks near the drives"
 newer=no
 if [ "$again" = yes ] || [ ! -f "$ROADS" ]; then
     newer=yes
@@ -71,22 +93,31 @@ elif ! grep -q -m 1 '"junction"' "$ROADS"; then
     # A map read before the junction and access tags were kept (the intersections need them).
     newer=yes
 fi
+places=no
+if [ "$again" = yes ] || [ ! -f "$PLACES" ] \
+        || [ -n "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -newer "$PLACES" -print -quit)" ]; then
+    places=yes
+fi
+if [ "$newer" = yes ] && [ -z "$UV" ]; then
+    echo "uv is missing: it reads the map (see docs/INSTALL.md)" >&2
+    exit 2
+fi
 if [ "$newer" = yes ]; then
-    # The site starts this with the service's PATH, without ~/.local/bin where uv usually is.
-    UV="$(command -v uv || true)"
-    if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then UV="$HOME/.local/bin/uv"; fi
-    if [ -z "$UV" ]; then
-        echo "uv is missing: it reads the map (see docs/INSTALL.md)" >&2
-        exit 2
-    fi
     (cd "$ROOT" && nice "$UV" run --no-project --with osmium python scripts/osm_roads.py --data-root "$DATA")
 else
     echo "The map roads and car parks are up to date."
 fi
+# Only the names of the drives: without them the road types are the same.
+if [ "$places" = yes ] && [ -n "$UV" ]; then
+    (cd "$ROOT" && nice "$UV" run --no-project --with osmium python scripts/osm_places.py --data-root "$DATA" \
+        < /dev/null) || echo "The names of the places not read: the drives keep the names they had"
+elif [ "$places" = yes ]; then
+    echo "uv is missing: the names of the places not read, the drives keep the names they had"
+fi
 
-echo "== d. Road type of every frame"
+echo "== e. Road type of every frame"
 "$NN" road-types --all --data-root "$DATA" < /dev/null
 
-echo "== e. Junctions of the drives"
+echo "== f. Junctions of the drives"
 "$NN" junctions --all --data-root "$DATA" < /dev/null
 echo "Done: the road types are in $DATA/derived/road_types/, the junctions in $DATA/derived/junctions/."

@@ -1495,6 +1495,35 @@ export interface RoadTypesPayload {
   made_at: string | null;
   /** Prepared drives (with their signs proposed) without road types yet. */
   drives_without: number;
+  /** The maps of the server and those the drives still need (nnslr_tools.road_types.maps_status); absent from a server
+   * before it. */
+  maps?: RoadMaps;
+}
+/** A map the drives need that the server lacks (scripts/osm_maps.py, derived/osm/maps.json). */
+export interface RoadMapNeed {
+  /** "Illinois", "Alsace". */
+  name: string | null;
+  /** From Geofabrik; null when it did not say. */
+  bytes: number | null;
+  state: 'to download' | 'too big' | 'failed' | 'busy';
+  /** Why it is not here: "5.2 GB, beyond the 5.0 GB of --max-gb ...", the error of a download; null otherwise. */
+  reason: string | null;
+  /** How many drives need it. */
+  drives: number;
+}
+export interface RoadMaps {
+  /** The Geofabrik extracts of data/raw/osm, oldest first. */
+  names: string[];
+  needed: RoadMapNeed[];
+  /** The drives with positions outside every map. */
+  outside: number;
+  /** The drives with positions on no map to download: in no extract of Geofabrik, or a few squares only in a region of
+   * regions, between its parts (a lake, the sea, a GPS fix that jumped). */
+  nowhere: number;
+  /** The most a search downloads (GB); null before the first. */
+  max_gb: number | null;
+  /** When the maps were last looked for (ISO); null: never. */
+  checked_at: string | null;
 }
 
 /** A frame of a drive opened on Data › Roads: its picture and its road type, the map's or a person's. */

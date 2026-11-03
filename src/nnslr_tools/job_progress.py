@@ -3,7 +3,7 @@
 The helpers write a line per phase (``== a. ...`` in helpers/3_train.sh, ``== 4/10 Train detector`` in
 scripts/run_v100_baseline.sh, ``== 3/7 Mine the cutter's false boxes ==`` in scripts/run_classifier.sh,
 ``== 3/3 Train SignNet ==`` in scripts/run_signnet.sh (``== 3/4 Train the detector at 960x544 ==`` in the old
-scripts/run_detector_sizes.sh), ``== b+c. ...`` in helpers/1_prepare.sh, ``== b. Map roads near the drives`` in
+scripts/run_detector_sizes.sh), ``== b+c. ...`` in helpers/1_prepare.sh, ``== d. Map roads near the drives`` in
 helpers/road_types.sh) and the training one line per epoch (``detector epoch 3/20 ...``, ``classifier epoch 3/20 ...``,
 ``pretrain epoch 3/20 ...`` for the first stage of a two-stage classifier, nnslr_tools.training; ``signnet epoch 3/40
 ...``, nnslr_tools.signnet). Nothing here guesses a time: a percent comes only from
@@ -96,11 +96,13 @@ TRY_STEPS = (('check', 'Check the comma', 3), ('export', 'Export the SignNet and
 RESTORE_STEPS = (('check', 'Check the comma', 50), ('restore', "Put back the build's networks", 50))
 FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 # helpers/road_types.sh: openpilot.distill's localizer on the segments new to it (about 20 s of a core each, 6 side by
-# side: some 20 minutes the first time) and the GPS of the drives prepared without it or localized since, the car's
-# speed from the logs (a minute for each new drive), the map roads near the drives (minutes when the map is read again),
-# the road type of every frame, the intersections every drive passed.
-ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('speed', 'Read the speed of the drives', 10),
-                    ('map_roads', 'Read the map roads near the drives', 55),
+# side: some 20 minutes the first time) and the GPS of the drives prepared without it or localized since, the maps the
+# drives need (seconds, a minute or two for each map downloaded), the car's speed from the logs (a minute for each new
+# drive), the map roads near the drives (minutes when the map is read again), the road type of every frame, the
+# intersections every drive passed.
+ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('maps', 'Download the maps the drives need', 5),
+                    ('speed', 'Read the speed of the drives', 10),
+                    ('map_roads', 'Read the map roads near the drives', 50),
                     ('road_types', 'Find the road type of every picture', 18),
                     ('junctions', 'Find the junctions the car drove through', 7))
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
@@ -159,12 +161,14 @@ MARKERS = (
     (re.compile(r'^== a\. (?:linking|collego)'), 'link', ()),
     (re.compile(r'^== b\+c\. '), 'frames', ()),
     # helpers/road_types.sh, by the words after its letters (a marker counts only for an action with that step: the
-    # "== b. " of the import above is not one of its steps); the letters of a log from before the speed, one earlier.
+    # "== b. " of the import above is not one of its steps): the letters of a log from before the maps (3 Nov 2026),
+    # or from before the speed, are one or two earlier.
     (re.compile(r'^== a\. GPS of the drives'), 'gps', ()),
-    (re.compile(r'^== b\. Speed of the drives'), 'speed', ()),
-    (re.compile(r'^== [bc]\. Map roads'), 'map_roads', ()),
-    (re.compile(r'^== [cd]\. Road type'), 'road_types', ()),
-    (re.compile(r'^== [de]\. Junctions of the drives'), 'junctions', ()),
+    (re.compile(r'^== b\. Maps the drives need'), 'maps', ()),
+    (re.compile(r'^== [bc]\. Speed of the drives'), 'speed', ()),
+    (re.compile(r'^== [bcd]\. Map roads'), 'map_roads', ()),
+    (re.compile(r'^== [cde]\. Road type'), 'road_types', ()),
+    (re.compile(r'^== [def]\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'

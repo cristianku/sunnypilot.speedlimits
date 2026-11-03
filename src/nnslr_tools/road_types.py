@@ -30,9 +30,12 @@ names its type:
   takes the last metres of the ramp, the lane in sight. Added last on 30 Oct 2026, after garage;
 - zone30, a 30 zone (the Swiss Tempo-30-Zone, its gate signs easy to see): ``CH:zone30``, sure; a road of the map
   at 30 without its kind, not sure (a 30 street outside a zone is tagged the same way);
-- town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, another zone such as
-  ``CH:zone20`` → town, ``CH:rural`` → rural), else its limit (50 or less → town, 60 and more → rural), else its kind
-  (a residential street, a living street → town). A road that says none of these stays unknown.
+- town or rural, for every other road: the kind of limit when the map says it (``CH:urban``, ``US-IL:urban``, another
+  zone such as ``CH:zone20`` → town, ``CH:rural`` → rural), else its limit (50 km/h or less → town, 60 and more →
+  rural; a limit in mph, ``35 mph``, by the US cut US_TOWN_MPH: 45 mph or less → town, the streets and the arterials of
+  a US town with its shops and signals, 50 mph and more → rural, and never a 30 zone, 30 mph is an ordinary US
+  street; a US trunk at 45 mph is such an arterial, a town's, not an expressway), else its kind (a residential street,
+  a living street → town). A road that says none of these stays unknown.
 
 Then along the drive: a gap of unknown frames between two stretches of the same type takes that type (a tunnel, a
 road of the map without a limit), and a stretch shorter than MIN_RUN frames between two stretches of the same type
@@ -42,12 +45,12 @@ passes a junction: the carriageway too.
 
 Writes ``derived/road_types/<route>.jsonl``: one line per frame, ``{"frame_key", "segment_index", "output_index",
 "road_type" (town, rural, expressway, motorway, ramp, parking, zone30, garage, merge or null), "map_type" (before
-the drive was looked at), "basis" (why: "maxspeed 50", "highway motorway", "parking aisle", "car park on the map",
-"garage on the map", "slow without gps", "filled", "smoothed", "acceleration lane (highway motorway)", "no road", "no
-gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one signal, a garage without GPS,
-filled, smoothed; the acceleration lane as its road: the ramp's metres are not sure, the carriageway's are),
-"way_id", "highway", "maxspeed"}`` (the road found, also in a car park), and "lead": true on the frames of the
-acceleration lane that were the ramp's (the measures fold them back into the ramp).
+the drive was looked at), "basis" (why: "maxspeed 50", "maxspeed 35 mph", "highway motorway", "parking aisle", "car
+park on the map", "garage on the map", "slow without gps", "filled", "smoothed", "acceleration lane (highway
+motorway)", "no road", "no gps"...), "sure" (false where the map is often wrong: WEAK_BASES, a car park of one
+signal, a garage without GPS, filled, smoothed; the acceleration lane as its road: the ramp's metres are not sure, the
+carriageway's are), "way_id", "highway", "maxspeed"}`` (the road found, also in a car park), and "lead": true on the
+frames of the acceleration lane that were the ramp's (the measures fold them back into the ramp).
 
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
 91% of town frames, 75% of rural ones and 95% of motorway ones; most rural misses were roads at 60 in a town.
@@ -61,6 +64,7 @@ OpenStreetMap data © OpenStreetMap contributors (ODbL).
 """
 from __future__ import annotations
 
+import json
 import re
 import threading
 from datetime import datetime
@@ -75,6 +79,9 @@ from nnslr_tools.sign_reads import is_read_frame
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
+# The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Data › Roads).
+MAPS_RELATIVE = Path('raw') / 'osm'
+MAPS_STATUS_RELATIVE = Path('derived') / 'osm' / 'maps.json'
 # The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
 # keeps its indices (zone30, garage and merge, 30 Oct 2026).
 ROAD_TYPES = ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage', 'merge')
@@ -108,8 +115,15 @@ TOWN_KINDS = ('urban', 'zone', 'zone30')
 # The reasons the map is often wrong about, measured on 27 Oct 2026 against 240 frames looked at without the map:
 # a road at 60 was in a town one time in three, a ramp is between two kinds of road, a filled gap is mostly a tunnel.
 # Their frames are not "sure": the review shows them first, and a training can leave them out until reviewed. A road
-# at 30 without its kind is a 30 zone or a 30 street.
-WEAK_BASES = ('maxspeed 30', 'maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link')
+# at 30 without its kind is a 30 zone or a 30 street. The US cut is looked at on a few frames only (3 Nov 2026: at 40
+# and 45 mph shops, sidewalks and signals, at 55 mph open country): 35, 40 and 45 mph are not sure either.
+WEAK_BASES = ('maxspeed 30', 'maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link',
+              'maxspeed 35 mph', 'maxspeed 40 mph', 'maxspeed 45 mph')
+# A limit in mph (the US): up to US_TOWN_MPH a town, above it rural. Near the US drives of 3 Nov 2026 a frame at 40 mph
+# had a residential street within 150 m 94 times in 100, at 45 mph 54, at 55 mph 23.
+US_TOWN_MPH = 45
+TOWN_KPH = 50
+MPH = re.compile(r'([0-9]+) ?mph')
 TOWN_HIGHWAYS = ('residential', 'living_street')
 # The picture of a frame in its pre-annotation report (preview_path), served at /route/<route>/images/<8 digits>.jpg.
 PREVIEW = re.compile(r'images/[0-9]{8}\.jpg')
@@ -125,12 +139,16 @@ class CorrectionError(ValueError):
     """A correction that cannot be kept: a frame that is not of the drive, a type that is not one."""
 
 
-def _limit(value) -> int | None:
-    """The limit of a maxspeed tag in km/h ("50", "50 mph" is not Swiss: None), or None."""
+def _limit(value) -> tuple[int, str] | None:
+    """The limit of a maxspeed tag and its unit: (50, 'km/h') for "50", (35, 'mph') for "35 mph" or "35mph"; None for
+    anything else ("signals", "none", "CH:urban", two values)."""
     if not isinstance(value, str):
         return None
     text = value.strip()
-    return int(text) if text.isdigit() else None
+    if text.isdigit():
+        return int(text), 'km/h'
+    match = MPH.fullmatch(text)
+    return (int(match.group(1)), 'mph') if match else None
 
 
 def _kind(way: dict) -> str | None:
@@ -147,16 +165,18 @@ def _kind(way: dict) -> str | None:
 
 
 def way_type(way: dict) -> tuple[str | None, str]:
-    """The road type of an OSM way and why: ('town', 'maxspeed 50')."""
+    """The road type of an OSM way and why: ('town', 'maxspeed 50'), ('rural', 'maxspeed 55 mph')."""
     highway = way.get('highway') or ''
     limit = _limit(way.get('maxspeed'))
     kind = _kind(way)
+    # A town's limit: 50 km/h or less, US_TOWN_MPH or less.
+    town = limit is not None and limit[0] <= (US_TOWN_MPH if limit[1] == 'mph' else TOWN_KPH)
     if highway == 'motorway':
         return 'motorway', 'highway motorway'
     if highway == 'motorway_link':
         return 'ramp', 'highway motorway_link'
     if highway in ('trunk', 'trunk_link'):
-        if kind in TOWN_KINDS or (limit is not None and limit <= 50):
+        if kind in TOWN_KINDS or town:
             return 'town', 'highway ' + highway + ' in town'
         return ('ramp' if highway == 'trunk_link' else 'expressway'), 'highway ' + highway
     if kind == 'zone30':
@@ -165,10 +185,11 @@ def way_type(way: dict) -> tuple[str | None, str]:
         return 'town', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
     if kind == 'rural':
         return 'rural', 'limit ' + str(way.get('maxspeed_type') or way.get('maxspeed'))
-    if limit == 30:
+    # Only 30 km/h: 30 mph is an ordinary US street, no zone.
+    if limit == (30, 'km/h'):
         return 'zone30', 'maxspeed 30'
     if limit is not None:
-        return ('town' if limit <= 50 else 'rural'), 'maxspeed ' + str(limit)
+        return ('town' if town else 'rural'), 'maxspeed ' + str(limit[0]) + (' mph' if limit[1] == 'mph' else '')
     if highway in TOWN_HIGHWAYS:
         return 'town', 'highway ' + highway
     return None, 'highway ' + (highway or 'road') + ' without a limit'
@@ -557,12 +578,51 @@ def _stamp(path: Path) -> tuple | None:
     return stat.st_mtime_ns, stat.st_size, stat.st_ino
 
 
+def _map_name(file: str) -> str:
+    """A map osm_maps.py has not named yet, by its file: "illinois-latest.osm.pbf" -> "Illinois"."""
+    stem = file.removesuffix('.osm.pbf').removesuffix('-latest')
+    return ' '.join(word.capitalize() for word in stem.replace('_', '-').split('-') if word)
+
+
+def maps_status(root: Path) -> dict:
+    """The maps of the server for Data › Roads: {'names': the extracts of raw/osm, oldest first, by their name in
+    derived/osm/maps.json (scripts/osm_maps.py; a file it has not seen yet by its own: "illinois-latest.osm.pbf" ->
+    "Illinois"), 'needed': [{'name', 'bytes' (None: unknown), 'state' (to download, failed, busy, too big), 'reason',
+    'drives': how many need it}] the extracts the drives need that raw/osm still lacks, 'outside': how many drives they
+    are, 'nowhere': the drives with positions on no map to download (in no extract, or a few squares between the parts of
+    a region of regions), 'max_gb': the most a search downloads, 'checked_at': when osm_maps.py last looked (None:
+    never)}."""
+    root = Path(root)
+    try:
+        status = json.loads((root / MAPS_STATUS_RELATIVE).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        status = None
+    status = status if isinstance(status, dict) else {}
+    named = {item.get('file'): item.get('name') for item in status.get('maps') or () if isinstance(item, dict)}
+    files = []
+    for path in (root / MAPS_RELATIVE).glob('*.osm.pbf'):
+        try:
+            files.append((path.stat().st_mtime, path.name))
+        except OSError:
+            continue
+    present = {name for _, name in files}
+    # A map downloaded since (by another run, or by hand) is no longer needed.
+    needed = [item for item in status.get('needed') or () if isinstance(item, dict)
+              and item.get('state') != 'downloaded' and item.get('file') not in present]
+    return {'names': [named.get(name) or _map_name(name) for _, name in sorted(files)],
+            'needed': [{'name': item.get('name'), 'bytes': item.get('bytes'), 'state': item.get('state'),
+                        'reason': item.get('reason'), 'drives': len(item.get('drives') or ())} for item in needed],
+            'outside': len({route for item in needed for route in item.get('drives') or ()}),
+            'nowhere': len(status.get('nowhere') or ()), 'max_gb': status.get('max_gb'),
+            'checked_at': status.get('checked_at')}
+
+
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
     'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':
     frames a person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None
     before the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types
-    yet}."""
+    yet, 'maps': the maps of the server and those the drives still need (maps_status)}."""
     from nnslr_tools.review import list_reports
     root = Path(root)
     files = []
@@ -585,4 +645,5 @@ def summary(root: Path) -> dict:
     return {'routes': [{name: value for name, value in drive.items() if name != 'start'} for drive in drives],
             'made_at': datetime.fromtimestamp(newest / 1e9).astimezone().isoformat(timespec='seconds')
             if newest is not None else None,
-            'drives_without': sum(1 for route, _ in list_reports(root) if route not in done)}
+            'drives_without': sum(1 for route, _ in list_reports(root) if route not in done),
+            'maps': maps_status(root)}

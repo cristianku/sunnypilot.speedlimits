@@ -309,7 +309,8 @@ def test_the_road_types_need_no_confirmed_frame_and_are_no_preparation(root, che
         # It shares the group of the preparation, but the Prepare page shows no drive being prepared.
         assert status['preparation'] is None
         steps = next(item for item in status['jobs'] if item['id'] == job['id'])['progress']['steps']
-        assert [step['key'] for step in steps] == ['gps', 'speed', 'map_roads', 'road_types', 'junctions']
+        assert [step['key'] for step in steps] == ['gps', 'maps', 'speed', 'map_roads', 'road_types',
+                                                    'junctions']
         assert steps[0]['state'] == 'current'
     finally:
         panel.stop(job['id'])

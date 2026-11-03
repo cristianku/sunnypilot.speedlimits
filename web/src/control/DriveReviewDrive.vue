@@ -357,7 +357,9 @@ const today = computed(() => {
     const from = secondOf(current.segments, segment, first);
     const to = secondOf(current.segments, segment, lastSecond + 1);
     if (from !== null && to !== null && from <= cursor.value && cursor.value < to) {
-      road = (type ? ROAD_LABEL[type as keyof typeof ROAD_LABEL] ?? type : 'unknown road') + (maxspeed ? ' · ' + maxspeed + ' km/h' : ' · no limit');
+      // A bare number is km/h; the map's own unit otherwise ("35 mph" in the US).
+      const limit = maxspeed ? ' · ' + maxspeed + (/^\d+$/.test(String(maxspeed)) ? ' km/h' : '') : ' · no limit';
+      road = (type ? ROAD_LABEL[type as keyof typeof ROAD_LABEL] ?? type : 'unknown road') + limit;
     }
   }
   return {sign, road, models: current.inference ? [current.inference.cutter, current.inference.classifier].filter(Boolean).join(' + ') : ''};

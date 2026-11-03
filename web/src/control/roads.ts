@@ -78,7 +78,7 @@ const HIGHWAY_WORDS: Record<string, string> = {
 };
 
 /** Why a frame has its type, in a driver's words, from the reason of the map (nnslr_tools.road_types: "maxspeed 50",
- * "highway motorway_link", "filled (no gps)"...); '' for a reason without words here, rather than the tags of the map. */
+ * "maxspeed 35 mph", "highway motorway_link", "filled (no gps)"...); '' for a reason without words here, rather than the tags of the map. */
 export function reasonOf(frame: RoadFrame): string {
   if (frame.reviewed) return frame.road_type === null ? 'Set by you: can\'t tell' : 'Set by you';
   const basis = frame.basis ?? '';
@@ -93,6 +93,9 @@ export function reasonOf(frame: RoadFrame): string {
   const limit = /^maxspeed (\d+)$/.exec(basis)?.[1];
   if (limit === '30') return 'The map says 30 km/h: a 30 zone or a 30 street, check it';
   if (limit) return 'The map says ' + limit + ' km/h' + (frame.sure ? ' here' : ': often a town edge, check it');
+  // The US: up to 45 mph a town, 50 mph and more rural (nnslr_tools.road_types.US_TOWN_MPH).
+  const miles = /^maxspeed (\d+) mph$/.exec(basis)?.[1];
+  if (miles) return 'The map says ' + miles + ' mph' + (frame.sure ? ' here' : ': often a town edge, check it');
   const zone = /^limit \S*zone ?(\d+)/i.exec(basis)?.[1];
   if (zone) return 'A ' + zone + ' zone on the map';
   if (/^limit \S*urban/i.test(basis)) return 'In town on the map';

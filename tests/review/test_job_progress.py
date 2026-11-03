@@ -385,17 +385,25 @@ def test_a_known_failure_is_one_plain_sentence():
 
 def test_the_road_types_have_their_steps_from_their_own_lines():
     log = ('== helpers/road_types.sh\n== a. GPS of the drives\n{"route_id": "x", "frames": 10}\n'
-           '== b. Speed of the drives\n== c. Map roads near the drives\nreading the map\n')
+           '== b. Maps the drives need\nAlsace: downloaded\n'
+           '== c. Speed of the drives\n== d. Map roads near the drives\nreading the map\n')
     running = progress('road_types', 'running', log)
-    assert states(running) == {'gps': 'done', 'speed': 'done', 'map_roads': 'current', 'road_types': 'todo',
-                               'junctions': 'todo'}
-    assert running['percent'] == 20.0 and running['last_line'] == 'reading the map'
-    failed = progress('road_types', 'failed', log + '== d. Road type of every frame\nno map\n')
+    assert states(running) == {'gps': 'done', 'maps': 'done', 'speed': 'done', 'map_roads': 'current',
+                               'road_types': 'todo', 'junctions': 'todo'}
+    assert running['percent'] == 25.0 and running['last_line'] == 'reading the map'
+    maps = progress('road_types', 'running', log.split('== c.')[0])
+    assert states(maps)['maps'] == 'current' and maps['percent'] == 10.0
+    failed = progress('road_types', 'failed', log + '== e. Road type of every frame\nno map\n')
     assert states(failed)['road_types'] == 'failed' and failed['percent'] == 75.0
     # The junctions last: the labels of the road-type network's junction head.
-    junctions = progress('road_types', 'running', log + '== d. Road type of every frame\n== e. Junctions of the drives\n')
+    junctions = progress('road_types', 'running', log + '== e. Road type of every frame\n== f. Junctions of the drives\n')
     assert states(junctions)['junctions'] == 'current' and junctions['percent'] == 93.0
-    # A log from before the speed: its letters one earlier, the speed never read.
+    # A log from before the maps: its letters one earlier, the maps never looked for.
+    before_maps = progress('road_types', 'running', '== a. GPS of the drives\n== b. Speed of the drives\n'
+                           '== c. Map roads near the drives\n== d. Road type of every frame\n'
+                           '== e. Junctions of the drives\n')
+    assert states(before_maps)['junctions'] == 'current' and states(before_maps)['speed'] == 'done'
+    # A log from before the speed: its letters two earlier, the speed never read.
     old = progress('road_types', 'running', '== a. GPS of the drives\n== b. Map roads near the drives\n'
                    '== c. Road type of every frame\n')
     assert states(old)['road_types'] == 'current' and states(old)['map_roads'] == 'done'

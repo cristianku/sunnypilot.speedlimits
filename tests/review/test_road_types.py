@@ -34,6 +34,28 @@ def test_way_type_from_kind_limit_and_highway():
     assert way_type({'highway': 'primary', 'maxspeed': 'signals'})[0] is None
 
 
+def test_a_limit_in_mph_by_the_us_cut():
+    # Up to 45 mph a town, 50 mph and more rural, by the US cut (US_TOWN_MPH); the reason keeps the unit.
+    assert way_type({'highway': 'primary', 'maxspeed': '55 mph'}) == ('rural', 'maxspeed 55 mph')
+    assert way_type({'highway': 'primary', 'maxspeed': '50 mph'}) == ('rural', 'maxspeed 50 mph')
+    assert way_type({'highway': 'residential', 'maxspeed': '35mph'}) == ('town', 'maxspeed 35 mph')
+    assert way_type({'highway': 'secondary', 'maxspeed': '40 mph'}) == ('town', 'maxspeed 40 mph')
+    assert way_type({'highway': 'primary', 'maxspeed': '45 mph'}) == ('town', 'maxspeed 45 mph')
+    assert way_type({'highway': 'residential', 'maxspeed': '25 mph'})[0] == 'town'
+    # 30 mph is an ordinary US street, never a 30 zone.
+    assert way_type({'highway': 'residential', 'maxspeed': '30 mph'}) == ('town', 'maxspeed 30 mph')
+    # A trunk road at 45 mph is a town's arterial with signals (US 45 in Orland Park), not an expressway, and not
+    # sure; at 55 mph it is an expressway.
+    assert way_type({'highway': 'trunk', 'maxspeed': '35 mph'})[0] == 'town'
+    assert way_type({'highway': 'trunk', 'maxspeed': '45 mph'}) == ('town', 'highway trunk in town')
+    assert way_type({'highway': 'trunk', 'maxspeed': '55 mph'})[0] == 'expressway'
+    # The kind of limit wins, as in Switzerland.
+    assert way_type({'highway': 'primary', 'maxspeed': '55 mph', 'maxspeed_type': 'US-IL:urban'})[0] == 'town'
+    # Two values or a unit of its own: no limit read.
+    assert way_type({'highway': 'primary', 'maxspeed': '55 mph;45 mph'})[0] is None
+    assert way_type({'highway': 'primary', 'maxspeed': '50 knots'})[0] is None
+
+
 def test_smooth_fills_gaps_and_drops_slips():
     town, rural = 'town', 'rural'
     # A tunnel (unknown) between two rural stretches; a GPS slip of 2 frames to a town street.
@@ -103,7 +125,9 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
     from review_helpers import make_report
 
     from nnslr_tools.road_types import summary
-    assert summary(tmp_path) == {'routes': [], 'made_at': None, 'drives_without': 0}
+    assert summary(tmp_path) == {'routes': [], 'made_at': None, 'drives_without': 0,
+                                 'maps': {'names': [], 'needed': [], 'outside': 0, 'nowhere': 0, 'max_gb': None,
+                                          'checked_at': None}}
     # A prepared drive without road types yet.
     make_report(tmp_path, ROUTE)
     assert summary(tmp_path)['drives_without'] == 1
@@ -138,6 +162,62 @@ def test_weak_reasons_are_not_sure(tmp_path):
     build_road_types(tmp_path, ROUTE, positions, RoadMap.load(tmp_path))
     lines = load_road_types(tmp_path, ROUTE)
     assert [(line['road_type'], line['sure']) for line in lines] == [('rural', False), ('ramp', False)]
+
+
+def test_the_limits_around_the_us_cut_are_not_sure(tmp_path):
+    ways = [{'id': 1, 'highway': 'primary', 'maxspeed': '35 mph', 'nodes': [[40.0, -88.0], [40.002, -88.0]]},
+            {'id': 2, 'highway': 'primary', 'maxspeed': '45 mph', 'nodes': [[40.1, -88.0], [40.102, -88.0]]},
+            {'id': 3, 'highway': 'primary', 'maxspeed': '55 mph', 'nodes': [[40.2, -88.0], [40.202, -88.0]]},
+            # A trunk at 45 mph, a town's arterial: never a sure expressway.
+            {'id': 4, 'highway': 'trunk', 'maxspeed': '45 mph', 'nodes': [[40.3, -88.0], [40.302, -88.0]]}]
+    path = tmp_path / 'derived' / 'osm' / 'roads.jsonl'
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(way) + '\n' for way in ways))
+    positions = [{'frame_key': f'0/{index}', 'segment_index': 0, 'output_index': index, 'latitude': latitude,
+                  'longitude': -88.0, 'bearing_deg': 0.0}
+                 for index, latitude in enumerate((40.201, 40.001, 40.101, 40.301))]
+    build_road_types(tmp_path, ROUTE, positions, RoadMap.load(tmp_path))
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [(line['road_type'], line['basis'], line['sure']) for line in lines] == [
+        ('rural', 'maxspeed 55 mph', True), ('town', 'maxspeed 35 mph', False), ('town', 'maxspeed 45 mph', False),
+        ('town', 'highway trunk in town', False)]
+
+
+def test_the_maps_of_the_server_and_those_the_drives_need(tmp_path):
+    import os
+
+    from nnslr_tools.road_types import maps_status
+    folder = tmp_path / 'raw' / 'osm'
+    folder.mkdir(parents=True)
+    for stamp, name in ((1_700_000_000, 'switzerland-latest.osm.pbf'), (1_800_000_000, 'illinois-latest.osm.pbf'),
+                        (1_750_000_000, 'baden-wuerttemberg-latest.osm.pbf')):
+        (folder / name).write_bytes(b'pbf')
+        os.utime(folder / name, (stamp, stamp))
+    status = tmp_path / 'derived' / 'osm' / 'maps.json'
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({
+        'checked_at': '2026-11-03T10:00:00+01:00', 'max_gb': 5.0,
+        'maps': [{'file': 'switzerland-latest.osm.pbf', 'name': 'Switzerland'},
+                 {'file': 'baden-wuerttemberg-latest.osm.pbf', 'name': 'Baden-Württemberg'}],
+        'needed': [{'name': 'Alsace', 'file': 'alsace-latest.osm.pbf', 'bytes': 132_000_000, 'state': 'failed',
+                    'reason': 'no network', 'drives': ['r1', 'r2']},
+                   {'name': 'Michigan', 'file': 'michigan-latest.osm.pbf', 'bytes': 316_000_000, 'state': 'too big',
+                    'reason': 'beyond', 'drives': ['r2', 'r3']},
+                   # Downloaded by that run, or since: no longer needed.
+                   {'name': 'Indiana', 'file': 'indiana-latest.osm.pbf', 'bytes': 1, 'state': 'downloaded',
+                    'drives': ['r4']},
+                   {'name': 'Illinois', 'file': 'illinois-latest.osm.pbf', 'bytes': 1, 'state': 'failed',
+                    'drives': ['r5']}],
+        'nowhere': ['r6']}))
+    maps = maps_status(tmp_path)
+    # Oldest first; a map the status has not seen yet by its file.
+    assert maps['names'] == ['Switzerland', 'Baden-Württemberg', 'Illinois']
+    assert [(item['name'], item['state'], item['drives']) for item in maps['needed']] == [
+        ('Alsace', 'failed', 2), ('Michigan', 'too big', 2)]
+    assert (maps['outside'], maps['nowhere'], maps['max_gb']) == (3, 1, 5.0)
+    # A broken status: the maps of the folder only.
+    status.write_text('{')
+    assert maps_status(tmp_path)['names'] == ['Switzerland', 'Baden Wuerttemberg', 'Illinois']
 
 
 

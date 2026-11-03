@@ -4,11 +4,12 @@
 // action, with Find the road types or its job running; then each drive as a thin strip of its whole length coloured by
 // road type, from GET /api/panel/road-types, read when the page opens and again when a search for the road types ends.
 // Nothing here needs a review: the map's types are a proposal; a tap on a drive opens it ("/roads?drive=<route>",
-// RoadDrive.vue), to look at its pictures and correct the map, and the list is read again on the way back.
+// RoadDrive.vue), to look at its pictures and correct the map, and the list is read again on the way back. Under the
+// action, the maps of the server and those the drives still need: the search downloads them first (scripts/osm_maps.py).
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, plural, sentence, thousands} from '../common/format';
-import type {ActionName, ActionState, Job, PanelStatus, RoadTypesPayload} from '../common/panel-types';
+import type {ActionName, ActionState, Job, PanelStatus, RoadMapNeed, RoadTypesPayload} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import JobProgress from './JobProgress.vue';
 import {activityTab, JOB_STATE, jobOf, startedWhen, terminalActivities} from './jobs';
@@ -66,11 +67,39 @@ const drives = computed(() => (payload.value?.routes ?? []).map((drive) => ({
     .map(([key, label]) => ({key, label, share: percentText(drive.types[key] ?? 0, drive.frames)})),
 })));
 const without = computed(() => payload.value?.drives_without ?? 0);
-/** Prepared drives still without road types, or none read yet. */
-const fresh = computed(() => payload.value !== null && (without.value > 0 || !payload.value.routes.length));
+/** The maps of the server (absent from a server before them). */
+const maps = computed(() => payload.value?.maps ?? null);
+/** Maps the next search downloads for the drives outside the maps (one that failed is tried again; one bigger than a
+ * search downloads is not): their road types are still to find there. */
+const mapsToGet = computed(() => (maps.value?.needed ?? []).some((item) => item.state !== 'too big'));
+/** Prepared drives still without road types, none read yet, or maps to download first. */
+const fresh = computed(() => payload.value !== null && (without.value > 0 || !payload.value.routes.length || mapsToGet.value));
+/** Only maps to download: every prepared drive has its road types, but not where it went outside the maps. */
+const onlyMaps = computed(() => fresh.value && without.value === 0 && !!payload.value?.routes.length);
 /** Drives copied from the comma but not prepared yet: no pictures, so no road types until Prepare new drives. */
 const waiting = computed(() => (props.status?.routes ?? []).filter((row) => ['collegare', 'estrarre', 'preannotare'].includes(row.state)).length);
 const madeAt = computed(() => isoWhen(payload.value?.made_at));
+
+const sizeText = (bytes: number): string => bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+const andList = (names: string[]): string => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
+const nameOf = (item: RoadMapNeed): string => item.name ?? 'a map';
+/** The drives outside the maps, and what the next search downloads: "2 drives outside the maps: Find again downloads
+ * Alsace and Michigan (≈ 448 MB)."; then why the last download failed, and the maps more than a search downloads. */
+const outsideText = computed(() => {
+  const needed = maps.value?.needed ?? [];
+  const items = needed.filter((item) => item.state !== 'too big');
+  const total = items.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+  const big = needed.filter((item) => item.state === 'too big');
+  const failed = needed.find((item) => item.state === 'failed');
+  return [
+    plural(maps.value?.outside ?? 0, 'drive') + ' outside the maps' + (items.length
+      ? ': ' + (fresh.value ? 'Find the road types' : 'Find again') + ' downloads ' + andList(items.map(nameOf))
+        + (total ? ' (≈ ' + sizeText(total) + ')' : '') : '') + '.',
+    failed ? 'The last download failed' + (failed.reason ? ': ' + failed.reason : '') + '.' : '',
+    big.length ? andList(big.map(nameOf)) + (big.length === 1 ? ' is' : ' are') + ' more than the '
+      + (maps.value?.max_gb ?? 5) + ' GB a search downloads.' : '',
+  ].filter(Boolean).join(' ');
+});
 </script>
 
 <template>
@@ -85,8 +114,11 @@ const madeAt = computed(() => isoWhen(payload.value?.made_at));
       <div v-if="idle" class="import-row">
         <span class="import-icon" :class="{fresh}" aria-hidden="true"><Icon v-if="fresh" name="routes"/><template v-else>✓</template></span>
         <div class="import-what">
-          <strong>{{ payload === null ? 'Road types from the map' : fresh ? 'Road types to find' : 'Road types are up to date' }}</strong>
+          <strong>{{ payload === null ? 'Road types from the map' : !fresh ? 'Road types are up to date' : onlyMaps ? 'Maps to download'
+            : 'Road types to find' }}</strong>
           <span v-if="payload !== null && !fresh">Every prepared drive has them, from the map{{ madeAt ? ' · ' + madeAt : '' }}.</span>
+          <span v-else-if="onlyMaps">Some drives went where the server has no map: the search downloads it first, then reads their road types
+            there.</span>
           <span v-else>Reads where the car was and the type of road there on the map, for every picture of the prepared drives. No need to
             review anything first.</span>
         </div>
@@ -97,6 +129,10 @@ const madeAt = computed(() => isoWhen(payload.value?.made_at));
         no road types yet.</p>
       <p v-if="idle && waiting > 0" class="import-why" id="rt-waiting">{{ plural(waiting, 'new drive needs', 'new drives need') }} their pictures
         first: <button type="button" class="link-button" @click="goTo('prepare')">Prepare new drives</button> in Drives.</p>
+      <p v-if="idle && maps && maps.checked_at && maps.names.length" class="import-why" id="rt-maps">Maps: {{ maps.names.join(', ') }}.</p>
+      <p v-if="idle && maps && maps.outside > 0" class="import-why" id="rt-outside">{{ outsideText }}</p>
+      <p v-if="idle && maps && maps.nowhere > 0" class="import-why" id="rt-nowhere">{{ plural(maps.nowhere, 'drive has', 'drives have') }}
+        positions on no map to download (the sea, a lake, a GPS fix that jumped): they stay without a road type there.</p>
       <p v-if="idle && state && !state.allowed" class="import-why">{{ sentence(state.reason) }}</p>
       <p v-if="job && !bigJob" class="import-last">Last search {{ startedWhen(job) }} ·
         {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·

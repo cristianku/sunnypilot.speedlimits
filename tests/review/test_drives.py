@@ -31,3 +31,22 @@ def test_drive_named_by_time_and_places(tmp_path):
     assert drive['when'] == 'Fri 23 Oct 2026 · 07:38'
     # A town beats a district next to it.
     assert (drive['from'], drive['to'], drive['title']) == ('Herznach', 'Aarau', 'Herznach → Aarau')
+
+
+def test_a_hamlet_names_a_position_only_where_no_other_place_is_near(tmp_path):
+    from nnslr_tools.drives import place_name
+    places = tmp_path / 'derived' / 'osm' / 'places.jsonl'
+    places.parent.mkdir(parents=True)
+    places.write_text('\n'.join(json.dumps(item) for item in (
+        {'name': 'Arcola', 'place': 'town', 'lat': 39.685, 'lon': -88.306},
+        {'name': 'Bourbon', 'place': 'hamlet', 'lat': 39.69, 'lon': -88.30},
+        {'name': 'Hayes', 'place': 'hamlet', 'lat': 39.80, 'lon': -88.55},
+        # Across a square's edge (BOX_LAT, BOX_LON): still found.
+        {'name': 'Lone Grove', 'place': 'hamlet', 'lat': 40.001, 'lon': -88.0})) + '\n')
+    # On the hamlet, the town under a km away wins.
+    assert place_name(tmp_path, 39.69, -88.30) == 'Arcola'
+    # Nothing else within reach: the hamlet.
+    assert place_name(tmp_path, 39.801, -88.55) == 'Hayes'
+    assert place_name(tmp_path, 39.999, -88.0) == 'Lone Grove'
+    # Far from all of them: no name.
+    assert place_name(tmp_path, 41.0, -90.0) is None

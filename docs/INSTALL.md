@@ -75,6 +75,17 @@ Adds `pycapnp` and `zstandard` for `nnslr log-metadata`, `nnslr align-route` and
 
 The first run of a day downloads that day's GNSS orbits and ionosphere maps (laika, from comma's public gnss-data mirror on GitHub, no account) into `/tmp/gnss`. Without openpilot.distill's `.venv`, `nnslr localize` says so and the frames keep the position of the GPS, as before. From the portal it runs as step a of **Find the road types** (Data › Roads, `helpers/road_types.sh`).
 
+### The OpenStreetMap maps (downloaded by themselves)
+
+The road types (Data › Roads, **Find the road types**) read the Geofabrik extracts of OpenStreetMap in `data/raw/osm/`. You no longer download them by hand. Each run first looks for the extracts the drives need (`scripts/osm_maps.py`, step b. of `helpers/road_types.sh`) and downloads the missing ones from download.geofabrik.de: a Swiss drive needs Switzerland, a drive near Basel needs Alsace or Baden-Württemberg too, and a drive in the US needs its state. A few positions on a lake or the sea, or a GPS fix that jumped there, never start the download of a whole region such as us-midwest or the US. Only Geofabrik's index and the extracts are fetched, so no position of the drives leaves the server. A run downloads at most 5 GB and leaves 2 GB free on the disk. An extract is kept only when it is whole and its md5 matches. The space needed is the size of the extracts: about 550 MB for Switzerland, 650 MB for Baden-Württemberg, 200 to 400 MB for most US states.
+
+What it needs:
+
+- `uv` (section 1): `osmium` (pyosmium) reads the maps from uv's cache, for that run only, and is never installed in a `.venv`;
+- `shapely` for the outlines of the extracts: it is in the `.venv` with the `preannotate` extra (rapidocr brings it); without it, `helpers/road_types.sh` takes it from uv's cache too.
+
+Without the network, the maps already there are used: the drives outside them stay without a road type until a run can download their map. An extract can still be added by hand (any `*.osm.pbf` in `data/raw/osm/`); it is used as it is and never deleted.
+
 ### Training on a GPU (`.venv-gpu`)
 
 ```sh
