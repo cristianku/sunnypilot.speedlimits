@@ -1,31 +1,18 @@
 <script setup lang="ts">
 // The choices of the classifier's next training (classifier-choices.ts), in Train › Classifier and in the classifier's
-// step of Train › Pipeline: its signs, the places and the share of the Mapillary signs, where it starts.
-import {thousands} from '../common/format';
+// step of Train › Pipeline: its signs, the places and the share of the Mapillary signs (MapillaryChoices.vue), where
+// it starts.
 import type {PanelStatus} from '../common/panel-types';
 import PickerSheet from '../components/PickerSheet.vue';
-import {MAPILLARY_OPTIONS, type ClassifierChoices} from './classifier-choices';
-import RegionPicker from './RegionPicker.vue';
-import Segmented from './Segmented.vue';
+import type {ClassifierChoices} from './classifier-choices';
+import MapillaryChoices from './MapillaryChoices.vue';
 
 defineProps<{choices: ClassifierChoices; status: PanelStatus | null}>();
 defineEmits<{locate: []}>();
 </script>
 
 <template>
-  <div v-if="choices.mapillaryState?.available" class="seg-row">
-    <Segmented v-model="choices.mapillary" class="mly-seg" :options="MAPILLARY_OPTIONS" label="Signs the classifier learns from"/>
-  </div>
-  <div v-if="choices.mapillaryState?.available && choices.withMapillary" class="mly-choice" id="train-mapillary-choice">
-    <RegionPicker v-model="choices.region" :regions="choices.mapillaryRegions" :locate="status?.actions.mapillary_locations ?? null"
-                  :locating="choices.locating" @locate="$emit('locate')"/>
-    <label class="picker mly-share" :class="{bad: choices.share === null}">
-      <span class="picker-label">Share</span>
-      <span class="mly-share-field"><input v-model="choices.shareText" id="mapillary-share" type="text" inputmode="decimal"
-             maxlength="6" autocomplete="off" aria-describedby="train-mapillary-note">%</span>
-      <span class="picker-sub">{{ choices.share === null ? 'from 0.1 to 100' : 'about ' + thousands(choices.mapillarySigns) + ' signs' }}</span>
-    </label>
-  </div>
+  <MapillaryChoices :choices="choices" :status="status" label="Signs the classifier learns from" @locate="$emit('locate')"/>
   <div v-if="choices.mapillary !== 'pretrain'" class="cls-start">
     <PickerSheet v-model="choices.startKey" :options="choices.startOptions" label="Start from" id="train-classifier-start"/>
   </div>

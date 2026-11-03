@@ -2,7 +2,7 @@
 // Training: from the reviews to a model, as an app on the phone. One line says what the networks learn from (objects,
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
-// at the car's band; the signs it finds), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
+// at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the road type with memory (scripts/run_road_type.sh), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
@@ -15,7 +15,9 @@ import type {ActionName, ActionOptions, ActionState, Activity, CutterFamilies, J
 import ActionList from './ActionList.vue';
 import {useClassifierChoices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
+import {useCutterChoices} from './cutter-choices';
 import JobProgress from './JobProgress.vue';
+import MapillaryChoices from './MapillaryChoices.vue';
 import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
 import {pct} from './evaluate';
 import {sizeText, useModels} from './models';
@@ -156,11 +158,27 @@ const starts = {cutter: useNetworkStart('cutter', toRef(props, 'status'), versio
   road_type: useNetworkStart('road_type', toRef(props, 'status'), versionsOf)};
 /** How the scene network reads the signs (road-signs.ts), the same in its section and in the pipeline. */
 const roadSigns = useRoadSigns(versionsOf);
+/** The cutter's Mapillary switch (cutter-choices.ts), the same in its section and in the pipeline. */
+const cutterChoices = useCutterChoices(toRef(props, 'status'));
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_cutter', 'A new SignNet, the cutter the comma runs, for ' + (cutterFamilies.value === 'all' ? 'every sign'
-    : 'speed signs only') + starts.cutter.words + ': it looks at the ' + cutterBand.value + ' band at the top of the frame. '
-    + 'About 80 minutes on the GPU.'],
+    : 'speed signs only') + starts.cutter.words + cutterChoices.words + ': it looks at the ' + cutterBand.value
+    + ' band at the top of the frame. ' + cutterChoices.minutes + ' on the GPU.'],
 ]);
+/** The cut of the Mapillary windows, in the cutter's card until they are cut. */
+const WINDOWS_ACTIONS: [ActionName, string][] = [
+  ['mapillary_windows', 'Cuts the Mapillary photos into windows the size of the car’s band, around their speed signs, for the '
+    + 'switch above. The CPU for a while; the photos are read from the TrueNAS share.'],
+];
+/** The cutter's button: also not with a share that is not a percentage. */
+const cutterActions = computed(() => {
+  const actions = props.status?.actions ?? null;
+  if (actions === null || !cutterChoices.invalid) return actions;
+  return {...actions, train_cutter: {...actions.train_cutter, allowed: false, reason: cutterChoices.invalid}};
+});
+/** The speed signs of the windows (every family but the other signs). */
+const windowSigns = computed(() => Object.values(cutterChoices.mapillaryState?.boxes_by_family ?? {})
+  .reduce((total, count) => total + count, 0));
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */
 const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
@@ -254,9 +272,38 @@ const numbers = computed(() => {
         <div class="seg-row">
           <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
         </div>
+        <MapillaryChoices :choices="cutterChoices" :status="status" label="Frames the cutter learns from" id-prefix="cutter-mapillary"
+                          note-id="train-cutter-mapillary-note"
+                          @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
         <NetworkStartPicker :start="starts.cutter" id="train-cutter-start"/>
-        <ActionList :items="CUTTER_ACTIONS" :actions="status?.actions ?? null"
-                    @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies, ...starts.cutter.option})"/>
+        <ActionList :items="CUTTER_ACTIONS" :actions="cutterActions"
+                    @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies, ...starts.cutter.option,
+                      ...cutterChoices.options})"/>
+        <JobProgress v-if="cutterChoices.cutJob?.state === 'running'" :job="cutterChoices.cutJob" @details="emit('details', $event)"
+                     @stop="emit('stop', $event)"/>
+        <p v-else-if="cutterChoices.cutting" class="latest-none" id="train-cutter-cutting">Cutting the Mapillary windows, started from a
+          terminal: the switch is ready when it ends.</p>
+        <template v-else-if="cutterChoices.mapillaryState?.available">
+          <p class="latest-none" id="train-cutter-mapillary-note">Mapillary: {{ thousands(cutterChoices.mapillaryState.windows) }} windows
+            of {{ thousands(cutterChoices.mapillaryState.photos) }} street photos, with {{ thousands(windowSigns) }} speed signs, added to
+            train only: every measure stays on your drives.<template v-if="cutterChoices.mapillary === 'on'"> The same share always
+            takes the same photos; then at most as many speed signs as ours (Settings › Mapillary signs per one of ours).</template><template
+            v-if="cutterChoices.mapillary === 'pretrain'"> The cutter first learns on them alone, from the start chosen above, then on
+            your drives, starting from there.</template> Photos {{ cutterChoices.mapillaryState.licence }}, Mapillary Traffic Sign
+            Dataset · <button type="button" class="link-button" id="cutter-windows-again"
+            :disabled="!status?.actions.mapillary_windows?.allowed"
+            @click="status && emit('run', 'mapillary_windows', status.actions.mapillary_windows)">Cut again</button></p>
+        </template>
+        <template v-else-if="cutterChoices.mapillaryState">
+          <p class="latest-none" id="train-cutter-mapillary-note">Mapillary windows: not cut yet. With them the cutter can also
+            learn from the speed signs of street photos taken around the world.</p>
+          <ActionList :items="WINDOWS_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
+        </template>
+        <p v-if="cutterChoices.cutJob?.state === 'failed'" class="latest-none warn-text" id="train-cutter-cut-failed">Cutting the
+          windows failed · <button type="button" class="link-button" @click="cutterChoices.cutJob && emit('details', cutterChoices.cutJob)">Details</button></p>
+        <p v-if="cutterChoices.mapillaryState?.available && cutterChoices.locateJob?.state === 'failed'" class="latest-none warn-text"
+           id="train-cutter-locate-failed">Locating the photos failed · <button type="button" class="link-button"
+           @click="cutterChoices.locateJob && emit('details', cutterChoices.locateJob)">Details</button></p>
       </template>
       <template v-else-if="section === 'classifier'">
         <ClassifierChoices :choices="choices" :status="status"
@@ -295,7 +342,7 @@ const numbers = computed(() => {
                     @run="(name, state) => emit('run', name, state, undefined, {...starts.road_type.option, ...roadSigns.option})"/>
         <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
       </template>
-      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :starts="starts" :road-signs="roadSigns" :fresh="numbers?.fresh ?? 0"
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :road-signs="roadSigns" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
                        @run="(name, state, start) => emit('run', name, state, start)"/>

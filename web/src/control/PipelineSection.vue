@@ -10,7 +10,9 @@ import type {ActionName, ActionOptions, ActionState, CutterFamilies, Job, PanelS
   PipelineStep, TrainingStart} from '../common/panel-types';
 import type {ClassifierChoices as Choices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
+import type {CutterChoices} from './cutter-choices';
 import JobProgress from './JobProgress.vue';
+import MapillaryChoices from './MapillaryChoices.vue';
 import type {NetworkStartChoice, StartRole} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
 import type {RoadSignsChoice} from './road-signs';
@@ -18,7 +20,8 @@ import RoadSignsPicker from './RoadSignsPicker.vue';
 import Segmented from './Segmented.vue';
 import TrainStart from './TrainStart.vue';
 
-const props = defineProps<{status: PanelStatus | null; choices: Choices; starts: Record<StartRole, NetworkStartChoice>;
+const props = defineProps<{status: PanelStatus | null; choices: Choices; cutterChoices: CutterChoices;
+  starts: Record<StartRole, NetworkStartChoice>;
   roadSigns: RoadSignsChoice; fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
 const families = defineModel<CutterFamilies>('families', {required: true});
 const emit = defineEmits<{pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string];
@@ -43,14 +46,14 @@ const chosen = computed(() => STEPS.filter((step) => on(step.action)));
 const withCutter = computed(() => on('train_cutter'));
 
 function optionsOf(action: PipelineAction): ActionOptions {
-  if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option};
+  if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option, ...props.cutterChoices.options};
   if (action === 'train_classifier') return props.choices.options;
   if (action === 'train_decider') return props.starts.decider.option;
   if (action === 'train_road_type') return {...props.starts.road_type.option, ...props.roadSigns.option};
   return {};
 }
 /** Why it cannot start now ('' when it can): the reason of a training chosen (the classifier after a new cutter needs
- * no cutter in use), or the classifier's share. */
+ * no cutter in use), or the share of Mapillary of the cutter or of the classifier. */
 const reason = computed(() => {
   const actions = props.status?.actions;
   if (!actions) return '';
@@ -60,6 +63,7 @@ const reason = computed(() => {
     if (step.action === 'train_classifier' && withCutter.value) continue;
     if (state && !state.allowed) return sentence(step.label + ': ' + state.reason);
   }
+  if (on('train_cutter') && props.cutterChoices.invalid) return sentence('Cutter: ' + props.cutterChoices.invalid);
   if (on('train_classifier') && props.choices.invalid) return sentence('Classifier: ' + props.choices.invalid);
   return '';
 });
@@ -70,7 +74,8 @@ const startLabel = computed(() => chosen.value.length === 1 ? (chosen.value[0]!.
 function start(): void {
   const steps = chosen.value.map((step) => ({action: step.action, options: optionsOf(step.action)}));
   const words = chosen.value.map((step) => step.action === 'train_cutter'
-    ? 'the cutter (' + (families.value === 'all' ? 'every sign' : 'speed signs only') + props.starts.cutter.words + ')'
+    ? 'the cutter (' + (families.value === 'all' ? 'every sign' : 'speed signs only') + props.starts.cutter.words
+      + props.cutterChoices.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
       : step.action === 'dataset' ? 'the import of the reviews'
         : step.action === 'train_road_type' ? 'the scene network' + props.starts.road_type.words + props.roadSigns.words
@@ -120,11 +125,17 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
           <input type="checkbox" :checked="on(step.action)" :id="'pipeline-' + step.action"
                  @change="toggle(step.action, ($event.target as HTMLInputElement).checked)">
           <span class="pl-what"><span class="pl-label">{{ step.label }}</span>
-            <span class="pl-sub">{{ step.action === 'dataset' && fresh === 0 ? 'Nothing new to import: the split is made again.' : step.text }}</span></span>
+            <span class="pl-sub">{{ step.action === 'dataset' && fresh === 0 ? 'Nothing new to import: the split is made again.'
+              : step.action === 'train_cutter' ? 'A new SignNet. ' + cutterChoices.minutes + '.' : step.text }}</span></span>
         </label>
         <div v-if="on(step.action) && step.action === 'train_cutter'" class="pl-choices">
           <div class="seg-row"><Segmented v-model="families" :options="familyOptions" label="Signs the cutter finds"/></div>
+          <MapillaryChoices :choices="cutterChoices" :status="status" label="Frames the cutter learns from" id-prefix="cutter-mapillary"
+                            note-id="pipeline-cutter-mapillary-note"
+                            @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
           <NetworkStartPicker :start="starts.cutter" id="pipeline-cutter-start"/>
+          <p v-if="cutterChoices.withMapillary" class="latest-none" id="pipeline-cutter-mapillary-note">The Mapillary windows join its
+            training only: every measure stays on your drives.</p>
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_classifier'" class="pl-choices">
           <ClassifierChoices :choices="choices" :status="status"

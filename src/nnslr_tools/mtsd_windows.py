@@ -640,6 +640,62 @@ def windows_state(data_root: Path) -> dict[str, Any]:
     return dict(state)
 
 
+_REGIONS_CACHE: dict[str, Any] = {}
+
+
+def windows_regions_state(data_root: Path, repo: Path | None = None) -> dict[str, Any]:
+    """What the region choice of Train › Cutter offers, in the shape of mapillary.regions_state: whether the positions
+    were fetched, and the speed signs of the train windows (its 'crops') of each continent and country, most first, by
+    the position of their photo (locations.jsonl, as plan_frames reads it). Read again only when a file changed."""
+    from nnslr_tools.gps import CONTINENTS, world_names
+    data_root = Path(data_root)
+    path, where = data_root / WINDOWS_FILE, data_root / mapillary.LOCATIONS_FILE
+    stamp = (str(data_root), mapillary._stamp(path), mapillary._stamp(where))
+    if _REGIONS_CACHE.get("stamp") != stamp:
+        try:
+            rows = [row for row in read_windows(path)[1] if row.get("split") == TRAIN] if path.is_file() else []
+        except (OSError, ValueError):
+            rows = []
+        locations = mapillary.read_locations(where)
+        state: dict[str, Any] = {"fetched": where.is_file(), "crops": 0, "located_crops": 0}
+        by_continent: Counter = Counter()
+        by_country: Counter = Counter()
+        continent_of_country: dict[str, str | None] = {}
+        photos: set[str] = set()
+        placed: set[str] = set()
+        for row in rows:
+            signs = sum(1 for obj in row.get("objects") or ()
+                        if obj.get("status") == CLEAN and obj.get("family") in SPEED_FAMILIES)
+            photos.add(row["image_key"])
+            state["crops"] += signs
+            location = locations.get(row["image_key"])
+            if not location or location.get("latitude") is None:
+                continue
+            placed.add(row["image_key"])
+            state["located_crops"] += signs
+            if location.get("continent"):
+                by_continent[location["continent"]] += signs
+            if location.get("country"):
+                by_country[location["country"]] += signs
+                continent_of_country.setdefault(location["country"], location.get("continent"))
+        names = world_names() if by_country else {}
+        state.update({
+            "photos": len(photos), "located_photos": len(placed),
+            "fetched_photos": sum(1 for key in photos if key in locations),
+            "continents": [{"key": key, "name": CONTINENTS.get(key, key), "crops": count}
+                           for key, count in sorted(by_continent.items(), key=lambda item: (-item[1], item[0]))],
+            "countries": [{"code": code, "name": names.get(code, code), "continent": continent_of_country.get(code),
+                           "crops": count}
+                          for code, count in sorted(by_country.items(), key=lambda item: (-item[1], item[0]))],
+        })
+        _REGIONS_CACHE.clear()
+        _REGIONS_CACHE.update({"stamp": stamp, "state": state})
+    state = dict(_REGIONS_CACHE["state"])
+    state["token"] = mapillary.token_ready(repo)
+    state["ids_table"] = (data_root / mapillary.IMAGE_IDS_FILE).is_file()
+    return state
+
+
 def _uses_mapillary(document: Any) -> bool:
     return isinstance(document, dict) and bool(document.get("mapillary") or document.get("mapillary_only"))
 

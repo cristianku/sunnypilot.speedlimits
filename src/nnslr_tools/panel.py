@@ -98,6 +98,9 @@ ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
 # Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
 LOCATIONS_SCRIPT = 'helpers/mapillary_locations.sh'
+# The MTSD photos cut into windows the size of the car's band (Train › Cutter, its Mapillary switch): read from the
+# TrueNAS share, written into the data root (nnslr mapillary-windows).
+WINDOWS_SCRIPT = 'helpers/mapillary_windows.sh'
 # Our three networks in use as one package (ONNX, model card), and that package on Hugging Face.
 NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
 NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
@@ -130,10 +133,13 @@ SIGNNET_ACTIONS = ('send_to_car', 'try_on_comma')
 CUTTER_BAND = '896x288'
 CUTTER_FAMILIES = ('all', 'speed')
 CUTTER_FAMILY = 'all'
+# The trainings with a Mapillary switch and the variable of their script (NNSLR_..._MAPILLARY: 1 or pretrain; its
+# _REGION and _SHARE): the classifier's crops (helpers/mapillary.sh), the cutter's windows (helpers/mapillary_windows.sh).
+MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter': 'NNSLR_CUTTER_MAPILLARY'}
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
-ACTION_OPTIONS = {'train_cutter': ('families', 'start'), 'train_decider': ('start',),
+ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_road_type': ('start', 'classifier', 'boards'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
@@ -238,6 +244,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('Mapillary ' + _region_words(flags['--mapillary-region']))
     if flags.get('--mapillary-share'):
         chips.append('Mapillary ' + flags['--mapillary-share'] + ' %')
+    # The cutter's cap of the windows added to ours (NNSLR_CUTTER_MAPILLARY_RATIO).
+    if flags.get('--mapillary-ratio'):
+        chips.append('Mapillary ' + flags['--mapillary-ratio'] + ' × ours')
     # The first stage's epochs (Train › Classifier › Settings), when not the same as the second's.
     if pretraining.get('--epochs') and pretraining['--epochs'] != flags.get('--epochs'):
         chips.append('Mapillary ' + pretraining['--epochs'] + ' epochs')
@@ -269,6 +278,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('pretrained')
     elif flags.get('--init-from') and not pretraining:
         chips.append('from ' + _start_words(flags['--init-from']))
+    elif pretraining.get('--init-from'):
+        # A cutter's first stage on the Mapillary windows can go on from a SignNet (NNSLR_CUTTER_INIT_FROM).
+        chips.append('from ' + _start_words(pretraining['--init-from']))
     elif fields.get('init'):
         chips.append('from ' + fields['init'])
     if fields.get('dataset kind'):
@@ -317,6 +329,9 @@ ACTIONS = {
     'road_types': {'label': 'Find the road types', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
     # Where each Mapillary photo was taken, for the region of "Train the classifier": network only, a few minutes.
     'mapillary_locations': {'label': 'Locate the Mapillary photos', 'group': 'mapillary', 'command': [LOCATIONS_SCRIPT]},
+    # The Mapillary photos cut into windows for "Train the cutter": the CPU for a while, the share read once; the
+    # windows already cut are kept, windows.jsonl is replaced whole at the end.
+    'mapillary_windows': {'label': 'Cut the Mapillary windows', 'group': 'mapillary', 'command': [WINDOWS_SCRIPT]},
     'dataset': {'label': 'Import reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
     # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
@@ -373,6 +388,7 @@ ACTIVITIES = (
     ('prepare', 'pre-annotation', 'nnslr preannotate'),
     ('prepare', 'road types', ROAD_TYPES_SCRIPT),
     ('mapillary', 'Mapillary positions', 'nnslr mapillary-locations'),
+    ('mapillary', 'Mapillary windows', 'nnslr mapillary-windows'),
     ('train', 'dataset and training', 'helpers/3_train.sh'),
     ('train', 'GPU training', 'run_v100_baseline.sh'),
     ('train', 'classifier training', 'run_classifier.sh'),
@@ -409,7 +425,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'comma_restore': "a return to the build's networks",
                  'ai_review': 'an AI review',
                  'measure_ai_reviewer': 'an AI reviewer measurement', 'road_types': 'a search for the road types',
-                 'mapillary_locations': 'a search for the Mapillary positions'}
+                 'mapillary_locations': 'a search for the Mapillary positions',
+                 'mapillary_windows': 'the cut of the Mapillary windows'}
 ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'preparation': 'a preparation',
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
@@ -419,7 +436,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
                   'AI reviewer measure': 'an AI reviewer measurement', 'road types': 'a search for the road types',
-                  'Mapillary positions': 'a search for the Mapillary positions'}
+                  'Mapillary positions': 'a search for the Mapillary positions',
+                  'Mapillary windows': 'the cut of the Mapillary windows'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on. The search for the
@@ -778,7 +796,12 @@ class Panel:
         payload['actions'] = self._action_states(payload, activities, ai_providers=ai_providers)
         # [ai-reviewer] - END
         # The choices of "Train the cutter", for its buttons.
-        payload['cutter_options'] = {'families': list(CUTTER_FAMILIES), 'family': CUTTER_FAMILY, 'band': CUTTER_BAND}
+        # Its Mapillary switch: whether the windows are cut (helpers/mapillary_windows.sh), and the regions their photos
+        # can be chosen by (the positions of helpers/mapillary_locations.sh, the same as the classifier's).
+        from nnslr_tools.mtsd_windows import LICENCE, windows_regions_state, windows_state
+        payload['cutter_options'] = {'families': list(CUTTER_FAMILIES), 'family': CUTTER_FAMILY, 'band': CUTTER_BAND,
+                                     'mapillary': {**windows_state(self.root), 'licence': LICENCE},
+                                     'mapillary_regions': windows_regions_state(self.root, self.repo)}
         # The Mapillary switch of "Train the classifier": whether its crops are prepared (helpers/mapillary.sh), and
         # the regions its photos can be chosen by (helpers/mapillary_locations.sh).
         from nnslr_tools.mapillary import crops_state, regions_state
@@ -945,6 +968,13 @@ class Panel:
             elif name == 'mapillary_locations':
                 # Network only (no GPU, no confirmed frame): the script and the token of .env.
                 reason = self._locations_missing()
+            elif name == 'mapillary_windows' and not (self.repo / WINDOWS_SCRIPT).is_file():
+                # The CPU and the share only; whether the share is mounted the script says (no stat of it here: a share
+                # that hangs would hang the status).
+                reason = WINDOWS_SCRIPT + ' is missing in this installation'
+            elif name == 'mapillary_windows':
+                # Photos of Mapillary, not our drives: it needs no confirmed frame.
+                pass
             elif name == 'train_classifier' and not (self.repo / CLASSIFIER_SCRIPT).is_file():
                 reason = CLASSIFIER_SCRIPT + ' is missing in this installation'
             elif name == 'train_cutter' and not (self.repo / CUTTER_SCRIPT).is_file():
@@ -1412,14 +1442,16 @@ class Panel:
 
     # -- actions -------------------------------------------------------------------------------
     def _mapillary_choice(self, action: str, options: dict, mapillary: bool) -> dict:
-        """The environment of the region and share of the Mapillary crops ({'region': 'europe,CH', 'share': '5'}):
-        only with the Mapillary signs on; a region other than all needs the positions."""
+        """The environment of the region and share of the Mapillary crops of the classifier, or of the windows of the
+        cutter ({'region': 'europe,CH', 'share': '5'}): only with the Mapillary signs on; a region other than all needs
+        the positions."""
         from nnslr_tools.mapillary import FULL_SHARE, LOCATIONS_FILE, check_share, region_text
         region, share = options.get('region'), options.get('share')
         if region is None and share is None:
             return {}
-        if action != 'train_classifier':
-            raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a region and a share of Mapillary.')
+        if action not in MAPILLARY_ENV:
+            raise PanelError(400, 'bad_option', 'Only "Train the cutter" and "Train the classifier" take a region and '
+                             'a share of Mapillary.')
         if not isinstance(region or '', str) or not isinstance(share or '', str):
             raise PanelError(400, 'bad_option', 'The region and the share are strings.')
         try:
@@ -1436,9 +1468,9 @@ class Panel:
                              'locate the Mapillary photos first.')
         env = {}
         if region != 'all':
-            env['NNSLR_CLASSIFIER_MAPILLARY_REGION'] = region
+            env[MAPILLARY_ENV[action] + '_REGION'] = region
         if share != FULL_SHARE:
-            env['NNSLR_CLASSIFIER_MAPILLARY_SHARE'] = f'{share:g}'
+            env[MAPILLARY_ENV[action] + '_SHARE'] = f'{share:g}'
         return env
 
     def _classifier_cutter(self, cutter: object) -> str:
@@ -1601,17 +1633,21 @@ class Panel:
             start_env['NNSLR_CUTTER_FAMILIES'] = families
         mapillary = (options or {}).get('mapillary')
         if mapillary is not None:
-            if action != 'train_classifier':
-                raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes the Mapillary signs.')
-            # 'pretrain': two stages, the Mapillary crops alone, then ours from those weights.
+            if action not in MAPILLARY_ENV:
+                raise PanelError(400, 'bad_option', 'Only "Train the cutter" and "Train the classifier" take the '
+                                 'Mapillary signs.')
+            # 'pretrain': two stages, the Mapillary crops (the cutter's windows) alone, then ours from those weights.
             if mapillary not in ('on', 'off', 'pretrain'):
                 raise PanelError(400, 'bad_option', 'Mapillary is off, on, or pretrain (Mapillary first, then ours).')
             if mapillary in ('on', 'pretrain'):
-                from nnslr_tools.mapillary import crops_state
-                state = crops_state(self.root)
+                if action == 'train_cutter':
+                    from nnslr_tools.mtsd_windows import windows_state as mapillary_state
+                else:
+                    from nnslr_tools.mapillary import crops_state as mapillary_state
+                state = mapillary_state(self.root)
                 if not state['available']:
                     raise PanelError(409, 'not_available', state['reason'][0].upper() + state['reason'][1:] + '.')
-                start_env['NNSLR_CLASSIFIER_MAPILLARY'] = '1' if mapillary == 'on' else 'pretrain'
+                start_env[MAPILLARY_ENV[action]] = '1' if mapillary == 'on' else 'pretrain'
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         if action == 'train_classifier':
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
@@ -1630,6 +1666,10 @@ class Panel:
         # The settings of the training changed in Train (nnslr_tools.train_settings): the variables its script reads.
         from nnslr_tools import train_settings
         start_env.update(train_settings.environment(self.root, action))
+        if action == 'train_cutter' and mapillary != 'on':
+            # The cap of the windows added to ours (Train › Cutter › Settings): scripts/run_signnet.sh refuses it
+            # without them, or with Mapillary first.
+            start_env.pop('NNSLR_CUTTER_MAPILLARY_RATIO', None)
         package = (options or {}).get('package')
         if package is not None and action != 'networks_publish':
             raise PanelError(400, 'bad_option', 'Only "Publish on Hugging Face" takes a package.')
@@ -1718,6 +1758,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', ROAD_TYPES_SCRIPT + ' is missing in this installation.')
+        if action == 'mapillary_windows' and not (self.repo / WINDOWS_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', WINDOWS_SCRIPT + ' is missing in this installation.')
         if action == 'mapillary_locations':
             missing = self._locations_missing()
             if missing:

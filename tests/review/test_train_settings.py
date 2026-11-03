@@ -29,7 +29,8 @@ def test_the_defaults_until_one_is_saved(tmp_path):
     assert view['train_classifier']['by'] is None and view['train_classifier']['fixed'] == []
     # What the car needs is shown, never a setting.
     assert [item['label'] for item in view['train_cutter']['fixed']] == ['Band', 'Grid', 'Channels', 'Fuse']
-    assert [item['key'] for item in view['train_cutter']['settings']] == ['epochs', 'batch', 'learning_rate', 'workers']
+    assert [item['key'] for item in view['train_cutter']['settings']] == ['epochs', 'pretrain_epochs', 'mapillary_ratio',
+                                                                          'batch', 'learning_rate', 'workers']
     for action in train_settings.TRAININGS:
         assert train_settings.environment(tmp_path, action) == {}
     assert train_settings.environment(tmp_path, 'train') == {}
@@ -109,6 +110,9 @@ def test_the_same_defaults_as_the_scripts():
                 assert default == '$SIGN_WORKERS_DEFAULT'
             elif setting.get('same_as'):
                 assert default == '$' + setting['same_as'].upper()
+            elif setting['key'] == 'mapillary_ratio':
+                # Passed on only when set: nnslr train-signnet's own default (1) without it.
+                assert default == '' and setting['default'] == 1.0
             else:
                 assert float(default) == setting['default'], (action, setting['key'])
 

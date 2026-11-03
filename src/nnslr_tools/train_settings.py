@@ -39,6 +39,14 @@ TRAININGS = {
         {'key': 'epochs', 'env': 'NNSLR_SIGNNET_EPOCHS', 'label': 'Epochs',
          'help': 'Passes over the training frames; the best one on validation is kept (recall in the 5 best boxes of '
                  'a frame).', 'default': 40, 'min': 1, 'max': 200, 'step': 1, 'unit': 'epochs'},
+        {'key': 'pretrain_epochs', 'env': 'NNSLR_CUTTER_PRETRAIN_EPOCHS', 'label': 'Epochs on Mapillary alone',
+         'help': 'Only with “Mapillary, then ours”: the first stage, on the Mapillary windows alone. Default: the same '
+                 'as the epochs.', 'default': 40, 'same_as': 'epochs', 'min': 1, 'max': 200, 'step': 1,
+         'unit': 'epochs'},
+        {'key': 'mapillary_ratio', 'env': 'NNSLR_CUTTER_MAPILLARY_RATIO', 'label': 'Mapillary signs per one of ours',
+         'help': 'Only with “With Mapillary”: the speed signs of the Mapillary windows added to train, at most this '
+                 'many times the speed signs of our train frames (whole photos, always the same ones).',
+         'default': 1.0, 'min': 0.1, 'max': 10.0, 'step': 0.1, 'unit': '× ours'},
         {'key': 'batch', 'env': 'NNSLR_SIGNNET_BATCH', 'label': 'Batch',
          'help': 'Frames in each step of the training: more takes more of the GPU.', 'default': 16, 'min': 1,
          'max': 128, 'step': 1, 'unit': 'frames'},

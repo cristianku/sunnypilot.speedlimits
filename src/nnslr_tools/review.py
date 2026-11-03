@@ -1467,9 +1467,10 @@ def make_handler(app: ReviewApp):
                 if run:
                     # The options: where a training starts ({"start": key}), the run to resume ({"run": name}), the
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}),
-                    # the classifier's Mapillary signs ({"mapillary": "on", "region": "europe", "share": "5"}), the
-                    # classifier that reads the signs for the scene network and its board input ({"classifier",
-                    # "boards"}), the route, provider, save and limit of an AI action, all checked by Panel.start.
+                    # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
+                    # "share": "5"}), the classifier that reads the signs for the scene network and its board input
+                    # ({"classifier", "boards"}), the route, provider, save and limit of an AI action, all checked by
+                    # Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards')

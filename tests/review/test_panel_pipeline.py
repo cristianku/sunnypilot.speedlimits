@@ -141,7 +141,10 @@ def test_the_classifier_alone_uses_the_cutter_in_use(panel, root):
     ({'steps': [{'action': 'train_decider'}, {'action': 'train_cutter'}]}, 400),
     ({'steps': [{'action': 'train_cutter'}, {'action': 'train_cutter'}]}, 400),
     ({'steps': [{'action': 'train_cutter', 'options': {'families': 'other'}}]}, 400),
-    ({'steps': [{'action': 'train_cutter', 'options': {'mapillary': 'on'}}]}, 400),
+    ({'steps': [{'action': 'train_cutter', 'options': {'mapillary': 'yes'}}]}, 400),
+    # The cutter's Mapillary switch needs its windows cut (helpers/mapillary_windows.sh).
+    ({'steps': [{'action': 'train_cutter', 'options': {'mapillary': 'on'}}]}, 409),
+    ({'steps': [{'action': 'train_cutter', 'options': {'mapillary': 'off', 'share': '5'}}]}, 400),
     ({'steps': [{'action': 'train_cutter'}, {'action': 'train_classifier', 'options': {'cutter': 'cutter:x/signnet'}}]}, 400),
     ({'steps': [{'action': 'train_cutter'}, {'action': 'train_classifier', 'options': {'mapillary': 'on'}}]}, 409),
     ({'steps': [{'action': 'train_cutter', 'options': {'families': 3}}]}, 400),

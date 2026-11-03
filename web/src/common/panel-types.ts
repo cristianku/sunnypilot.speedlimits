@@ -3,7 +3,7 @@ import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_road_type' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
-  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations';
+  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -140,6 +140,9 @@ export interface EpochPoint {
   val_recall?: number;
   /** SignNet: its false boxes per frame among those 5 on validation. */
   val_false_per_frame?: number;
+  /** SignNet's stage on the Mapillary windows alone: the speed signs of validation found among those 5, which chooses
+   * that stage's best epoch. */
+  val_speed_recall?: number;
   /** The classifier with “not a sign”: the sign crops read right and the “not a sign” crops rejected on validation, and
    * their mean, which chooses its best epoch. */
   val_sign_accuracy?: number;
@@ -167,11 +170,12 @@ export interface TrainingCurve {
 }
 
 /** The networks with curves: the pipeline’s detector and reader, the classifier with “not a sign” and its pretraining
- * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs), the road type's networks
+ * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs) and its stage on the Mapillary windows
+ * alone (signnet_pretrain), the road type's networks
  * (scripts/run_road_type.sh; road_type_gru_nosign in the runs before 29 Oct 2026) and experiment B's variants. */
 export type RoadNet = 'road_type_gru' | 'road_type_gru_nosign' | 'road_type_gru_nomotion' | 'road_type_frame';
 export type DeciderNet = 'experiment_b_crop' | 'experiment_b_crop_geom' | 'experiment_b_full';
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | RoadNet | DeciderNet;
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | RoadNet | DeciderNet;
 
 export interface StepProgress {
   done: number;
@@ -408,8 +412,13 @@ export interface PanelStatus {
   training_starts: TrainingStart[];
   /** The last pipeline of Train › Pipeline, or null before the first. */
   pipeline?: Pipeline | null;
-  /** The choices of “Train the cutter”: what it finds and the default, and the car's band it is trained at ("896x288"). */
-  cutter_options?: {families: CutterFamilies[]; family: CutterFamilies; band: string};
+  /** The choices of “Train the cutter”: what it finds and the default, the car's band it is trained at ("896x288"), and
+   * its Mapillary switch: whether the windows are cut (helpers/mapillary_windows.sh), how many, of how many photos, their
+   * boxes by family, why not when they are not, their licence; and the speed signs of their photos by place. */
+  cutter_options?: {families: CutterFamilies[]; family: CutterFamilies; band: string;
+    mapillary?: {available: boolean; windows: number; photos: number; boxes_by_family: Record<string, number>; reason: string;
+      licence: string};
+    mapillary_regions?: MapillaryRegions};
   /** The Mapillary switch of “Train the classifier”: whether its crops are prepared (helpers/mapillary.sh), how many
    * and of how many labels, and why not when they are not. */
   classifier_options?: {mapillary: {available: boolean; crops: number; labels: number; reason: string};

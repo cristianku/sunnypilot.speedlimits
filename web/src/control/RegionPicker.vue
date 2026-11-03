@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// Where the Mapillary photos of the classifier come from: a button showing the places chosen, and under it a menu that
+// Where the Mapillary photos of a training come from (the classifier's crops, the cutter's windows): a button showing the places chosen, and under it a menu that
 // opens downwards (on a phone, a sheet from the bottom) with All the world, the continents and the countries (each with its signs), several at a time. The
 // positions come from helpers/mapillary_locations.sh: until they are fetched the menu says so and offers to fetch them.
-// v-model: the keys chosen (continents: europe, north_america...; countries: CH, DE...); none is All the world.
+// v-model: the keys chosen (continents: europe, north_america...; countries: CH, DE...); none is All the world. idPrefix
+// names its elements (mapillary-region...: the classifier's; another for a second picker on the same page).
 import {computed, nextTick, onBeforeUnmount, ref, watch} from 'vue';
 import {sentence, thousands} from '../common/format';
 import type {ActionState, MapillaryRegions} from '../common/panel-types';
 import {CONTINENT_NAMES, regionCrops} from './mapillary';
 
-const props = defineProps<{regions: MapillaryRegions | null; locate: ActionState | null; locating: boolean}>();
+const props = withDefaults(defineProps<{regions: MapillaryRegions | null; locate: ActionState | null; locating: boolean;
+  idPrefix?: string}>(), {idPrefix: 'mapillary'});
 const emit = defineEmits<{locate: []}>();
 const chosen = defineModel<string[]>({required: true});
 
@@ -95,7 +97,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="rp">
-    <button type="button" class="picker rp-button" id="mapillary-region" :aria-expanded="open" aria-controls="mapillary-region-menu"
+    <button type="button" class="picker rp-button" :id="idPrefix + '-region'" :aria-expanded="open" :aria-controls="idPrefix + '-region-menu'"
             @click="open = !open">
       <span class="picker-label">Where</span>
       <span class="picker-title"><span class="rp-title">{{ title }}</span></span>
@@ -103,7 +105,7 @@ onBeforeUnmount(() => {
       <span class="picker-chev" aria-hidden="true">›</span>
     </button>
     <div v-if="open" class="rp-backdrop" aria-hidden="true" @click="close"></div>
-    <div v-if="open" class="rp-menu" id="mapillary-region-menu" role="group" aria-label="Where the photos were taken">
+    <div v-if="open" class="rp-menu" :id="idPrefix + '-region-menu'" role="group" aria-label="Where the photos were taken">
       <div class="rp-head">
         <span class="rp-head-title">Where the photos were taken</span>
         <button type="button" class="picker-done" @click="close">Done</button>
@@ -115,11 +117,11 @@ onBeforeUnmount(() => {
               <span class="picker-row-sub">{{ thousands(regions?.crops ?? 0) }} signs</span></span>
             <span class="picker-check" aria-hidden="true">{{ chosen.length ? '' : '✓' }}</span></button></li>
         </ul>
-        <div v-if="!fetched" class="rp-empty" id="mapillary-region-empty">
+        <div v-if="!fetched" class="rp-empty" :id="idPrefix + '-region-empty'">
           <p class="rp-empty-title">Positions not fetched yet</p>
           <p class="rp-empty-text">To choose a continent or a country, first find where each Mapillary photo was taken.
             It asks Mapillary over the internet and takes a few minutes.</p>
-          <button type="button" class="btn primary rp-locate" id="mapillary-locate" :disabled="locating || !locate?.allowed"
+          <button type="button" class="btn primary rp-locate" :id="idPrefix + '-locate'" :disabled="locating || !locate?.allowed"
                   @click="emit('locate')">{{ locating ? 'Locating the photos…' : 'Locate the photos' }}</button>
           <p v-if="!locating && locate && !locate.allowed && locate.reason" class="rp-reason">{{ sentence(locate.reason) }}</p>
         </div>
@@ -155,7 +157,7 @@ onBeforeUnmount(() => {
           <p class="rp-foot">{{ thousands(regions?.located_crops ?? 0) }} of {{ thousands(regions?.crops ?? 0) }} signs have a
             place; the others come in only with All the world.<template v-if="locating"> Locating the photos…</template><template
             v-else-if="locate?.allowed && (regions?.located_crops ?? 0) < (regions?.crops ?? 0)"> <button type="button"
-            class="link-button" id="mapillary-locate-again" @click="emit('locate')">Locate the rest</button></template></p>
+            class="link-button" :id="idPrefix + '-locate-again'" @click="emit('locate')">Locate the rest</button></template></p>
         </template>
       </div>
     </div>

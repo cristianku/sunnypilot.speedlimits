@@ -339,6 +339,47 @@ def test_the_signnet_training_has_its_own_steps():
     assert 'signnet' not in progress('train', 'running', TRAIN_LOG)
 
 
+# The same in two stages (NNSLR_CUTTER_MAPILLARY=pretrain), the lines of the run of 3 Nov 2026: the Mapillary windows
+# alone, then our frames from them.
+SIGNNET_TWO_STAGE_LOG = """== scripts/run_signnet.sh 2026-11-03_1903-cutter-mapillary-pretrain
+run:          2026-11-03_1903-cutter-mapillary-pretrain
+band:         896x288
+pretraining:  --families all --epochs 40 --mapillary /d/windows.jsonl --mapillary-only
+settings:     --families all --epochs 40 --init-from /d/runs/2026-11-03_1903-cutter-mapillary-pretrain/pretrain/signnet-best.pt
+== 1/3 Check the training population (CPU-only) ==
+== 2/3 Explicit CUDA smoke test ==
+== 3/3 Train SignNet ==
+-- the first stage: the Mapillary windows alone --
+signnet_pretrain epoch 22/40 train_loss 0.4210 val_recall 0.478 val_false_per_frame 4.79 val_speed_recall 0.706 90s
+"""
+SECOND_STAGE = """signnet_pretrain measure the best epoch 22 on validation and test
+Mapillary stage complete: /d/runs/2026-11-03_1903-cutter-mapillary-pretrain/pretrain
+-- the second stage: our frames alone, from the first --
+signnet epoch 3/40 train_loss 1.3470 val_recall 0.597 val_false_per_frame 4.74 173s
+"""
+
+
+def test_the_signnet_training_in_two_stages_has_its_mapillary_stage():
+    from nnslr_tools.job_progress import SIGNNET_TWO_STAGE_STEPS
+    assert sum(weight for _, _, weight in SIGNNET_TWO_STAGE_STEPS) == 100
+    first = progress('train_cutter', 'running', SIGNNET_TWO_STAGE_LOG)
+    assert first['signnet'] and first['two_stages']
+    assert states(first) == {'checks': 'done', 'signnet_pretrain': 'current', 'signnet': 'todo', 'evaluate': 'todo'}
+    # 5 done, and 22 of 40 epochs of the stage's 40.
+    assert first['percent'] == 27.0 and first['detail'] == 'Mapillary · epoch 22 of 40'
+    assert first['curves'] == {'signnet_pretrain': {'epochs': 40, 'points': [
+        {'epoch': 22, 'train_loss': 0.421, 'val_recall': 0.478, 'val_false_per_frame': 4.79, 'val_speed_recall': 0.706,
+         'seconds': 90}]}}
+    # Its measure is not the end: the second stage is still to come.
+    measured = progress('train_cutter', 'running', SIGNNET_TWO_STAGE_LOG + SECOND_STAGE.split('-- the second')[0])
+    assert states(measured)['signnet_pretrain'] == 'current'
+    second = progress('train_cutter', 'running', SIGNNET_TWO_STAGE_LOG + SECOND_STAGE)
+    assert states(second) == {'checks': 'done', 'signnet_pretrain': 'done', 'signnet': 'current', 'evaluate': 'todo'}
+    assert second['detail'] == 'SignNet · epoch 3 of 40' and set(second['curves']) == {'signnet_pretrain', 'signnet'}
+    # One stage (or no Mapillary): the three steps of SIGNNET_STEPS.
+    assert not progress('train_cutter', 'running', SIGNNET_LOG)['two_stages']
+
+
 def test_the_last_line_is_the_error_not_the_hint_after_it():
     log = ('== 3/3 Try it on the GPU\ntorch.AcceleratorError: CUDA error: out of memory\n'
            "Search for `cudaErrorMemoryAllocation' in https://docs.nvidia.com/cuda/ for more information.\n\n== finito con codice 1\n")

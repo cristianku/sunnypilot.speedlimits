@@ -15,7 +15,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_road_type: 'train', update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
-  try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary',
+  try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
 };
 
 /** The icon of each action, on its button. */
@@ -24,7 +24,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_road_type: 'train',
   update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
-  try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes',
+  try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
 };
 
 /**
@@ -35,7 +35,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
   dataset: '/dataset', road_types: '/roads',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_road_type: '/train',
-  train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train',
+  train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
@@ -48,7 +48,8 @@ export const TRAIN_ACTIONS: ActionName[] = actionsOf('/train');
 export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's, the
- * road types (in the group of the preparation) are Roads', the Mapillary positions Train's (its classifier). */
+ * road types (in the group of the preparation) are Roads', the Mapillary positions and windows Train's (its classifier
+ * and its cutter). */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.label === 'road types') return '/roads';
   if (activity.group === 'mapillary') return '/train';

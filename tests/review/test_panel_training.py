@@ -306,8 +306,14 @@ def test_the_cutter_training_follows_the_rules_of_a_training(root, checkout):
     assert panel._action_states(ready_payload(), [])['train_cutter'] == {'label': 'Train the cutter', 'allowed': True, 'reason': ''}
     assert panel._action_states(ready_payload(gpu_processes=2), [])['train_cutter']['reason'] == 'the GPU is busy with another process'
     assert panel._action_states({**ready_payload(), 'reviewed_routes': 1}, [])['train_cutter']['reason'] == '3 reviewed drives are needed, now 1'
-    # The signs are the only choice: the band is the car's.
-    assert panel.status()['cutter_options'] == {'families': ['all', 'speed'], 'family': 'all', 'band': '896x288'}
+    # The signs and the Mapillary windows are the choices: the band is the car's.
+    options = panel.status()['cutter_options']
+    assert {key: options[key] for key in ('families', 'family', 'band')} == {'families': ['all', 'speed'], 'family': 'all',
+                                                                            'band': '896x288'}
+    assert options['mapillary'] == {'available': False, 'windows': 0, 'photos': 0, 'boxes_by_family': {},
+                                    'reason': 'the Mapillary windows are not cut yet (helpers/mapillary_windows.sh)',
+                                    'licence': 'CC BY-NC-SA 4.0'}
+    assert (options['mapillary_regions']['fetched'], options['mapillary_regions']['crops']) == (False, 0)
 
 
 @pytest.mark.parametrize('options, expected', [(None, 'families=all'), ({'families': 'all'}, 'families=all'),
@@ -412,6 +418,10 @@ def test_the_cutter_options_over_http(root, checkout):
         assert status == 400 and json_of(data)['error'] == 'bad_option'
         status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'size': '1344x760', 'families': 'speed'})
         assert status == 400 and 'band, 896 × 288' in json_of(data)['message']
+        # The Mapillary switch reaches the panel: refused here, the windows are not cut.
+        status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'mapillary': 'on'})
+        assert status == 409 and json_of(data)['message'] == (
+            'The Mapillary windows are not cut yet (helpers/mapillary_windows.sh).')
         status, response, data = server.request('POST', '/api/panel/run/train_cutter', body={'families': 'speed'})
         assert status == 200, data
         job_id = json_of(data)['id']
@@ -512,7 +522,7 @@ def test_the_classifier_takes_the_mapillary_signs_only_when_prepared(root, check
     with pytest.raises(PanelError) as missing:
         panel.start('train_classifier', {'mapillary': 'on'})
     assert (missing.value.status, missing.value.message) == (409, 'Mapillary is not prepared (helpers/mapillary.sh).')
-    for action, options in (('train_classifier', {'mapillary': 'yes'}), ('train_cutter', {'mapillary': 'off'})):
+    for action, options in (('train_classifier', {'mapillary': 'yes'}), ('train_decider', {'mapillary': 'off'})):
         with pytest.raises(PanelError) as refused:
             panel.start(action, options)
         assert refused.value.status == 400
@@ -559,7 +569,7 @@ def test_the_classifier_takes_a_region_and_a_share_of_mapillary(root, checkout, 
             panel.start('train_classifier', options)
         assert refused.value.status == 400, options
     with pytest.raises(PanelError) as other:
-        panel.start('train_cutter', {'region': 'europe'})
+        panel.start('train_decider', {'region': 'europe'})
     assert other.value.status == 400
     job = panel.start('train_classifier', {'mapillary': 'on', 'region': 'all', 'share': '5'})
     finished(panel, job['id'])
@@ -607,6 +617,126 @@ def test_the_mapillary_positions_need_the_script_and_a_token(root, checkout, mon
         assert status['actions']['update']['reason'] == 'A search for the Mapillary positions is running'
         assert status['actions']['mapillary_locations']['reason'] == 'A search for the Mapillary positions is running'
         assert status['actions']['prepare']['reason'] != 'A search for the Mapillary positions is running'
+    finally:
+        panel.stop(job['id'])
+        finished(panel, job['id'])
+
+
+FAKE_CUTTER_MAPILLARY = FAKE_SIGNNET.replace(
+    'families=${NNSLR_CUTTER_FAMILIES:-}"', 'mapillary=${NNSLR_CUTTER_MAPILLARY:-0} region=${NNSLR_CUTTER_MAPILLARY_REGION:-} '
+    'share=${NNSLR_CUTTER_MAPILLARY_SHARE:-} ratio=${NNSLR_CUTTER_MAPILLARY_RATIO:-} '
+    'pretrain_epochs=${NNSLR_CUTTER_PRETRAIN_EPOCHS:-}"')
+
+
+def cut_windows(root, photos=('zurich', 'boston')):
+    """A windows file of nnslr mapillary-windows: one train window of each photo, with a 50 and a give way."""
+    from nnslr_tools.mtsd_windows import WINDOWS_FILE, WINDOWS_KIND, WINDOW_VERSION
+    path = root / WINDOWS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = {'kind': WINDOWS_KIND, 'version': WINDOW_VERSION, 'counts': {'train': {
+        'windows': len(photos), 'photos': len(photos), 'boxes_by_family': {'maximum_speed': len(photos), 'other_sign': 3}}}}
+    rows = [{'split': 'train', 'image_key': photo, 'objects': [{'status': 'clean', 'family': 'maximum_speed'},
+                                                               {'status': 'clean', 'family': 'other_sign'}]}
+            for photo in photos]
+    path.write_text(''.join(json.dumps(line) + '\n' for line in [header, *rows]))
+
+
+def cutter_run(panel, options):
+    """The fields the fake run_signnet.sh echoes of a cutter training with these options."""
+    job = panel.start('train_cutter', options)
+    finished(panel, job['id'])
+    line = next(line for line in full_log(panel, job['id']).splitlines() if line.startswith('args '))
+    time.sleep(1.1)  # a job's log is named by its second
+    return dict(field.split('=', 1) for field in line.split()[2:])
+
+
+def test_the_cutter_takes_the_mapillary_windows_only_when_cut(root, checkout, monkeypatch):
+    from nnslr_tools import train_settings
+    signnet_script(checkout, FAKE_CUTTER_MAPILLARY)
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    for mapillary in ('on', 'pretrain'):
+        with pytest.raises(PanelError) as missing:
+            panel.start('train_cutter', {'mapillary': mapillary})
+        assert (missing.value.status, missing.value.message) == (
+            409, 'The Mapillary windows are not cut yet (helpers/mapillary_windows.sh).')
+    with pytest.raises(PanelError) as refused:
+        panel.start('train_cutter', {'mapillary': 'yes'})
+    assert refused.value.status == 400 and panel.jobs() == []
+    cut_windows(root)
+    # The speed signs only: the other signs of the windows are not what the switch adds.
+    assert panel.status()['cutter_options']['mapillary'] == {
+        'available': True, 'windows': 2, 'photos': 2, 'boxes_by_family': {'maximum_speed': 2}, 'reason': '',
+        'licence': 'CC BY-NC-SA 4.0'}
+    assert cutter_run(panel, {'mapillary': 'off'})['mapillary'] == '0'
+    assert cutter_run(panel, {'mapillary': 'on'})['mapillary'] == '1'
+    assert cutter_run(panel, {'mapillary': 'pretrain'})['mapillary'] == 'pretrain'
+    # Train › Cutter › Settings: the cap goes with the windows added to ours only, the first stage's epochs always.
+    train_settings.save(root, {'training': 'train_cutter', 'values': {'mapillary_ratio': 2.5, 'pretrain_epochs': 5}},
+                        'test')
+    on = cutter_run(panel, {'mapillary': 'on'})
+    assert (on['ratio'], on['pretrain_epochs']) == ('2.5', '5')
+    for mapillary in ('pretrain', 'off'):
+        assert cutter_run(panel, {'mapillary': mapillary})['ratio'] == ''
+
+
+def test_the_cutter_takes_a_region_and_a_share_of_the_mapillary_windows(root, checkout, monkeypatch):
+    from nnslr_tools.mapillary import LOCATIONS_FILE
+    signnet_script(checkout, FAKE_CUTTER_MAPILLARY)
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    cut_windows(root)
+    regions = panel.status()['cutter_options']['mapillary_regions']
+    assert (regions['fetched'], regions['crops'], regions['photos'], regions['continents']) == (False, 2, 2, [])
+    with pytest.raises(PanelError) as missing:
+        panel.start('train_cutter', {'mapillary': 'on', 'region': 'europe'})
+    assert missing.value.status == 409 and 'not fetched' in missing.value.message
+    for options in ({'mapillary': 'off', 'share': '5'}, {'mapillary': 'on', 'share': '0'},
+                    {'mapillary': 'on', 'region': 'Atlantis'}):
+        with pytest.raises(PanelError) as refused:
+            panel.start('train_cutter', options)
+        assert refused.value.status == 400, options
+    (root / LOCATIONS_FILE).write_text(''.join(json.dumps(line) + '\n' for line in [
+        {'mtsd_image': 'zurich', 'latitude': 47.4, 'longitude': 8.5, 'country': 'CH', 'continent': 'europe',
+         'status': 'located'},
+        {'mtsd_image': 'boston', 'latitude': 42.4, 'longitude': -71.1, 'country': 'US', 'continent': 'north_america',
+         'status': 'located'}]))
+    # The speed signs of the windows by the place of their photo.
+    regions = panel.status()['cutter_options']['mapillary_regions']
+    assert (regions['fetched'], regions['located_crops'], regions['located_photos']) == (True, 2, 2)
+    assert [(item['key'], item['crops']) for item in regions['continents']] == [('europe', 1), ('north_america', 1)]
+    assert {item['code'] for item in regions['countries']} == {'CH', 'US'}
+    fields = cutter_run(panel, {'mapillary': 'pretrain', 'region': 'ch,europe', 'share': '50'})
+    assert (fields['mapillary'], fields['region'], fields['share']) == ('pretrain', 'europe,CH', '50')
+    fields = cutter_run(panel, {'mapillary': 'on', 'region': 'all', 'share': '100'})
+    assert (fields['region'], fields['share']) == ('', '')
+
+
+def test_the_mapillary_windows_are_cut_from_the_panel(root, checkout, monkeypatch):
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    assert panel.status()['actions']['mapillary_windows'] == {
+        'label': 'Cut the Mapillary windows', 'allowed': False,
+        'reason': 'helpers/mapillary_windows.sh is missing in this installation'}
+    with pytest.raises(PanelError) as missing:
+        panel.start('mapillary_windows')
+    assert missing.value.status == 403
+    script = checkout / 'helpers' / 'mapillary_windows.sh'
+    script.write_text('#!/usr/bin/env bash\necho "== Mapillary: the windows of the cutter"\nsleep "${FAKE_SLEEP:-0}"\n')
+    script.chmod(0o755)
+    # The CPU and the share only: no confirmed frame, no GPU, no token.
+    assert panel.status()['actions']['mapillary_windows'] == {'label': 'Cut the Mapillary windows', 'allowed': True,
+                                                              'reason': ''}
+    with pytest.raises(PanelError) as other:
+        panel.start('mapillary_windows', {'mapillary': 'on'})
+    assert other.value.status == 400
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    job = panel.start('mapillary_windows')
+    try:
+        status = panel.status()
+        for action in ('update', 'mapillary_windows', 'mapillary_locations'):
+            assert status['actions'][action]['reason'] == 'The cut of the Mapillary windows is running', action
+        assert status['actions']['prepare']['reason'] != 'The cut of the Mapillary windows is running'
     finally:
         panel.stop(job['id'])
         finished(panel, job['id'])

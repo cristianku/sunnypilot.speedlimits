@@ -51,6 +51,14 @@ SIGNNET_STEPS = (
     ('signnet', 'Train SignNet', 85),
     ('evaluate', 'Measure on validation and test', 10),
 )
+# The same in two stages (NNSLR_CUTTER_MAPILLARY=pretrain, PRETRAINING): the Mapillary windows alone ("signnet_pretrain
+# epoch ..."), then our frames from them, until "-- the second stage" (SECOND_STAGE).
+SIGNNET_TWO_STAGE_STEPS = (
+    SIGNNET_STEPS[0],
+    ('signnet_pretrain', 'Learn the Mapillary windows', 40),
+    ('signnet', 'Train on our drives', 45),
+    SIGNNET_STEPS[2],
+)
 # The old cutter, scripts/run_detector_sizes.sh with one size: a detector trained as the cutter, then measured on test
 # and validation (the jobs of the history before SignNet; chosen by the log, see is_signnet).
 CUTTER_STEPS = (
@@ -171,7 +179,7 @@ MARKERS = (
     (re.compile(r'^== [def]\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
-EPOCH = re.compile(r'^(signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
+EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
                    r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|'
@@ -181,10 +189,11 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
 # the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types,
 # val_road_score, its own measure that chooses its best epoch (road_type_net.road_score), and val_junction_f1, its
-# junction head; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them;
-# experiment B val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case).
-METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_sign_accuracy|val_rejection|'
-                    r'val_balanced_accuracy|val_macro_f1|val_false_per_frame|val_road_score|val_junction_f1|'
+# junction head; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them, and
+# in its Mapillary stage val_speed_recall, the speed signs found, which chooses that stage's best epoch; experiment B
+# val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case).
+METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
+                    r'val_rejection|val_balanced_accuracy|val_macro_f1|val_false_per_frame|val_road_score|val_junction_f1|'
                     r'val_ownership_macro_f1|val_other_road_recall) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
@@ -266,16 +275,16 @@ def again_detail(preparation: dict) -> str:
 def progress(action: str, state: str, text: str, preparation: dict | None = None) -> dict:
     """{'steps': [{'key', 'label', 'state': done|current|todo|failed}], 'percent': 0-100 or None,
     'detail': str, 'last_line': str, 'step_progress': how far the current step is from the log alone (see
-    _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet': {'epochs': total, ('stopped_early':
-    epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',) ('val_recall',)
-    ('val_false_per_frame',) ('val_sign_accuracy', 'val_rejection', 'val_balanced_accuracy',) ('val_macro_f1',
-    'val_road_score', 'val_junction_f1',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_selection_score',)
-    'seconds'}]}}} (also the road type's networks and experiment B's variants, by the names of their epoch lines) for an
+    _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet'|'signnet_pretrain': {'epochs': total,
+    ('stopped_early': epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',)
+    ('val_recall',) ('val_false_per_frame', 'val_speed_recall',) ('val_sign_accuracy', 'val_rejection',
+    'val_balanced_accuracy',) ('val_macro_f1', 'val_road_score', 'val_junction_f1',) ('val_ownership_macro_f1',
+    'val_other_road_recall', 'val_selection_score',) 'seconds'}]}}} (also the road type's networks and experiment B's variants, by the names of their epoch lines) for an
     action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
     unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,
     '' when unknown) for a failed job."""
-    two_stages = action == 'train_classifier' and PRETRAINING.search(text) is not None
     signnet = is_signnet(action, text)
+    two_stages = (action == 'train_classifier' or signnet) and PRETRAINING.search(text) is not None
     steps = steps_of(action, two_stages, signnet)
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
@@ -365,6 +374,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     # Step 4 of two stages is the pretraining until the script starts the second ("-- the second stage").
     if two_stages and current == 'classifier' and not SECOND_STAGE.search(text):
         current = 'pretrain'
+    # The same for the cutter: step 3/3 is its Mapillary stage until "-- the second stage".
+    if two_stages and current == 'signnet' and not SECOND_STAGE.search(text):
+        current = 'signnet_pretrain'
     if current in keys:
         done.update(keys[:keys.index(current)])
     if complete:
@@ -430,8 +442,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         result['chain_runs'] = {'done': min(runs_done, runs_total), 'total': runs_total}
         result['two_stages'] = two_stages
     if action == 'train_cutter':
-        # Which steps the log has (SIGNNET_STEPS, or the old detector's CUTTER_STEPS), for with_step_progress.
+        # Which steps the log has (SIGNNET_STEPS, in two stages SIGNNET_TWO_STAGE_STEPS, or the old detector's
+        # CUTTER_STEPS), for with_step_progress.
         result['signnet'] = signnet
+        result['two_stages'] = two_stages
     preparing = action in ('prepare', 'prepare_again') and preparation is not None and state == 'running'
     if preparing:
         # Its drives are listed with their phase under the card: the raw line of the helper says it again.
@@ -474,7 +488,7 @@ CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )
 PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
 # A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
-NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet'}
+NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary'}
 
 
 def is_signnet(action: str, text: str) -> bool:
@@ -487,7 +501,7 @@ def steps_of(action: str, two_stages: bool = False, signnet: bool = False) -> tu
     """The steps of an action: a classifier in two stages has its pretraining as a step of its own; the cutter is a
     SignNet, or the old detector."""
     if action == 'train_cutter' and signnet:
-        return SIGNNET_STEPS
+        return SIGNNET_TWO_STAGE_STEPS if two_stages else SIGNNET_STEPS
     return CLASSIFIER_TWO_STAGE_STEPS if action == 'train_classifier' and two_stages else STEPS.get(action, ())
 
 # The tasks that report their own progress (nnslr_tools.progress) and the step they belong to.

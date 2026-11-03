@@ -14,7 +14,7 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
 export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
-  'networks_prepare', 'road_types', 'mapillary_locations'];
+  'networks_prepare', 'road_types', 'mapillary_locations', 'mapillary_windows'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews, the road types). */
 /** The proposer as the Prepare tab names it. */
@@ -30,10 +30,24 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'train_cutter') {
     const what = options?.families === 'speed' ? 'the speed signs only' : 'the speed signs and the other signs';
+    const where = options?.region && options.region !== 'all' ? ' taken in ' + regionWords(options.region) : '';
+    const share = options?.share && options.share !== '100' ? options.share + ' % of the' : 'the';
+    const time = options?.mapillary === 'on' ? 'about two hours' : options?.mapillary === 'pretrain' ? 'about three hours'
+      : 'about 80 minutes';
+    const mapillary = options?.mapillary === 'on' ? ' The speed signs of ' + share + ' Mapillary windows' + where
+      + ' join its training frames, at most as many as ours (Settings), not its measures.'
+      : options?.mapillary === 'pretrain' ? ' It first learns on ' + share + ' Mapillary windows' + where
+        + ' alone, then on our drives from there: two trainings, not its measures.' : '';
     return {title: 'Train the cutter?', action: 'Start training',
       text: 'Trains SignNet, the cutter the comma runs, then measures it on validation and test. It finds ' + what
-        + ' in the 896 × 288 band at the top of the frame: about 80 minutes on the GPU. Its run is a new one, named by '
-        + 'the time it starts.'};
+        + ' in the 896 × 288 band at the top of the frame: ' + time + ' on the GPU. Its run is a new one, named by '
+        + 'the time it starts.' + mapillary};
+  }
+  if (name === 'mapillary_windows') {
+    return {title: 'Cut the Mapillary windows?', action: 'Cut',
+      text: 'Reads the Mapillary photos on the TrueNAS share and cuts each speed sign into a window the size of the car’s '
+        + 'band, for the cutter’s Mapillary switch. The CPU for a while, no GPU and no internet; the windows already cut '
+        + 'are kept.'};
   }
   if (name === 'train_road_type') {
     const signs = options?.classifier && options.classifier !== 'car'
@@ -135,6 +149,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   networks_publish: 'What Hugging Face already received may stay there.',
   road_types: 'The drives done stay; the next run does them all again in a minute.',
   mapillary_locations: 'The photos already located stay: locating again carries on from there.',
+  mapillary_windows: 'The windows already cut stay: cutting again carries on from there.',
   send_to_car: 'What was already published or pushed stays. Publishing again carries on: what is in place is skipped, '
     + 'and a build not finished runs then.',
   try_on_comma: 'Stopped before the copy, nothing on the comma changed. Stopped during the copy or the wait, the networks '

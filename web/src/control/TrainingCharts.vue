@@ -6,7 +6,8 @@
 // its pretraining on the Mapillary signs alone (accuracy on our validation signs, and loss); for SignNet (the cutter the
 // comma runs), the validation signs found in its 5 best boxes of each frame at any score (the car also drops the boxes
 // below 0.3: those numbers come once it is measured, on the run's SignNet card), its false boxes per frame among those
-// 5, and its train loss; for each network of the road type, its road score on validation (which chooses its best epoch),
+// 5, and its train loss (before it, in two stages, its stage on the Mapillary windows alone: the speed signs of our
+// validation it finds, which choose that stage's best epoch); for each network of the road type, its road score on validation (which chooses its best epoch),
 // macro F1 and accuracy, and its train loss; for applicability (experiment B), its variants in the same two charts, one
 // line each: the mean of its reading accuracy and ownership macro F1 (which chooses its best epoch), and its validation
 // loss. Data: progress.curves of the job, one point per finished epoch.
@@ -22,17 +23,18 @@ type Net = CurveNet;
 /** The road type's networks (scripts/run_road_type.sh) and applicability's variants (experiment B), in the order they train. */
 const ROAD_NETS: RoadNet[] = ['road_type_gru', 'road_type_gru_nosign', 'road_type_gru_nomotion', 'road_type_frame'];
 const DECIDER_NETS: DeciderNet[] = ['experiment_b_crop', 'experiment_b_crop_geom', 'experiment_b_full'];
-const ALL_NETS: Net[] = ['signnet', 'detector', 'reader', 'pretrain', 'classifier', ...ROAD_NETS, ...DECIDER_NETS];
-const NET_NAME: Record<Net, string> = {signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
+const ALL_NETS: Net[] = ['signnet_pretrain', 'signnet', 'detector', 'reader', 'pretrain', 'classifier', ...ROAD_NETS, ...DECIDER_NETS];
+const NET_NAME: Record<Net, string> = {signnet_pretrain: 'SignNet on Mapillary', signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
   classifier: 'Classifier', road_type_gru: 'With memory, sign and motion', road_type_gru_nosign: 'With memory, no sign',
   road_type_gru_nomotion: 'With memory, no motion', road_type_frame: 'Without memory', experiment_b_crop: 'The crop alone',
   experiment_b_crop_geom: 'Crop, position and speed', experiment_b_full: 'Crop, position and the scene'};
 /** A network in a sentence ("the classifier ends in ..."). */
-const NET_WORD: Record<Net, string> = {signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
+const NET_WORD: Record<Net, string> = {signnet_pretrain: 'Mapillary stage', signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
   classifier: 'classifier', road_type_gru: 'network with memory, sign and motion', road_type_gru_nosign: 'network with memory, no sign',
   road_type_gru_nomotion: 'network with memory, no motion', road_type_frame: 'network without memory',
   experiment_b_crop: 'variant with the crop alone', experiment_b_crop_geom: 'variant with crop, position and speed',
   experiment_b_full: 'variant with crop, position and the scene'};
+const isSignnet = (net: Net): boolean => net === 'signnet' || net === 'signnet_pretrain';
 const isRoad = (net: Net): net is RoadNet => (ROAD_NETS as Net[]).includes(net);
 const isDecider = (net: Net): net is DeciderNet => (DECIDER_NETS as Net[]).includes(net);
 const TRAIN = 'var(--c-train)';
@@ -50,6 +52,7 @@ const reader = computed(() => curves.value.reader ?? null);
 const classifier = computed(() => curves.value.classifier ?? null);
 const pretrain = computed(() => curves.value.pretrain ?? null);
 const signnet = computed(() => curves.value.signnet ?? null);
+const signnetPretrain = computed(() => curves.value.signnet_pretrain ?? null);
 const hasPoints = (curve: TrainingCurve | null | undefined): curve is TrainingCurve => curve !== null && curve !== undefined
   && curve.points.length > 0;
 /** The networks shown, in the order they train. */
@@ -113,6 +116,14 @@ const detectorBestRecall = computed(() => shows('detector') && detectorRecall.va
  * it keeps). */
 const signnetBest = computed(() => shows('signnet') && hasPoints(signnet.value) ? best(signnet.value, (point) => point.val_recall, true) : null);
 const signnetLowest = computed(() => hasPoints(signnet.value) ? best(signnet.value, (point) => point.train_loss, false) : null);
+/** Its first stage on the Mapillary windows alone (Mapillary, then ours): the speed signs of our validation it finds in
+ * its 5 best boxes choose that stage's best epoch, the weights the second one starts from. */
+const pretrainSpeed = computed(() => hasPoints(signnetPretrain.value)
+  && signnetPretrain.value.points.some((point) => point.val_speed_recall !== undefined));
+const signnetPretrainBest = computed(() => shows('signnet_pretrain') && hasPoints(signnetPretrain.value)
+  ? best(signnetPretrain.value, (point) => pretrainSpeed.value ? point.val_speed_recall : point.val_recall, true) : null);
+const signnetPretrainLowest = computed(() => hasPoints(signnetPretrain.value)
+  ? best(signnetPretrain.value, (point) => point.train_loss, false) : null);
 const signnetFalse = computed(() => hasPoints(signnet.value) && signnet.value.points.some((point) => point.val_false_per_frame !== undefined));
 const readerBestLoss = computed(() => hasPoints(reader.value) ? best(reader.value, (point) => point.val_loss, false) : null);
 const readerBestAccuracy = computed(() => shows('reader') && hasPoints(reader.value)
@@ -255,6 +266,11 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-note">SignNet on validation, epoch {{ signnetBest.epoch }}<template v-if="signnetBest.val_false_per_frame !== undefined">,
             {{ signnetBest.val_false_per_frame.toFixed(2) }} false boxes per frame</template></span>
         </div>
+        <div v-if="signnetPretrainBest && !signnetBest" class="tile" id="signnet-pretrain-best">
+          <span class="tile-label">{{ pretrainSpeed ? 'Best on our speed signs' : 'Best 5 boxes, any score' }}</span>
+          <span class="tile-value">{{ percent(signnetPretrainBest.value * 100) }}</span>
+          <span class="tile-note">Mapillary stage on validation, epoch {{ signnetPretrainBest.epoch }}: the start of the second stage</span>
+        </div>
         <div v-if="detectorBestRecall" class="tile" id="detector-best-recall">
           <span class="tile-label">Best validation recall</span>
           <span class="tile-value">{{ percent(detectorBestRecall.value * 100) }}</span>
@@ -302,6 +318,26 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-value">{{ elapsedText(perEpoch * 1000) }}</span>
           <span class="tile-note">{{ left || ((current === null ? '' : NET_WORD[current]) + ', mean of the last epochs') }}</span>
         </div>
+      </div>
+
+      <div v-if="shows('signnet_pretrain')" class="net" id="signnet-pretrain-curves">
+        <h3>{{ NET_NAME.signnet_pretrain }}<span>the first stage, on the Mapillary windows alone · on our validation, found in its 5
+          best boxes of each frame, higher is better, and loss</span></h3>
+        <div v-if="hasPoints(signnetPretrain)" class="net-charts">
+          <LineChart title="Mapillary stage on validation" :top="100" :format="percentAxis" :epochs="span(signnetPretrain)"
+                     :series="[...(pretrainSpeed ? [{key: 'speed', label: 'speed signs', color: VAL,
+                       values: column(signnetPretrain, (point) => point.val_speed_recall, 100)}] : []),
+                       {key: 'val', label: 'every sign', color: pretrainSpeed ? REJECT : VAL, values: column(signnetPretrain, (point) => point.val_recall, 100)}]"
+                     :best="signnetPretrainBest ? {series: pretrainSpeed ? 'speed' : 'val', epoch: signnetPretrainBest.epoch, label: 'best'} : null"
+                     :running="isRunning('signnet_pretrain')"/>
+          <LineChart title="Mapillary stage loss" :epochs="span(signnetPretrain)" :format="lossAxis"
+                     :series="[{key: 'train', label: 'train', color: TRAIN, values: column(signnetPretrain, (point) => point.train_loss)}]"
+                     :best="signnetPretrainLowest ? {series: 'train', epoch: signnetPretrainLowest.epoch, label: 'lowest'} : null"
+                     :running="isRunning('signnet_pretrain')"/>
+        </div>
+        <p v-else class="net-wait">The Mapillary stage’s curves appear at the end of its first epoch.</p>
+        <p v-if="hasPoints(signnetPretrain)" class="note">The windows hold speed signs only, so it keeps the epoch that finds the
+          most speed signs of our validation; the second stage, on our drives, starts from those weights.</p>
       </div>
 
       <div v-if="shows('signnet')" class="net" id="signnet-curves">
@@ -432,28 +468,31 @@ const tables = computed(() => nets.value.flatMap((net) => {
         <div v-for="table in tables" :key="table.net" class="table-wrap">
           <table>
             <caption>{{ NET_NAME[table.net] }}</caption>
-            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="table.net !== 'signnet' && !isRoad(table.net)" class="num">Val loss</th>
-              <template v-if="table.net !== 'detector' && table.net !== 'signnet' && !isRoad(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="!isSignnet(table.net) && !isRoad(table.net)" class="num">Val loss</th>
+              <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
               <template v-if="isRoad(table.net)"><th v-if="table.scored" class="num">Road score</th><th class="num">Macro F1</th>
                 <th class="num">Accuracy</th><th v-if="roadJunction" class="num">Junction F1</th></template>
               <template v-if="isDecider(table.net)"><th class="num">Whose sign</th><th class="num" title="The signs of another road found">Other road</th>
                 <th class="num">Chosen</th></template>
               <th v-if="table.net === 'detector' && detectorRecall" class="num">Val recall</th>
-              <template v-if="table.net === 'signnet'"><th class="num" title="Its 5 best boxes of each frame, at any score">Best 5, any score</th><th v-if="signnetFalse" class="num">False per frame</th></template>
+              <template v-if="isSignnet(table.net)"><th class="num" title="Its 5 best boxes of each frame, at any score">Best 5, any score</th><th
+                v-if="table.net === 'signnet_pretrain' && pretrainSpeed" class="num" title="The speed signs among them">Speed signs</th><th
+                v-if="signnetFalse" class="num">False per frame</th></template>
               <template v-if="table.net === 'classifier' && withRejection"><th class="num">Signs</th><th class="num">Not a sign</th>
                 <th class="num">Balanced</th></template><th class="num">Time</th></tr></thead>
             <tbody>
               <tr v-for="point in table.rows" :key="point.epoch">
                 <td class="num">{{ point.epoch }}</td>
                 <td class="num">{{ cell(point.train_loss, loss) }}</td>
-                <td v-if="table.net !== 'signnet' && !isRoad(table.net)" class="num">{{ cell(point.val_loss, loss) }}</td>
-                <template v-if="table.net !== 'detector' && table.net !== 'signnet' && !isRoad(table.net)">
+                <td v-if="!isSignnet(table.net) && !isRoad(table.net)" class="num">{{ cell(point.val_loss, loss) }}</td>
+                <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net)">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
                 </template>
                 <td v-if="table.net === 'detector' && detectorRecall" class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
-                <template v-if="table.net === 'signnet'">
+                <template v-if="isSignnet(table.net)">
                   <td class="num">{{ cell(point.val_recall, (value) => percent(value * 100)) }}</td>
+                  <td v-if="table.net === 'signnet_pretrain' && pretrainSpeed" class="num">{{ cell(point.val_speed_recall, (value) => percent(value * 100)) }}</td>
                   <td v-if="signnetFalse" class="num">{{ cell(point.val_false_per_frame, (value) => value.toFixed(2)) }}</td>
                 </template>
                 <template v-if="isRoad(table.net)">
