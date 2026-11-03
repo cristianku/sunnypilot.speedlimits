@@ -9,7 +9,7 @@ import {toast} from '../composables/toast';
 
 interface CarSetting {
   key: string; label: string; help: string; default: number; min: number; max: number; step: number; unit: string;
-  group: 'signs' | 'road'; value: number; on_car: number | null;
+  group: 'signs' | 'road' | 'distance'; value: number; on_car: number | null;
 }
 interface CarSettingsPayload {settings: CarSetting[]; by: string | null; at: string | null; sent: boolean}
 
@@ -19,7 +19,7 @@ const error = ref('');
 const saving = ref(false);
 /** The values typed, as text, by key. */
 const draft = reactive<Record<string, string | number>>({});
-const GROUPS = [['signs', 'Signs'], ['road', 'Scene']] as const;
+const GROUPS = [['signs', 'Signs'], ['road', 'Scene'], ['distance', 'Sign distance']] as const;
 
 /** A probability (unit "sure") is shown and typed in %, the rest as they are. */
 const percent = (setting: CarSetting): boolean => setting.unit === 'sure';
