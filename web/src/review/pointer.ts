@@ -3,7 +3,7 @@
 // pointer is the SVG's own math.
 import {nextTick} from 'vue';
 import {datasetOf} from './dom';
-import {addManualBox, changed} from './edits';
+import {addManualBox, changed, markPlacedByHand} from './edits';
 import {currentRow, selectedDetection} from './frames';
 import {revealEditor} from './scroll';
 import {report, state} from './store';
@@ -135,7 +135,10 @@ export function finishDrag(event: PointerEvent, surface: Surface): void {
   if (drag.moved) {
     // A carried box moved (or resized) onto its sign: its position is checked.
     const d = selectedDetection();
-    if (d) delete d.check_position;
+    if (d) {
+      delete d.check_position;
+      markPlacedByHand(d, true);
+    }
     changed(row);
   }
 }

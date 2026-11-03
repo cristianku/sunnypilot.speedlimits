@@ -1,6 +1,6 @@
 // Changes to the frame on screen: type, value, road and details of the selected box, boxes added (drawn or
 // taken from the second reading) and removed, drawing mode and second reading on or off.
-import {nextTick} from 'vue';
+import {nextTick, toRaw} from 'vue';
 import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue} from './catalog';
 import {writeLocal} from './dom';
 import {currentRow, selectedDetection, workOf} from './frames';
@@ -20,6 +20,19 @@ export function changed(row: FrameRow): void {
   state.withdrawArmed = null;
   if (state.notice && state.notice.key === row.frame_key) state.notice = null;
   store();
+}
+
+// The boxes the reviewer moved or resized by hand since a fit last moved them, in this page only: C (every box of
+// the frame) leaves them where they are; the Fit box of their editor still fits them.
+const placedByHand = new WeakSet<Detection>();
+
+export function markPlacedByHand(detection: Detection, placed: boolean): void {
+  if (placed) placedByHand.add(toRaw(detection));
+  else placedByHand.delete(toRaw(detection));
+}
+
+export function isPlacedByHand(detection: Detection): boolean {
+  return placedByHand.has(toRaw(detection));
 }
 
 /** Applies a change to the selected box, if there is one, and marks the frame changed. */

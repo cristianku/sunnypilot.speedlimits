@@ -12,7 +12,7 @@ import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types'
 import type {Box, Detection, FrameRow} from './types';
 import {askConfirm} from '../composables/confirm';
 import {clone} from './dom';
-import {changed} from './edits';
+import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, startingDetections, workOf} from './frames';
 import {call} from './server';
 import {report, rowOf, state} from './store';
@@ -162,6 +162,7 @@ function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box |
   detection.bbox_xyxy = box;
   // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
   delete detection.check_position;
+  markPlacedByHand(detection, false);
   changed(row);
   return 'fitted';
 }
@@ -233,20 +234,28 @@ export function canFitLocally(): boolean {
   return Boolean(report.apiBase) && state.server !== 'stale';
 }
 
-/** Fit box (C): the box the reviewer picked (``selected``: the one selected, as the button of its editor), else every
- * box of the frame, fitted to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all in one request
- * and in a fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with Fit with AI; a
- * box with no better box found (no sign there, or already right), moved less than a pixel, or moved or removed
- * meanwhile, is left as it is. */
+/** Fit box: C fits every box of the frame (after A, after Apply, a box just drawn…) but those the reviewer moved or
+ * resized by hand, whatever box is selected; ``selected`` (the button of a box's editor) fits only that box, by hand
+ * or not. Each to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all in one request and in a
+ * fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with Fit with AI; a box with
+ * no better box found (no sign there, or already right), moved less than a pixel, or moved or removed meanwhile, is
+ * left as it is. */
 export async function fitLocal(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
   if (!row || !apiBase || !canFitLocally() || localFitting.key !== null || refuseChange()) return;
   const boxes = workOf(row).detections;
-  const chosen = selected || state.selectedByUser ? boxes[state.selected] : undefined;
-  const targets = chosen ? [chosen] : [...boxes];
-  if (targets.length === 0) return;
+  const chosen = selected ? boxes[state.selected] : undefined;
+  if (selected && !chosen) return;
+  const targets = chosen ? [chosen] : boxes.filter((detection) => !isPlacedByHand(detection));
+  const byHand = chosen ? 0 : boxes.length - targets.length;
   const key = row.frame_key;
+  if (targets.length === 0) {
+    if (byHand) state.notice = {key, error: false, warn: true,
+      text: (byHand === 1 ? 'The box was' : 'All ' + byHand + ' boxes were') + ' placed by hand: kept as '
+        + (byHand === 1 ? 'it is' : 'they are') + '. Fit box in its editor fits one anyway.'};
+    return;
+  }
   localFitting.key = key;
   localFitting.index = chosen ? state.selected : -1;
   const sent = targets.map((detection) => ({detection, box: JSON.stringify(detection.bbox_xyxy)}));
@@ -258,10 +267,11 @@ export async function fitLocal(selected = false): Promise<void> {
     const count = countFits(sent.map(({detection, box}, number) =>
       settleFit(row, detection, box, answer.boxes[number] ?? null, 1)));
     const ms = ' · ' + answer.ms + ' ms.';
-    const text = targets.length > 1
+    const hand = byHand ? ', ' + byHand + ' placed by hand left as ' + (byHand === 1 ? 'it is' : 'they are') : '';
+    const text = targets.length > 1 || byHand
       ? count.fitted + ' of ' + targets.length + ' boxes fitted'
         + (count.same ? ', ' + count.same + ' kept as ' + (count.same === 1 ? 'it was' : 'they were') : '')
-        + meanwhile(count) + ms
+        + hand + meanwhile(count) + ms
       : count.fitted ? 'Box fitted' + ms : count.same ? 'No better box found: kept as it was' + ms
         : count.changed ? 'The box changed meanwhile: left as it is.' : 'The box was removed meanwhile.';
     // Only a box the fit could not reach is worth a warning; one already right is not.
