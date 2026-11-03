@@ -150,6 +150,7 @@ input::placeholder { color: var(--placeholder); }
 }
 #scene { display: block; width: 100%; height: auto; max-height: 74vh; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #scene.drawing { cursor: crosshair; touch-action: none; }
+.photo-grip { display: none; }
 #scene.dragging, #zoom.dragging { touch-action: none; }
 .box { fill: transparent; stroke-width: 2.25; vector-effect: non-scaling-stroke; cursor: pointer; }
 .box.proposal, .box-under.proposal { stroke-dasharray: 8 5; }
@@ -604,32 +605,40 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   #draw { min-width: 7.5em; }
 }
 @media (min-width: 981px) and (max-width: 1680px) {
-  /* The frame data get their own line (up to 1680px the bar's row has no room for them); the height is the same on
-     every frame. */
-  .stage-bar { flex-wrap: wrap; row-gap: 8px; }
-  .stage-bar .data { order: 5; flex-basis: 100%; }
-  #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 230px)); }
   /* Two even rows of four: no label left alone on a second line. */
   .legend { display: grid; grid-template-columns: repeat(4, max-content); gap: 4px 18px; font-size: 11.5px; }
 }
-@media (min-width: 1681px) {
-  .stage-bar:has(> .stage-helpers) { flex-wrap: wrap; row-gap: 8px; }
-  .stage-bar:has(> .stage-helpers) .data { order: 5; flex-basis: 100%; }
-  /* With the second-reading switch the row is full at any width: the frame data get their own line there too. */
-  .stage-bar:has(> #hintToggle:not([hidden])) { flex-wrap: wrap; row-gap: 8px; }
-  .stage-bar:has(> #hintToggle:not([hidden])) .data { order: 5; flex-basis: 100%; }
-  body:has(#hintToggle:not([hidden])) #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 230px)); }
-}
 @media (min-width: 981px) {
-  /* The second-reading switch starts the frame data's line (a line break before it), instead of a line of its own. */
-  .stage-bar:has(> #hintToggle:not([hidden]))::before { content: ""; order: 3; flex-basis: 100%; height: 0; }
+  /* The bar in two rows, the same height on every frame: the frame, its filters and the helpers (Car networks, Ask AI)
+     on the first; its state, the second-reading switch, the frame data and + Box / Delete on the second. One row only
+     on a wide window with none of them. */
+  #statePill, #hintToggle { order: 4; }
+  .stage-bar .data { order: 5; flex: 1 1 0; }
+  .stage-tools { order: 6; }
+  .stage-helpers + .stage-tools { margin-left: auto; }
+}
+@media (min-width: 981px) and (max-width: 1680px) {
+  .stage-bar { flex-wrap: wrap; row-gap: 8px; }
+  .stage-bar::before { content: ""; order: 3; flex-basis: 100%; height: 0; }
   /* The empty line of the break adds a second row gap: taken back. */
-  .stage-bar:has(> #hintToggle:not([hidden])) #hintToggle { order: 4; margin-top: -8px; }
-  .stage-bar:has(> #hintToggle:not([hidden])) .data { flex: 1 1 0; margin-top: -8px; }
+  .stage-bar > :is(#statePill, #hintToggle, .data, .stage-tools) { margin-top: -8px; }
+  /* Their keys are in their titles and under "Keys": the first row keeps room for the filters. */
+  .stage-helpers .btn .keycap { display: none; }
+}
+@media (min-width: 1681px) {
+  .stage-bar:has(> .stage-helpers), .stage-bar:has(> #hintToggle:not([hidden])) { flex-wrap: wrap; row-gap: 8px; }
+  .stage-bar:has(> .stage-helpers)::before, .stage-bar:has(> #hintToggle:not([hidden]))::before {
+    content: ""; order: 3; flex-basis: 100%; height: 0;
+  }
+  :is(.stage-bar:has(> .stage-helpers), .stage-bar:has(> #hintToggle:not([hidden]))) > :is(#statePill, #hintToggle, .data, .stage-tools) {
+    margin-top: -8px;
+  }
 }
 @media (min-width: 981px) and (max-width: 1240px) {
   :root { --inspector: 352px; }
   .stage-col { padding: 16px 20px 32px; }
+  .stage-bar { column-gap: 8px; }
+  .stage-helpers .btn { padding-inline: 10px; }
   .filters button { padding: 4px 8px; }
 }
 
@@ -765,8 +774,25 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   * { transition: none !important; animation: none !important; }
 }
 @media (min-width: 981px) {
-  /* Under the photo, room for its bar and a few rows of the timeline on a low window too (after the rules above). */
-  #scene, body:has(#hintToggle:not([hidden])) #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 330px)); }
+  /* The photo's height: the one chosen with its grip (PhotoGrip.vue, --photo-max), or room for its bar and a few
+     rows of the timeline on a low window too; never more than the window with 180px for the bar (after the rules
+     above). Its frame hugs it, centred: no empty bands beside a lower photo. */
+  .stage-col {
+    --photo-h: min(var(--photo-max, min(72vh, calc(100vh - var(--topbar-h, 57px) - 330px))), calc(100vh - var(--topbar-h, 57px) - 180px));
+  }
+  #scene { max-height: var(--photo-h); }
+  .stage-col > .stage { width: 100%; max-width: calc(var(--photo-h) * var(--photo-aspect, 1.6) + 2px); align-self: center; }
+  /* The grip, in the gap above the bar: dragged up the photo gets lower and the timeline gets the room. */
+  .photo-grip {
+    display: flex; justify-content: center; align-items: center; flex-shrink: 0; height: 14px; margin-top: 1px;
+    cursor: row-resize; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: 7px;
+  }
+  .photo-grip::before { content: ""; width: 44px; height: 5px; border-radius: 3px; background: var(--line-strong); transition: width 0.15s, background-color 0.15s; }
+  .photo-grip:hover::before, .photo-grip.dragging::before, .photo-grip:focus-visible::before { width: 72px; background: var(--accent); }
+  .photo-grip:focus { outline: none; }
+  .photo-grip:focus-visible { box-shadow: 0 0 0 2px var(--accent-soft); }
+  .photo-grip + .stage-bar { margin-top: 0; }
+  body:has(.photo-grip.dragging) { cursor: row-resize; user-select: none; -webkit-user-select: none; }
 }
 </style>
 </head>

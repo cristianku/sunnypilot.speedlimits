@@ -16,6 +16,7 @@ import CarSection from './CarSection.vue';
 import {ensureCurrentFrame, row, status, work} from './current';
 import {unsavedKeys, workOf} from './frames';
 import Inspector from './Inspector.vue';
+import {photoHeight} from './photo-size';
 import MobileBar from './MobileBar.vue';
 import {pickStartFrame, startAtWork} from './navigation';
 import {scrollTimelineToCurrent} from './scroll';
@@ -41,6 +42,11 @@ useKeyboard();
 useCarReading();
 // The drive at work has none until its first proposals come (review/busy.ts adds them).
 const hasFrames = computed(() => report.rows.length > 0);
+// On a computer the photo's frame hugs it at the height chosen with its grip (review.html, PhotoGrip.vue).
+const photoStyle = computed(() => ({
+  '--photo-aspect': row.value ? String(row.value.width / (row.value.height || 1)) : undefined,
+  '--photo-max': photoHeight.value === null ? undefined : photoHeight.value + 'px',
+}));
 
 // State for whoever drives the page (an agent with Playwright): attributes only, the layout does not change.
 watchEffect(() => {
@@ -103,7 +109,7 @@ onBeforeUnmount(() => {
     </div>
     <div id="workspace" class="workspace" :class="{'tl-open': state.timelineOpen}" :hidden="!hasFrames">
       <template v-if="row && work">
-        <div class="stage-col">
+        <div class="stage-col" :style="photoStyle">
           <CarMoment :row="row" :work="work"/>
           <Stage :row="row" :work="work"/>
           <StageBar :row="row"/>

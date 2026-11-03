@@ -2,7 +2,7 @@
 // The photo and what is drawn on it: the boxes with their dark under-stroke and labels, the corner handles of
 // the selected box, the boxes of the second reading, the AI suggestion not applied yet and what the car's networks
 // read (car.ts; neither takes the pointer) and the box being drawn. The frame's country and what the comma had at that moment are in the bar above
-// it (CarMoment.vue).
+// it (CarMoment.vue). Under it, the grip that makes it lower on a computer (PhotoGrip.vue).
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
@@ -10,6 +10,7 @@ import {carAskOf, carDetection} from './car';
 import {coarsePointer} from './dom';
 import {drawAi, drawCar, drawStage, sceneScale} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
+import PhotoGrip from './PhotoGrip.vue';
 import {hintsOf, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
 import {useScreenSize} from './use-layout';
@@ -109,4 +110,5 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
     </svg>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
   </div>
+  <PhotoGrip :row="row" :size="size"/>
 </template>
