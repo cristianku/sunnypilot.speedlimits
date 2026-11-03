@@ -297,7 +297,9 @@ This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 
 - SignNet runs right after a `modelV2` (the GPU is shared with the driving model at the same KGSL level);
   the process runs at niceness 10.
 - Shown by the sunnylink toggle Cruise › Speed Limits › Show Vision Speed Limit (`SpeedLimitVisionDisplay`), the
-  round sign at the top right of the mici driving screen; used for the speed only with Speed Limit Source › Map Data +
+  fuchsia square on the right of the mici driving screen, right above the final-limit square in the bottom right
+  corner (3 Nov 2026; the final square alone reads the map, showing the distance to the map's next limit in place of
+  MAP while it is the map's); used for the speed only with Speed Limit Source › Map Data +
   Vision or, since 1 Nov 2026, Vision Only (`SpeedLimitPolicy` 6: the network's limit alone, no limit without it).
   speedvisiond runs when any of them is on.
 - Known limits: no 120 km/h class, some 40 and 50 missed by the classifier on the test route, and no decider, so a
@@ -307,7 +309,8 @@ This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 
   alert (the PSA has no button to confirm with); the set speed stays the driver's maximum. The sunnylink toggle
   Set Speed Only Engages (Alpha) (`SpeedLimitSetSpeedEngageOnly`, only with Speed Limit Mode Assist) lets the limit
   replace the set speed, above it too, but only while the big driving model runs (`modelV2.big`, the external GPU);
-  the screen then shows a green AUTO square with an eye above the final-limit square and no longer the set speed.
+  the screen then shows a green AUTO square with an eye left of the vision square (alone in the bottom right corner
+  without the speed-limit squares) and no longer the set speed.
   The rules are listed in the README, "The rules on the car".
 
 Older runtime branch:
