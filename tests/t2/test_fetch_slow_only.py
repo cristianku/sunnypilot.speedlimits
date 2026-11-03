@@ -99,3 +99,22 @@ def test_a_fetch_stopped_halfway_finishes_the_start_and_end_of_a_new_drive(comma
                              capture_output=True, timeout=60)
     assert process.returncode == 0, process.stdout + process.stderr
     assert sorted(segment for segment, slow in fetched(data, NEW).items() if slow) == [0, 1, 4, 6, 7]
+
+
+def test_a_second_run_reads_no_rlog_and_copies_nothing_again(comma):
+    repo, data, videos, env = comma
+    calls = videos.parent / "calls"
+    script(videos.parent / "log_reader", f'#!/bin/bash\necho "$2" >> {calls}\n' + FAKE_LOG_READER.split("\n", 1)[1])
+    rsync_log = videos.parent / "rsync_calls"
+    script(videos.parent / "bin/rsync", f'#!/bin/bash\necho "$@" >> {rsync_log}\n' + FAKE_RSYNC.split("\n", 1)[1])
+    for _ in range(2):
+        calls.unlink(missing_ok=True)
+        rsync_log.unlink(missing_ok=True)
+        process = subprocess.run(["bash", str(repo / "helpers/fetch_comma_segments.sh")], env=env, text=True,
+                                 capture_output=True, timeout=60)
+        assert process.returncode == 0, process.stdout + process.stderr
+    # The gear of every rlog is kept next to it, the files already here are not asked again.
+    assert "reverse" not in calls.read_text()
+    assert ".hevc" not in rsync_log.read_text()
+    assert "already here" in process.stdout
+    assert (videos / f"{NEW}--4/gear").read_text().startswith("reverse ")
