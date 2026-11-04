@@ -31,7 +31,7 @@ ENUMS = {
     "sign_family": {"maximum_speed", "cancellation", "zone", "variable_display", "other_sign", "not_a_sign", "unreadable", "road_marking"},
     "value_state": {"read", "unreadable", "unknown", "not_applicable"},
     "applicability": {"own_road", "other_road", "unresolved"},
-    "supplementary_panel": {"none", "present", "unresolved", "unknown"},
+    "supplementary_panel": {"none", "present", "time", "unresolved", "unknown"},
     "visibility": {"clear", "partial", "poor", "unknown"},
     "occlusion": {"none", "partial", "heavy", "unknown"},
     "review_state": {"pending", "accepted", "corrected", "rejected"},

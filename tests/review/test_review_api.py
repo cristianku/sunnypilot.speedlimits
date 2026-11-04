@@ -72,6 +72,16 @@ def test_rest_service_preserves_original_mph_number_with_legacy_alias(tmp_path):
     assert service.progress(ROUTE)['confirmed_with_doubts']['unknown_value']==[]
 
 
+def test_rest_service_saves_a_panel_of_hours(tmp_path):
+    from nnslr_tools.review_service import ReviewService
+    make_report(tmp_path)
+    service=ReviewService(tmp_path,ReviewStore(db_path(tmp_path)))
+    result=service.save_review(ROUTE,'0/0',ai_body(detections=[{
+        'detection_id':'0/0/0','value_kph':30,'applicability':'own_road','supplementary_panel':'time'}]),
+        client='unit-test',channel='rest')
+    assert result['review']['detections'][0]['supplementary_panel']=='time'
+
+
 def test_api_needs_the_token_in_a_header_even_on_loopback(api):
     server, root, rows = api
     assert server.app.token is None and not server.app.require_token

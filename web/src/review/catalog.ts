@@ -116,6 +116,13 @@ export const ROADS: readonly {id: string; label: string}[] = [
   {id: 'unresolved', label: 'Unclear'},
 ];
 
+// The panel under the sign, in one tap. Hours: a limit valid only at some hours, such as the German 22-6.
+export const PANELS: readonly {id: string; label: string}[] = [
+  {id: 'none', label: 'None'},
+  {id: 'time', label: 'Hours'},
+  {id: 'present', label: 'Other'},
+];
+
 // The selects and the text field of "Sign details" (their ids are the field names).
 export const SELECT_FIELDS = ['visibility', 'occlusion', 'supplementary_panel'] as const;
 export const BOOLEAN_FIELDS = ['temporary', 'variable_display'] as const;

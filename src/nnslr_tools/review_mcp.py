@@ -256,7 +256,7 @@ def build_server(service, *, client: str, read_only: bool = False):
         applicability: Literal['own_road', 'other_road', 'unresolved']
         visibility: Literal['unknown', 'clear', 'partial', 'poor']
         occlusion: Literal['unknown', 'none', 'partial', 'heavy']
-        supplementary_panel: Literal['unknown', 'none', 'present', 'unresolved']
+        supplementary_panel: Literal['unknown', 'none', 'present', 'time', 'unresolved']
         temporary: bool | None
         variable_display: bool | None
         sign_type: Literal[SIGN_TYPES + NOT_A_SIGN_TYPES] | None

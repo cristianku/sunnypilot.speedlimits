@@ -330,6 +330,7 @@
       "enum": [
         "none",
         "present",
+        "time",
         "unknown",
         "unresolved"
       ]

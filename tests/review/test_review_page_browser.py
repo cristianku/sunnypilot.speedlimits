@@ -85,6 +85,12 @@ with sync_playwright() as p:
 
     # 0/2 has the same sign twice: the first Confirm asks, the second saves both boxes.
     page.locator('#timeline button[data-key="0/2"]').click()
+    # The panel under the sign in one tap, and a second tap takes it back.
+    hours = page.locator('#panels [data-panel="time"]')
+    hours.click()
+    assert hours.get_attribute('aria-pressed') == 'true' and page.locator('#supplementary_panel').input_value() == 'time'
+    hours.click()
+    assert hours.get_attribute('aria-pressed') == 'false' and page.locator('#supplementary_panel').input_value() == 'unknown'
     page.locator('#reviewer').fill('Tester')
     page.locator('#confirm').click()
     assert data(page, 'lastSaveResult') == 'need-duplicate-check', data(page, 'lastSaveResult')

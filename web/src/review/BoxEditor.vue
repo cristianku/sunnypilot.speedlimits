@@ -2,7 +2,7 @@
 // The editor of the selected box: zoom (its corners and inside move the box too), road, speed signs, other
 // value, type and kinds of other signs, details.
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
-import {BOOLEAN_FIELDS, FAMILIES, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
+import {BOOLEAN_FIELDS, FAMILIES, PANELS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
@@ -52,6 +52,7 @@ const hasValueField = computed(() => props.detection !== null && familyHasValue(
 const noValue = computed(() => hasValueField.value
   && (props.detection?.value_kph === null || props.detection?.value_kph === undefined));
 const road = computed(() => props.detection?.applicability || 'unresolved');
+const panel = computed(() => props.detection?.supplementary_panel ?? 'unknown');
 const variable = computed(() => props.detection?.family === 'variable_display');
 // O X U, G P R on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
@@ -74,7 +75,7 @@ const evidence = computed(() => {
 const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
   visibility: [['unknown', 'To assess'], ['clear', 'Clear'], ['partial', 'Partial'], ['poor', 'Poor']],
   occlusion: [['unknown', 'To assess'], ['none', 'None'], ['partial', 'Partial'], ['heavy', 'Heavy']],
-  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['present', 'Present'],
+  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['time', 'Hours'], ['present', 'Other'],
     ['unresolved', 'Unresolved']],
 };
 const SELECT_LABELS: Record<SelectField, string> = {
@@ -170,6 +171,12 @@ function booleanChanged(key: BooleanField, event: Event): void {
     <div class="quick-row">
       <button type="button" class="chip quick variable" id="variable" :aria-pressed="variable"
               @click="toggleVariable(); releaseFocus($event)">Variable speed limit<kbd>L</kbd></button>
+    </div>
+    <!-- The panel under the sign: the box stays on the disc. A second tap takes the choice back. -->
+    <p class="field-label">Panel below</p>
+    <div class="segmented" id="panels" role="group" aria-label="Panel below the sign">
+      <button v-for="item in PANELS" :key="item.id" type="button" :aria-pressed="panel === item.id" :data-panel="item.id"
+              @click="setField('supplementary_panel', panel === item.id ? 'unknown' : item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
     <div id="valueBlock" class="value-line" :hidden="!hasValueField">
       <label for="value">Other value</label>
