@@ -142,6 +142,8 @@ On each picture you:
 
 An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
+**Data › Speed review** is the other review, for the network that will decide the speed: along a whole drive you say the speed the car should really hold, stretch by stretch, starting from the limit the comma's vision held (confirm, correct, or split it where it should have changed). These labels only collect the target: nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
+
 ### 4. Import the reviews
 
 On the site: **Data › Training dataset**, then **Import reviews**. In a terminal: `helpers/3_train.sh --dataset-only`.

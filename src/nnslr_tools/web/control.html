@@ -1541,6 +1541,52 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
 .dr-episode{fill:var(--todo);opacity:.55}.dr-episode.intervention{fill:var(--accent)}.dr-episode.both{fill:var(--bad)}
 .dr-episode.current{opacity:1}
 @media (max-width:560px){.dr-lanes{--dr-name:62px}.dr-lane-name{font-size:11px}}
+/* Data › Speed review (SpeedReviewTab.vue, SpeedReviewDrive.vue): the drives, then one drive in the player of Drive review
+   with the lane of the speed to hold over the others and the commands at the top of the side. On the lane a stretch nobody
+   looked at is a dashed box, never filled, so a proposal left alone does not look approved; "?" a person could not tell,
+   filled unlike the hatch of what the log does not have. Under 860 px the commands come right under the picture and its
+   Play: one screen to watch a stretch and answer. */
+.sr-drives{display:flex;flex-direction:column;gap:12px}
+.sr-more{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0 0;border-top:1px solid var(--line);
+list-style:none;cursor:pointer;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.sr-more::-webkit-details-marker{display:none}
+.sr-more .data-chev{transition:transform .15s}
+details[open]>.sr-more .data-chev{transform:rotate(90deg)}
+.sr-group>.rt-list{margin-top:2px}
+.sr-bar{height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
+.sr-bar i{display:block;height:100%;border-radius:2px;background:var(--ok)}
+.dr-rate button{padding-left:10px;padding-right:10px}
+.dr-lanes rect.sr-not_examined{fill:transparent;stroke:var(--line-strong);stroke-dasharray:4 3}
+.dr-lanes rect.sr-confirmed{fill:var(--ok-soft)}
+.dr-lanes rect.sr-corrected{fill:var(--accent-soft)}
+.dr-lanes rect.sr-undetermined{fill:var(--surface-3)}
+.dr-lanes rect.sr-current{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:none}
+.dr-run-text.sr-text-not_examined{fill:var(--muted);font-weight:500}
+.sr-known{stroke:var(--rev);stroke-width:2}
+.sr-card{display:flex;flex-direction:column;gap:8px}
+.sr-value{display:flex;align-items:baseline;gap:6px;font-size:14px;color:var(--muted)}
+.sr-value b{font-size:34px;font-weight:700;line-height:1.1;letter-spacing:-.02em;color:var(--fg);font-variant-numeric:tabular-nums}
+.sr-tag{margin-left:auto;align-self:center;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--surface-3);color:var(--fg)}
+.sr-tag-not_examined{background:none;box-shadow:inset 0 0 0 1px var(--line-strong);color:var(--muted)}
+.sr-tag-confirmed{background:var(--ok-soft);color:var(--ok)}
+.sr-tag-corrected{background:var(--accent-soft);color:var(--accent)}
+.sr-yes{width:100%}
+.sr-steps{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.sr-speeds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
+.sr-speeds .btn{padding-left:0;padding-right:0;font-variant-numeric:tabular-nums}
+.sr-speeds .btn[aria-pressed="true"]{background:var(--accent);color:#fff}
+.sr-tools{display:flex;flex-wrap:wrap;gap:6px}
+.sr-note input{box-sizing:border-box;width:100%;min-height:36px;padding:6px 12px;font:inherit;font-size:14px;color:var(--fg);background:var(--surface-2);
+border:1px solid var(--line);border-radius:10px}
+@media (max-width:860px){
+  .sr-view .dr-main{display:flex;flex-direction:column;align-items:stretch}
+  .sr-view .dr-side,.sr-view .dr-time{display:contents}
+  .sr-view .dr-stage{order:1}.sr-view .rt-controls{order:2}.sr-view .sr-card{order:3}.sr-view .dr-time>:not(.rt-controls){order:4}
+  .sr-view .dr-now,.sr-view .dr-signs{order:5}
+}
+@media (max-width:860px),(pointer:coarse){
+  .sr-speeds .btn,.sr-steps .btn,.sr-tools .btn{min-height:44px}
+}
 /* Data › Sign distance (SignDistanceTab.vue, SignDistanceDrive.vue): the median of how late vision's zero comes, the
    drives with signs to mark, then one sign at a time: the road frame as large as the column leaves with what the car's
    screen showed on it (the car's own fuchsia), vision's distance over the window under it, the marks and the figures.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Overview, Drives, Roads, Drive review, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
+// Overview, Drives, Roads, Drive review, Speed review, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
 // tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).
@@ -19,6 +19,7 @@ import PrepareTab from './PrepareTab.vue';
 import PublishTab from './PublishTab.vue';
 import RoadsTab from './RoadsTab.vue';
 import SignDistanceTab from './SignDistanceTab.vue';
+import SpeedReviewTab from './SpeedReviewTab.vue';
 import {currentTab, useTabRouting} from './tabs';
 import TrainTab from './TrainTab.vue';
 import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actions';
@@ -63,6 +64,7 @@ watch(busyPaths, markBusy);
     <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
     <RoadsTab v-else-if="currentTab === 'roads'" :status="status" @run="run" @stop="stop" @details="details"/>
     <DriveReviewTab v-else-if="currentTab === 'drivereview'" :read-only="status?.actions_enabled === false"/>
+    <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
     <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>

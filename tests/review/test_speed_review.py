@@ -78,6 +78,12 @@ def test_a_proposal_covers_the_drive_from_its_first_second_even_with_nothing_hel
     assert speed_review.proposals({'t0': None, 'span': [None, None], 'series': {}}) == []
 
 
+def test_a_flicker_at_the_start_of_a_drive_joins_the_stretch_after():
+    # The first message comes a moment after the start of the logs: no stretch of a tenth of a second to answer for.
+    assert speed_review.proposals(merged([(at(0.1), 80.0), (at(100), 60.0)])) == [
+        {'start_ns': T0, 'end_ns': at(100), 'kph': 80}, {'start_ns': at(100), 'end_ns': END, 'kph': 60}]
+
+
 def test_saved_stretches_cut_the_proposals_and_the_whole_drive_stays_covered():
     proposed = speed_review.proposals(merged([(at(0), 80.0), (at(100), 120.0)]))
     saved = [{'start_ns': at(50), 'end_ns': at(150), 'kph': 100, 'state': 'corrected', 'known_ns': None, 'note': '',

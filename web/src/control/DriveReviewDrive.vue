@@ -8,7 +8,10 @@
 // review links back (?segment=N&second=S opens the drive at that time). Without logs the video plays all the same,
 // with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
-// or rlog/qlog files named with their drive and segment).
+// or rlog/qlog files named with their drive and segment). Speed review shows a drive with this same player
+// (SpeedReviewDrive.vue): its own tab and back label (tab, backLabel), no episodes (noEpisodes), a choice of playback
+// speed (rates), a lane of its own over the others (slot "lane") and its controls at the top of the side (slot "side");
+// it follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -18,9 +21,12 @@ import {CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logT
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
-import {goTo, showEpisode, tabEpisode} from './tabs';
+import {type ControlTab, goTo, showEpisode, tabEpisode} from './tabs';
 
-const props = defineProps<{route: string; readOnly: boolean}>();
+const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab?: ControlTab; backLabel?: string; noEpisodes?: boolean;
+  rates?: readonly number[]; startZoom?: Zoom}>(), {tab: 'drivereview', backLabel: 'Drive review', noEpisodes: false, rates: () => [],
+  startZoom: 'episode'});
+const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
 
 const MARKS = {
   play: 'M8 5.6v12.8a.8.8 0 0 0 1.2.7l10.3-6.4a.8.8 0 0 0 0-1.4L9.2 4.9A.8.8 0 0 0 8 5.6z',
@@ -42,7 +48,7 @@ async function read(): Promise<void> {
     }
     view.value = answer;
     error.value = '';
-    document.title = 'Speed limits · ' + (answer.title ?? 'Drive review');
+    document.title = 'Speed limits · ' + (answer.title ?? props.backLabel);
     followScan(answer.scan);
   } catch (problem) {
     if (ticket === asked) error.value = messageOf(problem);
@@ -143,6 +149,7 @@ const plainVideo = computed(() => ready.value && !hasLogs.value);
 
 // -- the time shown, playing ---------------------------------------------------------------------------------------------
 const cursor = ref(0);
+watch([cursor, t0], () => emit('time', cursor.value, t0.value));
 const playing = ref(false);
 let frame = 0;
 let last = 0;
@@ -172,6 +179,7 @@ function onVideoError(): void {
 }
 function start(element: HTMLVideoElement, at: number): void {
   element.currentTime = at;
+  element.playbackRate = rate.value;
   starting = true;
   void element.play()
     .catch((problem: unknown) => {
@@ -191,7 +199,7 @@ function tick(now: number): void {
     if (at !== null) cursor.value = at;
   } else {
     // No picture here: the logs go on at their own pace, the video takes over where it has the time again.
-    cursor.value = clamp(cursor.value + (last ? (now - last) / 1000 : 0));
+    cursor.value = clamp(cursor.value + (last ? (now - last) / 1000 * rate.value : 0));
     const at = plainVideo.value ? cursor.value : videoTime.value;
     if (element && at !== null && !element.ended && !videoProblem.value) start(element, at);
   }
@@ -219,6 +227,11 @@ function pause(): void {
   player.value?.pause();
 }
 const toggle = (): void => (playing.value ? pause() : play());
+/** The speed of the playback, where the page offers a choice. */
+const rate = ref(1);
+const RATES = computed(() => props.rates.map((key) => ({key: String(key), label: key + '×'})));
+const rateKey = computed({get: () => String(rate.value), set: (key: string) => { rate.value = Number(key); }});
+watch(rate, (value) => { if (player.value) player.value.playbackRate = value; });
 function onKey(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   if (target && (target.closest('input, textarea, select, [contenteditable]') || event.metaKey || event.ctrlKey || event.altKey)) return;
@@ -250,7 +263,7 @@ const syncText = computed((): string => {
 });
 
 // -- the episodes ----------------------------------------------------------------------------------------------------------
-const episodes = computed(() => (view.value?.episodes ?? []).filter((item) => item.active || item.id === tabEpisode.value)
+const episodes = computed(() => props.noEpisodes ? [] : (view.value?.episodes ?? []).filter((item) => item.active || item.id === tabEpisode.value)
   .sort((a, b) => a.start_s - b.start_s));
 const episode = computed((): Episode | null => episodes.value.find((item) => item.id === tabEpisode.value) ?? null);
 const episodeIndex = computed(() => episode.value ? episodes.value.indexOf(episode.value) : -1);
@@ -273,7 +286,7 @@ const signHref = computed((): string => {
 
 // -- the window of the lanes ------------------------------------------------------------------------------------------------
 type Zoom = 'episode' | 'two' | 'ten' | 'all';
-const zoom = ref<Zoom>('episode');
+const zoom = ref<Zoom>(props.startZoom);
 const ZOOMS = computed(() => [{key: 'episode' as Zoom, label: episode.value ? 'Episode' : '1 min'}, {key: 'two' as Zoom, label: '2 min'},
   {key: 'ten' as Zoom, label: '10 min'}, {key: 'all' as Zoom, label: 'Drive'}]);
 const windowSpan = computed(() => {
@@ -340,6 +353,7 @@ const now = computed(() => {
   };
 });
 const change = computed(() => previousChange(series('vis_limit'), cursor.value));
+defineExpose({seek, pause});
 /** The server today at the time shown: our networks' sign within a second, the map's road and limit now. */
 const today = computed(() => {
   const current = view.value;
@@ -394,7 +408,7 @@ const whenNote = computed(() => view.value && view.value.when && !view.value.whe
 function back(): void {
   pause();
   if ((history.state as {fromList?: boolean} | null)?.fromList) history.back();
-  else goTo('drivereview');
+  else goTo(props.tab);
 }
 
 onMounted(async () => {
@@ -425,7 +439,7 @@ watch(() => props.route, () => {
 <template>
   <section class="card rt-view dr-view" aria-labelledby="dr-view-title">
     <div class="rt-view-head">
-      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> Drive review</button>
+      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
       <div class="rt-view-name">
         <h2 id="dr-view-title">{{ view?.title ?? 'Places unknown' }}</h2>
         <span>{{ facts }}</span>
@@ -471,6 +485,7 @@ watch(() => props.route, () => {
             <button type="button" class="btn small" :disabled="!change" id="dr-last-change"
                     :title="change ? 'The vision limit changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change before'"
                     @click="change && seek(change.at - 2)">Last limit change</button>
+            <Segmented v-if="RATES.length" v-model="rateKey" :options="RATES" label="Playback speed" class="dr-rate"/>
             <span class="rt-pos"><b>{{ clockOf(cursor) }}</b> of {{ clockOf(end) }}</span>
           </div>
           <p class="dr-sync">{{ syncText }}</p>
@@ -487,11 +502,14 @@ watch(() => props.route, () => {
             <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
             <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
           </div>
-          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor" :episode="episode" @seek="seek"/>
+          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor" :episode="episode" @seek="seek">
+            <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
+          </DriveReviewLanes>
           <p v-else class="dr-hint">{{ NO_LOGS }}</p>
         </div>
 
         <aside class="dr-side">
+          <slot name="side"></slot>
           <section v-if="episodes.length" class="dr-episode-card" aria-labelledby="dr-ep-title">
             <div class="dr-ep-nav">
               <button type="button" class="btn small" :disabled="episodeIndex <= 0 && episode !== null || !episodes.length" aria-label="Previous episode"

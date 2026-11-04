@@ -3,7 +3,8 @@
 // (its vision limit and the signs it read, every sign read with the reason the limit holds, the map's limit, the resolver's limit and source, the speeds, openpilot and
 // the interventions, the kind of road its vision saw), what the server finds today (our networks' signs on its frames,
 // the map as it is now), and the episodes found in the logs. A stretch the log does not have is
-// hatched: missing data is never a value. A tap or a drag goes to that time.
+// hatched: missing data is never a value. A tap or a drag goes to that time. The slot "top" is a lane of the page that
+// shows them (Speed review's speed to hold), first of all, drawn with the scale of the others.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {combine, type Episode, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value} from './drive-review';
@@ -217,6 +218,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
       <pattern id="dr-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
         <rect width="6" height="6" class="dr-hatch-back"/><line x1="1.5" y1="0" x2="1.5" y2="6" class="dr-hatch-line"/></pattern></defs></svg>
     <div class="dr-lane-ruler"><span class="dr-lane-name"></span><div ref="ruler"></div></div>
+    <slot name="top" :x="x" :w="w" :width="width" :from="from" :to="to" :fits="textFits"></slot>
     <div class="dr-lane" title="The limit the comma's vision held (speedVisionSP); – none held; hatched: not in the log">
       <span class="dr-lane-name">Vision<small>comma</small></span>
       <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">

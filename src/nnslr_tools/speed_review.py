@@ -17,7 +17,8 @@ stays the same if a new scan moves the start of the drive:
   alone never counts as approved.
 
 The proposal (proposals) is the limit the comma's vision held, in runs rounded to 5 km/h, a run under MERGE_SECONDS
-joined to the one before. It is worked out when a drive is shown and never stored. OpenStreetMap is never a proposal.
+joined to the one before (the first one of a drive to the one after). It is worked out when a drive is shown and never
+stored. OpenStreetMap is never a proposal.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
 on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI). One write (apply)
@@ -41,7 +42,8 @@ from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
 DB_RELATIVE_PATH = Path('annotations') / 'speed_review.sqlite'
 SCHEMA_VERSION = 1
 NS = 1_000_000_000
-# A run of the vision limit shorter than this joins the one before: it is a flicker, not a stretch of road.
+# A run of the vision limit shorter than this joins the one before, or at the start of a drive the one after: it is a
+# flicker, not a stretch of road.
 MERGE_SECONDS = 5
 GRID_KPH = 5
 MAX_KPH = 200
@@ -106,6 +108,9 @@ def proposals(merged: dict | None) -> list[dict]:
             joined[-1][1] = stop
         else:
             joined.append([first, stop, kph])
+    if len(joined) > 1 and joined[0][1] - joined[0][0] < MERGE_SECONDS * NS:
+        joined[1][0] = joined[0][0]
+        del joined[0]
     return [{'start_ns': first, 'end_ns': stop, 'kph': kph} for first, stop, kph in joined]
 
 
