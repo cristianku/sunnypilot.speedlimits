@@ -17,8 +17,10 @@ the car, where the memory is never empty after the first seconds), the others fr
 random colour and framing; a second dropped now and then; the speed scaled by +-5 % and, in one sequence in ten,
 unknown; the sign and the board missed or misread now and then; the car's motion unknown in MOTION_DROP_SHARE of the windows and its
 yaw or its carState part in MOTION_PART_SHARE, so that the network still works without them. The speed input is
-carState.vEgo when the motion is read (the GPS speed where it is missing). Loss: cross-entropy weighted by the frame's
-weight (road_type_data) and by 1 / sqrt(class frequency); the best epoch by the road type's own measure on validation
+carState.vEgo when the motion is read (the GPS speed where it is missing). Loss: cross-entropy over the frames a person
+confirmed or corrected in Data › Roads (road_type_data.frame_label; every other frame only feeds the memory, and the
+windows drawn anywhere are drawn around a confirmed frame), weighted by 1 / sqrt(class frequency). The training stops
+at once, a dry run too, when the partitions hold too few of them (road_type_data.missing_labels); the best epoch by the road type's own measure on validation
 (road_score: macro F1, the first minute after a merge, false switches; the whole sequences run with their memory, as
 on the car).
 
@@ -589,14 +591,16 @@ class WindowSampler:
     """Train windows: (route, positions, labels, weights, speed, sign, emphasis, junction, junction weight, motion,
     board) of
     length burn + window, a second dropped now and then, merge_share of them around a merge, focus_share around a
-    change of road type and junction_share (with the junction head) around a "passed"; the sign input missed or
+    change of road type, junction_share (with the junction head) around a "passed" and the others anywhere around a
+    confirmed frame (the frames without a label teach the road type nothing; around_labels False: anywhere, for the
+    junction head alone); the sign input missed or
     misread now and then (SIGN_DROP_SHARE, SIGN_FAKE_SHARE) and confirmed up to SIGN_JITTER seconds earlier or later,
     the board input the same on its own;
     the car's motion unknown now and then (MOTION_DROP_SHARE, MOTION_PART_SHARE)."""
 
     def __init__(self, dataset: dict, runs: list[dict], rng: random.Random, junctions: bool = False, *,
                  merge_share: float = MERGE_SHARE, focus_share: float = FOCUS_SHARE,
-                 junction_share: float = JUNCTION_SHARE):
+                 junction_share: float = JUNCTION_SHARE, around_labels: bool = True):
         self.rng = rng
         self.shares = (merge_share, focus_share, junction_share)
         self.times = dataset.get('sign_times', {})
@@ -611,6 +615,8 @@ class WindowSampler:
         self.merges = [(i, entry['merge']) for i, (run, arrays) in enumerate(self.runs)
                        for entry in ramp_entries(arrays['labels'], data.CLASSES, arrays['lead'])]
         self.lengths = [len(run['positions']) for run, _ in self.runs]
+        self.anchors = [(np.flatnonzero(arrays['labels'] >= 0) if around_labels else np.arange(len(arrays['labels']))
+                         ).tolist() for _, arrays in self.runs]
 
     def window(self, length: int):
         rng = self.rng
@@ -634,8 +640,10 @@ class WindowSampler:
             index, moment = rng.choice(crossings)
             start = min(max(moment - rng.randrange(min(5, length - 1), length), 0), self.lengths[index] - length)
         else:
-            index = rng.choices(fits, weights=[self.lengths[i] for i in fits])[0]
-            start = rng.randrange(self.lengths[index] - length + 1)
+            anchors = [len(self.anchors[i]) for i in fits]
+            index = rng.choices(fits, weights=anchors)[0] if any(anchors) else rng.choice(fits)
+            moment = rng.choice(self.anchors[index]) if self.anchors[index] else rng.randrange(self.lengths[index])
+            start = min(max(moment - rng.randrange(length), 0), self.lengths[index] - length)
         run, arrays = self.runs[index]
         picks, cursor = [], start
         while len(picks) < length and cursor < self.lengths[index]:
@@ -912,12 +920,19 @@ def _load_pictures(root: Path, dataset: dict, runs: list[dict], *, dry_run: bool
     return arrays
 
 
-def _dry_runs(runs: list[dict]) -> list[dict]:
-    """A dry run's few short sequences: two of train, one of validation and of test, 40 frames each."""
+def _dry_runs(dataset: dict) -> list[dict]:
+    """A dry run's few short sequences: two of train, one of validation and of test, those with the most labelled
+    frames, 40 frames each from the first of them on."""
+    def labelled(run: dict) -> list[int]:
+        frames = dataset['frames'][run['route']]
+        return [at for at, position in enumerate(run['positions']) if frames[position]['label'] >= 0]
     picked = []
     for partition, count in (('train', 2), ('validation', 1), ('test', 1)):
-        for run in [r for r in runs if r['partition'] == partition][:count]:
-            picked.append({**run, 'positions': run['positions'][:40]})
+        runs = [run for run in dataset['sequences'] if run['partition'] == partition]
+        for run in sorted(runs, key=lambda item: len(labelled(item)), reverse=True)[:count]:
+            first = min(next(iter(labelled(run)), 0), max(len(run['positions']) - 40, 0))
+            positions = run['positions'][first:first + 40]
+            picked.append({**run, 'start': positions[0], 'positions': positions})
     return picked
 
 
@@ -975,7 +990,7 @@ def train_junction_stage(torch, model, store: FrameStore, dataset: dict, by_part
     total = max(1, epochs * steps)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda s: 0.5 * (1 + math.cos(math.pi * min(s, total) / total)))
     sampler = WindowSampler(dataset, by_partition['train'], rng, junctions=True, merge_share=0.0, focus_share=0.0,
-                            junction_share=JUNCTION_STAGE_SHARE)
+                            junction_share=JUNCTION_STAGE_SHARE, around_labels=False)
     use_amp = device.type == 'cuda'
     scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
     history, best, best_epoch, best_state, since = [], None, 0, None, 0
@@ -1164,7 +1179,8 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
     fresh, but for the board input added to a start without it: the start's columns of the memory's input as they
     are, the board's two zeros (widened), so the network starts as the start. The image backbone must be the start's
     whole. Returns what result.json records of it: its file and sha256, run, epoch, split, the layers left fresh and
-    widened, and whether it was tested on the same drives as this one (its split.json beside it; None when missing)."""
+    widened, whether it was tested on the same drives as this one (its split.json beside it; None when missing) and its
+    label policy (None: trained before road_type_data.LABEL_POLICY, the map's proposals among its labels)."""
     path = Path(path)
     saved = torch.load(path, map_location='cpu', weights_only=False)
     if not isinstance(saved, dict) or saved.get('task') != 'road_type' or saved.get('memory') != memory:
@@ -1205,6 +1221,7 @@ def road_type_start(torch, model, path: Path, memory: str, split: dict) -> dict:
     return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'run': path.parents[2].name if len(path.parents) > 2 else None, 'epoch': saved.get('epoch'),
             'split_sha256': saved.get('split_sha256'), 'fresh': fresh, 'widened': widened,
+            'label_policy': (saved.get('config') or {}).get('label_policy'),
             'same_test_drives': None if not isinstance(tested, list)
             else sorted(tested) == sorted(split.get('test_routes') or [])}
 
@@ -1217,7 +1234,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
                     init_from: Path | None = None, boards: bool | None = None, log=_print) -> dict:
     """Train the road-type network on the drives with road types and measure it on validation and test (see the
     module's text). Writes into run_dir: split.json, dataset.json, road-type-best.pt, result.json and the answers on
-    test and validation (answers-test.json, answers-validation.json). A dry run: the CPU, a few short sequences, one
+    test and validation (answers-test.json, answers-validation.json). Too few confirmed frames stop it before anything
+    is written (road_type_data.missing_labels), a dry run too. A dry run: the CPU, a few short sequences, one
     epoch of two steps, no ImageNet download, nothing written outside run_dir. junctions: with the junction head (None:
     when nnslr junctions has labelled the drives); motion: with the car's own motion as input (None: when nnslr
     car-motion has read every drive; the speed input is then carState.vEgo, else the GPS speed). The road type's epoch
@@ -1226,15 +1244,20 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     road-type-best.pt of the same network of an earlier run to go on from (road_type_start), else ImageNet. boards:
     with the board input (the green boards towards a motorway the car's code confirmed, nnslr road-type-signs; None:
     when every drive was read with them and they were confirmed on MIN_BOARD_DRIVES drives at least)."""
-    torch = _torch()
     data_root, run_dir = Path(data_root), Path(run_dir)
+    dataset = data.load_dataset(data_root)
+    missing = data.missing_labels(dataset['summary'])
+    if missing:
+        raise ValueError('too few road types confirmed by a person to train, and a proposal of the map is never a label: '
+                         + '; '.join(missing) + '. Confirm or correct more of them in Data › Roads, on other drives '
+                         'than the test.')
+    torch = _torch()
     run_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
     pretrained = (not dry_run) if pretrained is None else pretrained
-    dataset = data.load_dataset(data_root)
     coverage = attach_signs(dataset, data_root, sign_source)
     if signs and coverage['read'] < coverage['drives'] and not dry_run:
         raise ValueError(f"the motorway signs were read on {coverage['read']} of {coverage['drives']} drives: run "
@@ -1260,7 +1283,7 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
             raise ValueError(f"the car's code confirmed green boards on {board_coverage['drives_with_boards']} drives "
                              f'(at least {MIN_BOARD_DRIVES}): the classifier does not read them yet; train it with more '
                              'boxed boards (or train with --no-boards)')
-    runs = _dry_runs(dataset['sequences']) if dry_run else dataset['sequences']
+    runs = _dry_runs(dataset) if dry_run else dataset['sequences']
     by_partition = {name: [run for run in runs if run['partition'] == name] for name in data.PARTITIONS}
     labelled = sum(1 for frames in dataset['frames'].values() for f in frames if f.get('junction_known'))
     if junctions is None:
@@ -1294,7 +1317,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
         log(f"{name} starts from {start['run']} (epoch {start['epoch']}): every layer"
             + (f" but {', '.join(start['fresh'])}" if start['fresh'] else '')
             + (f"; the board's columns added to {', '.join(start['widened'])}" if start['widened'] else '')
-            + ('; tested on other drives' if start['same_test_drives'] is False else ''))
+            + ('; tested on other drives' if start['same_test_drives'] is False else '')
+            + ("; its weights learned from the map's proposals too" if start['label_policy'] != data.LABEL_POLICY else ''))
     model = model.to(device)
     weights_of_class = torch.tensor(class_weights(dataset, by_partition['train']), device=device)
     junction_balance = torch.tensor(junction_pos_weights(dataset, by_partition['train']), device=device)
@@ -1324,8 +1348,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
               'learning_rate': LEARNING_RATE,
               'backbone_learning_rate': BACKBONE_LEARNING_RATE, 'weight_decay': WEIGHT_DECAY, 'seed': seed,
               'pretrained': pretrained, 'width': data.FRAME_WIDTH, 'height': data.FRAME_HEIGHT,
-              'features': FEATURES, 'hidden': HIDDEN, 'unsure_weight': data.UNSURE_WEIGHT,
-              'ramp_weight': data.RAMP_WEIGHT, 'class_weights': [round(float(w), 4) for w in weights_of_class],
+              'features': FEATURES, 'hidden': HIDDEN, 'label_policy': data.LABEL_POLICY,
+              'class_weights': [round(float(w), 4) for w in weights_of_class],
               'junctions': junctions, 'motion': motion, 'motion_fields': list(motion_data.MOTION_FIELDS) if motion else [],
               'motion_drop_share': MOTION_DROP_SHARE, 'motion_part_share': MOTION_PART_SHARE,
               'motion_coverage': motion_coverage, 'speed_source': motion_coverage['speed_source'],

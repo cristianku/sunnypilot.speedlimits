@@ -1,16 +1,17 @@
 <script setup lang="ts">
 // Data › Roads, a drive opened ("/roads?drive=<route>"): its pictures one at a time with the type of road there, the
 // map's or a person's (GET /api/panel/road-types/<route>), and the strip of the whole drive under it, coloured as the
-// list, a dark line under the stretches a person set, an orange one under those to check, a blue one over the stretch a
+// list, a dark line under the stretches a person set, an orange one under those to review, a blue one over the stretch a
 // tap sets; a tap on it goes there, its knob is dragged from where it is. A long drive has a second strip under it, the
 // minute or two around the picture, its pictures five pixels apart: a drag moves the drive under the line in its middle
 // picture by picture, a tap goes to the picture tapped, a wheel or a trackpad scrolls it; its stretch is framed on the
-// strip of the drive. Play, the arrows and space step as in Results › Drive (DriveView.vue). A
-// person corrects the map: the type of the stretch shown (or from a marked start to here), saved at once (POST, the drive
-// comes back), after a question when it is longer than a minute; Next to check goes to the next stretch the map is
-// unsure about. On a phone the loop (Next to check, look, tap a type) fits one screen; the rest is under it.
+// strip of the drive. Play, the arrows and space step as in Results › Drive (DriveView.vue). The map only proposes: a
+// person confirms its type or taps the right one, for the stretch shown (or from a marked start to here), saved at once
+// (POST, the drive comes back), after a question when it is longer than a minute, and only then the frames are usable in
+// training; Next to review goes to the next stretch no person set, however sure the map is. On a phone the loop (Next to
+// review, look, Confirm or tap a type) fits one screen; the rest is under it.
 // The intersections of the drive (nnslr junctions: the map's, with a person's corrections over them) are dots under the
-// strip; under the type buttons and Next to check (which also stops on the junctions to check) a person marks the
+// strip; under the type buttons and Next to review (which also stops on the junctions to check) a person marks the
 // picture shown "Junction here" or "Not a junction" (POST .../junction, kept apart from the map; Undo takes the last
 // back).
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
@@ -57,7 +58,7 @@ async function read(route: string): Promise<void> {
 }
 const frames = computed(() => payload.value?.frames ?? []);
 const runs = computed(() => roadRuns(frames.value));
-/** The stretches to check: a line under each on the strip, Next to check goes from one to the next. */
+/** The stretches to review: a line under each on the strip, Next to review goes from one to the next. */
 const checks = computed(() => checkStretches(frames.value));
 /** The narrowest mark of the strip, in frames: a stretch of one picture (the stretch a tap sets three times that, to show
  * beside the position). */
@@ -66,7 +67,9 @@ const facts = computed(() => {
   const drive = payload.value;
   if (!drive) return '';
   return [drive.when, drive.minutes !== null ? drive.minutes + ' min' : null, plural(drive.frames.length, 'picture'),
-    drive.reviewed ? thousands(drive.reviewed) + ' reviewed' : null].filter(Boolean).join(' · ');
+    drive.usable ? thousands(drive.usable) + ' usable in training' : null,
+    drive.cant_tell ? thousands(drive.cant_tell) + ' can\'t tell' : null,
+    drive.to_review ? thousands(drive.to_review) + ' to review' : null].filter(Boolean).join(' · ');
 });
 
 /** Back to the list: back in the history when the list opened this drive, so it is as it was. */
@@ -176,7 +179,7 @@ onBeforeUnmount(() => {
 // -- the junctions: dots under the strip, the one at the picture shown, and a person's correction --------------------------
 const junctions = computed(() => payload.value?.junctions?.marks ?? []);
 /** The junctions to check (a GPS that stops in one, a track far from it, a long wait in it, the map's on another road):
- * Next to check stops on them too. */
+ * Next to review stops on them too. */
 const junctionChecks = computed(() => junctions.value.filter((mark) => mark.doubt !== null));
 /** The dots of a strip, each at `place` of its middle (in %): those that are not junctions under, the junctions over
  * them, those to check on top. */
@@ -187,10 +190,10 @@ function dotsOf(marks: readonly RoadJunction[], place: (middle: number) => numbe
       kind: mark.doubt !== null ? 'check' : mark.label === 'junction' ? 'on' : 'not'}));
 }
 const dots = computed(() => dotsOf(junctions.value, (middle) => 100 * middle / frames.value.length));
-/** Where Next to check stops: the first frame of each stretch to check and of each junction to check, in drive order. */
+/** Where Next to review stops: the first frame of each stretch to review and of each junction to check, in drive order. */
 const stops = computed(() => [...new Set([...checks.value.map((item) => item.first),
   ...junctionChecks.value.map((mark) => mark.first)])].sort((a, b) => a - b).map((first) => ({first})));
-/** What is left to check, in the title of its count: "3 stretches · 2 junctions". */
+/** What is left to look at, in the title of its count: "3 stretches · 2 junctions". */
 const left = computed(() => [checks.value.length ? plural(checks.value.length, 'stretch', 'stretches') : '',
   junctionChecks.value.length ? plural(junctionChecks.value.length, 'junction') : ''].filter(Boolean).join(' · '));
 /** The junction at the picture shown: one it is inside, else the one it is just after (its "passed" frame), else a
@@ -244,12 +247,11 @@ async function setJunction(choice: 'here' | 'none'): Promise<void> {
 }
 
 const stage = useTemplateRef<HTMLElement>('stage');
-/** Next to check: the next stretch no person set where the map says nothing or is often wrong, or the next junction
- * to check. */
+/** Next to review: the next stretch no person set, sure or not, or the next junction to check. */
 function nextCheck(): void {
   const index = nextToCheck(stops.value, cursor.value);
   if (index === null) {
-    toast('Nothing else to check on this drive.');
+    toast('Nothing else to review on this drive.');
     return;
   }
   step(index - cursor.value);
@@ -416,6 +418,8 @@ const spanCount = computed((): string => {
   const count = last - first + 1;
   return count === 1 ? 'this picture' : 'these ' + thousands(count) + ' pictures';
 });
+/** The map's type here, while a person has not said it: Confirm sets it, as a tap on its button. */
+const proposal = computed((): RoadType | null => mark.value === null && frame.value && !frame.value.reviewed ? frame.value.road_type : null);
 const saving = ref(false);
 async function setType(type: RoadType | null): Promise<void> {
   const [first, last] = span.value ?? [0, -1];
@@ -544,8 +548,9 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
       <aside class="rt-side" aria-label="The road here">
         <div class="rt-now">
           <span class="rt-chip"><i class="rt-key" :class="'rt-' + kind" aria-hidden="true"></i>{{ ROAD_LABEL[kind] }}</span>
-          <span v-if="frame?.reviewed" class="rt-flag done">Reviewed</span>
-          <span v-else-if="frame && frame.road_type !== null && !frame.sure" class="rt-flag unsure">Not sure</span>
+          <span v-if="frame?.reviewed" class="rt-flag" :class="frame.road_type === null ? 'none' : 'done'">{{
+            frame.road_type === null ? 'Can\'t tell · not used' : 'Usable in training' }}</span>
+          <span v-else-if="frame" class="rt-flag unsure">{{ frame.road_type === null ? 'To set' : frame.sure ? 'To confirm' : 'To confirm · not sure' }}</span>
         </div>
         <p v-if="reason" class="rt-basis">{{ reason }}</p>
 
@@ -556,6 +561,8 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
           <Segmented v-if="splittable" v-model="part" :options="partOptions" label="Cut the stretch at this picture" class="rt-part"/>
           <p class="rt-fix-head"><strong>{{ mark !== null ? 'Set from the mark to here to:' : 'Set ' + spanCount + ' to:' }}</strong>
             <span>{{ spanTimes }}</span></p>
+          <button v-if="proposal" type="button" class="btn primary rt-confirm" :disabled="saving || readOnly"
+                  @click="setType(proposal)">Confirm {{ ROAD_LABEL[proposal] }}</button>
           <!-- Real buttons, one a type: a person must see at once that a tap here changes the stretch. -->
           <div class="rt-pick" role="group" aria-label="Type of road">
             <button v-for="[key, label] in CHOICES" :key="key ?? 'none'" type="button" class="btn rt-type"
@@ -566,8 +573,8 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
           </div>
         </div>
 
-        <button type="button" class="btn rt-next" :disabled="stops.length === 0" @click="nextCheck">{{ stops.length ? 'Next to check'
-          : 'Nothing left to check' }}<span v-if="stops.length" class="rt-left" :title="left">{{ thousands(stops.length) }} left</span></button>
+        <button type="button" class="btn rt-next" :disabled="stops.length === 0" @click="nextCheck">{{ stops.length ? 'Next to review'
+          : 'Nothing left to review' }}<span v-if="stops.length" class="rt-left" :title="left">{{ thousands(stops.length) }} left</span></button>
 
         <!-- The junction at the picture shown: a person adds one the map misses, or drops one that is not (a driveway,
              a car park's exit, a bridge). -->
@@ -593,12 +600,12 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
             <button v-if="payload.corrections > 0" type="button" class="btn small" :disabled="saving || readOnly" @click="undo()">Undo last change</button>
           </div>
           <p class="rt-hint">{{ readOnly ? 'Read-only: corrections are turned off on this server.'
-            : mark === null ? 'Tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question. Up to here or From here split it at the picture shown; Mark start chooses any start.'
+            : mark === null ? 'Confirm the proposal or tap the right type: the stretch marked in blue on the strip is saved at once, a long one after a question, and only then used in training. ✂ Before or After split it at the picture shown; Mark start chooses any start.'
               : 'Now go to the end of the stretch, then tap its type.' }}</p>
           <ul class="rt-legend rt-marks" aria-label="The strip">
             <li v-for="[key, label] in ROAD_TYPES" :key="key"><span class="rt-key" :class="'rt-' + key" aria-hidden="true"></span>{{ label }}</li>
-            <li><span class="rt-line rt-tocheck" aria-hidden="true"></span>To check</li>
-            <li><span class="rt-line rt-done" aria-hidden="true"></span>Set by you</li>
+            <li><span class="rt-line rt-tocheck" aria-hidden="true"></span>To review</li>
+            <li><span class="rt-line rt-done" aria-hidden="true"></span>Reviewed by you</li>
             <li><span class="rt-line rt-marked" aria-hidden="true"></span>What a tap sets</li>
             <li><span class="rt-jdot on" aria-hidden="true"></span>Junction</li>
             <li><span class="rt-jdot check" aria-hidden="true"></span>Junction to check</li>

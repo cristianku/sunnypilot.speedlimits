@@ -3,9 +3,11 @@
 // merge lane, parking, garage), from where the car was and the map (helpers/road_types.sh, the panel action "road_types"). First the
 // action, with Find the road types or its job running; then each drive as a thin strip of its whole length coloured by
 // road type, from GET /api/panel/road-types, read when the page opens and again when a search for the road types ends.
-// Nothing here needs a review: the map's types are a proposal; a tap on a drive opens it ("/roads?drive=<route>",
-// RoadDrive.vue), to look at its pictures and correct the map, and the list is read again on the way back. Under the
-// action, the maps of the server and those the drives still need: the search downloads them first (scripts/osm_maps.py).
+// The map's types are proposals, and only what a person confirms or corrects is used in training: each drive says how
+// many frames are usable and how many to review, and the title of the list the sum. A tap on a drive opens it
+// ("/roads?drive=<route>", RoadDrive.vue), to look at its pictures, confirm or correct them, and the list is read again on
+// the way back. Under the action, the maps of the server and those the drives still need: the search downloads them
+// first (scripts/osm_maps.py).
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, plural, sentence, thousands} from '../common/format';
@@ -79,6 +81,12 @@ const onlyMaps = computed(() => fresh.value && without.value === 0 && !!payload.
 /** Drives copied from the comma but not prepared yet: no pictures, so no road types until Prepare new drives. */
 const waiting = computed(() => (props.status?.routes ?? []).filter((row) => ['collegare', 'estrarre', 'preannotare'].includes(row.state)).length);
 const madeAt = computed(() => isoWhen(payload.value?.made_at));
+/** What all the frames are worth to training: "7,759 usable in training · 66,268 to review". */
+const reviewText = (counts: Partial<Pick<RoadTypesPayload['review'], 'usable' | 'cant_tell' | 'to_review'>> | undefined): string[] => [
+  counts?.usable ? thousands(counts.usable) + ' usable in training' : '',
+  counts?.cant_tell ? thousands(counts.cant_tell) + ' can\'t tell' : '',
+  counts?.to_review ? thousands(counts.to_review) + ' to review' : '',
+].filter(Boolean);
 
 const sizeText = (bytes: number): string => bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
 const andList = (names: string[]): string => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
@@ -116,11 +124,12 @@ const outsideText = computed(() => {
         <div class="import-what">
           <strong>{{ payload === null ? 'Road types from the map' : !fresh ? 'Road types are up to date' : onlyMaps ? 'Maps to download'
             : 'Road types to find' }}</strong>
-          <span v-if="payload !== null && !fresh">Every prepared drive has them, from the map{{ madeAt ? ' · ' + madeAt : '' }}.</span>
+          <span v-if="payload !== null && !fresh">Every prepared drive has its proposals, from the map{{ madeAt ? ' · ' + madeAt : '' }}. Only
+            what you confirm or correct is used in training.</span>
           <span v-else-if="onlyMaps">Some drives went where the server has no map: the search downloads it first, then reads their road types
             there.</span>
-          <span v-else>Reads where the car was and the type of road there on the map, for every picture of the prepared drives. No need to
-            review anything first.</span>
+          <span v-else>Reads where the car was and the type of road there on the map, for every picture of the prepared drives: proposals,
+            used in training only once you confirm or correct them.</span>
         </div>
         <button type="button" class="btn" :class="{primary: fresh}" id="find-road-types" :disabled="!state?.allowed"
                 @click="state && emit('run', 'road_types', state)">{{ fresh ? 'Find the road types' : 'Find again' }}</button>
@@ -142,7 +151,7 @@ const outsideText = computed(() => {
     <section class="card rt-drives" aria-labelledby="rt-drives-title">
       <div class="ds-head">
         <h2 id="rt-drives-title">By drive</h2>
-        <span v-if="drives.length" class="ds-when">{{ plural(drives.length, 'drive') }}</span>
+        <span v-if="drives.length" class="ds-when" id="rt-review">{{ [plural(drives.length, 'drive'), ...reviewText(payload?.review)].join(' · ') }}</span>
       </div>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="payload === null" class="empty">Loading…</p>
@@ -164,7 +173,7 @@ const outsideText = computed(() => {
             </div>
             <p class="rt-shares">
               <span v-for="item in drive.shares" :key="item.key">{{ item.label }} {{ item.share }}</span>
-              <span v-if="drive.reviewed" class="rt-reviewed">{{ thousands(drive.reviewed) }} reviewed</span>
+              <span v-for="(item, index) in reviewText(drive)" :key="item" :class="{'rt-reviewed': index === 0 && drive.usable}">{{ item }}</span>
               <span class="rt-frames">{{ thousands(drive.frames) }} pictures</span>
             </p>
             <span class="data-chev rt-go" aria-hidden="true">›</span>

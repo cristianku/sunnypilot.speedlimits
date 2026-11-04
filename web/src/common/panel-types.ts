@@ -1491,8 +1491,14 @@ export interface RoadDrive {
   frames: number;
   /** Frames of each type; a type missing: none (parking or garage, from a server before them). */
   types: Partial<Record<RoadType | 'unknown', number>>;
-  /** The frames whose type a person set (Data › Roads, the drive opened). */
+  /** The frames a person looked at (Data › Roads, the drive opened): usable and cant_tell. */
   reviewed: number;
+  /** The frames a person confirmed or corrected to a type: the only labels of the training. */
+  usable: number;
+  /** The frames a person left as "Can't tell": reviewed, and no label. */
+  cant_tell: number;
+  /** The frames no person looked at: the map's proposals, the sure ones too, and its gaps. */
+  to_review: number;
   /** In the order of the drive. */
   stretches: RoadStretch[];
 }
@@ -1504,6 +1510,8 @@ export interface RoadTypesPayload {
   made_at: string | null;
   /** Prepared drives (with their signs proposed) without road types yet. */
   drives_without: number;
+  /** The frames of all the drives, as in each drive. */
+  review: Pick<RoadDrive, 'usable' | 'cant_tell' | 'to_review'>;
   /** The maps of the server and those the drives still need (nnslr_tools.road_types.maps_status); absent from a server
    * before it. */
   maps?: RoadMaps;

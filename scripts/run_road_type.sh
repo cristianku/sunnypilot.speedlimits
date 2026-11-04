@@ -11,7 +11,8 @@ set -euo pipefail
 # logs; never the map) tells its memory when the car turned at an intersection.
 # On one GPU, one step after the other:
 #
-#   1. checks the road types, the split and the whole pipeline on the CPU (nnslr train-road-type --dry-run);
+#   1. checks the road types, the split and the whole pipeline on the CPU (nnslr train-road-type --dry-run): it stops
+#      here while too few frames are confirmed in Data › Roads (the labels are a person's, never the map's proposals);
 #   2. a CUDA smoke test;
 #   3. finds the intersections every drive passed from its GPS and the map (nnslr junctions --all,
 #      data/derived/junctions: the labels of the junction head, a person's corrections over them) and resizes every
@@ -45,7 +46,8 @@ set -euo pipefail
 # Writes only into $DATA_ROOT/runs/NAME/ (road-type.log, road-type/{dry-run,gru,gru-nomotion,frame,baseline*,export}/,
 # road-type/comparison.txt), the junction labels, the frame cache, the sign readings and the car's motion. It never imports reviews, changes the road types,
 # the model in use or the car, never publishes. Run it again with the same NAME to finish: a finished training is not
-# repeated, the signs already read are not read again, an export older than its weights is redone.
+# repeated (one trained before the labels were a person's alone stops it: use another NAME), the signs already read are
+# not read again, an export older than its weights is redone.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_ROAD_TYPE_EPOCHS (60),
 # NNSLR_ROAD_TYPE_PATIENCE (15), NNSLR_ROAD_TYPE_BATCH (12 sequences), NNSLR_NUM_WORKERS (half the cores, 4 to 16),
@@ -55,7 +57,7 @@ set -euo pipefail
 # classifier read too few boards; 0: without; empty, the default: with it when it read them on enough drives),
 # NNSLR_ROAD_TYPE_BASELINE (earlier road-type-best.pt to compare with, separated by ":"), NNSLR_ROAD_TYPE_INIT_FROM (the
 # road-type folder of an earlier run: each network goes on from its own there, one it lacks from ImageNet; Train ›
-# Scene › Start from), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# Scene › Start from; a run before 4 Nov 2026 brings what it learned from the map's proposals, as the log says), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -234,6 +236,11 @@ train() {
   local memory="$1" folder="$2"
   shift 2
   if [[ -f "$OUT/$folder/result.json" ]]; then
+    # Finished before the labels were a person's alone: not a step of this run, beside networks trained after it.
+    if ! grep -q '"label_policy": "confirmed-only"' "$OUT/$folder/result.json"; then
+      echo "error: $OUT/$folder was trained on the map's proposals: start a new run, with another NAME" >&2
+      exit 2
+    fi
     echo "skip trained: $OUT/$folder/result.json"
     return
   fi

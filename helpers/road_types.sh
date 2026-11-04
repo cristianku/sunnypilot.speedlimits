@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, merge lane,
-# parking, garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline: the labels of
-# the road-type head, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads
-# starts this). A person corrects them later in the road-type review; nothing here touches the reviews of the signs.
+# parking, garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline:
+# proposals, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads starts this).
+# They become labels of the road-type head only when a person confirms or corrects them in Data › Roads, and those
+# decisions outlive a search; nothing here touches the reviews of the signs.
 #
 #   a. the precise position of the road camera's frames from openpilot.distill's localizer, for the segments without
 #      it (nnslr localize --all; about 20 s of a core a segment, 6 side by side; skipped without distill's .venv),

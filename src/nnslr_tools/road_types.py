@@ -1,4 +1,4 @@
-"""The type of road of every frame, from the map: the labels of the road-type head, prepared without a person.
+"""The type of road of every frame, from the map: proposals for the road-type head, prepared without a person.
 
 ``nnslr road-types --all`` reads the GPS position, speed and heading of every frame
 (``derived/gps/<route>/positions.jsonl``, nnslr gps) and the OpenStreetMap roads and car parks near the drives
@@ -59,7 +59,9 @@ The map labels are a proposal: OpenStreetMap can be wrong or old, and a person c
 (Data › Roads, a drive opened). A correction is kept apart, in ``annotations/road_types/<route>.jsonl``: one line per
 correction, appended, ``{"from", "to" (frame keys, the stretch), "road_type" (null: the person cannot tell), "reviewer",
 "at"}``; the last line covering a frame wins. ``nnslr road-types`` never touches it, so a correction survives a new map
-run; load_road_types gives the map labels with the corrections over them.
+run; load_road_types gives the map labels with the corrections over them. A person confirms a proposal the same way,
+with a correction to the type the map proposed. Only a frame a person confirmed or corrected is a label of a training
+(confirmed), whatever the map says of it: a proposal, sure or not, is never one; "cannot tell" is reviewed, with no type.
 OpenStreetMap data © OpenStreetMap contributors (ODbL).
 """
 from __future__ import annotations
@@ -114,8 +116,8 @@ MIN_LINK_RUN = 10
 TOWN_KINDS = ('urban', 'zone', 'zone30')
 # The reasons the map is often wrong about, measured on 27 Oct 2026 against 240 frames looked at without the map:
 # a road at 60 was in a town one time in three, a ramp is between two kinds of road, a filled gap is mostly a tunnel.
-# Their frames are not "sure": the review shows them first, and a training can leave them out until reviewed. A road
-# at 30 without its kind is a 30 zone or a 30 street. The US cut is looked at on a few frames only (3 Nov 2026: at 40
+# Their frames are not "sure": Data › Roads says so; sure or not, a training takes none until a person confirmed it. A
+# road at 30 without its kind is a 30 zone or a 30 street. The US cut is looked at on a few frames only (3 Nov 2026: at 40
 # and 45 mph shops, sidewalks and signals, at 55 mph open country): 35, 40 and 45 mph are not sure either.
 WEAK_BASES = ('maxspeed 30', 'maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link',
               'maxspeed 35 mph', 'maxspeed 40 mph', 'maxspeed 45 mph')
@@ -474,6 +476,20 @@ def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
             for line, correction in zip(lines, chosen)]
 
 
+def confirmed(line: dict) -> bool:
+    """Whether a person gave the frame its type (a correction, or the proposed type confirmed): the one condition for a
+    label of a training (road_type_data.frame_label). "Cannot tell" is reviewed but has no type."""
+    return line.get('reviewed') is True and line.get('road_type') in ROAD_TYPES
+
+
+def review_counts(lines: list[dict]) -> dict[str, int]:
+    """What a person did of a drive's frames: {'usable': confirmed, so usable in a training; 'cant_tell': reviewed
+    without a type; 'to_review': no person looked yet, the proposals the map is sure of too}."""
+    usable = sum(1 for line in lines if confirmed(line))
+    reviewed = sum(1 for line in lines if line.get('reviewed') is True)
+    return {'usable': usable, 'cant_tell': reviewed - usable, 'to_review': len(lines) - reviewed}
+
+
 def load_road_types(root: Path, route: str) -> list[dict]:
     """The lines of a route in the order of the drive with a person's corrections over the map (corrected), [] when
     nnslr road-types has not run for it. Every reader takes these: Data › Roads, its API, a training."""
@@ -532,19 +548,21 @@ def type_counts(lines: list[dict]) -> dict[str, int]:
 
 
 def _drive(root: Path, route: str) -> dict:
-    """One drive of summary(): its name, the frames of each type, those a person set, and its stretches."""
+    """One drive of summary(): its name, the frames of each type, those a person set (review_counts), and its
+    stretches."""
     from nnslr_tools.drives import drive_of
     lines = load_road_types(root, route)
     drive = drive_of(root, route) or {}
     return {'route': route, 'title': drive.get('title'), 'when': drive.get('when'), 'start': drive.get('start'),
             'minutes': drive.get('minutes'), 'frames': len(lines), 'types': type_counts(lines),
-            'reviewed': sum(1 for line in lines if line.get('reviewed')), 'stretches': stretches(lines)}
+            'reviewed': sum(1 for line in lines if line.get('reviewed')), **review_counts(lines),
+            'stretches': stretches(lines)}
 
 
 def drive_view(root: Path, route: str, by_key: dict) -> dict:
     """A drive of Data › Roads opened (GET /api/panel/road-types/<route>): {'route', 'title', 'when', 'start', 'minutes',
     'frames': [{'key', 'image', 'road_type', 'basis', 'sure', 'reviewed'}] in the order of the drive, 'stretches',
-    'types', 'reviewed', 'corrections': how many, 'junctions': the intersections of the drive, the map's with a person's
+    'types', 'reviewed', 'usable', 'cant_tell', 'to_review' (review_counts), 'corrections': how many, 'junctions': the intersections of the drive, the map's with a person's
     corrections over them (junctions.drive_marks: {'found', 'corrections', 'marks'})}; frames [] before nnslr road-types
     ran for it. by_key: the rows of the drive's pre-annotation report by frame key, whose preview_path names the picture
     of the frame on the site (/route/<route>/images/<8 digits>.jpg)."""
@@ -564,7 +582,8 @@ def drive_view(root: Path, route: str, by_key: dict) -> dict:
     drive = drive_of(root, route) or {}
     return {'route': route, 'title': drive.get('title'), 'when': drive.get('when'), 'start': drive.get('start'),
             'minutes': drive.get('minutes'), 'frames': frames, 'stretches': stretches(lines), 'types': type_counts(lines),
-            'reviewed': sum(1 for frame in frames if frame['reviewed']), 'corrections': len(corrections),
+            'reviewed': sum(1 for frame in frames if frame['reviewed']), **review_counts(lines),
+            'corrections': len(corrections),
             'junctions': drive_marks(root, route, [frame['key'] for frame in frames])}
 
 
@@ -620,7 +639,8 @@ def maps_status(root: Path) -> dict:
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
     'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':
-    frames a person set, 'stretches'}] newest drive first, 'made_at': when the newest file of the map was written (None
+    frames a person set, 'usable', 'cant_tell', 'to_review' (review_counts), 'stretches'}] newest drive first, 'review':
+    those three over every drive, 'made_at': when the newest file of the map was written (None
     before the first), 'drives_without': the prepared drives (with a pre-annotation report) that have no road types
     yet, 'maps': the maps of the server and those the drives still need (maps_status)}."""
     from nnslr_tools.review import list_reports
@@ -643,6 +663,7 @@ def summary(root: Path) -> dict:
     newest = max((stamp for _, stamp, _ in files), default=None)
     done = {route for route, _, _ in files}
     return {'routes': [{name: value for name, value in drive.items() if name != 'start'} for drive in drives],
+            'review': {name: sum(drive[name] for drive in drives) for name in ('usable', 'cant_tell', 'to_review')},
             'made_at': datetime.fromtimestamp(newest / 1e9).astimezone().isoformat(timespec='seconds')
             if newest is not None else None,
             'drives_without': sum(1 for route, _ in list_reports(root) if route not in done),

@@ -1791,7 +1791,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_net.add_argument("--init-from", default=None,
                             help="the road-type-best.pt of the same network (same memory) of an earlier run to go on "
                                  "from, instead of ImageNet: every layer of the same shape (a start without the board "
-                                 "input gets its columns as zeros)")
+                                 "input gets its columns as zeros); one trained before the labels were a person's alone "
+                                 "brings what it learned from the map's proposals, as the log says")
     p_road_boards = p_road_net.add_mutually_exclusive_group()
     p_road_boards.add_argument("--boards", action="store_true", default=None,
                                help="with the board input: the seconds since the car's code confirmed a green board "

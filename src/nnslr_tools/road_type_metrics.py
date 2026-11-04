@@ -1,8 +1,12 @@
 """How well the road-type network finds the kind of road and its changes, from its answers on whole sequences.
 
-* per class: precision, recall and F1 over the frames of weight 1 (sure, or a ramp from its OSM link), and macro F1
+The truth of every measure is what a person confirmed or corrected in Data › Roads (road_type_data.frame_label): the
+map's proposals are no truth, their frames are unknown here (label -1, weight 0), so a network is measured only on the
+confirmed stretches and a change between two of them only when they are at most GAP_SECONDS apart.
+
+* per class: precision, recall and F1 over the frames of weight 1 (the confirmed ones, every label), and macro F1
   over the classes that have frames;
-* transitions: a change of the map's road type with at least STABLE_SECONDS of the old type before it and of the new
+* transitions: a change of road type with at least STABLE_SECONDS of the old type before it and of the new
   one after it (a gap of frames without a type up to GAP_SECONDS between them). Its delay is the time from the change
   to the first second from which the network answers the new type CONFIRM_SECONDS in a row, looked for from
   STABLE_SECONDS before the change (an early answer is a negative delay) to WINDOW_SECONDS after it; later it is
@@ -136,7 +140,7 @@ def transition_kind(old: int, new: int, classes: tuple[str, ...]) -> str:
 
 
 def change_points(labels: np.ndarray, classes: tuple[str, ...]) -> list[dict]:
-    """The map's changes of road type with STABLE_SECONDS of each side (labels: class per second, -1 unknown):
+    """The changes of road type with STABLE_SECONDS of each side (labels: class per second, -1 unknown):
     [{'time', 'old', 'new', 'kind'}]; the time is the first second of the new type."""
     runs = [run for run in _runs(np.asarray(labels)) if run[0] >= 0]
     found = []

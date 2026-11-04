@@ -31,7 +31,8 @@ Two sources of the sign times (SIGN_SOURCES):
 - 'car': the signs the car's code confirms, as above. On the first 12 drives (October 2026) the car's classifier
   confirmed no motorway sign at all: its motorway_start probability stays below 0.03 on the boxes of the reviewed
   4.01 signs, so today the car gives the network nothing.
-- 'map': where the sign stands, from the map's road types: the first second of every ramp that leads from another road
+- 'map': where the sign stands, from the road types read so far, a person's over the map's (the frames' map_label: an
+  input, as on the car, never a label of the training): the first second of every ramp that leads from another road
   onto the motorway or expressway (road_type_metrics.ramp_entries, not from the motorway itself: an interchange has no
   4.01). The reviewed 4.01 signs were seen from 7 s before to 6 s after that second; training moves the time by up to
   SIGN_JITTER seconds (road_type_net). This is the input the network gets once the car reads the sign.
@@ -386,9 +387,11 @@ def frame_sign_features(frames: list[dict], times: list[float]) -> np.ndarray:
 
 def map_sign_times(frames: list[dict], classes: tuple[str, ...]) -> list[float]:
     """Where the map puts the motorway sign in a drive (seconds from its start): the first second of every ramp from
-    another road onto the motorway or expressway (frames: the drive's 1 Hz frames with their 'label')."""
+    another road onto the motorway or expressway (frames: the drive's 1 Hz frames with their 'map_label' and
+    'map_lead', not their label: a drive a person has not reviewed has its signs too; a ramp a person corrected has
+    none)."""
     from nnslr_tools.road_type_metrics import ramp_entries
-    labels = np.array([frame['label'] for frame in frames], dtype=np.int64)
-    lead = np.array([bool(frame.get('lead')) for frame in frames], dtype=bool)
+    labels = np.array([frame['map_label'] for frame in frames], dtype=np.int64)
+    lead = np.array([bool(frame.get('map_lead')) for frame in frames], dtype=bool)
     return [frame_seconds(frames[entry['ramp']]) for entry in ramp_entries(labels, classes, lead)
             if entry['before'] != 'motorway']

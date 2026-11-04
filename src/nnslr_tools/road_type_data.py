@@ -5,24 +5,28 @@ sign, the motorway's 120 starts where the ramp merges (vision.SpeedLimitMemory).
 camera, one frame a second, and keeps a memory (a GRU) of what it saw, so that the moment of the merge, the entry
 into a town and the exit from it are found from the change of the picture, not from a sign.
 
-Labels: the kind of road of each frame from the map (nnslr road-types, data/derived/road_types) with a person's
-corrections over it (Data › Roads, road_types.load_road_types). The classes are road_types.ROAD_TYPES, in the order
+Labels: the kind of road a person gave a frame in Data › Roads, confirming the map's proposal or correcting it
+(road_types.confirmed, annotations/road_types): nothing else is a label. The classes are road_types.ROAD_TYPES, in the order
 of the network's output and with the same names the car's SpeedLimitMemory takes: town, rural, expressway, motorway,
 ramp (an OSM link of a motorway or an expressway, highway motorway_link or trunk_link out of town), parking (a car
 park in the open), zone30 (a 30 zone), garage (a car park underground or indoors) and merge (the acceleration lane of
 an entry, where the ramp's limit ends: road_types.merge_lanes); zone30, garage and merge were added last on 30 Oct
 2026: the car learns them with its next road-type network.
 
-Loss weight of a frame (FRAME_WEIGHTS):
+A frame's label and loss weight (frame_label), the same for the training, the validation and the test:
 
-* no road type (no GPS, no road on the map, a person said "not sure"): 0, out of the loss, still fed to the memory;
-* sure: 1;
-* a ramp from its OSM link: RAMP_WEIGHT. road_types flags every ramp "check it" (WEAK_BASES) because the LIMIT of a
-  ramp is unclear (60, 80, none), not because the road is: an OSM link is the ramp. Masking them would erase the class.
-  The same for the metres of the acceleration lane on the ramp's link;
-* every other unsure frame (a 60 or 70 road taken as rural, a stretch filled across a gap of the map or of the GPS, a
-  frame smoothed into its neighbours): UNSURE_WEIGHT. Masking them would erase most frames at the transitions, where
-  the memory matters; they count less because the map may be wrong there. The measure reads weight-1 frames only.
+* a person confirmed or corrected it: its type, weight 1;
+* everything else: no label, weight 0, out of the loss and of every measure, still fed to the memory. So the map's
+  proposal, however sure (nnslr road-types, data/derived/road_types: "sure", an OSM link of a ramp, an acceleration
+  lane), a frame without a road type and a person's "can't tell". Until 4 Nov 2026 the proposals were labels too, at
+  weight 1 or 0.3: a frame beside a ramp was taught as the ramp (18/57 of 00000168--2b00afdc52), and the measures took
+  the map for the truth. The numbers of a network trained then do not compare with a later one's.
+
+A frame also keeps the road type read so far, a person's over the map's (map_label, map_lead): it says only where the
+sign input of source 'map' stands (road_type_signs.map_sign_times), an input like the speed. It is never a label.
+
+Enough to train: a training stops, with what is missing, while the partitions hold fewer confirmed frames than
+ENOUGH_LABELS asks (missing_labels). It never goes back to the proposals.
 
 Split (SPLIT_POLICY, like splits.py's place-v4 but over frames): the drives pass the same roads again and again, so a
 split by drive or by random frames would test the network on roads it learned. The frames are grouped in areas of
@@ -30,8 +34,9 @@ about 300 m (splits.PLACE_CELL, the GPS of the frame, else of the nearest frame 
 every area the test drives of the sign split went through (data/splits/latest.json: the same held-out drive), so the
 whole test drive is measured as it was driven, with its ramps and towns. The areas next to the test are the buffer.
 Validation grows in VALIDATION_CLUSTERS compact clusters of areas (seeded where it adds the classes it lacks, never
-without a class of MAIN_CLASS_SHARE of the frames) to about EVALUATION_SHARE of the labelled frames; the areas next to
-it are the buffer too. Everything else is train. A
+without a class of MAIN_CLASS_SHARE of the frames) to about EVALUATION_SHARE of the labelled frames, through the areas
+in between too: the frames a person confirmed lie scattered, and a cluster of labelled areas alone stops at the first
+gap; the areas next to it are the buffer too. Everything else is train, so the split moves as a person reviews. A
 sequence is a run of frames of one drive, without a missing frame, in one partition: the network is trained and
 measured on whole stretches, never on lone frames.
 
@@ -55,15 +60,13 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools.junctions import labelled_junctions
-from nnslr_tools.road_types import MERGE_BASIS, ROAD_TYPES, ROAD_TYPES_RELATIVE, load_road_types
+from nnslr_tools.road_types import ROAD_TYPES, ROAD_TYPES_RELATIVE, confirmed, load_road_types
 from nnslr_tools.splits import PLACE_CELL
 
 CLASSES = ROAD_TYPES
 CLASS_INDEX = {name: index for index, name in enumerate(CLASSES)}
-# A ramp found from its OSM link: unsure only because its limit is (road_types.WEAK_BASES).
-RAMP_BASES = ('highway motorway_link', 'highway trunk_link')
-RAMP_WEIGHT = 1.0
-UNSURE_WEIGHT = 0.3
+# What a run records of its labels: a person's only (frame_label). Before it the map's proposals were labels too.
+LABEL_POLICY = 'confirmed-only'
 # A frame and its car speed: GPS speed in m/s, clipped and scaled (on the car: carState.vEgo), and a flag that says
 # whether the speed is known.
 SPEED_MAX = 60.0
@@ -76,7 +79,7 @@ GPS_RELATIVE = Path('derived') / 'gps'
 CACHE_RELATIVE = Path('derived') / 'road_type_frames'
 CACHE_VERSION = 1
 SPLITS_RELATIVE = Path('splits') / 'latest.json'
-SPLIT_POLICY = 'road-type-place-v2'
+SPLIT_POLICY = 'road-type-place-v3'
 PARTITIONS = ('train', 'validation', 'test')
 EVALUATION_SHARE = .15
 VALIDATION_CLUSTERS = 2
@@ -84,22 +87,21 @@ VALIDATION_CLUSTERS = 2
 MAIN_CLASS_SHARE = .1
 # Shorter runs of one partition (frames) are dropped: too short to train or measure a memory.
 MIN_SEQUENCE = 30
+# The fewest confirmed frames in the sequences of each partition (the only frames a training sees) and of each kind of
+# road the car's rules turn on: the ramp, the motorway after it, the entry into a town and the exit from it. The other
+# classes may be missing: a class without frames is not learned and stays out of the macro F1. Fewer stops a training
+# (missing_labels); a validation without a ramp would choose the epoch blind to it (31 Oct: the same without the
+# motorway gave a motorway recall of 0.11 on test).
+ENOUGH_LABELS = {'train': 2000, 'validation': 300, 'test': 300}
+NEEDED_CLASSES = ('town', 'rural', 'motorway', 'ramp')
+ENOUGH_OF_A_CLASS = 30
 UNSEEN_EXIT_S = 4.0  # seconds after a passage whose exit was not seen in which a "passed" is not judged
 
 
 def frame_label(line: dict) -> tuple[int, float]:
-    """(class index, loss weight) of a road-types line; (-1, 0.0) without a road type (see the module's text)."""
-    road_type = line.get('road_type')
-    if road_type not in CLASS_INDEX:
-        return -1, 0.0
-    if line.get('sure'):
-        return CLASS_INDEX[road_type], 1.0
-    basis = str(line.get('basis'))
-    if road_type == 'merge':
-        basis = basis.removeprefix(MERGE_BASIS + ' (').removesuffix(')')
-    if road_type in ('ramp', 'merge') and basis in RAMP_BASES:
-        return CLASS_INDEX[road_type], RAMP_WEIGHT
-    return CLASS_INDEX[road_type], UNSURE_WEIGHT
+    """(class index, loss weight) of a road-types line: (class, 1.0) where a person confirmed or corrected its type,
+    else (-1, 0.0), however sure the map is (see the module's text)."""
+    return (CLASS_INDEX[line['road_type']], 1.0) if confirmed(line) else (-1, 0.0)
 
 
 def speed_features(speed_mps) -> tuple[float, float]:
@@ -136,8 +138,9 @@ def _positions(root: Path, route: str) -> dict[str, dict]:
 
 
 def route_frames(root: Path, route: str) -> list[dict]:
-    """The frames of a drive in drive order: key, segment, index, label, weight, sure, basis, lead (an acceleration
-    lane frame that was the ramp's: road_types), latitude, longitude, speed_mps, image (path), present (the picture is
+    """The frames of a drive in drive order: key, segment, index, label, weight, reviewed, sure, basis, lead (an
+    acceleration lane frame that was the ramp's: road_types), map_label and map_lead (the same two of the road type read
+    so far, for the sign input alone: see the module's text), latitude, longitude, speed_mps, image (path), present (the picture is
     on disk) and the junction labels (junction_in, junction_passed,
     junction_known, junction: the intersection's id; junction_ignore: near the end of a passage whose exit was not
     seen, where a "passed" is neither right nor wrong; distance_m: metres driven since the start of the drive)."""
@@ -149,13 +152,16 @@ def route_frames(root: Path, route: str) -> list[dict]:
     frames = []
     for line in load_road_types(root, route):
         label, weight = frame_label(line)
+        map_label = CLASS_INDEX.get(line.get('road_type'), -1)
         gps = positions.get(line['frame_key'], {})
         junction = junctions.get(line['frame_key'])
         image = frame_path(root, route, line['segment_index'], line['output_index'])
         frames.append({
             'route': route, 'key': line['frame_key'], 'segment': line['segment_index'], 'index': line['output_index'],
-            'label': label, 'weight': weight, 'sure': bool(line.get('sure')), 'basis': line.get('basis'),
+            'label': label, 'weight': weight, 'reviewed': line.get('reviewed') is True,
+            'sure': bool(line.get('sure')), 'basis': line.get('basis'),
             'lead': label == CLASS_INDEX['merge'] and bool(line.get('lead')),
+            'map_label': map_label, 'map_lead': map_label == CLASS_INDEX['merge'] and bool(line.get('lead')),
             'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'speed_mps': gps.get('speed_mps'),
             'image': str(image), 'present': image.is_file(),
             'junction_known': bool(junction and junction['known']),
@@ -222,11 +228,13 @@ def place_split(frames_by_route: dict[str, list[dict]], tests: list[str] | tuple
     classes_of: dict[tuple[int, int], dict[int, int]] = {}
     for route, frames in frames_by_route.items():
         for frame, cell in zip(frames, cells_of[route]):
-            if cell is None or frame['label'] < 0:
+            if cell is None:
                 continue
-            weight_of[cell] = weight_of.get(cell, 0) + 1
+            weight_of.setdefault(cell, 0)
             counts_here = classes_of.setdefault(cell, {})
-            counts_here[frame['label']] = counts_here.get(frame['label'], 0) + 1
+            if frame['label'] >= 0:
+                weight_of[cell] += 1
+                counts_here[frame['label']] = counts_here.get(frame['label'], 0) + 1
     test = {cell for route in tests for cell in cells_of[route] if cell is not None}
     shield = _around(test) - test
     candidates = {cell for cell in weight_of if cell not in test and cell not in shield}
@@ -268,20 +276,21 @@ def _validation_cells(candidates: set, weight_of: dict, classes_of: dict, share:
     """Validation areas: clusters compact clusters, each holding about share / clusters of the candidates' labelled
     frames, the one at each step whose seed brings every class closest to its share of the candidates' frames (the
     ramps sit at interchanges: a cluster grown blindly on one takes most of them from the training) with the fewest
-    training frames lost to its buffer. A cluster that leaves out a class of MAIN_CLASS_SHARE of the frames loses to any
-    that holds it: with eight classes the rare ones weigh as much as the motorway, and a validation without the
-    motorway chose the epoch blind to it (31 Oct: motorway recall 0.11 on test)."""
+    training frames lost to its buffer. A cluster that leaves out a class of MAIN_CLASS_SHARE of the frames, or one of
+    NEEDED_CLASSES, loses to any that holds it: with eight classes the rare ones weigh as much as the motorway, and a
+    validation without the motorway chose the epoch blind to it (31 Oct: motorway recall 0.11 on test)."""
     pool: dict[int, int] = {}
     for cell in candidates:
         for label, count in classes_of[cell].items():
             pool[label] = pool.get(label, 0) + count
     total = sum(weight_of[cell] for cell in candidates) or 1
-    main = [label for label, count in pool.items() if count >= MAIN_CLASS_SHARE * total]
+    main = [label for label, count in pool.items()
+            if count >= MAIN_CLASS_SHARE * total or CLASSES[label] in NEEDED_CLASSES]
     chosen: set = set()
     for step in range(1, clusters + 1):
         target = share * step / clusters
         best, best_score = None, None
-        for seed in sorted(candidates - _around(chosen)):
+        for seed in sorted(cell for cell in candidates - _around(chosen) if weight_of[cell]):
             cluster = _cluster(seed, candidates, _around(chosen), weight_of, share * total / clusters)
             together = chosen | cluster
             have: dict[int, int] = {}
@@ -331,9 +340,10 @@ def split_sha256(split: dict) -> str:
 
 
 def dataset_summary(frames_by_route: dict[str, list[dict]], split: dict, runs: list[dict]) -> dict:
-    """Frames per partition and class (weight > 0), the unsure ones among them, and the frames in sequences."""
-    summary = {partition: {'sequences': 0, 'frames': 0, 'labelled': {name: 0 for name in CLASSES},
-                           'unsure': {name: 0 for name in CLASSES}} for partition in PARTITIONS}
+    """The labelled frames per partition and class in the sequences, with the frames there still to review, and the same
+    over every frame with those a person could not tell."""
+    summary = {partition: {'sequences': 0, 'frames': 0, 'labelled': {name: 0 for name in CLASSES}, 'to_review': 0}
+               for partition in PARTITIONS}
     for run in runs:
         part = summary[run['partition']]
         part['sequences'] += 1
@@ -343,18 +353,33 @@ def dataset_summary(frames_by_route: dict[str, list[dict]], split: dict, runs: l
             frame = frames[position]
             if frame['label'] >= 0:
                 part['labelled'][CLASSES[frame['label']]] += 1
-                if not frame['sure']:
-                    part['unsure'][CLASSES[frame['label']]] += 1
+            elif not frame['reviewed']:
+                part['to_review'] += 1
     every = {name: 0 for name in CLASSES}
-    unsure = {name: 0 for name in CLASSES}
+    cant_tell = to_review = 0
     for frames in frames_by_route.values():
         for frame in frames:
             if frame['label'] >= 0:
                 every[CLASSES[frame['label']]] += 1
-                unsure[CLASSES[frame['label']]] += 0 if frame['sure'] else 1
-    return {'policy': split['policy'], 'test_routes': split['test_routes'], 'partitions': summary,
-            'all_frames': {'labelled': every, 'unsure': unsure,
-                           'no_label': sum(1 for f in frames_by_route.values() for x in f if x['label'] < 0)}}
+            elif frame['reviewed']:
+                cant_tell += 1
+            else:
+                to_review += 1
+    return {'policy': split['policy'], 'label_policy': LABEL_POLICY, 'test_routes': split['test_routes'],
+            'partitions': summary, 'all_frames': {'labelled': every, 'cant_tell': cant_tell, 'to_review': to_review}}
+
+
+def missing_labels(summary: dict) -> list[str]:
+    """What the sequences of dataset_summary lack to train (ENOUGH_LABELS, NEEDED_CLASSES), one text each; [] when they
+    have enough."""
+    missing = []
+    for partition, enough in ENOUGH_LABELS.items():
+        labelled = summary['partitions'][partition]['labelled']
+        if sum(labelled.values()) < enough:
+            missing.append(f'{partition} has {sum(labelled.values())} of {enough} confirmed frames')
+        missing += [f'{partition} has {labelled[name]} of {ENOUGH_OF_A_CLASS} {name} frames'
+                    for name in NEEDED_CLASSES if labelled[name] < ENOUGH_OF_A_CLASS]
+    return missing
 
 
 def load_dataset(root: Path, routes: list[str] | None = None, tests: list[str] | None = None,

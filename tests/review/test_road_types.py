@@ -3,7 +3,8 @@ import json
 
 from nnslr_tools.cli import main
 from nnslr_tools.map_context import RoadMap
-from nnslr_tools.road_types import build_road_types, load_road_types, merge_lanes, smooth, stretches, way_type
+from nnslr_tools.road_types import (build_road_types, confirmed, correct, drive_view, load_road_types, merge_lanes,
+                                    review_counts, smooth, stretches, summary, way_type)
 
 ROUTE = '0000002a--0123456789'
 
@@ -126,6 +127,7 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
 
     from nnslr_tools.road_types import summary
     assert summary(tmp_path) == {'routes': [], 'made_at': None, 'drives_without': 0,
+                                 'review': {'usable': 0, 'cant_tell': 0, 'to_review': 0},
                                  'maps': {'names': [], 'needed': [], 'outside': 0, 'nowhere': 0, 'max_gb': None,
                                           'checked_at': None}}
     # A prepared drive without road types yet.
@@ -145,6 +147,9 @@ def test_summary_names_each_drive_with_its_types_and_the_drives_left(tmp_path):
                              'garage': 0, 'merge': 0, 'unknown': 1}
     assert drive['stretches'] == [{'type': 'motorway', 'from': '0/0', 'to': '0/2', 'frames': 3},
                                   {'type': None, 'from': '0/3', 'to': '0/3', 'frames': 1}]
+    # Sure on the map or not, every frame is to review until a person says.
+    assert (drive['reviewed'], drive['usable'], drive['cant_tell'], drive['to_review']) == (0, 0, 0, 4)
+    assert result['review'] == {'usable': 0, 'cant_tell': 0, 'to_review': 4}
     # Read again when the file changes.
     build_road_types(tmp_path, ROUTE, positions[:2], road_map)
     assert summary(tmp_path)['routes'][0]['frames'] == 2
@@ -291,10 +296,16 @@ def test_build_labels_the_lane_after_an_entry_ramp(tmp_path):
     assert on_ramp['basis'] == 'acceleration lane (highway motorway_link)' and not on_ramp['sure']
     # The ramp's frames of the lane are its lead, for the measures to fold back into the ramp.
     assert on_ramp['lead'] is True and on_road['lead'] is False
-    assert data.route_frames(tmp_path, ROUTE)[first]['lead'] is True
+    frames = data.route_frames(tmp_path, ROUTE)
+    assert frames[first]['map_lead'] is True and frames[first]['lead'] is False
     assert on_road['basis'] == 'acceleration lane (highway motorway)' and on_road['sure']
-    assert data.frame_label(on_ramp) == (data.CLASS_INDEX['merge'], data.RAMP_WEIGHT)
-    assert data.frame_label(on_road) == (data.CLASS_INDEX['merge'], 1.0)
+    # Proposals: no label, and a person's confirmation makes them one, the lead kept.
+    assert data.frame_label(on_ramp) == data.frame_label(on_road) == (-1, 0.0)
+    correct(tmp_path, ROUTE, lines[first]['frame_key'], lines[last]['frame_key'], 'merge', 'someone')
+    frames = data.route_frames(tmp_path, ROUTE)
+    assert frames[first]['label'] == frames[last]['label'] == data.CLASS_INDEX['merge']
+    assert frames[first]['weight'] == frames[last]['weight'] == 1.0
+    assert frames[first]['lead'] is True and frames[last]['lead'] is False
 
 
 
@@ -356,6 +367,24 @@ def test_corrections_over_the_map_the_last_wins_and_a_new_map_keeps_them(tmp_pat
     correct(tmp_path, ROUTE, '0/0', '0/5', 'rural', 'admin')
     build_road_types(tmp_path, ROUTE, positions[:4], road_map)
     assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 4
+
+
+def test_what_a_person_did_of_a_drive_is_counted_for_the_page(tmp_path):
+    positions, road_map = _drive_of(tmp_path)
+    assert review_counts(load_road_types(tmp_path, ROUTE)) == {'usable': 0, 'cant_tell': 0, 'to_review': 6}
+    assert confirmed(load_road_types(tmp_path, ROUTE)[0]) is False  # motorway, sure on the map
+    correct(tmp_path, ROUTE, '0/0', '0/1', 'motorway', 'someone')  # the proposal confirmed
+    correct(tmp_path, ROUTE, '0/2', '0/2', 'rural', 'someone')  # corrected
+    correct(tmp_path, ROUTE, '0/3', '0/3', None, 'someone')  # can't tell
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [confirmed(line) for line in lines] == [True, True, True, False, False, False]
+    assert review_counts(lines) == {'usable': 3, 'cant_tell': 1, 'to_review': 2}
+    # The same for the list and the drive opened, and after the map is read again.
+    build_road_types(tmp_path, ROUTE, positions, road_map)
+    drive = summary(tmp_path)
+    assert drive['review'] == {'usable': 3, 'cant_tell': 1, 'to_review': 2}
+    assert (drive['routes'][0]['usable'], drive['routes'][0]['to_review']) == (3, 2)
+    assert drive_view(tmp_path, ROUTE, {})['usable'] == 3
 
 
 def test_a_correction_names_frames_of_the_drive_and_a_type(tmp_path):
@@ -426,6 +455,7 @@ def test_the_drive_over_http(tmp_path):
                                                 headers={**cookie, 'Origin': f'http://127.0.0.1:{server.port}'})
         drive = json_of(data)
         assert status == 200 and drive['ok'] and drive['corrections'] == 1 and drive['reviewed'] == 2
+        assert (drive['usable'], drive['cant_tell'], drive['to_review']) == (2, 0, 4)
         assert [(frame['road_type'], frame['reviewed']) for frame in drive['frames'][:3]] == [
             ('motorway', False), ('rural', True), ('rural', True)]
         assert json.loads(corrections_path(tmp_path, ROUTE).read_text())['reviewer'] == 'admin'

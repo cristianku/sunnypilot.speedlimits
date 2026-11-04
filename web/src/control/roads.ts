@@ -1,5 +1,5 @@
 // Data › Roads: the kinds of road with their words, and a drive opened (RoadDrive.vue) as runs of frames, the stretches
-// still to check, the stretch a correction sets, why a frame has its type in a driver's words and the time of a frame.
+// still to review, the stretch a correction sets, why a frame has its type in a driver's words and the time of a frame.
 import type {RoadFrame, RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */
@@ -26,30 +26,30 @@ export function roadRuns(frames: readonly RoadFrame[]): RoadRun[] {
   return runs;
 }
 
-/** A frame a person should look at: no person set it, and the map says nothing or is often wrong there. */
+/** A frame still to review: no person confirmed or corrected it. Every proposal of the map is, the sure ones too: only
+ * a person's types are labels of the training (nnslr_tools.road_type_data). */
 export function toCheck(frame: RoadFrame): boolean {
-  return !frame.reviewed && (frame.road_type === null || !frame.sure);
+  return !frame.reviewed;
 }
 
-/** The stretches to check, in the order of the drive: the frames to check one after the other, of one kind (an unknown
- * gap then an unsure ramp are two stretches, as a correction sets them one at a time). */
+/** The stretches to review, in the order of the drive: the frames to review one after the other, of one kind and as
+ * sure (an unknown gap then an unsure ramp are two stretches, as stretchAt sets them one at a time: one Confirm clears
+ * one). */
 export function checkStretches(frames: readonly RoadFrame[]): {first: number; count: number}[] {
   const stretches: {first: number; count: number}[] = [];
   frames.forEach((frame, index) => {
     if (!toCheck(frame)) return;
     const last = stretches[stretches.length - 1];
-    if (last && last.first + last.count === index && frames[index - 1]?.road_type === frame.road_type) last.count += 1;
-    else stretches.push({first: index, count: 1});
+    const before = frames[index - 1];
+    if (last && last.first + last.count === index && before?.road_type === frame.road_type && before.sure === frame.sure) {
+      last.count += 1;
+    } else stretches.push({first: index, count: 1});
   });
-  // One or two unsure pictures of the same kind as both their neighbours (a gap filled in a car park, a lone picture
-  // between two town stretches) are not worth a stop: the stretch around them already says what they are.
-  return stretches.filter(({first, count}) => count > 2 || frames[first]?.road_type === null
-    || frames[first - 1]?.road_type !== frames[first]?.road_type
-    || frames[first + count]?.road_type !== frames[first]?.road_type);
+  return stretches;
 }
 
-/** The first frame of the next stretch to check after the one at `from` (from the start again after the last); null when
- * none is left. */
+/** The first frame of the next stretch to review after the one at `from` (from the start again after the last); null
+ * when none is left. */
 export function nextToCheck(stretches: readonly {first: number}[], from: number): number | null {
   const next = stretches.find((stretch) => stretch.first > from) ?? stretches[0];
   return next && next.first !== from ? next.first : null;

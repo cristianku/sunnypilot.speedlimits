@@ -2,6 +2,7 @@
 root, and its ONNX step contract (nnslr_tools.road_type_net, with torch only). numpy and the modules that need it
 are imported inside the tests: collecting the tests must leave numpy out (tests/cli/test_import_isolation.py)."""
 import json
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -52,8 +53,17 @@ def _types(*parts):
     return found
 
 
+def _confirm_all(root: Path, route: str):
+    """A person confirms every stretch the map proposes, as Data › Roads saves it."""
+    from nnslr_tools import road_types
+    for stretch in road_types.stretches(road_types.map_road_types(root, route)):
+        if stretch['type'] is not None:
+            road_types.correct(root, route, stretch['from'], stretch['to'], stretch['type'], 'someone')
+
+
 @pytest.fixture
-def root(tmp_path):
+def proposed(tmp_path):
+    """Four drives with the map's proposals, no person's decision yet."""
     root = tmp_path / 'data'
     # The test drive: town, a ramp, the motorway; in an area of its own.
     _write_route(root, TEST_ROUTE, _types(('town', 40), ('ramp', 20, False, 'highway motorway_link', 'motorway_link'),
@@ -73,16 +83,33 @@ def root(tmp_path):
     return root
 
 
-def test_labels_and_weights_follow_the_road_types():
+@pytest.fixture
+def root(proposed):
+    """The same drives with every proposal confirmed by a person."""
+    for route in (TEST_ROUTE, *OTHER_ROUTES):
+        _confirm_all(proposed, route)
+    return proposed
+
+
+def test_only_a_person_s_type_is_a_label():
     from nnslr_tools import road_type_data as data
     assert data.CLASSES == ('town', 'rural', 'expressway', 'motorway', 'ramp', 'parking', 'zone30', 'garage',
                             'merge')
-    assert data.frame_label({'road_type': 'town', 'sure': True}) == (TOWN, 1.0)
-    # A ramp from its OSM link is unsure only for its limit: it keeps the full weight.
-    assert data.frame_label({'road_type': 'ramp', 'sure': False, 'basis': 'highway motorway_link'}) == (RAMP, 1.0)
-    assert data.frame_label({'road_type': 'ramp', 'sure': False, 'basis': 'smoothed (x)'}) == (RAMP, data.UNSURE_WEIGHT)
-    assert data.frame_label({'road_type': 'rural', 'sure': False, 'basis': 'maxspeed 60'}) == (RURAL, data.UNSURE_WEIGHT)
-    assert data.frame_label({'road_type': None, 'sure': False}) == (-1, 0.0)
+    # No proposal is a label, however sure: the ramps of the map's links and the acceleration lane least of all.
+    for proposal in ({'road_type': 'town', 'sure': True, 'basis': 'maxspeed 50'},
+                     {'road_type': 'motorway', 'sure': True, 'basis': 'highway motorway'},
+                     {'road_type': 'ramp', 'sure': True, 'basis': 'highway motorway_link'},
+                     {'road_type': 'ramp', 'sure': False, 'basis': 'highway motorway_link'},
+                     {'road_type': 'ramp', 'sure': False, 'basis': 'highway trunk_link'},
+                     {'road_type': 'merge', 'sure': True, 'basis': 'acceleration lane (highway motorway)'},
+                     {'road_type': 'merge', 'sure': False, 'basis': 'acceleration lane (highway motorway_link)'},
+                     {'road_type': 'rural', 'sure': False, 'basis': 'maxspeed 60', 'reviewed': False},
+                     {'road_type': 'town', 'sure': True, 'reviewed': 'yes'}):
+        assert data.frame_label(proposal) == (-1, 0.0)
+    assert data.frame_label({'road_type': 'ramp', 'sure': True, 'basis': 'reviewed', 'reviewed': True}) == (RAMP, 1.0)
+    # Reviewed without a valid type: "Can't tell", or a type no more of the list.
+    assert data.frame_label({'road_type': None, 'sure': True, 'reviewed': True}) == (-1, 0.0)
+    assert data.frame_label({'road_type': 'lane', 'sure': True, 'reviewed': True}) == (-1, 0.0)
     assert data.speed_features(15.0) == (0.5, 1.0)
     assert data.speed_features(100.0) == (2.0, 1.0)
     assert data.speed_features(None) == (0.0, 0.0)
@@ -130,7 +157,20 @@ def test_the_validation_never_leaves_out_a_main_class(monkeypatch):
     assert data._validation_cells(set(classes_of), weight_of, classes_of, .15, 1) == {(10, 0)}
     # Without the rule the village wins: closer to every share, nothing lost to its buffer, and no motorway.
     monkeypatch.setattr(data, 'MAIN_CLASS_SHARE', 2.0)
+    monkeypatch.setattr(data, 'NEEDED_CLASSES', ())
     assert data._validation_cells(set(classes_of), weight_of, classes_of, .15, 1) == {(0, 0)}
+
+
+def test_the_validation_grows_through_the_areas_without_a_person_s_types():
+    from nnslr_tools import road_type_data as data
+    town, motorway = data.CLASS_INDEX['town'], data.CLASS_INDEX['motorway']
+    # Three areas in a row, the middle one driven but not reviewed: the cluster reaches the far one across it.
+    classes_of = {(0, 0): {town: 100}, (0, 1): {}, (0, 2): {motorway: 100}, (9, 9): {town: 400, motorway: 400}}
+    weight_of = {cell: sum(counts.values()) for cell, counts in classes_of.items()}
+    chosen = data._validation_cells(set(classes_of), weight_of, classes_of, .2, 1)
+    assert chosen == {(0, 0), (0, 1), (0, 2)}
+    # A place without one confirmed frame is never where a cluster starts.
+    assert data._validation_cells({(0, 1)}, {(0, 1): 0}, {(0, 1): {}}, .2, 1) == set()
 
 
 def test_sequences_are_runs_in_drive_order_broken_at_gaps(root):
@@ -148,13 +188,192 @@ def test_sequences_are_runs_in_drive_order_broken_at_gaps(root):
     assert [len(run['positions']) for run in data.sequences(frames, partitions, min_length=30)] == [50, 39]
 
 
-def test_summary_counts_unsure_frames_per_class(root):
+def test_summary_counts_a_person_s_labels_apart_from_the_frames_to_review(root):
     from nnslr_tools import road_type_data as data
     summary = data.load_dataset(root, min_length=10)['summary']
+    assert summary['label_policy'] == data.LABEL_POLICY == 'confirmed-only'
     assert summary['all_frames']['labelled']['ramp'] == 40
-    assert summary['all_frames']['unsure']['ramp'] == 40
-    assert summary['all_frames']['unsure']['rural'] == 60
-    assert summary['all_frames']['no_label'] == 10
+    assert summary['all_frames']['labelled']['rural'] == 60
+    assert summary['all_frames']['cant_tell'] == 0 and summary['all_frames']['to_review'] == 10
+
+
+# -- a road type enters a training only by a person: a proposal teaches nothing and measures nothing ------------------
+def _labels(root, route) -> list[int]:
+    from nnslr_tools import road_type_data as data
+    return [frame['label'] for frame in data.route_frames(root, route)]
+
+
+def test_proposals_are_no_labels_until_a_person_confirms_or_corrects_them(proposed):
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[1]  # the motorway, a ramp from its link, a car park
+    frames = data.route_frames(proposed, route)
+    assert {frame['label'] for frame in frames} == {-1} and {frame['weight'] for frame in frames} == {0.0}
+    assert [frame['map_label'] for frame in frames] == [MOTORWAY] * 50 + [RAMP] * 20 + [PARKING] * 50
+    summary = data.load_dataset(proposed, min_length=10)['summary']
+    assert sum(summary['all_frames']['labelled'].values()) == 0 and summary['all_frames']['to_review'] == 480
+
+    # Confirming the proposed ramp, and correcting the motorway to a town: the very same labels of full weight.
+    road_types.correct(proposed, route, '0/50', '1/9', 'ramp', 'someone')
+    road_types.correct(proposed, route, '0/0', '0/9', 'town', 'someone')
+    frames = data.route_frames(proposed, route)
+    assert [frame['label'] for frame in frames] == [TOWN] * 10 + [-1] * 40 + [RAMP] * 20 + [-1] * 50
+    assert {frame['weight'] for frame in frames if frame['label'] >= 0} == {1.0}
+    assert {frame['weight'] for frame in frames if frame['label'] < 0} == {0.0}
+
+
+def test_a_confirmation_outlives_new_proposals_of_the_map(proposed):
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[1]
+    road_types.correct(proposed, route, '0/50', '1/9', 'ramp', 'someone')
+    kept = road_types.corrections_path(proposed, route).read_bytes()
+    # The map read again: other types, and the frames confirmed are now the map's town.
+    _write_route(proposed, route, _types(('town', 120)), (48.0, 9.0), (0.0003, 0.0))
+    assert road_types.corrections_path(proposed, route).read_bytes() == kept
+    assert _labels(proposed, route) == [-1] * 50 + [RAMP] * 20 + [-1] * 50
+
+
+def test_cant_tell_is_reviewed_no_label_and_stays_in_the_sequence(proposed):
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[0]
+    road_types.correct(proposed, route, '0/0', '0/19', None, 'someone')
+    road_types.correct(proposed, route, '0/20', '0/39', 'rural', 'someone')
+    frames = data.route_frames(proposed, route)
+    assert [frame['label'] for frame in frames[:40]] == [-1] * 20 + [RURAL] * 20
+    assert {frame['weight'] for frame in frames[:20]} == {0.0} and all(frame['reviewed'] for frame in frames[:20])
+    # In the memory of the sequence all the same, with the proposals around them.
+    runs = data.sequences(frames, ['train'] * len(frames), min_length=10)
+    assert [len(run['positions']) for run in runs] == [120]
+    summary = data.load_dataset(proposed, min_length=10)['summary']
+    assert summary['all_frames']['cant_tell'] == 20 and summary['all_frames']['labelled']['rural'] == 20
+    assert summary['all_frames']['to_review'] == 480 - 40
+
+
+def test_the_measures_take_only_a_person_s_types_as_truth(proposed):
+    import numpy as np
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_metrics as metrics
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[1]
+    # A person confirmed the motorway's start and the car park's end: the proposals in between are no truth.
+    road_types.correct(proposed, route, '0/0', '0/29', 'motorway', 'someone')
+    road_types.correct(proposed, route, '1/30', '1/59', 'parking', 'someone')
+    frames = data.route_frames(proposed, route)
+    labels = np.array([frame['label'] for frame in frames])
+    weights = np.array([frame['weight'] for frame in frames])
+    # Right on the confirmed frames, flipping between town and rural on every frame of the proposals.
+    predicted = np.where(labels >= 0, labels, np.arange(len(labels)) % 2 * (RURAL - TOWN) + TOWN)
+    result = metrics.sequence_metrics([{'labels': labels, 'weights': weights, 'predicted': predicted}], data.CLASSES)
+    # Only the confirmed frames are measured, right every one: the wrong answers on the map's ramp count for nothing.
+    assert result['labelled']['classes']['motorway']['support'] == 30
+    assert result['labelled']['classes']['parking']['support'] == 30
+    assert result['labelled']['classes']['ramp']['support'] == 0
+    assert sum(map(sum, result['confusion'])) == 60
+    assert result['labelled']['classes']['motorway']['f1'] == result['labelled']['classes']['parking']['f1'] == 1.0
+    # The proposals are a gap too long to be a transition, and the flips inside it are no false switches.
+    assert metrics.change_points(labels, data.CLASSES) == []
+    assert not any(kind['count'] for kind in result['transitions'].values())
+    assert result['false_switches_per_hour'] == 0
+    # What the map says there, were it the truth, is another measure: 40 frames more, and all the flips of the ramp.
+    map_labels = np.array([frame['map_label'] for frame in frames])
+    assert metrics.switches(predicted, map_labels)[0] > 0 and metrics.change_points(map_labels, data.CLASSES)
+
+
+def test_enough_labels_name_what_each_partition_lacks():
+    from nnslr_tools import road_type_data as data
+
+    def summary(train=None, validation=None, test=None):
+        parts = {name: {'labelled': {kind: 0 for kind in data.CLASSES} | (labelled or {})}
+                 for name, labelled in (('train', train), ('validation', validation), ('test', test))}
+        return {'partitions': parts}
+    full = {name: 1000 for name in data.NEEDED_CLASSES}
+    assert data.missing_labels(summary(full, full, full)) == []
+    missing = data.missing_labels(summary(full, {**full, 'ramp': 0}, {**full, 'ramp': 29}))
+    assert missing == ['validation has 0 of 30 ramp frames', 'test has 29 of 30 ramp frames']
+    few = {name: 30 for name in data.NEEDED_CLASSES}
+    assert data.missing_labels(summary(few, full, full)) == ['train has 120 of 2000 confirmed frames']
+    assert 'test has 0 of 300 confirmed frames' in data.missing_labels(summary(full, full))
+
+
+def test_too_few_confirmed_frames_stop_a_training_before_it_writes_anything(proposed, tmp_path, capsys):
+    from nnslr_tools.cli import main
+    run_dir = tmp_path / 'run'
+    # The proposals alone would fill every partition: they are not counted, and nothing falls back on them.
+    assert main(['train-road-type', '--dry-run', '--run-dir', str(run_dir), '--data-root', str(proposed)]) != 0
+    message = capsys.readouterr().err
+    assert 'a proposal of the map is never a label' in message and 'Data › Roads' in message
+    assert 'train has 0 of 2000 confirmed frames' in message and 'validation has 0 of 30 ramp frames' in message
+    assert not run_dir.exists()
+
+
+def test_a_dry_run_on_a_person_s_types_records_its_label_policy(root, tmp_path, monkeypatch):
+    pytest.importorskip('torch')
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    # The thresholds and the shortest sequence are those of a real data root.
+    monkeypatch.setattr(data, 'ENOUGH_LABELS', {'train': 1, 'validation': 1, 'test': 1})
+    monkeypatch.setattr(data, 'NEEDED_CLASSES', ())
+    monkeypatch.setattr(data, 'load_dataset', partial(data.load_dataset, min_length=10))
+    run_dir = tmp_path / 'run'
+    result = net.train_road_type(root, run_dir, dry_run=True, workers=0, log=lambda *_: None)
+    assert result['config']['label_policy'] == data.LABEL_POLICY
+    assert 'unsure_weight' not in result['config'] and 'ramp_weight' not in result['config']
+    assert json.loads((run_dir / 'dataset.json').read_text())['label_policy'] == data.LABEL_POLICY
+    assert '"label_policy": "confirmed-only"' in (run_dir / 'result.json').read_text()  # what run_road_type.sh looks for
+
+
+def test_a_dry_run_takes_the_sequences_with_the_most_confirmed_frames(proposed):
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    from nnslr_tools import road_types
+    road_types.correct(proposed, OTHER_ROUTES[1], '1/10', '1/29', 'parking', 'someone')
+    frames = {route: data.route_frames(proposed, route) for route in (TEST_ROUTE, *OTHER_ROUTES)}
+    sequences = [{**run, 'route': route, 'partition': 'train'} for route, found in frames.items()
+                 for run in data.sequences(found, ['train'] * len(found), min_length=10)]
+    runs = net._dry_runs({'frames': frames, 'sequences': sequences})
+    assert runs[0]['route'] == OTHER_ROUTES[1] and len(runs[0]['positions']) == 40
+    # It starts at the first of them, not at the start of the drive where nothing would be learned.
+    assert runs[0]['positions'][0] == runs[0]['start'] == 70
+    assert sum(frames[OTHER_ROUTES[1]][at]['label'] >= 0 for at in runs[0]['positions']) == 20
+
+
+def _sampler_of(root, route, **options):
+    import random
+
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_net as net
+    dataset = data.load_dataset(root, min_length=10)
+    net.attach_signs(dataset, root)
+    net.attach_motion(dataset, root)
+    frames = dataset['frames'][route]
+    runs = [{**run, 'route': route, 'partition': 'train'}
+            for run in data.sequences(frames, ['train'] * len(frames), min_length=10)]
+    return net.WindowSampler(dataset, runs, random.Random(1), merge_share=0.0, focus_share=0.0, junction_share=0.0,
+                             **options)
+
+
+def test_windows_go_around_the_confirmed_frames_and_keep_the_proposals_as_memory(proposed):
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[0]
+    road_types.correct(proposed, route, '1/30', '1/39', 'town', 'someone')
+    sampler = _sampler_of(proposed, route)
+    windows = [sampler.window(20) for _ in range(100)]
+    for window in windows:
+        labels, weights = window[2], window[3]
+        assert (labels >= 0).any()
+        # The frames around them come along, for the memory, and weigh nothing.
+        assert not weights[labels < 0].any() and (weights[labels >= 0] == 1.0).all()
+    assert any((window[2] < 0).any() for window in windows)
+    # The junction head's stage does not care for the road types: its windows are anywhere.
+    anywhere = _sampler_of(proposed, route, around_labels=False)
+    assert any(not (anywhere.window(20)[2] >= 0).any() for _ in range(100))
+
+
+def test_a_drive_without_a_person_s_types_still_gives_windows(proposed):
+    window = _sampler_of(proposed, OTHER_ROUTES[0]).window(20)
+    assert (window[2] == -1).all() and not window[3].any()
 
 
 def test_frame_cache_is_the_pil_bilinear_resize_and_is_reused(root):
@@ -285,7 +504,7 @@ def test_sign_features_age_out_after_two_minutes():
 def test_the_map_puts_the_motorway_sign_at_the_start_of_every_entry_ramp():
     from nnslr_tools import road_type_signs as signs
     road = [TOWN] * 30 + [RAMP] * 10 + [MOTORWAY] * 40 + [RAMP] * 10 + [MOTORWAY] * 30  # an entry, then an interchange
-    frames = [{'segment': i // 60, 'index': i % 60, 'label': label} for i, label in enumerate(road)]
+    frames = [{'segment': i // 60, 'index': i % 60, 'label': -1, 'map_label': label} for i, label in enumerate(road)]
     assert signs.map_sign_times(frames, ROAD_TYPES) == [30.0]
     ages = signs.sign_ages([29, 30, 31.5, 200], [30.0])
     assert ages[0] == float('inf') and list(ages[1:]) == [0.0, 1.5, 170.0]
@@ -617,6 +836,22 @@ def test_a_start_without_the_board_input_goes_on_as_it_was(tmp_path):
     # A start with other inputs is not widened: its memory starts fresh.
     other = net.build_road_type_net('gru', pretrained=False, signs=True, motion=False, boards=True)
     assert 'gru.weight_ih_l0' in net.road_type_start(torch, other, path, 'gru', {'test_routes': []})['fresh']
+
+
+def test_a_person_s_motorway_over_the_map_s_ramp_takes_its_sign_away(proposed):
+    from nnslr_tools import road_type_data as data
+    from nnslr_tools import road_type_signs as signs
+    from nnslr_tools import road_types
+    route = OTHER_ROUTES[2]
+    # The map's ramp beside the carriageway, and the car on the carriageway (00000168--2b00afdc52, frame 18/57).
+    _write_route(proposed, route, _types(('town', 30), ('ramp', 30, False, 'highway motorway_link', 'motorway_link'),
+                                         ('motorway', 60, True, 'highway motorway')), (48.5, 9.5), (0.0003, 0.0))
+    # A proposal is no label, but it still says where the sign of the entry stands: an input, never an answer.
+    assert signs.map_sign_times(data.route_frames(proposed, route), ROAD_TYPES) == [30.0]
+    road_types.correct(proposed, route, '0/30', '0/59', 'motorway', 'someone')
+    frames = data.route_frames(proposed, route)
+    assert signs.map_sign_times(frames, ROAD_TYPES) == []
+    assert (frames[57]['label'], frames[57]['weight']) == (MOTORWAY, 1.0)
 
 
 def test_train_windows_carry_the_board_input(root):
