@@ -59,7 +59,7 @@ PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/set
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
 PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|publish|panoramica|prepara|allena|pannello|stato|account|'
-                     r'settings|review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
+                     r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # A drive page whose route has no report (or an id that is no route), in words.
 UNKNOWN_DRIVE_MESSAGE = 'This drive is not on the server, or it is not prepared yet.'
@@ -658,6 +658,12 @@ def make_handler(app: ReviewApp):
                 self._sign_distance_get(path)
                 return
             # [sign-distance] - END
+            # [speed-review] - START
+            # Data › Speed review (nnslr_tools.speed_review): the drives, a drive's stretches.
+            if path.startswith('/api/speed-review/'):
+                self._speed_review_get(path)
+                return
+            # [speed-review] - END
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
@@ -1348,6 +1354,58 @@ def make_handler(app: ReviewApp):
             self._json(200, answer)
         # [sign-distance] - END
 
+        # [speed-review] - START
+        def _speed_review_get(self, path):
+            """Data › Speed review, reading only: the drives with how much of each is examined, a drive's stretches."""
+            from nnslr_tools import drive_review, speed_review
+            store = speed_review.store_for(app.root)
+            drives = drive_review.store_for(app.root)
+            drive = r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})'
+            if path == '/api/speed-review/drives':
+                self._json(200, {'ok': True, 'drives': speed_review.drives_list(store, drives)})
+                return
+            match = re.fullmatch(drive, path)
+            if match:
+                self._json(200, speed_review.drive_view(store, drives, match.group(1)))
+                return
+            if re.fullmatch(drive + '/stretches', path):
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                return
+            self._problem(404, 'not_found', 'Not found.', True)
+
+        def _speed_review_post(self, path):
+            """A person's speed on a stretch of a drive ({"start_ns", "end_ns", "kph", "state", "known_ns", "note",
+            "base_revision"}; state null clears it): same origin, JSON, a person signed in on the site (never the
+            access token alone: an agent never writes these) and a panel that is not read-only."""
+            from nnslr_tools import drive_review, speed_review
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return
+            self._require_ai_session()
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/stretches', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            body = self._read_json()
+            who, _via = self._who()
+            reviewer = who or 'local'
+            route = match.group(1)
+            try:
+                answer = speed_review.save(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body,
+                                           reviewer)
+            except speed_review.SpeedReviewError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+                return
+            print(f'Speed review: {route} revision {answer["revision"]} ({terminal_text(reviewer)})', flush=True)
+            self._json(200, answer)
+        # [speed-review] - END
+
         def _send_reviews(self, route):
             try:
                 directory, run_id, rows, busy, proposer = app.view(route)
@@ -1432,6 +1490,11 @@ def make_handler(app: ReviewApp):
                 self._sign_distance_post(path)
                 return
             # [sign-distance] - END
+            # [speed-review] - START
+            if path.startswith('/api/speed-review/'):
+                self._speed_review_post(path)
+                return
+            # [speed-review] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)

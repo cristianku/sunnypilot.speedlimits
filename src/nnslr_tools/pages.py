@@ -48,13 +48,15 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
 # shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, their
-# review, Sign distance (where the comma's vision says a sign is passed against the frame a person marks), the road
-# types from the map and the training dataset; Models the versions to choose, their results and the package to publish.
+# review, Speed review (the speed a person wants held along a drive), Sign distance (where the comma's vision says a
+# sign is passed against the frame a person marks), the road types from the map and the training dataset; Models the
+# versions to choose, their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
                                   ('drivereview', '/drive-review', 'Drive review'),
+                                  ('speedreview', '/speed-review', 'Speed review'),
                                   ('signdistance', '/sign-distance', 'Sign distance'), ('roads', '/roads', 'Roads'),
                                   ('dataset', '/dataset', 'Training dataset'))),
     ('train', '/train', 'Training', ()),
@@ -68,8 +70,8 @@ SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages o
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads',
-                '/drive-review': 'drivereview', '/sign-distance': 'signdistance', '/train': 'train',
-                '/evaluate': 'evaluate', '/models': 'models', '/publish': 'publish'}
+                '/drive-review': 'drivereview', '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
+                '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
     'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
