@@ -11,7 +11,7 @@ straight from the zips of the download (on the server they sit on the TrueNAS sh
 The classifier's training takes them when asked (``nnslr train --task reader --classes v2 --mapillary
 <crops.jsonl>``, scripts/run_classifier.sh with NNSLR_CLASSIFIER_MAPILLARY=1, the Mapillary switch of Train ›
 Classifier): in train only, never in validation or test, so every measure stays on our own drives. Only the labels
-of MAPPED_LABELS and SPEED_LABEL come in: a speed sign of the European round design, its end, and the kinds of
+of MAPPED_LABELS and SPEED_LABEL come in: a speed sign of any design, its end, and the kinds of
 other signs our classifier already has as classes (a kind we fold into other_sign gets no Mapillary crops: they
 would make a class of photos that are not ours). At most PER_LABEL crops of each label, so that Mapillary helps the
 rare classes without burying the common ones.
@@ -101,10 +101,10 @@ SHARE_SALT = "mapillary-share-1:"
 # (dummy: a sign on an advert), cut by the photo's edge, on the back of something (exterior), inside another sign.
 SKIPPED_PROPERTIES = ("ambiguous", "dummy", "out-of-frame", "exterior", "included")
 
-# The European round speed sign (design g1) of MTSD; its other designs are American and Canadian rectangles, in
-# miles per hour some of them.
-SPEED_LABEL = re.compile(r"^regulatory--maximum-speed-limit-(\d+)--g1$")
-SPEED_VALUES = frozenset({10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130})
+# A speed sign of MTSD, of any design: g1 is the European round one, the others American and Canadian rectangles, in
+# miles per hour some of them. The label keeps the written digits; only g1 says they are km/h.
+SPEED_LABEL = re.compile(r"^regulatory--maximum-speed-limit-(\d+)--g\d+$")
+SPEED_VALUES = frozenset(range(5, 251))  # written digits; design never determines mph
 # MTSD's labels that are signs of ours, each checked on its crops: the European design only.
 MAPPED_LABELS = {
     "regulatory--end-of-maximum-speed-limit-30--g2": "cancellation",
@@ -290,6 +290,9 @@ def make_crops(annotations: Path, images: Path, data_root: Path, *, log=print) -
                                   round((box[2] - left) * scale, 2), round((box[3] - top) * scale, 2)],
                     "label": label, "mtsd_label": item.get("label"), "mtsd_image": stem, "mtsd_object": key,
                     "occluded": bool((item.get("properties") or {}).get("occluded")),
+                    "original_annotation": item, "sign_unit": "unknown",
+                    "sign_value": int(label.partition(':')[2]) if label.partition(':')[2].isdigit() else None,
+                    "design": str(item.get('label','')).rsplit('--',1)[-1],
                 })
         broken = list(files.broken)
     finally:
@@ -483,7 +486,9 @@ def training_records(path: Path, classes: set[str], other_kinds: set[str], *, re
                 "bbox_xyxy": [float(v) for v in row["bbox_xyxy"]], "label": label,
                 "sign_family": family, "sign_type": (row.get("kind") or value or None) if family == "other_sign" else None,
                 "value_state": "read" if value.isdigit() else None,
-                "value_kph": int(value) if value.isdigit() else None,
+                "value_kph": int(value) if value.isdigit() and row.get("design", "g1") == "g1" else None,
+                "sign_value": int(value) if value.isdigit() else None, "sign_unit": row.get('sign_unit','unknown'),
+                "mtsd_label": row.get('mtsd_label'), "design": row.get('design'),
                 "route_id": None, "segment_index": None, "decoded_frame_index": None,
                 "label_basis": LABEL_BASIS, "source": LABEL_BASIS, "mtsd_object": row.get("mtsd_object"),
             })

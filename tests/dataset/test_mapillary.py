@@ -21,9 +21,10 @@ from test_detector_sizes import torch_python  # noqa: F401 (fixture)
 def test_the_mtsd_labels_that_are_ours():
     assert our_label("regulatory--maximum-speed-limit-50--g1") == "maximum_speed:50"
     assert our_label("regulatory--maximum-speed-limit-120--g1") == "maximum_speed:120"
-    # A US design (mph) and a value no road of ours has are not ours.
-    assert our_label("regulatory--maximum-speed-limit-45--g3") is None
-    assert our_label("regulatory--maximum-speed-limit-5--g1") is None
+    # Any design and any written value is a limit; a plate under a sign is not.
+    assert our_label("regulatory--maximum-speed-limit-45--g3") == "maximum_speed:45"
+    assert our_label("regulatory--maximum-speed-limit-5--g1") == "maximum_speed:5"
+    assert our_label("complementary--maximum-speed-limit-25--g1") is None
     assert our_label("regulatory--yield--g1") == "other_sign:give_way"
     assert our_label("information--parking--g1") is None
 
@@ -115,6 +116,17 @@ def _crops_file(root: Path, rows: list[dict]) -> Path:
     header = {"kind": "mapillary_crops", "version": 1, "crops": len(rows), "by_label": {}}
     path.write_text("\n".join(json.dumps(item) for item in [header] + rows) + "\n")
     return path
+
+
+def test_only_the_european_design_says_kilometres(tmp_path):
+    rows = [{"image_path": "c/a.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "maximum_speed:45", "mtsd_object": "a",
+             "design": "g3"},
+            {"image_path": "c/b.jpg", "bbox_xyxy": [1, 2, 3, 4], "label": "maximum_speed:50", "mtsd_object": "b",
+             "design": "g1"}]
+    records, _ = training_records(_crops_file(tmp_path, rows), set(), set())
+    by_label = {r["label"]: r for r in records}
+    assert (by_label["maximum_speed:45"]["sign_value"], by_label["maximum_speed:45"]["value_kph"]) == (45, None)
+    assert (by_label["maximum_speed:50"]["sign_value"], by_label["maximum_speed:50"]["value_kph"]) == (50, 50)
 
 
 def test_the_train_records_keep_our_kinds_and_a_cap_per_label(tmp_path, monkeypatch):
