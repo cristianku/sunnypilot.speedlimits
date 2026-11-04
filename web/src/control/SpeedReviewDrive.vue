@@ -4,7 +4,8 @@
 // and a person says what the speed to hold really was (speed_review.py). Every command saves at once and acts on the
 // stretch under the time shown; Yes and Can't tell go on to the next stretch nobody looked at. In a stuck limit the right
 // change is inside the stretch: Split here cuts it at the time shown, and saving one half makes the cut real. Roadworks
-// are marked next to the speed, two taps on the frame shown, and cut no stretch.
+// are marked next to the speed, two taps on the frame shown, and cut no stretch; a third tap says that the drive was gone
+// through up to the frame shown, so that no mark there means no works.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {toast} from '../composables/toast';
@@ -119,6 +120,8 @@ const worksOpen = computed(() => works.value.find((item) => item.end_ns === null
 const worksHere = computed(() => worksAt(works.value, now.value));
 const worksShown = computed(() => worksHere.value ?? worksOpen.value);
 const canMarkWorks = computed(() => worksOpen.value ? canEndWorks(works.value, worksOpen.value, now.value) : worksHere.value === null);
+const worksChecked = computed(() => drive.value?.works_checked_ns ?? null);
+const canCheckWorks = computed(() => !worksOpen.value || now.value < worksOpen.value.start_ns);
 const tapWorks = (tap: WorksTap): void => { void send('/works', {tap, at_ns: now.value}); };
 function markWorks(): void {
   if (canMarkWorks.value) tapWorks(worksOpen.value ? 'end' : 'start');
@@ -169,6 +172,12 @@ function runs(from: number, to: number) {
       known: item.known_ns === null ? null : secondOf(item.known_ns)}] : [];
   });
 }
+/** The part of the window of the lanes a person went through for roadworks. */
+function checkedIn(from: number, to: number) {
+  if (worksChecked.value === null) return [];
+  const last = Math.min(secondOf(worksChecked.value), to);
+  return from < last ? [{from, to: last}] : [];
+}
 /** The roadworks inside the window of the lanes. */
 function worksIn(from: number, to: number) {
   const end = pieces.value[pieces.value.length - 1]?.end_ns ?? 0;
@@ -184,7 +193,7 @@ function worksIn(from: number, to: number) {
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" back-label="Speed review" no-episodes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The speed to hold: dashed, what the comma's vision held, nobody looked at it yet; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks">
+      <div class="dr-lane sr-lane" title="The speed to hold: dashed, what the comma's vision held, nobody looked at it yet; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks; grey line: gone through for roadworks">
         <span class="dr-lane-name">To hold<small>review</small></span>
         <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
           <g v-for="run in runs(from, to)" :key="run.key">
@@ -192,6 +201,7 @@ function worksIn(from: number, to: number) {
             <text v-if="fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="15.5" class="dr-run-text" :class="'sr-text-' + run.state">{{ run.text }}</text>
             <line v-if="run.known !== null" :x1="x(run.known)" :x2="x(run.known)" y1="1" y2="22" class="sr-known"/>
           </g>
+          <rect v-for="part in checkedIn(from, to)" :key="part.from" :x="x(part.from)" y="22" :width="w(part.from, part.to)" height="2" class="sr-works-checked"/>
           <rect v-for="mark in worksIn(from, to)" :key="mark.key" :x="x(mark.from)" y="18" :width="w(mark.from, mark.to)" height="4" :class="['sr-works', {'sr-works-open': mark.open}]"/>
         </svg>
       </div>
@@ -240,8 +250,11 @@ function worksIn(from: number, to: number) {
           <div class="sr-tools">
             <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMarkWorks" title="Key w" @click="markWorks">{{ worksOpen ? 'Roadworks end here' : 'Roadworks start here' }}</button>
             <button v-if="worksHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapWorks('remove')">Remove roadworks</button>
+            <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheckWorks"
+                    title="From the start of the drive to this frame every roadworks is marked: the rest is free of them" @click="tapWorks('checked')">Roadworks checked to here</button>
           </div>
           <p v-if="worksShown" class="dr-hint">Roadworks {{ clockOf(secondOf(worksShown.start_ns)) }}{{ worksShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(worksShown.end_ns)) }}</p>
+          <p v-if="worksChecked !== null" class="dr-hint">Checked for roadworks up to {{ clockOf(secondOf(worksChecked)) }}</p>
           <label v-if="saved" class="sr-note"><span class="sr-only">A note on this stretch</span>
             <input ref="noteInput" v-model="note" type="text" maxlength="500" placeholder="A note on this stretch" :disabled="readOnly" @focus="noteStart" @change="noteEnd"/></label>
         </template>

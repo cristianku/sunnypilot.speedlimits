@@ -25,7 +25,7 @@ export interface Works {
   reviewer: string;
 }
 
-export type WorksTap = 'start' | 'end' | 'remove';
+export type WorksTap = 'start' | 'end' | 'remove' | 'checked';
 
 export interface SpeedDrive {
   route: string;
@@ -33,6 +33,8 @@ export interface SpeedDrive {
   revision: number;
   stretches: Stretch[];
   works: Works[];
+  /** From the start of the drive up to here a person looked for roadworks: outside the marks there are none. */
+  works_checked_ns: number | null;
   examined_s: number;
   total_s: number;
 }

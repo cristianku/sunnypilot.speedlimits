@@ -31,8 +31,11 @@ Roadworks. Two taps of a person on the frame shown: here they start, here they e
 end of the drive. A mark says nothing of the speed and cuts no stretch: it lies next to the labels, so that the training
 can tell the brain where the works were and measure its error there. It is never an input of the car. The taps are
 writes of the drive like the others, same revision and same rules (works_start, works_end, works_removed in
-speed_history, without a speed), and speed_works is rebuilt by playing them again. A stretch saved before the marks
-existed says nothing about works: no mark there does not mean no works.
+speed_history, without a speed), and speed_works is rebuilt by playing them again. A stretch with no mark says nothing
+about works: no mark does not mean no works. Only a third tap does: "checked to here" says that a person went through the
+drive from its start to the frame shown and marked all the works there (works_checked in speed_history, the last one
+holds, speed_works_checked keeps it), so what lies there outside the marks is free of works. Saying where works are not
+is what lets the brain learn them at all (nnslr_tools.brain_targets).
 
 ``annotations/speed_review.sqlite`` is a file of its own, readable only by its owner like review.sqlite:
 drive_review.sqlite holds what a scan can make again, this holds what only a person can.
@@ -58,7 +61,7 @@ GRID_KPH = 5
 MAX_KPH = 200
 MAX_NOTE = 500
 STATES = ('confirmed', 'corrected', 'undetermined')
-WORKS_TAPS = ('start', 'end', 'remove')
+WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
 # The drives to review first: whole drives chosen for what the brain must learn. Together 169 minutes
 # with 93 % of the seconds where the limit looks stuck, the roadworks and the low limits on the carriageway.
@@ -78,6 +81,8 @@ SCHEMA_STATEMENTS = (
     '''CREATE TABLE IF NOT EXISTS speed_works (
         route TEXT NOT NULL, start_ns INTEGER NOT NULL, end_ns INTEGER, reviewer TEXT NOT NULL, revision INTEGER NOT NULL,
         PRIMARY KEY (route, start_ns))''',
+    '''CREATE TABLE IF NOT EXISTS speed_works_checked (
+        route TEXT PRIMARY KEY, end_ns INTEGER NOT NULL, reviewer TEXT NOT NULL, revision INTEGER NOT NULL)''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_update BEFORE UPDATE ON speed_history
         BEGIN SELECT RAISE(ABORT, 'speed_history only grows'); END''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_delete BEFORE DELETE ON speed_history
@@ -187,7 +192,7 @@ def works_tap(body: dict, span: tuple[int, int]) -> tuple[str, int, int]:
     """(tap, at_ns, base_revision) of a request on the roadworks; refused with 400 when it does not fit the drive."""
     tap = body.get('tap')
     if tap not in WORKS_TAPS:
-        raise SpeedReviewError(400, 'bad_tap', 'tap must be start, end or remove.')
+        raise SpeedReviewError(400, 'bad_tap', 'tap must be start, end, remove or checked.')
     at, base = _integer(body.get('at_ns'), 'at_ns'), _integer(body.get('base_revision'), 'base_revision')
     if not span[0] <= at < span[1]:
         raise SpeedReviewError(400, 'bad_stretch', 'This frame is outside the logs of the drive.')
@@ -310,9 +315,15 @@ class SpeedReviewStore:
         return [dict(row) for row in self._rows('SELECT start_ns, end_ns, reviewer, revision FROM speed_works WHERE route = ? '
                                                 'ORDER BY start_ns', (route,))]
 
+    def works_checked(self, route: str) -> int | None:
+        """Up to when a person went through a drive for roadworks, from its start; None when nobody did."""
+        rows = self._rows('SELECT end_ns FROM speed_works_checked WHERE route = ?', (route,))
+        return rows[0]['end_ns'] if rows else None
+
     def tap_works(self, route: str, tap: str, at_ns: int, drive_end: int, base_revision: int, reviewer: str) -> int:
-        """A tap on the roadworks at a frame: start a mark, end the one with no end yet, remove the one on this frame.
-        Marks do not overlap and one at a time has no end. Returns the new revision."""
+        """A tap on the roadworks at a frame: start a mark, end the one with no end yet, remove the one on this frame,
+        say that the drive is checked up to it. Marks do not overlap, one at a time has no end, and a drive is not
+        checked past a mark with no end. Returns the new revision."""
         with self._writing(route, base_revision) as (connection, revision):
             marks = connection.execute('SELECT * FROM speed_works WHERE route = ? ORDER BY start_ns', (route,)).fetchall()
             here = next((row for row in marks if row['start_ns'] <= at_ns and (row['end_ns'] is None or at_ns < row['end_ns'])), None)
@@ -333,6 +344,12 @@ class SpeedReviewStore:
                 connection.execute('UPDATE speed_works SET end_ns = ?, reviewer = ?, revision = ? WHERE route = ? AND start_ns = ?',
                                    (at_ns, reviewer, revision, route, unended['start_ns']))
                 self._log(connection, route, revision, 'works_end', unended['start_ns'], at_ns, NO_LABEL, reviewer)
+            elif tap == 'checked':
+                if unended is not None and unended['start_ns'] <= at_ns:
+                    raise SpeedReviewError(400, 'bad_works', 'End the roadworks already open first.')
+                connection.execute('INSERT OR REPLACE INTO speed_works_checked (route, end_ns, reviewer, revision) VALUES (?, ?, ?, ?)',
+                                   (route, at_ns, reviewer, revision))
+                self._log(connection, route, revision, 'works_checked', at_ns, at_ns, NO_LABEL, reviewer)
             else:
                 if here is None:
                     raise SpeedReviewError(400, 'bad_works', 'No roadworks on this frame.')
@@ -368,11 +385,12 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
     drive whose logs are not scanned has no stretches."""
     span = _span_of(drives, route)
     if span is None:
-        return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'works': [], 'examined_s': 0,
-                'total_s': 0}
+        return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'works': [],
+                'works_checked_ns': None, 'examined_s': 0, 'total_s': 0}
     saved = store.stretches(route)
     return {'ok': True, 'route': route, 'revision': store.revision(route),
             'stretches': partition(proposals(drives.merged(route)), saved, span), 'works': store.works(route),
+            'works_checked_ns': store.works_checked(route),
             'examined_s': round(sum(row['end_ns'] - row['start_ns'] for row in saved) / NS, 1),
             'total_s': round((span[1] - span[0]) / NS, 1)}
 

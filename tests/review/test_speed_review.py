@@ -302,6 +302,31 @@ def test_a_tap_answers_with_the_drive_as_it_is_now(store):
     assert view['works'] == [{'start_ns': at(50), 'end_ns': None, 'reviewer': 'a', 'revision': 1}]
 
 
+def test_checked_to_here_says_where_a_person_looked_and_the_last_tap_holds(store):
+    assert store.works_checked(ROUTE) is None
+    store.tap_works(ROUTE, 'start', at(50), END, 0, 'a')
+    store.tap_works(ROUTE, 'end', at(80), END, 1, 'a')
+    assert store.tap_works(ROUTE, 'checked', at(120), END, 2, 'a') == 3
+    assert store.works_checked(ROUTE) == at(120)
+    store.tap_works(ROUTE, 'checked', at(90), END, 3, 'a')
+    assert store.works_checked(ROUTE) == at(90) and marks(store) == [(50, 80)]
+    assert [(row['action'], row['start_ns'], row['kph']) for row in store.history(ROUTE)][-1] == ('works_checked', at(90), None)
+
+
+def test_a_drive_is_not_checked_past_roadworks_with_no_end(store):
+    store.tap_works(ROUTE, 'start', at(50), END, 0, 'a')
+    with pytest.raises(speed_review.SpeedReviewError) as refused:
+        store.tap_works(ROUTE, 'checked', at(60), END, 1, 'a')
+    assert refused.value.reason == 'bad_works' and store.works_checked(ROUTE) is None
+    store.tap_works(ROUTE, 'checked', at(40), END, 1, 'a')
+    assert store.works_checked(ROUTE) == at(40)
+
+
+def test_the_page_reads_up_to_where_the_drive_is_checked(store):
+    view = speed_review.save_works(store, FakeDrives(), ROUTE, {'tap': 'checked', 'at_ns': at(50), 'base_revision': 0}, 'a')
+    assert view['works_checked_ns'] == at(50) and view['works'] == []
+
+
 def test_a_drive_without_a_scan_takes_no_roadworks(store):
     class NoLogs(FakeDrives):
         def summary(self, route):
