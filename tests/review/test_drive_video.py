@@ -22,8 +22,8 @@ def _minute(root: Path, segment: int, seconds: int = 1) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / 'fcamera.hevc'
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i',
-                    f'testsrc=size=320x180:rate=20:duration={seconds}', '-c:v', 'libx265', '-x265-params', 'log-level=error',
-                    '-f', 'hevc', str(path)], check=True, timeout=120)
+                    f'testsrc=size=320x180:rate=20:duration={seconds}', '-pix_fmt', 'yuv420p', '-c:v', 'libx265',
+                    '-x265-params', 'log-level=error', '-f', 'hevc', str(path)], check=True, timeout=120)
     return path
 
 
@@ -51,7 +51,7 @@ def test_a_drive_becomes_one_video_with_where_each_minute_starts(tmp_path):
                             '-of', 'json', str(video)], capture_output=True, text=True, check=True)
     assert json.loads(probe.stdout)['streams'][0] == {'codec_name': 'h264', 'width': drive_video.WIDTH}
     assert not list(video.parent.glob('*.part.mp4')) and not list(video.parent.glob('*.parts'))
-    # Encoded minute by minute and joined: every frame is there, in order.
+    # On the GPU or minute by minute on the CPU: every frame is there, in order.
     frames = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
                              'stream=nb_read_packets', '-of', 'csv=p=0', str(video)], capture_output=True, text=True, check=True)
     assert int(frames.stdout.strip()) == 60
@@ -60,6 +60,29 @@ def test_a_drive_becomes_one_video_with_where_each_minute_starts(tmp_path):
     _minute(tmp_path, 5, 1)
     assert drive_video.index(tmp_path, ROUTE) is None
     assert json.loads(index.read_text())['route'] == ROUTE
+
+
+@needs_ffmpeg
+def test_a_gpu_with_no_room_leaves_the_drive_to_the_cpu(tmp_path, monkeypatch):
+    def full(*_args):
+        raise RuntimeError('CUDA_ERROR_OUT_OF_MEMORY')
+    monkeypatch.setattr(drive_video, '_encode_on_gpu', full)
+    _minute(tmp_path, 3, 1)
+    _minute(tmp_path, 5, 2)
+    made = drive_video.make(tmp_path, ROUTE)
+    assert made['encoder'] == drive_video.CPU_ENCODER and made['duration'] == 3.0
+    video = drive_video.paths(tmp_path, ROUTE)[0]
+    frames = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
+                             'stream=nb_read_packets', '-of', 'csv=p=0', str(video)], capture_output=True, text=True, check=True)
+    assert int(frames.stdout.strip()) == 60
+    assert not list(video.parent.glob('*.part.mp4')) and not list(video.parent.glob('*.parts'))
+
+
+def test_the_gpu_must_write_every_frame_of_the_index(tmp_path, monkeypatch):
+    # A frame lost where two minutes join would move all the minutes after it.
+    monkeypatch.setattr(drive_video, '_ffmpeg', lambda _arguments, _done: 59)
+    with pytest.raises(RuntimeError, match='59 frames written of 60'):
+        drive_video._encode_on_gpu([(0, tmp_path / 'fcamera.hevc')], tmp_path / 'out.mp4', 60, lambda _frames: None)
 
 
 @needs_ffmpeg

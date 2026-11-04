@@ -2,10 +2,15 @@
 
 The comma records the road camera of every minute as raw HEVC (data/raw/routes/<route>/<segment>/fcamera.hevc,
 1344 x 760, 20 frames a second), which browsers do not play. Here the minutes of a drive, in order, become one H.264
-MP4 960 px wide, with an index of where each minute starts in it: derived/video/<route>.mp4 and <route>.json. The
-minutes are encoded side by side (WORKERS ffmpeg at low priority with THREADS threads each: it never slows a training)
-and then joined without encoding again, about 3.5 times faster than one ffmpeg over the whole drive. A frame of the reports is image N of a minute, N seconds into
-it (frames are sampled one a second), so the page finds it in the video at start(minute) + N.
+MP4 960 px wide, with an index of where each minute starts in it: derived/video/<route>.mp4 and <route>.json. A frame of
+the reports is image N of a minute, N seconds into it (frames are sampled one a second), so the page finds it in the
+video at start(minute) + N.
+
+On the GPU first: one ffmpeg over the whole drive decodes, scales and encodes there (a 25 minute drive in 29 s against
+52 s on the CPU, and the CPU stays free). The GPU often has room for one process only, so a video made while its memory
+is taken, or on a server without one, goes on the CPU: the minutes side by side (WORKERS ffmpeg at low priority with
+THREADS threads each: it never slows a training) and then joined without encoding again. The index says which
+(encoder).
 
 Made once, the first time the Drive view shows the drive (Panel.drive_video), or with `nnslr drive-video ROUTE`; a
 made video is kept until its minutes change. Nothing else reads it: it is only how the site shows a drive.
@@ -29,6 +34,10 @@ WIDTH = 960
 # Minutes encoded at once, and the threads of each ffmpeg.
 WORKERS = 8
 THREADS = 2
+CPU_ENCODER = 'libx264'
+GPU_ENCODER = 'h264_nvenc'
+# The GPU's constant quality with the size of the CPU's crf 27 (about 2 MB a minute), the same picture.
+GPU_QUALITY = 36
 ROUTE = re.compile(r'[0-9a-f]{8}--[0-9a-f]{10}')
 # One video made at a time, by this process.
 _lock = threading.Lock()
@@ -81,22 +90,78 @@ def index(root: Path, route: str) -> dict | None:
     return value
 
 
-def _encode(source: Path, target: Path, done: Callable[[int], None]) -> None:
-    """One minute of raw HEVC to H.264 (an MP4 of its own); done(frames so far) while ffmpeg works."""
+def _ffmpeg(arguments: list[str], done: Callable[[int], None]) -> int:
+    """Runs ffmpeg at low priority, done(frames so far) while it works; returns the frames it wrote."""
     command = ['nice', '-n', '15', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-nostats', '-progress', 'pipe:2',
-               '-y', '-f', 'hevc', '-r', str(FPS), '-i', str(source), '-an', '-vf', f'scale={WIDTH}:-2',
-               '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '27', '-g', str(2 * FPS), '-pix_fmt', 'yuv420p',
-               '-threads', str(THREADS), str(target)]
+               '-y', *arguments]
     process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, text=False)
-    errors = []
+    errors, frames = [], 0
     for line in process.stderr:  # type: ignore[union-attr]
         text = line.decode('utf-8', 'replace').strip()
         if text.startswith('frame='):
-            done(int(text[6:] or 0))
-        elif text and '=' not in text:
+            frames = int(text[6:] or 0)
+            done(frames)
+        elif text and not re.fullmatch(r'\w+=\S*', text):
             errors.append(text)
     if process.wait() != 0:
-        raise RuntimeError(f'ffmpeg failed on minute {source.parent.name}: ' + ' '.join(errors[-3:]))
+        raise RuntimeError(' '.join(errors[-3:]) or 'ffmpeg failed')
+    return frames
+
+
+def _encode(source: Path, target: Path, done: Callable[[int], None]) -> None:
+    """One minute of raw HEVC to H.264 (an MP4 of its own) on the CPU."""
+    try:
+        _ffmpeg(['-f', 'hevc', '-r', str(FPS), '-i', str(source), '-an', '-vf', f'scale={WIDTH}:-2', '-c:v', CPU_ENCODER,
+                 '-preset', 'veryfast', '-crf', '27', '-g', str(2 * FPS), '-pix_fmt', 'yuv420p', '-threads', str(THREADS),
+                 str(target)], done)
+    except RuntimeError as exc:
+        raise RuntimeError(f'ffmpeg failed on minute {source.parent.name}: {exc}') from exc
+
+
+def _encode_on_gpu(parts: list[tuple[int, Path]], target: Path, total: int, done: Callable[[int], None]) -> None:
+    """The whole drive to one MP4 on the GPU, its index at the front. The concat protocol reads the minutes as one stream,
+    so a frame lost at a join would move every minute after it: any other count than the index's is a failure."""
+    frames = _ffmpeg(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-f', 'hevc', '-r', str(FPS),
+                      '-i', 'concat:' + '|'.join(str(path) for _segment, path in parts), '-an',
+                      '-vf', f'scale_cuda={WIDTH}:-2', '-c:v', GPU_ENCODER, '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr',
+                      '-cq', str(GPU_QUALITY), '-b:v', '0', '-spatial-aq', '1', '-g', str(2 * FPS), '-bf', '0',
+                      '-movflags', '+faststart', str(target)], done)
+    if frames != total:
+        raise RuntimeError(f'{frames} frames written of {total}')
+
+
+def _encode_on_cpu(parts: list[tuple[int, Path]], folder: Path, target: Path, total: int,
+                   progress: Callable[[float], None] | None) -> None:
+    """The minutes side by side in folder, then joined into target without encoding again."""
+    folder.mkdir(exist_ok=True)
+    pieces = [folder / f'{number:04d}.mp4' for number in range(len(parts))]
+    done = [0] * len(parts)
+    counting = threading.Lock()
+
+    def advance(number: int, frames: int) -> None:
+        with counting:
+            done[number] = frames
+            if progress is not None and total:
+                progress(min(1.0, sum(done) / total))
+
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        jobs = [pool.submit(_encode, path, piece, functools.partial(advance, number))
+                for number, ((_segment, path), piece) in enumerate(zip(parts, pieces))]
+        try:
+            for job in jobs:
+                job.result()
+        except BaseException:
+            for job in jobs:
+                job.cancel()
+            raise
+    # Joined as they are (the concat demuxer reads the names next to its list), the index at the front.
+    listing = folder / 'list.txt'
+    listing.write_text(''.join(f"file '{piece.name}'\n" for piece in pieces), encoding='utf-8')
+    joined = subprocess.run(['nice', '-n', '15', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat',
+                             '-safe', '0', '-i', str(listing), '-c', 'copy', '-movflags', '+faststart', str(target)],
+                            capture_output=True, text=True, timeout=600, check=False)
+    if joined.returncode != 0:
+        raise RuntimeError('ffmpeg could not join the minutes: ' + joined.stderr.strip()[-300:])
 
 
 def make(root: Path, route: str, progress: Callable[[float], None] | None = None) -> dict:
@@ -120,42 +185,25 @@ def make(root: Path, route: str, progress: Callable[[float], None] | None = None
     stem = f'{route}.{os.getpid()}.{threading.get_ident()}'
     partial = video.with_name(stem + '.part.mp4')
     folder = video.with_name(stem + '.parts')
-    folder.mkdir(exist_ok=True)
-    pieces = [folder / f'{number:04d}.mp4' for number in range(len(parts))]
-    done = [0] * len(parts)
-    counting = threading.Lock()
 
-    def advance(number: int, frames: int) -> None:
-        with counting:
-            done[number] = frames
-            if progress is not None and total:
-                progress(min(1.0, sum(done) / total))
+    def advance(frames: int) -> None:
+        if progress is not None and total:
+            progress(min(1.0, frames / total))
 
     try:
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            jobs = [pool.submit(_encode, path, piece, functools.partial(advance, number))
-                    for number, ((_segment, path), piece) in enumerate(zip(parts, pieces))]
-            try:
-                for job in jobs:
-                    job.result()
-            except BaseException:
-                for job in jobs:
-                    job.cancel()
-                raise
-        # Joined as they are (the concat demuxer reads the names next to its list), the index at the front.
-        listing = folder / 'list.txt'
-        listing.write_text(''.join(f"file '{piece.name}'\n" for piece in pieces), encoding='utf-8')
-        joined = subprocess.run(['nice', '-n', '15', 'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat',
-                                 '-safe', '0', '-i', str(listing), '-c', 'copy', '-movflags', '+faststart', str(partial)],
-                                capture_output=True, text=True, timeout=600, check=False)
-        if joined.returncode != 0:
-            raise RuntimeError('ffmpeg could not join the minutes: ' + joined.stderr.strip()[-300:])
+        try:
+            _encode_on_gpu(parts, partial, total, advance)
+            encoder = GPU_ENCODER
+        except (OSError, RuntimeError) as exc:
+            print(f'Drive video {route}: on the CPU ({exc})', flush=True)
+            _encode_on_cpu(parts, folder, partial, total, progress)
+            encoder = CPU_ENCODER
         os.replace(partial, video)
     finally:
         partial.unlink(missing_ok=True)
         shutil.rmtree(folder, ignore_errors=True)
-    value = {'route': route, 'fps': FPS, 'width': WIDTH, 'segments': segments, 'duration': round(start, 3),
-             'source': _signature(parts), 'made_at': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+    value = {'route': route, 'fps': FPS, 'width': WIDTH, 'encoder': encoder, 'segments': segments,
+             'duration': round(start, 3), 'source': _signature(parts), 'made_at': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
     index_path.write_text(json.dumps(value, indent=1) + '\n', encoding='utf-8')
     return value
 
