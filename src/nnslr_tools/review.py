@@ -1368,15 +1368,16 @@ def make_handler(app: ReviewApp):
             if match:
                 self._json(200, speed_review.drive_view(store, drives, match.group(1)))
                 return
-            if re.fullmatch(drive + '/stretches', path):
+            if re.fullmatch(drive + '/(stretches|works)', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Not found.', True)
 
         def _speed_review_post(self, path):
-            """A person's speed on a stretch of a drive ({"start_ns", "end_ns", "kph", "state", "known_ns", "note",
-            "base_revision"}; state null clears it): same origin, JSON, a person signed in on the site (never the
-            access token alone: an agent never writes these) and a panel that is not read-only."""
+            """A person's speed on a stretch of a drive (/stretches: {"start_ns", "end_ns", "kph", "state", "known_ns",
+            "note", "base_revision"}; state null clears it) or a tap on its roadworks (/works: {"tap", "at_ns",
+            "base_revision"}): same origin, JSON, a person signed in on the site (never the access token alone: an agent
+            never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1388,7 +1389,7 @@ def make_handler(app: ReviewApp):
             self._require_ai_session()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/stretches', path)
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(stretches|works)', path)
             if match is None:
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
@@ -1396,9 +1397,9 @@ def make_handler(app: ReviewApp):
             who, _via = self._who()
             reviewer = who or 'local'
             route = match.group(1)
+            write = speed_review.save if match.group(2) == 'stretches' else speed_review.save_works
             try:
-                answer = speed_review.save(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body,
-                                           reviewer)
+                answer = write(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body, reviewer)
             except speed_review.SpeedReviewError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
                 return

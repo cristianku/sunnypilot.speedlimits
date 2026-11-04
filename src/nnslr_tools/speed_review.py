@@ -27,15 +27,24 @@ revision the page read (a stale one is refused with 409, so two tabs cannot over
 is the number of the last write of that drive in speed_history, a table that only grows (triggers refuse the rest): a
 drive's speed_stretches can always be rebuilt by playing its history again.
 
+Roadworks. Two taps of a person on the frame shown: here they start, here they end. A start with no end yet runs to the
+end of the drive. A mark says nothing of the speed and cuts no stretch: it lies next to the labels, so that the training
+can tell the brain where the works were and measure its error there. It is never an input of the car. The taps are
+writes of the drive like the others, same revision and same rules (works_start, works_end, works_removed in
+speed_history, without a speed), and speed_works is rebuilt by playing them again. A stretch saved before the marks
+existed says nothing about works: no mark there does not mean no works.
+
 ``annotations/speed_review.sqlite`` is a file of its own, readable only by its owner like review.sqlite:
 drive_review.sqlite holds what a scan can make again, this holds what only a person can.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Iterator
 
 from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
 
@@ -49,6 +58,8 @@ GRID_KPH = 5
 MAX_KPH = 200
 MAX_NOTE = 500
 STATES = ('confirmed', 'corrected', 'undetermined')
+WORKS_TAPS = ('start', 'end', 'remove')
+NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
 # The drives to review first: whole drives chosen for what the brain must learn. Together 169 minutes
 # with 93 % of the seconds where the limit looks stuck, the roadworks and the low limits on the carriageway.
 FIRST_DRIVES = ('00000160--ea56ae0f33', '0000015a--e47d11b0b0', '00000154--fa7e8f49aa', '00000151--7adc20003e',
@@ -64,6 +75,9 @@ SCHEMA_STATEMENTS = (
         id INTEGER PRIMARY KEY AUTOINCREMENT, route TEXT NOT NULL, revision INTEGER NOT NULL, action TEXT NOT NULL,
         start_ns INTEGER NOT NULL, end_ns INTEGER NOT NULL, kph INTEGER, state TEXT, known_ns INTEGER,
         note TEXT NOT NULL DEFAULT '', reviewer TEXT NOT NULL, at TEXT NOT NULL, UNIQUE (route, revision))''',
+    '''CREATE TABLE IF NOT EXISTS speed_works (
+        route TEXT NOT NULL, start_ns INTEGER NOT NULL, end_ns INTEGER, reviewer TEXT NOT NULL, revision INTEGER NOT NULL,
+        PRIMARY KEY (route, start_ns))''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_update BEFORE UPDATE ON speed_history
         BEGIN SELECT RAISE(ABORT, 'speed_history only grows'); END''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_delete BEFORE DELETE ON speed_history
@@ -169,6 +183,17 @@ def checked(body: dict, span: tuple[int, int]) -> tuple[int, int, dict | None, i
     return start, end, {'kph': kph, 'state': state, 'known_ns': known, 'note': note.strip()}, base
 
 
+def works_tap(body: dict, span: tuple[int, int]) -> tuple[str, int, int]:
+    """(tap, at_ns, base_revision) of a request on the roadworks; refused with 400 when it does not fit the drive."""
+    tap = body.get('tap')
+    if tap not in WORKS_TAPS:
+        raise SpeedReviewError(400, 'bad_tap', 'tap must be start, end or remove.')
+    at, base = _integer(body.get('at_ns'), 'at_ns'), _integer(body.get('base_revision'), 'base_revision')
+    if not span[0] <= at < span[1]:
+        raise SpeedReviewError(400, 'bad_stretch', 'This frame is outside the logs of the drive.')
+    return tap, at, base
+
+
 class SpeedReviewStore:
     """The labels' database. Every call opens its own connection (the site's threads share the store); writes are
     serialized by a lock."""
@@ -228,9 +253,10 @@ class SpeedReviewStore:
         return {row['route']: row['total'] for row in
                 self._rows('SELECT route, SUM(end_ns - start_ns) AS total FROM speed_stretches GROUP BY route')}
 
-    def apply(self, route: str, start_ns: int, end_ns: int, label: dict | None, base_revision: int, reviewer: str) -> int:
-        """Sets [start_ns, end_ns) to label, or clears it (None: back to not examined), if the drive is still at
-        base_revision; the stretches under it keep what stays outside it. Returns the new revision."""
+    @contextlib.contextmanager
+    def _writing(self, route: str, base_revision: int) -> Iterator[tuple[sqlite3.Connection, int]]:
+        """One write of a drive, all or nothing, if the drive is still at base_revision: gives the connection and the
+        new revision."""
         with self._write:
             connection = self._connect()
             try:
@@ -241,33 +267,78 @@ class SpeedReviewStore:
                     if revision != base_revision:
                         raise SpeedReviewError(409, 'stale_revision',
                                                'This drive changed in another window: its stretches are read again.')
-                    under = connection.execute('SELECT * FROM speed_stretches WHERE route = ? AND start_ns < ? AND end_ns > ?',
-                                               (route, end_ns, start_ns)).fetchall()
-                    insert = ('INSERT INTO speed_stretches (route, start_ns, end_ns, kph, state, known_ns, note, reviewer, '
-                              'revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-                    connection.executemany('DELETE FROM speed_stretches WHERE route = ? AND start_ns = ?',
-                                           [(route, row['start_ns']) for row in under])
-                    for row in under:
-                        for first, last in ((row['start_ns'], start_ns), (end_ns, row['end_ns'])):
-                            if first < last:
-                                known = row['known_ns'] if row['known_ns'] is not None and first <= row['known_ns'] < last else None
-                                connection.execute(insert, (route, first, last, row['kph'], row['state'], known, row['note'],
-                                                            row['reviewer'], row['revision']))
-                    revision += 1
-                    if label is not None:
-                        connection.execute(insert, (route, start_ns, end_ns, label['kph'], label['state'], label['known_ns'],
-                                                    label['note'], reviewer, revision))
-                    item = label or {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
-                    connection.execute('INSERT INTO speed_history (route, revision, action, start_ns, end_ns, kph, state, '
-                                       'known_ns, note, reviewer, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                                       (route, revision, 'saved' if label else 'cleared', start_ns, end_ns, item['kph'],
-                                        item['state'], item['known_ns'], item['note'], reviewer, utc_now()))
+                    yield connection, revision + 1
                     connection.execute('COMMIT')
                 except BaseException:
                     connection.execute('ROLLBACK')
                     raise
             finally:
                 connection.close()
+
+    @staticmethod
+    def _log(connection: sqlite3.Connection, route: str, revision: int, action: str, start_ns: int, end_ns: int, item: dict,
+             reviewer: str) -> None:
+        connection.execute('INSERT INTO speed_history (route, revision, action, start_ns, end_ns, kph, state, known_ns, note, '
+                           'reviewer, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                           (route, revision, action, start_ns, end_ns, item['kph'], item['state'], item['known_ns'],
+                            item['note'], reviewer, utc_now()))
+
+    def apply(self, route: str, start_ns: int, end_ns: int, label: dict | None, base_revision: int, reviewer: str) -> int:
+        """Sets [start_ns, end_ns) to label, or clears it (None: back to not examined), if the drive is still at
+        base_revision; the stretches under it keep what stays outside it. Returns the new revision."""
+        with self._writing(route, base_revision) as (connection, revision):
+            under = connection.execute('SELECT * FROM speed_stretches WHERE route = ? AND start_ns < ? AND end_ns > ?',
+                                       (route, end_ns, start_ns)).fetchall()
+            insert = ('INSERT INTO speed_stretches (route, start_ns, end_ns, kph, state, known_ns, note, reviewer, '
+                      'revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+            connection.executemany('DELETE FROM speed_stretches WHERE route = ? AND start_ns = ?',
+                                   [(route, row['start_ns']) for row in under])
+            for row in under:
+                for first, last in ((row['start_ns'], start_ns), (end_ns, row['end_ns'])):
+                    if first < last:
+                        known = row['known_ns'] if row['known_ns'] is not None and first <= row['known_ns'] < last else None
+                        connection.execute(insert, (route, first, last, row['kph'], row['state'], known, row['note'],
+                                                    row['reviewer'], row['revision']))
+            if label is not None:
+                connection.execute(insert, (route, start_ns, end_ns, label['kph'], label['state'], label['known_ns'],
+                                            label['note'], reviewer, revision))
+            self._log(connection, route, revision, 'saved' if label else 'cleared', start_ns, end_ns, label or NO_LABEL, reviewer)
+        return revision
+
+    def works(self, route: str) -> list[dict]:
+        """The roadworks marked on a drive in time order, end_ns None while a mark has no end yet."""
+        return [dict(row) for row in self._rows('SELECT start_ns, end_ns, reviewer, revision FROM speed_works WHERE route = ? '
+                                                'ORDER BY start_ns', (route,))]
+
+    def tap_works(self, route: str, tap: str, at_ns: int, drive_end: int, base_revision: int, reviewer: str) -> int:
+        """A tap on the roadworks at a frame: start a mark, end the one with no end yet, remove the one on this frame.
+        Marks do not overlap and one at a time has no end. Returns the new revision."""
+        with self._writing(route, base_revision) as (connection, revision):
+            marks = connection.execute('SELECT * FROM speed_works WHERE route = ? ORDER BY start_ns', (route,)).fetchall()
+            here = next((row for row in marks if row['start_ns'] <= at_ns and (row['end_ns'] is None or at_ns < row['end_ns'])), None)
+            unended = next((row for row in marks if row['end_ns'] is None), None)
+            if tap == 'start':
+                if unended is not None or here is not None:
+                    raise SpeedReviewError(400, 'bad_works', 'End the roadworks already open first.' if unended is not None
+                                           else 'This frame is already inside roadworks.')
+                connection.execute('INSERT INTO speed_works (route, start_ns, end_ns, reviewer, revision) VALUES (?, ?, NULL, ?, ?)',
+                                   (route, at_ns, reviewer, revision))
+                self._log(connection, route, revision, 'works_start', at_ns, drive_end, NO_LABEL, reviewer)
+            elif tap == 'end':
+                if unended is None:
+                    raise SpeedReviewError(400, 'bad_works', 'No roadworks are waiting for their end.')
+                later = [row['start_ns'] for row in marks if row['start_ns'] > unended['start_ns']]
+                if at_ns <= unended['start_ns'] or (later and at_ns > later[0]):
+                    raise SpeedReviewError(400, 'bad_works', 'The end must come after the start, before the next roadworks.')
+                connection.execute('UPDATE speed_works SET end_ns = ?, reviewer = ?, revision = ? WHERE route = ? AND start_ns = ?',
+                                   (at_ns, reviewer, revision, route, unended['start_ns']))
+                self._log(connection, route, revision, 'works_end', unended['start_ns'], at_ns, NO_LABEL, reviewer)
+            else:
+                if here is None:
+                    raise SpeedReviewError(400, 'bad_works', 'No roadworks on this frame.')
+                connection.execute('DELETE FROM speed_works WHERE route = ? AND start_ns = ?', (route, here['start_ns']))
+                self._log(connection, route, revision, 'works_removed', here['start_ns'], here['end_ns'] or drive_end, NO_LABEL,
+                          reviewer)
         return revision
 
 
@@ -293,14 +364,15 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
-    """A drive for the page: its revision, its stretches from start to end, how much of it is examined. A drive whose
-    logs are not scanned has no stretches."""
+    """A drive for the page: its revision, its stretches from start to end, its roadworks, how much of it is examined. A
+    drive whose logs are not scanned has no stretches."""
     span = _span_of(drives, route)
     if span is None:
-        return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'examined_s': 0, 'total_s': 0}
+        return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'works': [], 'examined_s': 0,
+                'total_s': 0}
     saved = store.stretches(route)
     return {'ok': True, 'route': route, 'revision': store.revision(route),
-            'stretches': partition(proposals(drives.merged(route)), saved, span),
+            'stretches': partition(proposals(drives.merged(route)), saved, span), 'works': store.works(route),
             'examined_s': round(sum(row['end_ns'] - row['start_ns'] for row in saved) / NS, 1),
             'total_s': round((span[1] - span[0]) / NS, 1)}
 
@@ -324,4 +396,14 @@ def save(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: di
         raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
     start, end, label, base = checked(body, span)
     store.apply(route, start, end, label, base, reviewer)
+    return drive_view(store, drives, route)
+
+
+def save_works(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
+    """A person's tap on the roadworks: checks it against the drive, applies it, and answers with the drive as it is now."""
+    span = _span_of(drives, route)
+    if span is None:
+        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    tap, at, base = works_tap(body, span)
+    store.tap_works(route, tap, at, span[1], base, reviewer)
     return drive_view(store, drives, route)

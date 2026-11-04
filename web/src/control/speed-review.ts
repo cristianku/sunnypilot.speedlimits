@@ -17,11 +17,22 @@ export interface Stretch {
   reviewer: string | null;
 }
 
+/** Roadworks a person marked, two taps on the frame shown: they say nothing of the speed and cut no stretch. */
+export interface Works {
+  start_ns: number;
+  /** Null until the second tap: they run to the end of the drive. */
+  end_ns: number | null;
+  reviewer: string;
+}
+
+export type WorksTap = 'start' | 'end' | 'remove';
+
 export interface SpeedDrive {
   route: string;
   /** The drive's last write: a save sends it back, and a stale one is refused. */
   revision: number;
   stretches: Stretch[];
+  works: Works[];
   examined_s: number;
   total_s: number;
 }
@@ -109,4 +120,15 @@ export function cutOf(piece: Stretch | null, cuts: readonly number[], ns: number
   if (!piece) return null;
   const ends = [piece.start_ns, piece.end_ns].filter((edge) => cuts.includes(edge));
   return ends.sort((a, b) => Math.abs(a - ns) - Math.abs(b - ns))[0] ?? null;
+}
+
+/** The roadworks on a frame, null outside them. */
+export function worksAt(works: readonly Works[], ns: number): Works | null {
+  return works.find((item) => item.start_ns <= ns && (item.end_ns === null || ns < item.end_ns)) ?? null;
+}
+
+/** True when roadworks with no end yet may end at this time: after their start, not past the next ones. */
+export function canEndWorks(works: readonly Works[], open: Works, ns: number): boolean {
+  const next = works.find((item) => item.start_ns > open.start_ns);
+  return ns > open.start_ns && (!next || ns <= next.start_ns);
 }

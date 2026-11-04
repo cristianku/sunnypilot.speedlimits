@@ -220,6 +220,98 @@ def test_a_save_answers_with_the_drive_as_it_is_now(store):
         (80, 'not_examined'), (120, 'confirmed'), (120, 'not_examined')]
 
 
+# ---------- the roadworks ----------
+
+def marks(store, route=ROUTE):
+    return [((row['start_ns'] - T0) / NS, None if row['end_ns'] is None else (row['end_ns'] - T0) / NS)
+            for row in store.works(route)]
+
+
+def test_two_taps_mark_roadworks_and_a_start_alone_runs_to_the_end_of_the_drive(store):
+    assert store.tap_works(ROUTE, 'start', at(50), END, 0, 'a') == 1
+    assert marks(store) == [(50, None)]
+    assert store.tap_works(ROUTE, 'end', at(80), END, 1, 'a') == 2
+    assert marks(store) == [(50, 80)]
+    store.tap_works(ROUTE, 'start', at(100), END, 2, 'a')
+    # Remove acts on the mark at the frame shown, ended or not.
+    store.tap_works(ROUTE, 'remove', at(120), END, 3, 'a')
+    store.tap_works(ROUTE, 'remove', at(79), END, 4, 'a')
+    assert marks(store) == []
+    assert [(row['action'], row['kph'], row['state']) for row in store.history(ROUTE)] == [
+        ('works_start', None, None), ('works_end', None, None), ('works_start', None, None), ('works_removed', None, None),
+        ('works_removed', None, None)]
+    assert [(row['start_ns'], row['end_ns']) for row in store.history(ROUTE)][:2] == [(at(50), END), (at(50), at(80))]
+
+
+def test_roadworks_cut_no_stretch_and_share_the_revision_of_the_drive(store):
+    store.apply(ROUTE, at(0), at(100), label(80, 'confirmed'), 0, 'a')
+    store.tap_works(ROUTE, 'start', at(50), END, 1, 'a')
+    assert spans(store) == [(0, 100, 80, 'confirmed')] and store.revision(ROUTE) == 2
+    # Two tabs: a write from before the tap is refused, and so is a tap from before a write.
+    with pytest.raises(SpeedReviewError) as refused:
+        store.apply(ROUTE, at(0), at(100), label(120), 1, 'a')
+    assert refused.value.status == 409
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_works(ROUTE, 'end', at(60), END, 1, 'a')
+    assert refused.value.status == 409 and marks(store) == [(50, None)]
+
+
+@pytest.mark.parametrize('tap, seconds', [('start', 15), ('start', 30), ('end', 25), ('remove', 25)])
+def test_a_tap_that_does_not_fit_the_marks_changes_nothing(store, tap, seconds):
+    store.tap_works(ROUTE, 'start', at(10), END, 0, 'a')
+    store.tap_works(ROUTE, 'end', at(20), END, 1, 'a')
+    if seconds == 30:
+        store.tap_works(ROUTE, 'start', at(25), END, 2, 'a')
+    before = store.revision(ROUTE), marks(store)
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_works(ROUTE, tap, at(seconds), END, before[0], 'a')
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_works')
+    assert (store.revision(ROUTE), marks(store)) == before
+
+
+@pytest.mark.parametrize('seconds', [5, 40, 50])
+def test_an_end_stays_after_its_start_and_before_the_next_roadworks(store, seconds):
+    store.tap_works(ROUTE, 'start', at(30), END, 0, 'a')
+    store.tap_works(ROUTE, 'end', at(35), END, 1, 'a')
+    store.tap_works(ROUTE, 'start', at(10), END, 2, 'a')
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_works(ROUTE, 'end', at(seconds), END, 3, 'a')
+    assert refused.value.reason == 'bad_works' and marks(store) == [(10, None), (30, 35)]
+    store.tap_works(ROUTE, 'end', at(30), END, 3, 'a')
+    assert marks(store) == [(10, 30), (30, 35)]
+
+
+@pytest.mark.parametrize('change, reason', [
+    ({'tap': 'move'}, 'bad_tap'),
+    ({'tap': None}, 'bad_tap'),
+    ({'at_ns': T0 - 1}, 'bad_stretch'),
+    ({'at_ns': END}, 'bad_stretch'),
+    ({'at_ns': float(T0)}, 'bad_value'),
+    ({'at_ns': True}, 'bad_value'),
+    ({'base_revision': None}, 'bad_value'),
+])
+def test_a_tap_outside_the_drive_is_refused(change, reason):
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.works_tap({'tap': 'start', 'at_ns': at(10), 'base_revision': 0, **change}, SPAN)
+    assert (refused.value.status, refused.value.reason) == (400, reason)
+
+
+def test_a_tap_answers_with_the_drive_as_it_is_now(store):
+    view = speed_review.save_works(store, FakeDrives(), ROUTE, {'tap': 'start', 'at_ns': at(50), 'base_revision': 0}, 'a')
+    assert view['revision'] == 1 and view['examined_s'] == 0
+    assert view['works'] == [{'start_ns': at(50), 'end_ns': None, 'reviewer': 'a', 'revision': 1}]
+
+
+def test_a_drive_without_a_scan_takes_no_roadworks(store):
+    class NoLogs(FakeDrives):
+        def summary(self, route):
+            return None
+    assert speed_review.drive_view(store, NoLogs(), ROUTE)['works'] == []
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.save_works(store, NoLogs(), ROUTE, {}, 'a')
+    assert refused.value.status == 404
+
+
 def test_the_drives_say_which_to_review_first(store, monkeypatch):
     routes = ['00000170--aaaaaaaaaa', *speed_review.FIRST_DRIVES]
     monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': route} for route in routes])
@@ -275,6 +367,39 @@ def test_only_a_person_signed_in_writes_a_speed(tmp_path, drives):
         assert status == 200 and json_of(data)['revision'] == 1
         assert server.request('GET', path, headers=token)[0] == 405
         assert server.request('GET', '/api/speed-review/nothing', headers=token)[0] == 404
+    finally:
+        server.close()
+        speed_review._stores.clear()
+
+
+def test_only_a_person_signed_in_marks_roadworks(tmp_path, drives):
+    make_report(tmp_path)
+    path = f'/api/speed-review/drives/{ROUTE}/works'
+    body = {'tap': 'start', 'at_ns': at(10), 'base_revision': 0}
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    token = {'X-Review-Token': TOKEN}
+
+    def post(headers, sent=body):
+        status, _response, data = server.request('POST', path, body=sent, headers=headers)
+        return status, json_of(data)
+
+    try:
+        status, answer = post(token)
+        assert (status, answer['error']) == (403, 'session_required')
+        session = sign_in(server)
+        assert post({**session, 'Origin': 'http://elsewhere.example'})[1]['error'] == 'cross_origin'
+        assert post({**session, 'Content-Type': 'text/plain'})[0] == 415
+        server.app.panel.actions_enabled = False
+        assert post(session)[1]['error'] == 'actions_disabled'
+        server.app.panel.actions_enabled = True
+        assert speed_review.store_for(tmp_path).works(ROUTE) == []
+        status, answer = post(session)
+        assert status == 200 and answer['revision'] == 1 and answer['works'][0]['reviewer'] == 'admin'
+        status, answer = post(session)
+        assert (status, answer['error']) == (409, 'stale_revision')
+        status, answer = post(session, {**body, 'base_revision': 1})
+        assert (status, answer['error']) == (400, 'bad_works')
+        assert server.request('GET', path, headers=token)[0] == 405
     finally:
         server.close()
         speed_review._stores.clear()

@@ -3,14 +3,15 @@
 // with one lane more, the speed to hold, and the commands at its side. The proposal is the limit the comma's vision held,
 // and a person says what the speed to hold really was (speed_review.py). Every command saves at once and acts on the
 // stretch under the time shown; Yes and Can't tell go on to the next stretch nobody looked at. In a stuck limit the right
-// change is inside the stretch: Split here cuts it at the time shown, and saving one half makes the cut real.
+// change is inside the stretch: Split here cuts it at the time shown, and saving one half makes the cut real. Roadworks
+// are marked next to the speed, two taps on the frame shown, and cut no stretch.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
-import {canCut, cutOf, type Label, labelOf, nextOpen, openCuts, pieceAt, SPEEDS, type SpeedDrive, STATE_LABEL, STEP_KPH, stepped, type Stretch,
-  withCuts} from './speed-review';
+import {canCut, canEndWorks, cutOf, type Label, labelOf, nextOpen, openCuts, pieceAt, SPEEDS, type SpeedDrive, STATE_LABEL, STEP_KPH, stepped,
+  type Stretch, withCuts, worksAt, type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
 const RATES = [1, 2, 4] as const;
@@ -68,12 +69,11 @@ const toFirstOpen = watch([t0, drive], () => {
 // -- the commands ----------------------------------------------------------------------------------------------------------
 const saving = ref(false);
 const locked = computed(() => saving.value || props.readOnly);
-async function write(item: Stretch, label: Label): Promise<boolean> {
+async function send(path: string, body: object): Promise<boolean> {
   if (locked.value || !drive.value) return false;
   saving.value = true;
   try {
-    show(await post<SpeedDrive>(address() + '/stretches', {start_ns: item.start_ns, end_ns: item.end_ns, ...label,
-      base_revision: drive.value.revision}));
+    show(await post<SpeedDrive>(address() + path, {...body, base_revision: drive.value.revision}));
     return true;
   } catch (problem) {
     toast(messageOf(problem), true);
@@ -84,6 +84,7 @@ async function write(item: Stretch, label: Label): Promise<boolean> {
     saving.value = false;
   }
 }
+const write = (item: Stretch, label: Label): Promise<boolean> => send('/stretches', {start_ns: item.start_ns, end_ns: item.end_ns, ...label});
 const canYes = computed(() => piece.value?.state === 'not_examined' && piece.value.kph !== null);
 async function yes(): Promise<void> {
   const item = piece.value;
@@ -113,6 +114,16 @@ function join(): void {
   cuts.value = cuts.value.filter((cut) => cut !== removable.value);
 }
 
+const works = computed(() => drive.value?.works ?? []);
+const worksOpen = computed(() => works.value.find((item) => item.end_ns === null) ?? null);
+const worksHere = computed(() => worksAt(works.value, now.value));
+const worksShown = computed(() => worksHere.value ?? worksOpen.value);
+const canMarkWorks = computed(() => worksOpen.value ? canEndWorks(works.value, worksOpen.value, now.value) : worksHere.value === null);
+const tapWorks = (tap: WorksTap): void => { void send('/works', {tap, at_ns: now.value}); };
+function markWorks(): void {
+  if (canMarkWorks.value) tapWorks(worksOpen.value ? 'end' : 'start');
+}
+
 // The note of a stretch already saved. The time can move while it is typed (a tap on the lanes ends the typing), so it
 // goes to the stretch it was begun on.
 const note = ref('');
@@ -137,6 +148,7 @@ function onKey(event: KeyboardEvent): void {
   if (target?.closest('input, textarea, select, [contenteditable]') || event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === 'y') void yes();
   else if (event.key === 's') split();
+  else if (event.key === 'w') markWorks();
   else if (event.key === '-' && piece.value) set(stepped(piece.value, -STEP_KPH));
   else if ((event.key === '+' || event.key === '=') && piece.value) set(stepped(piece.value, STEP_KPH));
 }
@@ -157,13 +169,22 @@ function runs(from: number, to: number) {
       known: item.known_ns === null ? null : secondOf(item.known_ns)}] : [];
   });
 }
+/** The roadworks inside the window of the lanes. */
+function worksIn(from: number, to: number) {
+  const end = pieces.value[pieces.value.length - 1]?.end_ns ?? 0;
+  return works.value.flatMap((item) => {
+    const first = Math.max(secondOf(item.start_ns), from);
+    const last = Math.min(secondOf(item.end_ns ?? end), to);
+    return first < last ? [{key: item.start_ns, from: first, to: last, open: item.end_ns === null}] : [];
+  });
+}
 </script>
 
 <template>
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" back-label="Speed review" no-episodes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The speed to hold: dashed, what the comma's vision held, nobody looked at it yet; green confirmed; blue corrected; ? nobody can tell">
+      <div class="dr-lane sr-lane" title="The speed to hold: dashed, what the comma's vision held, nobody looked at it yet; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks">
         <span class="dr-lane-name">To hold<small>review</small></span>
         <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
           <g v-for="run in runs(from, to)" :key="run.key">
@@ -171,6 +192,7 @@ function runs(from: number, to: number) {
             <text v-if="fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="15.5" class="dr-run-text" :class="'sr-text-' + run.state">{{ run.text }}</text>
             <line v-if="run.known !== null" :x1="x(run.known)" :x2="x(run.known)" y1="1" y2="22" class="sr-known"/>
           </g>
+          <rect v-for="mark in worksIn(from, to)" :key="mark.key" :x="x(mark.from)" y="18" :width="w(mark.from, mark.to)" height="4" :class="['sr-works', {'sr-works-open': mark.open}]"/>
         </svg>
       </div>
     </template>
@@ -215,6 +237,11 @@ function runs(from: number, to: number) {
             <button v-if="piece.known_ns !== null" type="button" class="btn small" :disabled="locked" @click="knownFrom(null)">Known from {{ clockOf(secondOf(piece.known_ns)) }} ✕</button>
             <button v-if="saved" type="button" class="btn small" id="sr-clear" :disabled="locked" @click="clear">Clear</button>
           </div>
+          <div class="sr-tools">
+            <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMarkWorks" title="Key w" @click="markWorks">{{ worksOpen ? 'Roadworks end here' : 'Roadworks start here' }}</button>
+            <button v-if="worksHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapWorks('remove')">Remove roadworks</button>
+          </div>
+          <p v-if="worksShown" class="dr-hint">Roadworks {{ clockOf(secondOf(worksShown.start_ns)) }}{{ worksShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(worksShown.end_ns)) }}</p>
           <label v-if="saved" class="sr-note"><span class="sr-only">A note on this stretch</span>
             <input ref="noteInput" v-model="note" type="text" maxlength="500" placeholder="A note on this stretch" :disabled="readOnly" @focus="noteStart" @change="noteEnd"/></label>
         </template>
