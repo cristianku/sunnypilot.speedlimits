@@ -297,8 +297,9 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict) -> dict:
     """A drive for the training: frames, ns, partitions, cells, speed (class per frame), speed_out (why a frame is out of
-    the loss, 0 when in), speed_weight, works, works_weight, inputs, signs_read, no_picture_s (labelled seconds without a
-    frame at all: prepare keeps only the slow ones at the start and the end of a drive)."""
+    the loss, 0 when in), speed_weight, works, works_weight, inputs, own_kph (the car's speed, NaN unknown: for the measure,
+    no input), signs_read, no_picture_s (labelled seconds without a frame at all: prepare keeps only the slow ones at the
+    start and the end of a drive)."""
     frames = drive_frames(root, route, merged)
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
     usable = np.array([frame['ns'] is not None and frame['present'] for frame in frames], dtype=bool)
@@ -308,7 +309,9 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     works, works_weight = works_answers(ns, labels['works'], labels['checked_ns'])
     works_weight[~usable] = 0
     readings = _sign_readings(root, route)
+    own = _last_at((merged.get('series') or {}).get('v_ego') or [], ns)
     return {'route': route, 'frames': frames, 'ns': ns, 'partitions': frame_partitions(route, frames, split),
+            'own_kph': np.array([np.nan if kph is None else kph for kph in own], dtype=np.float32),
             'cells': frame_cells(frames), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'works': works, 'works_weight': works_weight,
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],

@@ -316,6 +316,7 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path):
     assert drive['works'][20] == 0 and drive['works_weight'][20] == 1
     assert drive['works_weight'][30] == 0
     assert drive['partitions'] == ['buffer'] * 40
+    assert len(drive['own_kph']) == 40 and all(kph != kph for kph in drive['own_kph'])
     found = targets.summary([drive])
     assert found['drives'][0]['works_in'] == drive['works'][drive['works_weight'] > 0].sum()
     assert found['partitions']['buffer']['speed'] == found['drives'][0]['speed']

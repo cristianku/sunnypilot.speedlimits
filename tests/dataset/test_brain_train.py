@@ -17,7 +17,8 @@ def fake_drive(partitions, *, speed=19, works=None, marks=(), route='00000001--a
     drive = {'route': route, 'frames': [{}] * count, 'ns': numpy.arange(count, dtype=numpy.int64) * NS, 'partitions': list(partitions),
              'speed': numpy.full(count, speed, dtype=numpy.int64), 'speed_weight': numpy.ones(count, dtype=numpy.float32),
              'works': numpy.zeros(count, dtype=numpy.float32) if works is None else numpy.array(works, dtype=numpy.float32),
-             'works_weight': numpy.ones(count, dtype=numpy.float32), 'inputs': inputs, 'marks': list(marks)}
+             'works_weight': numpy.ones(count, dtype=numpy.float32), 'inputs': inputs, 'marks': list(marks),
+             'own_kph': numpy.full(count, numpy.nan, dtype=numpy.float32)}
     drive['extra'] = pack_inputs(inputs, GROUPS)
     return drive
 
@@ -43,6 +44,23 @@ def test_the_frames_without_gas_are_measured_apart():
     found = measure([drive], [said([100, 130, 100])], 'test')
     assert found['speed']['mean_error_kph'] == pytest.approx(10)
     assert found['no_gas'] == {'frames': 2, 'right': 1.0, 'mean_error_kph': 0.0}
+
+
+def test_a_network_that_follows_the_car_shows_where_the_car_is_far_from_the_label():
+    import numpy
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 4, speed=23)
+    drive['own_kph'][:] = 90, 90, 115, numpy.nan
+    found = measure([drive], [said([90, 120, 115, 120])], 'test')
+    assert found['speed']['frames'] == 4
+    assert found['far_from_own_speed'] == {'frames': 2, 'right': 0.5, 'mean_error_kph': 15.0, 'nearer_own_speed': 0.5}
+
+
+def test_with_the_car_near_the_label_the_measure_is_empty():
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 2, speed=23)
+    drive['own_kph'][:] = 118
+    assert measure([drive], [said([120, 120])], 'test')['far_from_own_speed']['nearer_own_speed'] is None
 
 
 def test_the_works_output_is_measured_on_its_own_answers():

@@ -13,6 +13,10 @@ The measure (measure), on validation to choose the epoch and on test once at the
 
 - speed: right, and the mean error in km/h, on all of them and on those without gas in the last second: the frames where
   the driver gives nothing away, so a network that follows the pedal shows here;
+- far_from_own_speed: the same on the frames where the car's speed is OWN_SPEED_GAP_KPH or more from his label, and how
+  many of them the network puts nearer the car's speed than the label. Leaving pedals and speed out of the inputs is not
+  enough: the video shows how fast the car goes, and at the end of works the label and the car's speed rise together, so
+  a network that follows the car looks right there. Here following the car is the wrong answer;
 - in_works: the same inside the marks;
 - works: precision and recall of works_head, on the frames with an answer of its own;
 - sites: per mark of the partition, how long after his end tap the speed reaches what he labelled after it, and how much
@@ -43,6 +47,7 @@ CLIP = 5.0
 CHECKPOINT = 'brain-best.pt'
 RESULT = 'result.json'
 END_WINDOW_S = 60
+OWN_SPEED_GAP_KPH = 20
 DRY_FRAMES = 12
 DRY_STEPS = 2
 ROAD_INPUTS = tuple(name for name in INPUT_SIZES if name not in DRIVER_INPUTS)
@@ -104,6 +109,14 @@ def _speed_measure(said: np.ndarray, truth: np.ndarray) -> dict:
     return {'frames': int(len(truth)), 'right': float((said == truth).mean()), 'mean_error_kph': float(np.abs(said - truth).mean())}
 
 
+def _far_from_own_speed(said: np.ndarray, truth: np.ndarray, own: np.ndarray) -> dict:
+    """The frames where following the car is the wrong answer. An unknown speed (NaN) is not among them."""
+    far = np.abs(own - truth) >= OWN_SPEED_GAP_KPH
+    said, truth, own = said[far], truth[far], own[far]
+    nearer = float((np.abs(said - own) < np.abs(said - truth)).mean()) if far.any() else None
+    return {**_speed_measure(said, truth), 'nearer_own_speed': nearer}
+
+
 def _site(drive: dict, said: dict, mark: dict, truth: np.ndarray, asked: np.ndarray) -> dict:
     """A mark: the frames inside it above his label, and how long after its end the speed reaches what he said after it."""
     ns = drive['ns']
@@ -121,7 +134,7 @@ def _site(drive: dict, said: dict, mark: dict, truth: np.ndarray, asked: np.ndar
 
 def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
     """What the network is worth on one partition: see the module's text."""
-    said_all, truth_all, free, works_frames, sites = [], [], [], [], []
+    said_all, truth_all, own_all, free, works_frames, sites = [], [], [], [], [], []
     hits = {'true_positive': 0, 'false_positive': 0, 'false_negative': 0}
     for drive, said in zip(drives, answers):
         speed_weight, works_weight = loss_weights(drive, partition)
@@ -129,6 +142,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
         truth = class_kph(drive['speed'])
         said_all.append(said['kph'][asked])
         truth_all.append(truth[asked])
+        own_all.append(drive['own_kph'][asked])
         free.append(drive['inputs']['pedals'][asked, 0] == 0)
         works_frames.append(drive['works'][asked] > 0)
         if said['works'] is not None:
@@ -142,10 +156,11 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
             middle = np.flatnonzero((drive['ns'] >= mark['start_ns']) & (drive['ns'] < mark['end_ns']))
             if len(middle) and held[middle[len(middle) // 2]]:
                 sites.append(_site(drive, said, mark, truth, drive['speed_weight'] > 0))
-    said_all, truth_all = np.concatenate(said_all or [[]]), np.concatenate(truth_all or [[]])
+    said_all, truth_all, own_all = (np.concatenate(part or [[]]) for part in (said_all, truth_all, own_all))
     free, works_frames = np.concatenate(free or [[]]).astype(bool), np.concatenate(works_frames or [[]]).astype(bool)
     found = hits['true_positive']
     return {'speed': _speed_measure(said_all, truth_all), 'no_gas': _speed_measure(said_all[free], truth_all[free]),
+            'far_from_own_speed': _far_from_own_speed(said_all, truth_all, own_all),
             'in_works': _speed_measure(said_all[works_frames], truth_all[works_frames]),
             'works': {**hits, 'precision': found / max(found + hits['false_positive'], 1),
                       'recall': found / max(found + hits['false_negative'], 1)}, 'sites': sites}
@@ -156,7 +171,7 @@ def _short(drive: dict, length: int) -> dict:
     first = next((i for i, name in enumerate(drive['partitions']) if name == 'train' and drive['speed_weight'][i]), 0)
     part = slice(first, first + length)
     cut = {name: drive[name][part] for name in ('frames', 'ns', 'partitions', 'cells', 'speed', 'speed_out', 'speed_weight',
-                                                'works', 'works_weight')}
+                                                'works', 'works_weight', 'own_kph')}
     return {**drive, **cut, 'inputs': {name: value[part] for name, value in drive['inputs'].items()}}
 
 
