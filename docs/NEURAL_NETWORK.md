@@ -565,3 +565,45 @@ No version ever says merge (F1 0): the training has 48 merge frames. The version
 **The rule.** A car park now ends after `PARKING_EXIT_SECONDS` (3 s) of a road with a general limit, a setting of its own in Models › On the car (`parking_exit_seconds`, 0 to 30 s); `ROAD_TYPE_SECONDS` still sets how long a new road type must last before its limit follows it elsewhere.
 
 **The measure.** The car's own memory (`vision.SpeedLimitMemory`, no signs) on the answers of four scene networks on their validation and test drives, the debounce of the car included. With the version on the car (1216) the limit goes 3 and 6 s after the two labelled exits, against 10 and 13 s before; no network left a car park while the car was still inside at 3 s, where the run 0007 did once at 0 to 2 s. Some exits of the 0046 networks take 7 to 17 s even at 0 s: there the network itself still says car park on the street. Only 11 exits over the four measures, so the next drives out of car parks should be watched.
+
+## The brain (4 November 2026)
+
+**What it is for.** One network with memory that says the speed to hold, from the road camera and what was read, and generalises to roads it never saw: the end of roadworks with no end sign, a limit the reader got wrong, a road type no rule covers. It never reads the map. It does not exist yet as a trained network: this section is the road from a person's labels to its weights.
+
+**From a label to the weights.** A label in the database changes nothing by itself:
+
+```
+Speed review  ->  answers on the frames  ->  errors of the network  ->  weights of the shared part
+speed_review.sqlite   brain_targets.py        brain_net.brain_loss       brain_train.py
+```
+
+**The network** (`src/nnslr_tools/brain_net.py`): the road-type network's encoder, its features with the frame's inputs, a GRU, then two heads on the same memory: `speed_head`, the only output on the car, a class of 5 km/h; `works_head`, are we inside roadworks, only in training. `car_weights` leaves it out. A mark is an answer, never an input, and no code goes from works to speed: "works ended" and "120" stay two separate answers.
+
+```
+loss = cross entropy(speed, his speed) + 0.3 * binary cross entropy(works, his marks)
+```
+
+Each term only on the frames with an answer of its own. The works error goes back through the GRU into the encoder, the part the speed uses too.
+
+**The answers** (`src/nnslr_tools/brain_targets.py`):
+
+| Frame | Speed | Roadworks |
+| --- | --- | --- |
+| a person gave a speed | that class | |
+| not examined, can't tell, before `known_ns` | out | |
+| within 2 s of a change of speed, or of a works tap | out | out |
+| inside a mark with an end | | 1 |
+| from the drive's start to "checked to here", outside the marks | | 0 |
+| anywhere else, and from the start of a mark with no end | | out |
+
+A stretch with no mark is not verified, it is not "no works".
+
+**Inputs.** Groups apart, all from what comes at or before the frame: `signs`, `lead`, `country`, and the driver's two, `pedals` and `speed`. These stay out by default (`--driver` adds them): the gas is pressed on 96 % of the labelled frames of `00000168`, where he overrode a limit stuck too low, and the car's speed is what the network itself decides on the car. Measured on the first 4,251 labelled frames: own speed is within 10 km/h of the label on 34 % of them, so the risk is the pedal more than the speed.
+
+**The split.** The frozen one, `data/splits/speed-brain-split.json`: on the place, never computed again. A later drive goes by the area of each frame. A works site with a frame in test or validation, 60 s around it included, has no frame in train, nor has another site on those areas. A frame out of train never moves a weight: pieces of the gradient stop at it, and it runs under no_grad only to keep the memory going.
+
+**Sequences.** Whole drives in order, the state carried from piece to piece, so that approach, crossing and exit are one sequence. Batch norm is frozen: its statistics would let later frames reach earlier ones.
+
+**The measure** (`src/nnslr_tools/brain_train.py`), on places excluded from training: speed right and error in km/h; the same on frames with no gas, where the driver gives nothing away; the same inside the marks; precision and recall of the works output; per site, how long after his end tap the speed reaches what he labelled, and how much of the mark was above his label. The comparison is the same training with and without `--no-works`, and with `--pool grid`, which keeps where things are in the frame (the mean over the 8 x 5 map loses most of it, and an occupied lane is a matter of where).
+
+**What the comma's limit scores.** On the first 4,251 labelled frames `vis_limit` equals the label on 48 %, 20.6 km/h off on average. The labelled drives were chosen for their errors, so this is a starting point, not the limit's overall score.

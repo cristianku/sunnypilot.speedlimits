@@ -1646,6 +1646,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
+    p_brain = sub.add_parser("brain-targets", help="what the labels of Speed review give the brain's training today: per "
+                                                   "partition and per drive the frames with a speed and with an answer on "
+                                                   "roadworks, and why the others are out. Reads only: it writes nothing and "
+                                                   "trains nothing")
+    p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive with a label")
+    p_brain.add_argument("--json", action="store_true", help="the same as JSON")
+    p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_brain.set_defaults(func=_cmd_brain_targets)
+    p_brain_net = sub.add_parser("train-brain", help="train the brain on the labels of Speed review (GPU, .venv-gpu): the speed "
+                                                     "to hold, with the roadworks as a second task of the same network, "
+                                                     "measured on sites it never learned. Writes brain-best.pt and "
+                                                     "result.json into --run-dir")
+    p_brain_net.add_argument("--run-dir", required=True, help="the folder of this run")
+    p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
+    p_brain_net.add_argument("--driver", action="store_true", help="with the gas, the brake and the car's speed as inputs")
+    p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="mean",
+                             help="grid keeps where things are in the frame, mean only what is there")
+    p_brain_net.add_argument("--epochs", type=int, default=None)
+    p_brain_net.add_argument("--device", help="default: cuda; the CPU for a dry run")
+    p_brain_net.add_argument("--dry-run", action="store_true", help="two steps on the CPU on a few frames: the chain works, "
+                                                                    "nothing is learned, nothing written outside --run-dir")
+    p_brain_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_brain_net.set_defaults(func=_cmd_train_brain)
     p_junctions = sub.add_parser("junctions", help="the intersections the car drives through, from its GPS track and "
                                                    "the OpenStreetMap roads: derived/junctions/<route>.json, the "
                                                    "labels of the junction head of the road-type network (in the "
@@ -2563,6 +2586,31 @@ def _cmd_gps(args: argparse.Namespace) -> int:
             result = {"route_id": route, "error": str(exc)}
         print(json.dumps(result, sort_keys=True), flush=True)
     return 1 if failed else 0
+
+
+def _cmd_brain_targets(args: argparse.Namespace) -> int:
+    from nnslr_tools import brain_targets
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route)
+    found = brain_targets.summary(drives)
+    print(json.dumps(found, indent=2) if args.json else brain_targets.summary_text(found))
+    return 0
+
+
+def _cmd_train_brain(args: argparse.Namespace) -> int:
+    from nnslr_tools import brain_train
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
+                                     works=not args.no_works, driver=args.driver, device=args.device, dry_run=args.dry_run,
+                                     epochs=args.epochs or brain_train.EPOCHS)
+    print(json.dumps({part: result[part]['speed'] for part in ('validation', 'test')}, indent=2))
+    return 0
 
 
 def _cmd_road_types(args: argparse.Namespace) -> int:
