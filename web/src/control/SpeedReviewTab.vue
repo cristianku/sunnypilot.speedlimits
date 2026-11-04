@@ -24,7 +24,8 @@ async function load(): Promise<void> {
   }
 }
 const first = computed(() => (drives.value ?? []).filter((drive) => drive.first));
-const others = computed(() => (drives.value ?? []).filter((drive) => !drive.first));
+// The newest first: the number of a drive is not its date, the comma's count started again.
+const others = computed(() => (drives.value ?? []).filter((drive) => !drive.first).sort((a, b) => (b.day ?? '').localeCompare(a.day ?? '')));
 const groups = computed(() => [{key: 'first', rows: first.value}, {key: 'others', rows: others.value}].filter((group) => group.rows.length));
 const stateOf = (drive: SpeedRow): string => !drive.total_s ? scanText(drive.scan).text : !drive.examined_s ? 'Not started.'
   : clockOf(drive.examined_s) + ' of ' + clockOf(drive.total_s) + ' examined.';
@@ -50,7 +51,7 @@ onMounted(() => { if (tabDrive.value === null) void load(); });
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <template v-else>
-        <component :is="group.key === 'others' ? 'details' : 'div'" v-for="group in groups" :key="group.key" class="sr-group">
+        <component :is="group.key === 'others' ? 'details' : 'div'" v-for="group in groups" :key="group.key" class="sr-group" :open="group.key === 'others' || undefined">
           <summary v-if="group.key === 'others'" class="sr-more">The other drives · {{ group.rows.length }}<span class="data-chev" aria-hidden="true">›</span></summary>
           <ul class="rt-list">
             <li v-for="drive in group.rows" :key="drive.route" class="rt-drive dr-drive">
