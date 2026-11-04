@@ -158,6 +158,16 @@ struct SpeedVisionSP {
   signSize @11 :Float32;
 }
 
+struct RadarState {
+  leadOne @0 :LeadData;
+  struct LeadData {
+    dRel @0 :Float32;
+    vRel @1 :Float32;
+    vLead @2 :Float32;
+    present @3 :Bool;
+  }
+}
+
 struct Event {
   logMonoTime @0 :UInt64;
   valid @1 :Bool;
@@ -175,5 +185,6 @@ struct Event {
     longitudinalPlanSP @12 :LongitudinalPlanSP;
     liveMapDataSP @13 :LiveMapDataSP;
     speedVisionSP @14 :SpeedVisionSP;
+    radarState @15 :RadarState;
   }
 }

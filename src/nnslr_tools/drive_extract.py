@@ -8,7 +8,9 @@ clock, which runs on across the segments of a drive); the civil time of the GPS 
 
 - series: {name: [[t, value], ...]}, each a step function written only when the value changes (a number by at least
   its tolerance). A service that stops sending (its process stopped, a gap in the log) ends its series with a value
-  of None after GAP_SECONDS[service]: a missing value is never carried on as if it were still read.
+  of None after GAP_SECONDS[service]: a missing value is never carried on as if it were still read. lead_*: the car
+  ahead (radarState's leadOne; radar is False on this car, so the camera's): its distance and speed are None while
+  there is none, never 0.
 - events: [[t, kind, ...]]: the buttons of carState, the signs speedvisiond confirmed (signRead), every change of the
   onroad events (their name and their type: userDisable, softDisable, immediateDisable, ...).
 - frames: the road camera's encode index (roadEncodeIdx, or narrowRoadEncodeIdx on this car): the video frame
@@ -31,7 +33,7 @@ import json
 import sys
 from pathlib import Path
 
-EXTRACT_VERSION = 2
+EXTRACT_VERSION = 3
 
 # (series, service, field path, kind, tolerance, scale): numbers are km/h where the log has m/s (scale 3.6).
 SERIES = (
@@ -83,15 +85,22 @@ SERIES = (
     ('map_ahead', 'liveMapDataSP', 'speedLimitAhead', 'num', 0.5, 3.6),
     ('map_ahead_dist', 'liveMapDataSP', 'speedLimitAheadDistance', 'num', 25, 1),
     ('road_name', 'liveMapDataSP', 'roadName', 'str', 0, 1),
+    ('lead_present', 'radarState', 'leadOne.present', 'bool', 0, 1),
+    ('lead_d', 'radarState', 'leadOne.dRel', 'num', 2, 1),
+    ('lead_v', 'radarState', 'leadOne.vLead', 'num', 2, 3.6),
+    ('lead_v_rel', 'radarState', 'leadOne.vRel', 'num', 2, 3.6),
 )
 # The fields speedvisiond added on 31 Oct 2026: an older build leaves them unset, read as ''/0/False. speedLimitState
 # is never '' when written, so without it they are None: not in the log, never a value.
 VISION_DETAIL = frozenset(('vis_state', 'vis_reason', 'vis_raw_class', 'vis_raw_speed', 'vis_raw_conf', 'vis_raw_taken',
                            'vis_sign_dist', 'vis_sign_size'))
+# The numbers of the car ahead: without one, leadOne still holds numbers that mean nothing, so they are None.
+LEAD_DETAIL = frozenset(('lead_d', 'lead_v', 'lead_v_rel'))
 # After this long without a message of the service (s), its series turn to None. Long enough for a qlog (carState
-# 10 Hz, longitudinalPlanSP 2 Hz, speedVisionSP 1 Hz, liveMapDataSP 1 Hz).
+# 10 Hz, longitudinalPlanSP 2 Hz, speedVisionSP 1 Hz, liveMapDataSP 1 Hz, radarState 4 Hz).
 GAP_SECONDS = {'carState': 0.5, 'selfdriveState': 0.5, 'selfdriveStateSP': 0.5, 'carControl': 0.5,
-               'longitudinalPlanSP': 1.5, 'longitudinalPlan': 1.5, 'speedVisionSP': 3.0, 'liveMapDataSP': 3.0}
+               'longitudinalPlanSP': 1.5, 'longitudinalPlan': 1.5, 'speedVisionSP': 3.0, 'liveMapDataSP': 3.0,
+               'radarState': 1.5}
 ENCODE = ('roadEncodeIdx', 'narrowRoadEncodeIdx')
 GPS = ('gpsLocationExternal', 'gpsLocation')
 EVENT_FLAGS = ('enable', 'noEntry', 'warning', 'userDisable', 'softDisable', 'immediateDisable', 'preEnable',
@@ -229,10 +238,10 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
                 for spec in specs:
                     put(spec[0], seen + int(gap * 1e9), None, 0)
             last_seen[which] = t
-            detail = which != 'speedVisionSP' or bool(_get(payload, 'speedLimitState'))
+            absent = (VISION_DETAIL if which == 'speedVisionSP' and not _get(payload, 'speedLimitState')
+                      else LEAD_DETAIL if which == 'radarState' and not _get(payload, 'leadOne.present') else ())
             for name, _service, field, kind, tolerance, scale in specs:
-                value = (_value(_get(payload, field), kind, scale, name in UNROUNDED)
-                         if detail or name not in VISION_DETAIL else None)
+                value = None if name in absent else _value(_get(payload, field), kind, scale, name in UNROUNDED)
                 put(name, t, value, tolerance)
             if which == 'carState':
                 for button in _get(payload, 'buttonEvents') or ():

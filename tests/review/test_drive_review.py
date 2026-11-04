@@ -56,6 +56,7 @@ def _pressed(s: float, spans) -> bool:
 
 BRAKE = ((58.5, 59.0),)
 GAS = ((62.0, 63.0),)
+LEAD = ((10.0, 20.0),)
 
 
 @functools.lru_cache(maxsize=None)
@@ -119,6 +120,13 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
                 resolver.source = 'vision' if vision else 'map'
                 resolver.speedLimit = (vision or _map(s)) / 3.6
             put(t + 4_000_000, plan)
+
+            def radar(event, s=s):
+                lead = event.init('radarState').init('leadOne')
+                # Without a car ahead the numbers stay in the message, meaning nothing.
+                lead.dRel, lead.vRel, lead.vLead = 30.0, -5.0, 20.0
+                lead.present = _pressed(s, LEAD)
+            put(t + 4_500_000, radar)
         if k % 10 == 0:
             vision = _vision(s)
             if vision is not None:
@@ -376,6 +384,21 @@ def test_the_timeline_says_why_the_vision_limit_is_what_it_is(tmp_path):
     assert at('vis_sign_size', 3.5) == 40 and at('vis_sign_size', 10) == 0
     # Where speedVisionSP stops (150 s on), its series end: a missing value is never carried on.
     assert at('vis_reason', 170) is None and at('vis_raw_class', 170) is None
+
+
+def test_the_car_ahead_has_numbers_only_while_it_is_there(tmp_path):
+    comma_drive(tmp_path, segments=(0,))
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    series = store.merged(ROUTE)['series']
+
+    def at(name, s):
+        return [value for t, value in series[name] if t <= BOOT_NS + s * NS][-1]
+    assert at('lead_present', 5) is False and at('lead_present', 15) is True
+    assert (at('lead_d', 15), at('lead_v', 15), at('lead_v_rel', 15)) == (30.0, 72.0, -18.0)
+    # No car ahead: nothing known, never 0 or the numbers of the message.
+    for name in ('lead_d', 'lead_v', 'lead_v_rel'):
+        assert at(name, 5) is None and at(name, 25) is None
 
 
 def test_holes_in_the_encode_index_degrade_the_sync_and_the_gps_gives_the_date(tmp_path):
