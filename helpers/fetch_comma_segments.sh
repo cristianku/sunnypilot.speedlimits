@@ -519,8 +519,9 @@ mkdir -p "$VIDEOS_DIR" || die "cannot create the shared folder $VIDEOS_DIR (COMM
 VIDEOS_DIR="$(cd "$VIDEOS_DIR" && pwd)"
 
 # One ssh connection to the comma for the whole run: ssh and rsync reuse it instead of opening
-# a new one (about a second each) for every file.
-SSH_CONTROL_DIR="$(mktemp -d)"
+# a new one (about a second each) for every file. In /tmp and not in $TMPDIR: the panel's is deep in
+# the data root, and ssh refuses a socket path that long.
+SSH_CONTROL_DIR="$(mktemp -d /tmp/nnslr-ssh.XXXXXX)"
 SSH_MUX=(-o ControlMaster=auto -o "ControlPath=$SSH_CONTROL_DIR/%C" -o ControlPersist=60)
 ssh() { command ssh "${SSH_MUX[@]}" "$@"; }
 export RSYNC_RSH="ssh ${SSH_MUX[*]}"
