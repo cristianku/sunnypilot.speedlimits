@@ -220,14 +220,14 @@ def test_a_save_answers_with_the_drive_as_it_is_now(store):
         (80, 'not_examined'), (120, 'confirmed'), (120, 'not_examined')]
 
 
-def test_the_drives_come_in_the_order_of_the_review(store, monkeypatch):
-    routes = ['00000170--aaaaaaaaaa', speed_review.LAST_DRIVES[0], *reversed(speed_review.FIRST_DRIVES)]
+def test_the_drives_say_which_to_review_first(store, monkeypatch):
+    routes = ['00000170--aaaaaaaaaa', *speed_review.FIRST_DRIVES]
     monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': route} for route in routes])
     store.apply(speed_review.FIRST_DRIVES[0], at(0), at(30), label(), 0, 'a')
     rows = speed_review.drives_list(store, FakeDrives())
-    assert [row['route'] for row in rows] == [*speed_review.FIRST_DRIVES, '00000170--aaaaaaaaaa', speed_review.LAST_DRIVES[0]]
-    assert [row['first'] for row in rows] == [True] * 5 + [False] * 2
-    assert rows[0]['examined_s'] == 30 and rows[0]['total_s'] == 300
+    assert [row['route'] for row in rows] == routes
+    assert [row['first'] for row in rows] == [False] + [True] * 5
+    assert rows[1]['examined_s'] == 30 and rows[1]['total_s'] == 300
 
 
 # ---------- who writes ----------

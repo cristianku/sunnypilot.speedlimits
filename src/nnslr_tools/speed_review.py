@@ -49,12 +49,10 @@ GRID_KPH = 5
 MAX_KPH = 200
 MAX_NOTE = 500
 STATES = ('confirmed', 'corrected', 'undetermined')
-# The drives to review first, in this order: whole drives chosen for what the brain must learn. Together 169 minutes
+# The drives to review first: whole drives chosen for what the brain must learn. Together 169 minutes
 # with 93 % of the seconds where the limit looks stuck, the roadworks and the low limits on the carriageway.
 FIRST_DRIVES = ('00000160--ea56ae0f33', '0000015a--e47d11b0b0', '00000154--fa7e8f49aa', '00000151--7adc20003e',
                 '00000153--44d221e479')
-# The drive to review last: it is the test drive, and its logs have no vision limit to propose from.
-LAST_DRIVES = ('0000012d--6552a45378',)
 
 SCHEMA_STATEMENTS = (
     'CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)',
@@ -308,20 +306,15 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
 
 
 def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]:
-    """The drives for the page: the first ones in their order, the others from the newest on, the last ones at the end.
-    Each with its share examined; no proposals here (they need the drive's logs)."""
+    """The drives for the page, which puts them in order: each with its share examined and whether it is one to review
+    first; no proposals here (they need the drive's logs)."""
     examined = store.examined()
     rows = []
     for drive in drives_view(drives):
         span = _span_of(drives, drive['route'])
         rows.append({**drive, 'first': drive['route'] in FIRST_DRIVES, 'examined_s': round(examined.get(drive['route'], 0) / NS, 1),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0})
-
-    def place(row: dict) -> tuple[int, int]:
-        if row['first']:
-            return 0, FIRST_DRIVES.index(row['route'])
-        return (2, 0) if row['route'] in LAST_DRIVES else (1, 0)
-    return sorted(rows, key=place)
+    return rows
 
 
 def save(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
