@@ -184,6 +184,16 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
   signType: string | null = null, panel = 'unknown', hours: string | null = null): void {
   if (refuseChange()) return;
   const work = workOf(row);
+  pushBox(work, box, family, value, signType, panel, hours);
+  state.selected = work.detections.length - 1;
+  state.selectedByUser = true;
+  state.drawing = false;
+  changed(row);
+}
+
+/** A box added to the frame's list, nothing else: no box selected, and the frame still waits as it did. */
+export function pushBox(work: FrameEdit, box: Box, family: string, value: number | null,
+  signType: string | null = null, panel = 'unknown', hours: string | null = null): void {
   work.detections.push({
     bbox_xyxy: box,
     family,
@@ -199,10 +209,6 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
     ...(signType && family === 'other_sign' ? {sign_type: signType} : {}),
     ...(hours ? {plate_hours: hours} : {}),
   });
-  state.selected = work.detections.length - 1;
-  state.selectedByUser = true;
-  state.drawing = false;
-  changed(row);
 }
 
 /** "Use": the sign of the second reading becomes a box of the frame. */

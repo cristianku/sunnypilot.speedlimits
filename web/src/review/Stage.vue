@@ -6,7 +6,7 @@
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
-import {carAskOf, carDetection} from './car';
+import {carAskOf, carDetection, carSignLeft} from './car';
 import {coarsePointer} from './dom';
 import {drawAi, drawCar, drawStage, sceneScale} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
@@ -45,8 +45,9 @@ const aiBoxes = computed(() => {
 const carBoxes = computed(() => {
   const reading = carAskOf(props.row.frame_key)?.reading;
   if (!reading) return [];
+  const left = reading.signs.map((sign) => carSignLeft(props.row, props.work, sign));
   return drawCar(reading.signs, reading.signs.map(carDetection), reading.surest, props.row.height,
-    sceneScale(size.value, props.row.width, props.row.height), props.row.width);
+    sceneScale(size.value, props.row.width, props.row.height), props.row.width).filter((_, i) => left[i]);
 });
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 </script>

@@ -1,13 +1,14 @@
 // "Car networks" (key T, its button in the inspector): what the car's cutter (SignNet) and classifier read on the
 // frame on screen, run by the car's own code on the server (GET <api>/car/<segment>/<index>,
 // nnslr_tools.car_reading). On, it reads every frame the page shows, a picture at 1 a second or any frame between
-// them; its boxes are drawn on the photo in their own colour and listed in CarSection.vue, each with what the car
-// does with it and "Use", which makes it a box of the frame. Nothing is saved: Confirm saves the frame as always.
-// Hidden offline.
+// them. What it reads goes straight into the frame's boxes, the list on the right, on a frame still to review; the
+// false boxes it reads as not a sign stay on the photo in their own colour and in CarSection.vue, with "Use". Nothing
+// is saved: Confirm saves the frame as always, and a frame only passed over stays to review. Hidden offline.
 import {reactive, watch} from 'vue';
 import {familyHasValue, holdsPlate, signKindOf} from './catalog';
 import {readLocal, writeLocal} from './dom';
-import {addManualBox} from './edits';
+import {addManualBox, pushBox} from './edits';
+import {currentRow, frameStatus, workOf} from './frames';
 import {overlap, sameBox} from './geometry';
 import {call} from './server';
 import {report, state} from './store';
@@ -66,6 +67,9 @@ const SETTLE_MS = 150;
 
 export const car = reactive({shown: false, asks: {} as Record<string, CarAsk>});
 
+// The frames whose boxes went to the list on the right, in this page: a box taken away there does not come back.
+const placed = new Set<string>();
+
 export function carAvailable(): boolean {
   return Boolean(report.apiBase);
 }
@@ -118,6 +122,10 @@ export function useCarReading(): void {
     wanted = key;
     settle = window.setTimeout(() => void readWanted(), SETTLE_MS);
   }, {immediate: true});
+  watch(() => (state.currentKey === null ? null : carAskOf(state.currentKey)?.reading ?? null), (reading) => {
+    const row = currentRow();
+    if (reading && row) placeCarSigns(row, reading);
+  }, {immediate: true});
 }
 
 /** T: on (the frame on screen is read now, then every frame shown) or off. */
@@ -150,11 +158,40 @@ export function carSignUsed(work: FrameEdit, sign: CarSign): boolean {
       && holdsPlate(box) === holdsPlate(d)));
 }
 
+/** The box of a sign inside the picture, null when too little of it is left. */
+function carBox(row: FrameRow, sign: CarSign): Box | null {
+  const [x1, y1, x2, y2] = sign.box;
+  const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
+  return box[2] - box[0] < 2 || box[3] - box[1] < 2 ? null : box;
+}
+
+/** What the car read becomes boxes of a frame still to review, once. Not the boxes it reads as not a sign: most are
+ * the cutter's false boxes, and confirmed as they are they would teach "not a sign". */
+function placeCarSigns(row: FrameRow, reading: CarReading): void {
+  if (report.readOnly || placed.has(row.frame_key) || frameStatus(row.frame_key) !== 'todo') return;
+  placed.add(row.frame_key);
+  const work = workOf(row);
+  for (const sign of reading.signs) {
+    const box = carBox(row, sign);
+    if (box === null || sign.review.family === 'not_a_sign' || carSignUsed(work, sign)) continue;
+    const d = carDetection(sign);
+    pushBox(work, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours);
+  }
+}
+
+/** True while a sign of the car is not among the frame's boxes: it is on the photo and in the card, with "Use". A box
+ * placed here stays its sign when the reviewer changes its kind or moves it, and so does a box on what it read as not
+ * a sign. */
+export function carSignLeft(row: FrameRow, work: FrameEdit, sign: CarSign): boolean {
+  if (carSignUsed(work, sign)) return false;
+  if (!placed.has(row.frame_key) && sign.review.family !== 'not_a_sign') return true;
+  return !work.detections.some((box) => overlap(box.bbox_xyxy, sign.box) > 0.3);
+}
+
 /** "Use": the box of the car becomes a box of the frame, inside the picture, with its family, value, kind and panel. */
 export function useCarSign(row: FrameRow, sign: CarSign): void {
   const d = carDetection(sign);
-  const [x1, y1, x2, y2] = sign.box;
-  const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
-  if (box[2] - box[0] < 2 || box[3] - box[1] < 2) return;
+  const box = carBox(row, sign);
+  if (box === null) return;
   addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours);
 }
