@@ -41,7 +41,7 @@ const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const ROW_ACTIONS: Record<LoopKey, ActionName[]> = {
   drives: ['fetch', 'prepare', 'prepare_again', 'road_types'],
   review: ['ai_review'],
-  train: ['dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train', 'train_continue', 'train_resume'],
+  train: ['dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train_brain', 'train', 'train_continue', 'train_resume'],
   car: ['send_to_car', 'try_on_comma', 'comma_restore'],
 };
 /** The terminal work of each stop, by its group (nnslr_tools.panel.ACTIVITIES). */

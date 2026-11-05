@@ -1830,6 +1830,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--device", choices=("auto", "cpu"), default="auto",
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
+    p_road_signs.add_argument("--labelled", action="store_true",
+                              help="the drives of Speed review instead of those with road types: what the brain needs "
+                                   "(scripts/run_brain.sh)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -2909,14 +2912,16 @@ def _cmd_train_road_type(args: argparse.Namespace) -> int:
 
 def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.brain_targets import read_labels
     from nnslr_tools.road_type_data import road_type_routes
     from nnslr_tools.road_type_signs import board_times, build_signs, package_path, sign_times
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     if args.classifier and not Path(args.classifier).is_file():
         raise ValueError(f"--classifier is not a file: {args.classifier}")
-    routes = road_type_routes(root)
+    routes = sorted(read_labels(root)) if args.labelled else road_type_routes(root)
     if not routes:
-        print("nnslr road-type-signs: no drive with road types (nnslr road-types)", file=sys.stderr)
+        print("nnslr road-type-signs: " + ("no drive with labels (Speed review)" if args.labelled
+                                           else "no drive with road types (nnslr road-types)"), file=sys.stderr)
         return 2
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
                           workers=args.workers or None, device=args.device,

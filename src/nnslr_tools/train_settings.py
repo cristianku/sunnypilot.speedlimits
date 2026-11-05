@@ -1,6 +1,7 @@
-"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Scene): the epochs, the patience, the batch,
+"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Scene, Brain): the epochs, the patience, the batch,
 the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an environment
-variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh, run_road_type.sh)
+variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh, run_road_type.sh,
+run_brain.sh)
 with the same default: the panel sets the ones changed here when it starts the next training of that kind
 (Panel.start, environment), the one running keeps its own. The job's chips say the values a training used (the head
 of its log, panel._settings_of).
@@ -105,6 +106,19 @@ TRAININGS = {
                  'ffmpeg, on the CPU. Only the speed changes. Default: half the cores.',
          'default': max(1, (os.cpu_count() or 8) // 2), 'min': 1, 'max': 64, 'step': 1, 'unit': 'workers'},
     ), 'fixed': ()},
+    'train_brain': {'label': 'Brain', 'script': 'scripts/run_brain.sh', 'settings': (
+        {'key': 'epochs', 'env': 'NNSLR_BRAIN_EPOCHS', 'label': 'Epochs',
+         'help': 'Passes over the drives, for each of the three seeds; the last epoch is kept.', 'default': 40, 'min': 1,
+         'max': 200, 'step': 1, 'unit': 'epochs'},
+        {'key': 'sign_workers', 'env': 'NNSLR_SIGN_WORKERS', 'label': 'Processes reading the signs',
+         'help': 'The processes reading the signs of the drives not read by today’s reader of the car, each with its '
+                 'ffmpeg. Only the speed changes. Default: half the cores.',
+         'default': max(1, (os.cpu_count() or 8) // 2), 'min': 1, 'max': 64, 'step': 1, 'unit': 'workers'},
+    ), 'fixed': (
+        {'label': 'Seeds', 'value': '0, 1, 2', 'help': 'Three networks that differ only by chance: compare them in Models.'},
+        {'label': 'Picture', 'value': '256 × 144', 'help': 'One frame a second, as the car gives it.'},
+        {'label': 'Memory', 'value': 'GRU, 128', 'help': 'What it keeps of the seconds before.'},
+    )},
 }
 
 

@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'train_brain' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -75,9 +75,14 @@ export interface ActionOptions {
    * classifier read the green boards on enough drives), "on" or "off" (road-signs.ts). */
   classifier?: string;
   boards?: 'auto' | 'on' | 'off';
+  /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, the driver's inputs (only to measure: the car
+   * does not give them), the picture's features as a mean or as a grid. */
+  works?: 'on' | 'off';
+  driver?: 'on' | 'off';
+  pool?: 'mean' | 'grid';
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
-export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type';
+export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type' | 'train_brain';
 export interface PipelineStep {
   action: PipelineAction;
   label: string;
@@ -158,6 +163,8 @@ export interface EpochPoint {
   val_ownership_macro_f1?: number;
   val_other_road_recall?: number;
   val_selection_score?: number;
+  /** The brain: how far its speed is from the labels, in km/h (val_accuracy: the frames it says right). */
+  val_error_kph?: number;
   seconds?: number;
 }
 
@@ -175,7 +182,9 @@ export interface TrainingCurve {
  * (scripts/run_road_type.sh; road_type_gru_nosign in the runs before 29 Oct 2026) and experiment B's variants. */
 export type RoadNet = 'road_type_gru' | 'road_type_gru_nosign' | 'road_type_gru_nomotion' | 'road_type_frame';
 export type DeciderNet = 'experiment_b_crop' | 'experiment_b_crop_geom' | 'experiment_b_full';
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | RoadNet | DeciderNet;
+/** The brain's three seeds (scripts/run_brain.sh). */
+export type BrainNet = 'brain_s0' | 'brain_s1' | 'brain_s2';
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | RoadNet | DeciderNet | BrainNet;
 
 export interface StepProgress {
   done: number;
@@ -1627,7 +1636,15 @@ export interface TrainSetting {
 }
 /** What a training keeps as it is: what the car needs (the cutter's band, grid, channels, fuse). */
 export interface TrainFixed {label: string; value: string; help: string}
-export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type';
+export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type' | 'train_brain';
+/** GET /api/panel/brain-labels: what the labels of Speed review give the brain's training today, per partition, and the drives
+ * the training reads again first; problem instead when they cannot be read. */
+export interface BrainLabels {
+  problem?: string;
+  partitions?: Record<'train' | 'validation' | 'test' | 'buffer', {speed: number; works_in: number; works_out: number; sites: number}>;
+  drives?: {route: string}[];
+  to_read?: number;
+}
 export interface TrainSettings {
   label: string;
   settings: TrainSetting[];

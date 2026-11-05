@@ -118,6 +118,8 @@ SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
 # The weights file of a version, inside its part (SignNet's is at the root of its run).
 WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt', 'road_type': 'road-type-best.pt'}
 BRAIN_WEIGHTS = 'brain-last.pt'
+# What the car does not give a brain (brain_train.DRIVER_INPUTS, without importing it).
+BRAIN_DRIVER_INPUTS = ('pedals', 'speed')
 SHA256 = re.compile(r'[0-9a-f]{64}')
 COMMIT = re.compile(r'[0-9a-f]{40}')
 # How the person who chose was recognised: signed in on the site, the access token of an agent, 127.0.0.1 without
@@ -126,6 +128,8 @@ VIA = ('sign-in', 'token', 'local')
 DECIDER_PARTITIONS = ('validation', 'test')
 # Why a version cannot be chosen (not_selectable_reason, short for the site; set_active says it longer).
 NOT_SELECTABLE = {
+    'driver_inputs': ('Trained on the driver’s inputs: only to measure.',
+                      'This brain was trained with the gas, the brake and the car’s speed, which the car does not give it.'),
     'not_finished': ('Not finished.', 'This model has not finished its training: its weights may still change.'),
     'compare_only': ('An old Detector: kept to compare.',
                      'An old Detector, kept to compare: the cutter is a SignNet, the network the car runs.'),
@@ -602,6 +606,8 @@ def selectable(entry: dict) -> tuple[bool, str | None]:
         return False, 'not_finished'
     if entry.get('role') == 'cutter' and not entry.get('fits_the_car'):
         return False, 'not_for_the_car'
+    if entry.get('role') == 'brain' and set(entry.get('groups') or ()) & set(BRAIN_DRIVER_INPUTS):
+        return False, 'driver_inputs'
     return True, None
 
 

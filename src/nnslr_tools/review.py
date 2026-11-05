@@ -701,6 +701,10 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/train-settings':
                 self._json(200, app.panel.train_settings())
                 return
+            # What the labels of Speed review give the brain's training today, for Train › Brain.
+            if path == '/api/panel/brain-labels':
+                self._json(200, app.panel.brain_labels())
+                return
             match = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/log', path)
             if match:
                 offset = parse_qs(urlsplit(self.path).query).get('offset', ['0'])[0]
@@ -1534,11 +1538,11 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), the route, provider, save and limit of an AI action, all checked by
-                    # Panel.start.
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "driver", "pool"}), the route, provider,
+                    # save and limit of an AI action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
-                                                          'classifier', 'boards')
+                                                          'classifier', 'boards', 'works', 'driver', 'pool')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit

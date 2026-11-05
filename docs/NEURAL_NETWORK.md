@@ -572,7 +572,7 @@ No version ever says merge (F1 0): the training has 48 merge frames. The version
 
 **What it is for.** One network with memory that says the speed to hold, from the road camera and what was read, and generalises to roads it never saw: the end of roadworks with no end sign, a limit the reader got wrong, a road type no rule covers. It never reads the map. It does not exist yet as a network that is ready for the car: this section is the road from a person's labels to its weights.
 
-**From a label to the weights.** A label in the database changes nothing by itself:
+**From a label to the weights.** A label in the database changes nothing by itself (**Train › Brain** in the portal runs the whole path, `scripts/run_brain.sh`, three seeds with their curves):
 
 ```
 Speed review  ->  answers on the frames  ->  errors of the network  ->  weights of the shared part

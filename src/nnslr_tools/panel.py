@@ -21,6 +21,7 @@ import os
 import re
 import shutil
 import signal
+import sqlite3
 import stat
 import subprocess
 import threading
@@ -93,6 +94,13 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The road type with memory (town, rural, expressway, motorway, ramp, car parks from the camera, a GRU over seconds),
 # trained with and without memory and exported as one ONNX step, on a run of its own (start() adds <time>-road-type).
 ROAD_TYPE_SCRIPT = 'scripts/run_road_type.sh'
+# The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
+# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'off'|'on', 'pool': 'mean'|'grid'}, the variables
+# of the script. A brain with the driver's inputs is only to measure: the car does not give them.
+BRAIN_SCRIPT = 'scripts/run_brain.sh'
+BRAIN_WORKS = {'on': '1', 'off': '0'}
+BRAIN_DRIVER = {'off': '0', 'on': '1'}
+BRAIN_POOLS = ('mean', 'grid')
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
@@ -112,6 +120,7 @@ RUN_LINES = {
                      re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_road_type': (re.compile(r'^== scripts/run_road_type\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_brain': (re.compile(r'^== scripts/run_brain\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     # The SignNet being published ("== Send to the car: SignNet <run>, classifier <id>", scripts/send_to_car.sh).
     'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
@@ -119,7 +128,7 @@ RUN_LINES = {
 # Train › Pipeline: our networks trained one after the other, in this order, each a job of its own with the choices of
 # its own button (start()); the next one starts when one ends well (advance_pipeline), the classifier on the SignNet the
 # pipeline has just trained. The plan and how far it is: PIPELINE_FILE in the panel's logs.
-PIPELINE_ORDER = ('dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type')
+PIPELINE_ORDER = ('dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train_brain')
 PIPELINE_FILE = 'pipeline.json'
 # How often the pipeline looks whether its training ended, besides the moment its process ends (also after a restart
 # of this server, which loses that process).
@@ -140,7 +149,7 @@ MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_road_type': ('start', 'classifier', 'boards'),
+                  'train_road_type': ('start', 'classifier', 'boards'), 'train_brain': ('works', 'driver', 'pool'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
@@ -201,7 +210,7 @@ def _settings_of(log: Path, action: str) -> list[str]:
     """How a training of the cutter, the classifier or the decider was launched, as short chips from the head of
     its log: ["896 × 288", "every sign", "stride 8", "40 epochs", "batch 16", "learning rate 0.003"], ["1344 × 760",
     "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
-    if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_road_type'):
+    if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train_brain'):
         return []
     try:
         with log.open('rb') as handle:
@@ -255,6 +264,13 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(epochs + ' epochs')
     if flags.get('--patience'):
         chips.append('patience ' + flags['--patience'])
+    # The brain's choices (scripts/run_brain.sh), when not the usual ones.
+    if '--no-works' in flags:
+        chips.append('no roadworks')
+    if '--driver' in flags:
+        chips.append('driver’s inputs: not for the car')
+    if flags.get('--pool') == 'grid':
+        chips.append('picture as a grid')
     if flags.get('--batch-size') or flags.get('--batch'):
         chips.append('batch ' + (flags.get('--batch-size') or flags['--batch']))
     if flags.get('--learning-rate'):
@@ -348,6 +364,7 @@ ACTIONS = {
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_road_type': {'label': 'Train the scene network', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
+    'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -396,6 +413,8 @@ ACTIVITIES = (
     ('train', 'cutter training', 'nnslr train-signnet'),
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('train', 'scene training', 'run_road_type.sh'),
+    ('train', 'brain training', 'run_brain.sh'),
+    ('train', 'brain training', 'nnslr train-brain'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -419,7 +438,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
-                 'train_road_type': 'a scene training', 'update': 'a code update',
+                 'train_road_type': 'a scene training', 'train_brain': 'a brain training', 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -431,7 +450,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
-                  'scene training': 'a scene training',
+                  'scene training': 'a scene training', 'brain training': 'a brain training',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -835,10 +854,10 @@ class Panel:
         if from_panel or not trainings:
             return
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'scene training': 'train_road_type'}
+                    'scene training': 'train_road_type', 'brain training': 'train_brain'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
-                    ('train_road_type', ('runs/*/road-type.log',)))
+                    ('train_road_type', ('runs/*/road-type.log',)), ('train_brain', ('runs/*/brain.log',)))
         for action, globs in patterns:
             items = [item for item in trainings if terminal.get(item['label'], 'train') == action]
             found = [path for pattern in globs for path in self.root.glob(pattern) if items]
@@ -990,6 +1009,15 @@ class Panel:
             elif name == 'train_road_type':
                 # Its labels are the road types of the map (Data › Roads): it needs no confirmed sign.
                 pass
+            elif name == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
+                reason = BRAIN_SCRIPT + ' is missing in this installation'
+            elif name == 'train_brain' and not self._speed_labels_found():
+                reason = 'no speeds marked yet: Data › Speed review'
+            elif name == 'train_brain' and gpu is not None and gpu['processes']:
+                reason = 'the GPU is busy with another process'
+            elif name == 'train_brain':
+                # Its labels are the speeds of Speed review: it needs no confirmed sign.
+                pass
             elif name in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
                 reason = NETWORKS_SCRIPT + ' is missing in this installation'
             elif name == 'networks_prepare':
@@ -1056,6 +1084,35 @@ class Panel:
             return any((self.root / 'derived' / 'road_types').glob('*.jsonl'))
         except OSError:
             return False
+
+    def _speed_labels_found(self) -> bool:
+        """Whether a person marked a drive in Speed review (its database; what the labels give: brain_labels)."""
+        from nnslr_tools.speed_review import db_path
+        path = db_path(self.root)
+        if not path.is_file():
+            return False
+        connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        try:
+            return connection.execute('SELECT 1 FROM speed_stretches LIMIT 1').fetchone() is not None
+        except sqlite3.Error:
+            return False
+        finally:
+            connection.close()
+
+    def brain_labels(self) -> dict:
+        """Train › Brain, what the labels of Speed review give a training today: brain_targets.summary, with the drives the
+        next training reads again first (not read, or read by another reader than the car's of today). A few seconds: asked
+        when the section opens, never by the status."""
+        from nnslr_tools.drive_review import DriveReviewStore
+        store = DriveReviewStore(self.root)
+        try:
+            # It loads the car's brain_inputs.py from the sunnypilot clone.
+            from nnslr_tools import brain_targets
+            found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
+                                                                log=lambda text: None))
+        except (ImportError, OSError, ValueError) as exc:
+            return {'problem': str(exc)}
+        return {**found, 'to_read': sum(not row['reader_current'] for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:
@@ -1515,6 +1572,15 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
         return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
 
+    def _brain_choices(self, options: dict) -> dict:
+        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'driver', 'pool'}), the usual
+        ones when not given."""
+        works, driver, pool = options.get('works', 'on'), options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
+        if not all(isinstance(value, str) for value in (works, driver, pool)) or works not in BRAIN_WORKS \
+                or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
+            raise PanelError(400, 'bad_option', 'Roadworks and the driver’s inputs are on or off, the picture mean or grid.')
+        return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver], 'NNSLR_BRAIN_POOL': pool}
+
     def _road_type_signs(self, classifier: object, boards: object) -> dict:
         """The environment of how the scene network reads the signs: nothing for the car's classifier and the board
         input when it read the boards (the defaults), else NNSLR_ROAD_TYPE_CLASSIFIER, the reader-best.pt of a finished
@@ -1661,6 +1727,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only "Train the scene network" takes a ' + key + '.')
         if action == 'train_road_type':
             start_env.update(self._road_type_signs((options or {}).get('classifier'), (options or {}).get('boards')))
+        for key in ('works', 'driver', 'pool'):
+            if (options or {}).get(key) is not None and action != 'train_brain':
+                raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
+        if action == 'train_brain':
+            start_env.update(self._brain_choices(options or {}))
         cutter_choice = (options or {}).get('cutter')
         if cutter_choice is not None and action != 'train_classifier':
             raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')
@@ -1757,6 +1828,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
         if action == 'train_road_type' and not (self.repo / ROAD_TYPE_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', ROAD_TYPE_SCRIPT + ' is missing in this installation.')
+        if action == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', BRAIN_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():
@@ -1800,6 +1873,8 @@ class Panel:
                 command.append(self.new_run_name('decider'))
             if action == 'train_road_type':
                 command.append(self.new_run_name('road-type'))
+            if action == 'train_brain':
+                command.append(self.new_run_name('brain'))
             if action == 'train_cutter':
                 # NAME: one SignNet, at the car's band, on a run of its own.
                 command.append(self.new_run_name('cutter'))

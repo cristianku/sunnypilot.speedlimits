@@ -3,16 +3,20 @@
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
-// experiment B), the road type with memory (scripts/run_road_type.sh), the pipeline (PipelineSection: those trainings one
+// experiment B), the road type with memory (scripts/run_road_type.sh), the brain (scripts/run_brain.sh: its three seeds, from the
+// labels of Speed review, which it says before the click), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
 // (TrainSettingsSection), then its curves and its latest version
 // (GET /api/panel/models, a link to its versions in Models). The page does not move while work runs.
-import {computed, ref, toRef} from 'vue';
+import {computed, ref, shallowRef, toRef, watch} from 'vue';
+import {api, messageOf} from '../common/api';
 import {isoWhen, plural, thousands} from '../common/format';
-import type {ActionName, ActionOptions, ActionState, Activity, CutterFamilies, Job, JobProgress as Progress,
+import type {ActionName, ActionOptions, ActionState, Activity, BrainLabels, CutterFamilies, Job, JobProgress as Progress,
   ModelRole, ModelVersion, PanelStatus, PipelineAction, TrainingStart, TrainSettingsAction} from '../common/panel-types';
 import ActionList from './ActionList.vue';
+import {useBrainChoices} from './brain-choices';
+import BrainChoices from './BrainChoices.vue';
 import {useClassifierChoices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
 import {useCutterChoices} from './cutter-choices';
@@ -36,16 +40,17 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]; pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string]; stopPipeline: []}>();
 
-/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Scene, the whole
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Scene, Brain, the whole
  * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
-type Section = 'cutter' | 'classifier' | 'decider' | 'road' | 'pipeline';
+type Section = 'cutter' | 'classifier' | 'decider' | 'road' | 'brain' | 'pipeline';
 const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
-  {key: 'decider', label: 'Applicability'}, {key: 'road', label: 'Scene'}, {key: 'pipeline', label: 'Pipeline'}];
+  {key: 'decider', label: 'Applicability'}, {key: 'road', label: 'Scene'}, {key: 'brain', label: 'Brain'}, {key: 'pipeline', label: 'Pipeline'}];
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
   if (action === 'train_decider') return 'decider';
   if (action === 'train_road_type') return 'road';
+  if (action === 'train_brain') return 'brain';
   return PIPELINE_ACTIONS.includes(action) ? 'pipeline' : null;
 }
 /** The newest job of a section (running or the last one). */
@@ -56,7 +61,7 @@ function jobFor(section: Section): Job | null {
 function activitiesFor(section: Section): Activity[] {
   return activities.value.filter((activity) => {
     const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier'
-      : activity.label.includes('scene') ? 'road' : 'pipeline';
+      : activity.label.includes('scene') ? 'road' : activity.label.includes('brain') ? 'brain' : 'pipeline';
     return named === section;
   });
 }
@@ -75,7 +80,7 @@ const section = computed({
 const job = computed(() => jobFor(section.value));
 /** The training whose settings the section shows (Settings, under its action): none for the whole pipeline. */
 const SETTINGS_OF: Partial<Record<Section, TrainSettingsAction>> = {cutter: 'train_cutter', classifier: 'train_classifier',
-  decider: 'train_decider', road: 'train_road_type'};
+  decider: 'train_decider', road: 'train_road_type', brain: 'train_brain'};
 const settingsAction = computed(() => SETTINGS_OF[section.value] ?? null);
 /** The job of the section in its slot: running or failed; one done or stopped by hand is a line. In the pipeline: only a
  * first pipeline (detector and reader) at work; the last line is PipelineSection's. */
@@ -111,7 +116,8 @@ const latestRoad = computed(() => roleOf('road_type')?.versions.find((version) =
   && version.id.endsWith('/road-type/gru')) ?? latest('road_type'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
 const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
-  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'road' ? latestRoad.value : null);
+  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'road' ? latestRoad.value
+    : section.value === 'brain' ? latest('brain') : null);
 /** The headline of a version in one line: its main number and what it counts (the numbers of ModelItem). */
 function headlineOf(version: ModelVersion): {value: string; text: string} | null {
   if (version.role === 'cutter') {
@@ -141,7 +147,7 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
 /** How many versions the section's network has: Models lists them, to compare and to choose. */
 const sectionVersions = computed(() => section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider'
-  ? roleOf(section.value)?.versions.length ?? 0 : section.value === 'road' ? roleOf('road_type')?.versions.length ?? 0 : 0);
+  || section.value === 'brain' ? roleOf(section.value)?.versions.length ?? 0 : section.value === 'road' ? roleOf('road_type')?.versions.length ?? 0 : 0);
 
 /** The cutter: a SignNet at the car's band (status.cutter_options.band), and the signs it learns to find. */
 const FAMILY_OPTIONS: {key: CutterFamilies; label: string}[] = [{key: 'all', label: 'Every sign'}, {key: 'speed', label: 'Speed signs only'}];
@@ -192,6 +198,13 @@ const ROAD_ACTIONS = computed((): [ActionName, string][] => [
     + 'and without memory, compared by when the ramp’s limit ends; the first is exported for the car'
     + starts.road_type.words + roadSigns.words + '. About 20 minutes, 40 the first time.'],
 ]);
+/** What the brain learns (brain-choices.ts), the same in its section and in the pipeline. */
+const brainChoices = useBrainChoices();
+/** The brain's training, in its card: three seeds, to choose one in Models. */
+const BRAIN_ACTIONS = computed((): [ActionName, string][] => [
+  ['train_brain', 'Three seeds of the brain' + brainChoices.words + ', one after the other, about 3 minutes each on the GPU, after '
+    + 'reading the signs of the drives as the car does. Then you choose one in Models and Publish it.'],
+]);
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
@@ -217,6 +230,17 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   const shown = value.state === 'running' || Object.values(curves).some((curve) => Boolean(curve?.points.length));
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
+/** What the labels of Speed review give the brain today, asked when its section opens and when a training of it ends (a few
+ * seconds on the server: never with the status). */
+const brainLabels = shallowRef<BrainLabels | null>(null);
+watch([section, () => jobFor('brain')?.state], async ([value]) => {
+  if (value !== 'brain') return;
+  try {
+    brainLabels.value = await api<BrainLabels>('/api/panel/brain-labels');
+  } catch (problem) {
+    brainLabels.value = {problem: messageOf(problem)};
+  }
+}, {immediate: true});
 const numbers = computed(() => {
   const status = props.status;
   if (status === null) return null;
@@ -260,6 +284,8 @@ const numbers = computed(() => {
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'road'" class="role-what">Says from the camera what road the car is on, once a second: town, zone 30,
       rural, expressway, motorway, ramp, the merge lane after it, a car park or a garage. It remembers the seconds before, so the motorway after a ramp is seen without a sign.</p>
+    <p v-else-if="section === 'brain'" class="role-what">Says the speed to hold, once a second, from the camera, the signs it reads and
+      the car’s own motion, and whether it is in roadworks. It learns from the speeds and the roadworks you mark in Speed review.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
@@ -343,7 +369,19 @@ const numbers = computed(() => {
                     @run="(name, state) => emit('run', name, state, undefined, {...starts.road_type.option, ...roadSigns.option})"/>
         <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
       </template>
-      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :road-signs="roadSigns" :fresh="numbers?.fresh ?? 0"
+      <template v-else-if="section === 'brain'">
+        <BrainChoices :choices="brainChoices" id="train-brain"/>
+        <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null"
+                    @run="(name, state) => emit('run', name, state, undefined, brainChoices.option)"/>
+        <p v-if="brainLabels?.problem" class="latest-none warn-text" id="train-brain-labels">{{ brainLabels.problem }}</p>
+        <p v-else-if="brainLabels?.partitions" class="latest-none" id="train-brain-labels">From Speed review:
+          <strong>{{ thousands(brainLabels.partitions.train.speed) }}</strong> seconds to learn from,
+          <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
+          <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test.<template
+          v-if="brainLabels.to_read"> The car’s reading changed: first it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} again.</template></p>
+        <p v-else class="latest-none" id="train-brain-labels">Loading…</p>
+      </template>
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :road-signs="roadSigns" :brain-choices="brainChoices" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
                        @run="(name, state, start) => emit('run', name, state, start)"/>
@@ -371,13 +409,13 @@ const numbers = computed(() => {
       : 'None trained yet: train a SignNet, then choose it in Models.' }}</p>
     <p v-else-if="section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
       : 'None trained yet: the reader of a whole pipeline plays this role.' }}</p>
-    <p v-else-if="section === 'road'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
+    <p v-else-if="section === 'road' || section === 'brain'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
 
     <!-- The curves stay open once the training ends: closing them is a tap. -->
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>
     <details v-else-if="charted" class="latest-row curves-row" open>
       <summary><span class="latest-what"><span class="latest-name">Curves of the last training</span>
-        <span class="latest-text">{{ section === 'road' ? 'road score' : section === 'decider' ? 'the chosen measure' : 'recall' }} and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
+        <span class="latest-text">{{ section === 'road' ? 'road score' : section === 'decider' ? 'the chosen measure' : section === 'brain' ? 'km/h off' : 'recall' }} and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
       <TrainingCharts :progress="charted.progress" :running="false"/>
     </details>
 

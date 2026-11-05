@@ -10,9 +10,10 @@
 // validation it finds, which choose that stage's best epoch); for each network of the road type, its road score on validation (which chooses its best epoch),
 // macro F1 and accuracy, and its train loss; for applicability (experiment B), its variants in the same two charts, one
 // line each: the mean of its reading accuracy and ownership macro F1 (which chooses its best epoch), and its validation
-// loss. Data: progress.curves of the job, one point per finished epoch.
+// loss; for the brain, its three seeds in the same way: how far its speed is from the labels on validation, the frames it says
+// right, and its train loss. Data: progress.curves of the job, one point per finished epoch.
 import {computed} from 'vue';
-import type {CurveNet, DeciderNet, EpochPoint, JobProgress, RoadNet, TrainingCurve} from '../common/panel-types';
+import type {BrainNet, CurveNet, DeciderNet, EpochPoint, JobProgress, RoadNet, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
 import {elapsedText, roughText} from './jobs';
 
@@ -23,27 +24,31 @@ type Net = CurveNet;
 /** The road type's networks (scripts/run_road_type.sh) and applicability's variants (experiment B), in the order they train. */
 const ROAD_NETS: RoadNet[] = ['road_type_gru', 'road_type_gru_nosign', 'road_type_gru_nomotion', 'road_type_frame'];
 const DECIDER_NETS: DeciderNet[] = ['experiment_b_crop', 'experiment_b_crop_geom', 'experiment_b_full'];
-const ALL_NETS: Net[] = ['signnet_pretrain', 'signnet', 'detector', 'reader', 'pretrain', 'classifier', ...ROAD_NETS, ...DECIDER_NETS];
+/** The brain's seeds (scripts/run_brain.sh). */
+const BRAIN_NETS: BrainNet[] = ['brain_s0', 'brain_s1', 'brain_s2'];
+const ALL_NETS: Net[] = ['signnet_pretrain', 'signnet', 'detector', 'reader', 'pretrain', 'classifier', ...ROAD_NETS, ...DECIDER_NETS, ...BRAIN_NETS];
 const NET_NAME: Record<Net, string> = {signnet_pretrain: 'SignNet on Mapillary', signnet: 'SignNet', detector: 'Detector', reader: 'Reader', pretrain: 'Pretraining on Mapillary',
   classifier: 'Classifier', road_type_gru: 'With memory, sign and motion', road_type_gru_nosign: 'With memory, no sign',
   road_type_gru_nomotion: 'With memory, no motion', road_type_frame: 'Without memory', experiment_b_crop: 'The crop alone',
-  experiment_b_crop_geom: 'Crop, position and speed', experiment_b_full: 'Crop, position and the scene'};
+  experiment_b_crop_geom: 'Crop, position and speed', experiment_b_full: 'Crop, position and the scene',
+  brain_s0: 'Seed 0', brain_s1: 'Seed 1', brain_s2: 'Seed 2'};
 /** A network in a sentence ("the classifier ends in ..."). */
 const NET_WORD: Record<Net, string> = {signnet_pretrain: 'Mapillary stage', signnet: 'SignNet', detector: 'detector', reader: 'reader', pretrain: 'pretraining',
   classifier: 'classifier', road_type_gru: 'network with memory, sign and motion', road_type_gru_nosign: 'network with memory, no sign',
   road_type_gru_nomotion: 'network with memory, no motion', road_type_frame: 'network without memory',
   experiment_b_crop: 'variant with the crop alone', experiment_b_crop_geom: 'variant with crop, position and speed',
-  experiment_b_full: 'variant with crop, position and the scene'};
+  experiment_b_full: 'variant with crop, position and the scene', brain_s0: 'seed 0', brain_s1: 'seed 1', brain_s2: 'seed 2'};
 const isSignnet = (net: Net): boolean => net === 'signnet' || net === 'signnet_pretrain';
 const isRoad = (net: Net): net is RoadNet => (ROAD_NETS as Net[]).includes(net);
 const isDecider = (net: Net): net is DeciderNet => (DECIDER_NETS as Net[]).includes(net);
+const isBrain = (net: Net): net is BrainNet => (BRAIN_NETS as Net[]).includes(net);
 const TRAIN = 'var(--c-train)';
 const VAL = 'var(--c-val)';
 const REJECT = 'var(--split-3)';
 const BALANCED = 'var(--split-4)';
-/** Applicability's variants share its charts: slots 1 to 3 of the categorical palette, in their order. */
-const VARIANT_COLOR: Record<DeciderNet, string> = {experiment_b_crop: 'var(--c-train)', experiment_b_crop_geom: 'var(--c-val)',
-  experiment_b_full: 'var(--split-3)'};
+/** Applicability's variants and the brain's seeds share their charts: slots 1 to 3 of the categorical palette, in their order. */
+const VARIANT_COLOR: Record<DeciderNet | BrainNet, string> = {experiment_b_crop: 'var(--c-train)', experiment_b_crop_geom: 'var(--c-val)',
+  experiment_b_full: 'var(--split-3)', brain_s0: 'var(--c-train)', brain_s1: 'var(--c-val)', brain_s2: 'var(--split-3)'};
 
 const running = computed(() => props.running);
 const curves = computed(() => props.progress.curves ?? {});
@@ -96,6 +101,8 @@ const loss = (value: number): string => value >= 10 ? value.toFixed(1) : value >
 const lossAxis = (value: number): string => value === 0 ? '0' : Number(value.toPrecision(3)).toString();
 const percent = (value: number): string => (Math.round(value * 10) / 10).toString() + '%';
 const percentAxis = (value: number): string => Math.round(value) + '%';
+const kph = (value: number): string => value.toFixed(1) + ' km/h';
+const kphAxis = (value: number): string => Number(value.toFixed(1)).toString();
 /** The road score: macro F1 plus a little for the minute after a merge, less the false switches (about 0 to 1.1). */
 const score = (value: number): string => value.toFixed(2);
 const scoreAxis = (value: number): string => Number(value.toFixed(2)).toString();
@@ -181,6 +188,15 @@ const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map(
   return {net, curve, scored: true, best: best(curve, (point) => point.val_selection_score, true),
     lowest: best(curve, (point) => point.val_loss, false), validation: []};
 }));
+/** The brain's seeds: each keeps its last epoch (brain_train), so that epoch is what its tile says. */
+const brainCards = computed((): NetCard[] => nets.value.filter(isBrain).map((net) => {
+  const curve = curves.value[net];
+  if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
+  const measured = curve.points.filter((point) => point.val_error_kph !== undefined);
+  const last = measured.reduce<EpochPoint | null>((found, point) => found === null || point.epoch > found.epoch ? point : found, null);
+  return {net, curve, scored: true, best: last === null ? null : {...last, value: last.val_error_kph as number},
+    lowest: best(curve, (point) => point.train_loss, false), validation: []};
+}));
 /** A tile per network with a best epoch. */
 const bestCards = computed(() => [...roadCards.value, ...deciderCards.value]
   .flatMap((card) => card.best ? [{net: card.net, best: card.best, scored: card.scored}] : []));
@@ -214,16 +230,24 @@ const beforeText = computed(() => shows('reader')
   ? 'First the training imports the reviews, checks the dataset and prepares the GPU: a few minutes.'
   : roadCards.value.length ? 'First it checks the GPU, finds the junctions of the drives, resizes the frames and reads the motorway signs and the car’s motion: a few minutes, more the first time.'
   : deciderCards.value.length ? 'First it checks the dataset and the GPU: a minute or two.'
+  : brainCards.value.length ? 'First it checks the labels and the GPU, then reads the signs of the drives of Speed review as the car does: a few minutes.'
   : shows('detector') || shows('signnet') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;
 
-/** Applicability's charts: a line per variant with points, and the one training now before its first epoch. */
-const deciderLines = computed(() => deciderCards.value.filter((card) => card.curve !== null || isRunning(card.net)));
-const deciderSpan = computed(() => Math.max(1, ...deciderLines.value.map((card) => card.curve === null ? 1 : span(card.curve))));
-const deciderSeries = (pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => deciderLines.value
-  .map((card) => ({key: card.net, label: NET_NAME[card.net], color: VARIANT_COLOR[card.net as DeciderNet],
+/** The charts of applicability and of the brain: a line per variant or seed with points, and the one training now before
+ * its first epoch. */
+const linesOf = (cards: NetCard[]): NetCard[] => cards.filter((card) => card.curve !== null || isRunning(card.net));
+const spanOf = (cards: NetCard[]): number => Math.max(1, ...cards.map((card) => card.curve === null ? 1 : span(card.curve)));
+const seriesOf = (cards: NetCard[], pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => cards
+  .map((card) => ({key: card.net, label: NET_NAME[card.net], color: VARIANT_COLOR[card.net as DeciderNet | BrainNet],
     values: card.curve === null ? [] : column(card.curve, pick, scale)}));
+const deciderLines = computed(() => linesOf(deciderCards.value));
+const deciderSpan = computed(() => spanOf(deciderLines.value));
+const deciderSeries = (pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => seriesOf(deciderLines.value, pick, scale);
+const brainLines = computed(() => linesOf(brainCards.value));
+const brainSpan = computed(() => spanOf(brainLines.value));
+const brainSeries = (pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => seriesOf(brainLines.value, pick, scale);
 /** The best variant's best epoch, marked on its line. */
 function deciderMark(pick: (card: NetCard) => Best, highest: boolean, label: string): {series: string; epoch: number; label: string} | null {
   let found: {net: Net; point: EpochPoint & {value: number}} | null = null;
@@ -235,6 +259,7 @@ function deciderMark(pick: (card: NetCard) => Best, highest: boolean, label: str
 }
 /** The variant training now: its line alone pulses, the band follows its last epoch. */
 const deciderRunning = computed(() => deciderCards.value.find((card) => isRunning(card.net))?.net ?? false);
+const brainRunning = computed(() => brainCards.value.find((card) => isRunning(card.net))?.net ?? false);
 /** Every value, for the table under the charts. */
 const tables = computed(() => nets.value.flatMap((net) => {
   const curve = curves.value[net];
@@ -313,6 +338,14 @@ const tables = computed(() => nets.value.flatMap((net) => {
               : percent(card.best.val_ownership_macro_f1 * 100) }}</template></span>
           </template>
         </div>
+        <template v-for="card in brainCards" :key="'kept-' + card.net">
+          <div v-if="card.best" class="tile" :id="card.net + '-kept'">
+            <span class="tile-label">{{ NET_NAME[card.net] }} on validation</span>
+            <span class="tile-value">{{ kph(card.best.value) }}</span>
+            <span class="tile-note">off the labels at epoch {{ card.best.epoch }}<template v-if="card.best.val_accuracy !== undefined">:
+              right {{ percent(card.best.val_accuracy * 100) }}</template></span>
+          </div>
+        </template>
         <div v-if="perEpoch !== null" class="tile">
           <span class="tile-label">Time per epoch</span>
           <span class="tile-value">{{ elapsedText(perEpoch * 1000) }}</span>
@@ -463,13 +496,31 @@ const tables = computed(() => nets.value.flatMap((net) => {
           tiles above and in the values per epoch.</p>
       </div>
 
+      <div v-if="brainCards.length" class="net" id="brain-curves">
+        <h3>The brain<span>the speed to hold, once a second · a line per seed, on validation: km/h off the labels, lower is better,
+          the frames it says right, higher is better, and train loss</span></h3>
+        <div v-if="brainCards.some((card) => card.curve)" class="net-charts">
+          <LineChart title="Km/h off on validation" :format="kphAxis" :epochs="brainSpan"
+                     :series="brainSeries((point) => point.val_error_kph)" :running="brainRunning"/>
+          <LineChart title="Right on validation" :top="100" :format="percentAxis" :epochs="brainSpan"
+                     :series="brainSeries((point) => point.val_accuracy, 100)" :running="brainRunning"/>
+          <LineChart title="Train loss" :format="lossAxis" :epochs="brainSpan" :series="brainSeries((point) => point.train_loss)"
+                     :running="brainRunning"/>
+        </div>
+        <p v-else class="net-wait">{{ running ? 'The curves appear at the end of the first seed’s first epoch.'
+          : 'No seed reached its first epoch.' }}</p>
+        <p class="note" id="brain-note">Each seed keeps the weights of its last epoch, then it is measured on the test: its numbers
+          are in Models › Brain, where you choose the one for the car.</p>
+      </div>
+
       <details class="chart-table">
         <summary>Values per epoch</summary>
         <div v-for="table in tables" :key="table.net" class="table-wrap">
           <table>
             <caption>{{ NET_NAME[table.net] }}</caption>
-            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="!isSignnet(table.net) && !isRoad(table.net)" class="num">Val loss</th>
-              <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+            <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="!isSignnet(table.net) && !isRoad(table.net) && !isBrain(table.net)" class="num">Val loss</th>
+              <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net) && !isBrain(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
+              <template v-if="isBrain(table.net)"><th class="num">Km/h off</th><th class="num">Right</th></template>
               <template v-if="isRoad(table.net)"><th v-if="table.scored" class="num">Road score</th><th class="num">Macro F1</th>
                 <th class="num">Accuracy</th><th v-if="roadJunction" class="num">Junction F1</th></template>
               <template v-if="isDecider(table.net)"><th class="num">Whose sign</th><th class="num" title="The signs of another road found">Other road</th>
@@ -484,8 +535,12 @@ const tables = computed(() => nets.value.flatMap((net) => {
               <tr v-for="point in table.rows" :key="point.epoch">
                 <td class="num">{{ point.epoch }}</td>
                 <td class="num">{{ cell(point.train_loss, loss) }}</td>
-                <td v-if="!isSignnet(table.net) && !isRoad(table.net)" class="num">{{ cell(point.val_loss, loss) }}</td>
-                <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net)">
+                <td v-if="!isSignnet(table.net) && !isRoad(table.net) && !isBrain(table.net)" class="num">{{ cell(point.val_loss, loss) }}</td>
+                <template v-if="isBrain(table.net)">
+                  <td class="num">{{ cell(point.val_error_kph, (value) => value.toFixed(1)) }}</td>
+                  <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
+                </template>
+                <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isRoad(table.net) && !isBrain(table.net)">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
                 </template>

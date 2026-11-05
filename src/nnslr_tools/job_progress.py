@@ -86,6 +86,15 @@ ROAD_TYPE_STEPS = (
     ('road_type_frame', 'Train without memory', 23),
     ('export', 'Compare and export the ONNX step', 4),
 )
+# scripts/run_brain.sh: the signs of the drives of Speed review as the car reads them today, then its three seeds (their
+# epoch lines name them: brain_s0, brain_s1, brain_s2).
+BRAIN_STEPS = (
+    ('checks', 'Checks and GPU smoke test', 6),
+    ('signs', 'Read the signs of the labelled drives', 22),
+    ('brain_s0', 'Seed 0', 24),
+    ('brain_s1', 'Seed 1', 24),
+    ('brain_s2', 'Seed 2', 24),
+)
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
@@ -122,13 +131,13 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'train_road_type': ROAD_TYPE_STEPS,
-         'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'train_brain': BRAIN_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-            'train_road_type', 'dataset', 'ai_review',
+            'train_road_type', 'train_brain', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore')
 
@@ -150,6 +159,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'train_decider': (5, DECIDER_PIPELINE),
             'train_road_type': (8, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'signs', 5: 'road_type_gru',
                                     6: 'road_type_gru_nomotion', 7: 'road_type_frame', 8: 'export'}),
+            'train_brain': (6, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
@@ -180,7 +190,7 @@ MARKERS = (
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
-                   r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame) epoch (\d+)/(\d+)\b')
+                   r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame|brain_s[0-2]) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|'
                    r'road_type_frame) stops early after epoch (\d+)\b')
@@ -191,10 +201,11 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|
 # val_road_score, its own measure that chooses its best epoch (road_type_net.road_score), and val_junction_f1, its
 # junction head; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them, and
 # in its Mapillary stage val_speed_recall, the speed signs found, which chooses that stage's best epoch; experiment B
-# val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case).
+# val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case; the brain
+# val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
                     r'val_rejection|val_balanced_accuracy|val_macro_f1|val_false_per_frame|val_road_score|val_junction_f1|'
-                    r'val_ownership_macro_f1|val_other_road_recall) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_ownership_macro_f1|val_other_road_recall|val_error_kph) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -419,7 +430,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     elif epoch is not None and epoch[0] == current and state == 'running':
         # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
-            if epoch[0].startswith(('experiment_b', 'road_type')) else NET_NAMES.get(epoch[0], epoch[0])
+            if epoch[0].startswith(('experiment_b', 'road_type', 'brain')) else NET_NAMES.get(epoch[0], epoch[0])
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)

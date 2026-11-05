@@ -221,7 +221,7 @@ Without drives of your own the site is empty. [docs/INSTALL.md](docs/INSTALL.md)
 Day-to-day work happens on the site, whose buttons run a few helper scripts and the `nnslr` command-line tool. [docs/COMMANDS.md](docs/COMMANDS.md) lists them all: what each one does, what it writes, and which ones use the GPU, install packages or publish anything.
 
 - `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
-- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
+- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_brain.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
 - `helpers/mapillary.sh`, `helpers/mapillary_windows.sh`, `helpers/mapillary_locations.sh`: the Mapillary Traffic Sign Dataset, as crops for the classifier, as windows for the cutter, and where its photos were taken (CPU; the last one asks the Mapillary API).

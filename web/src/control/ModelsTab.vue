@@ -79,7 +79,9 @@ function oldInUse(role: RoleModels): boolean {
   const used = inUseOf(role);
   return role.old_kind_in_use ?? (used?.role === 'cutter' && used.kind !== 'signnet');
 }
-/** The versions of a role worth a look, newest first: the one in use and the others of its run, the newer ones that can
+/** The name of a training whatever its seed: the seeds of a brain are runs of their own, NAME-s0, NAME-s1, NAME-s2. */
+const seedsOf = (run: string): string => run.replace(/-s\d+$/, '');
+/** The versions of a role worth a look, newest first: the one in use and the others of its run or of its training, the newer ones that can
  * be put in use, the one on the car or tried on the comma, a training running now; with none in use, every one that can
  * be. The others (the old Detectors, the SignNets that do not fit the car, stopped trainings, the older versions) wait
  * behind “Show older versions”: nothing is deleted. */
@@ -89,6 +91,7 @@ function recentOf(role: RoleModels): ModelVersion[] {
   const running = new Set((props.status?.jobs ?? []).filter((job) => job.state === 'running').map((job) => job.run));
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
   const recent = role.versions.filter((version) => version.in_use || version.on_car || version.run === used?.run
+    || (used !== null && seedsOf(version.run) === seedsOf(used.run))
     || version.run === tried || running.has(version.run)
     || (version.finished && version.selectable !== false && (used === null
       || (since !== null && version.trained_at !== null && Date.parse(version.trained_at) > since))));

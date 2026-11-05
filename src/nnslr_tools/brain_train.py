@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import random
+import time
 from functools import partial
 from pathlib import Path
 
@@ -315,16 +316,22 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
+    name = 'dry_run' if dry_run else f'brain_s{seed}'
     for epoch in range(epochs):
+        started = time.monotonic()
         error = train_epoch(model, optimizer, epoch_drives(drives, groups, rng), store, chunk=chunk, rng=rng, device=device,
                             steps=DRY_STEPS if dry_run else None)
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')
         score = validation['speed']['mean_error_kph']
         history.append({'epoch': epoch, 'error': error, 'validation': validation['speed']})
-        log(f'Epoch {epoch}: error {error:.3f}, validation {score} km/h off on {validation["speed"]["frames"]} frames '
+        # Read by nnslr_tools.job_progress: the seed's curve in Train › Brain.
+        right = validation['speed']['right']
+        log(f'{name} epoch {epoch + 1}/{epochs} train_loss {error:.4f} val_error_kph {"-" if score is None else f"{score:.2f}"} '
+            f'val_accuracy {"-" if right is None else f"{right:.4f}"} on {validation["speed"]["frames"]} frames '
             f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
-            f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]}')
+            f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]} '
+            f'{time.monotonic() - started:.0f}s')
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)

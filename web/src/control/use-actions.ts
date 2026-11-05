@@ -59,6 +59,15 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Trains the scene network on the GPU twice, with memory and without, compares them and exports the one '
         + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.' + signs + boards};
   }
+  if (name === 'train_brain') {
+    const works = options?.works === 'off' ? ' Without the roadworks.' : '';
+    const driver = options?.driver === 'on' ? ' With the driver’s inputs: only to measure, it cannot go to the car.' : '';
+    const grid = options?.pool === 'grid' ? ' With the picture as a grid.' : '';
+    return {title: 'Train the brain?', action: 'Start training',
+      text: 'First it reads the signs of the drives of Speed review as the car does today, then trains three seeds on the GPU: '
+        + 'about 15 minutes. Three new versions in Models; '
+        + 'nothing goes to the car until you choose one and Publish.' + works + driver + grid};
+  }
   if (name === 'train_decider') {
     return {title: 'Train applicability?', action: 'Start training',
       text: 'Trains three applicability networks on the GPU (the crop alone; with position and speed; with the scene) and compares them: '
@@ -144,6 +153,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
   train_decider: 'The applicability networks already trained stay; training again starts a new run.',
   train_road_type: 'A network already trained stays; training again starts a new run.',
+  train_brain: 'The seeds already trained stay in Models; training again starts a new run.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
   networks_prepare: 'Nothing is kept: preparing again starts over.',
   networks_publish: 'What Hugging Face already received may stay there.',

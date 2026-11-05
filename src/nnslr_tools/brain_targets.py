@@ -110,7 +110,7 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 SPEED_CLASSES = MAX_KPH // GRID_KPH
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
-READ_COMMAND = 'nnslr road-type-signs --device cpu --num-workers 8'
+READ_COMMAND = 'nnslr road-type-signs --labelled'
 NOT_EXAMINED, UNDETERMINED, NOT_KNOWN_YET, BOUNDARY, NO_FRAME = range(1, 6)
 OUT_REASONS = {NOT_EXAMINED: 'not_examined', UNDETERMINED: 'undetermined', NOT_KNOWN_YET: 'not_known_yet', BOUNDARY: 'boundary',
                NO_FRAME: 'no_frame'}
