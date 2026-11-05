@@ -94,9 +94,11 @@ export function stateFor(item: Stretch, kph: number): 'confirmed' | 'corrected' 
   return kph !== item.kph || item.state === 'corrected' ? 'corrected' : 'confirmed';
 }
 
-/** The label of a stretch with this value, what else it says kept. */
+/** The label of a stretch with this value, what else it says kept. A piece clipped before its time was not known for the old
+ * value: another value starts with no time, or the whole piece would stay out of training. */
 export function labelOf(item: Stretch, kph: number): Label {
-  return {kph, state: stateFor(item, kph), known_ns: item.known_ns, note: item.note};
+  const clipped = kph !== item.kph && item.known_ns === item.end_ns - 1;
+  return {kph, state: stateFor(item, kph), known_ns: clipped ? null : item.known_ns, note: item.note};
 }
 
 /** A value a step away from the stretch's, null past the grid's ends or with no value to step from. */
