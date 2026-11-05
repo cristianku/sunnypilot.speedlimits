@@ -212,7 +212,7 @@ export function drawAi(suggestion: Pick<AiSuggestion, 'detections' | 'deleted'>,
 }
 
 /**
- * The boxes of the car's networks on the photo, in their own colour: "car n · 80 · 97%" under each (n: its row in
+ * The boxes of the car's networks not among the frame's, on the photo in fuchsia: "car n · 80 · 97%" under each (n: its row in
  * "Car networks"; names: each as a box of the review, car.ts carDetection); dashed when the car takes nothing for
  * the limit from it, dotted when it drops it.
  */
@@ -223,7 +223,8 @@ export function drawCar(signs: readonly CarSign[], names: readonly Detection[], 
   return signs.map((sign, i) => {
     const b = sign.box;
     const name = names[i];
-    const text = 'car ' + (i + 1) + ' · ' + (name ? shortName(name) : sign.class) + ' · '
+    const road = sign.applicability === 'own_road' ? ' · OURS' : sign.applicability === 'other_road' ? ' · another' : '';
+    const text = 'car ' + (i + 1) + ' · ' + (name ? shortName(name) : sign.class) + road + ' · '
       + Math.round(sign.confidence * 100) + '%';
     const width = labelWidth(text, fontSize);
     const x = labelX(b[0], width, imageWidth, k);

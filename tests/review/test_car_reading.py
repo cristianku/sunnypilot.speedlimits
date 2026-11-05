@@ -140,6 +140,36 @@ def test_a_new_release_leaves_the_readings_under_way_their_networks(tmp_path, mo
     assert set(before) == set(after) == {'vision', 'finder', 'classifier', 'classes', 'stamp', 'release'}
 
 
+def test_the_applicability_network_says_whom_the_signs_are_for(drive, monkeypatch):
+    root, _video, _rows, _server = drive
+    asked = {}
+    monkeypatch.setattr(car_reading, 'decider_in_use', lambda root: 'decider.pt')
+
+    def decide(_root, checkpoint, request):
+        asked.update(request, checkpoint=checkpoint)
+        return [['own_road', 0.91234], None]
+    monkeypatch.setattr(car_reading, 'decide', decide)
+    monkeypatch.setattr(video_frames, 'preview', lambda *args: 'frame.jpg')
+    signs = [{'box': [1, 2, 3, 4], 'review': {'family': 'maximum_speed'}},
+             {'box': [5, 6, 7, 8], 'review': {'family': 'other_sign'}}]
+    assert car_reading.rule_signs(root, ROUTE, 0, 25, signs, 1344, 760, 12.5) is None
+    assert asked['checkpoint'] == 'decider.pt' and asked['speed'] == 12.5
+    assert [box['family'] for box in asked['boxes']] == ['maximum_speed', 'other_sign']
+    assert (signs[0]['applicability'], signs[0]['applicability_score']) == ('own_road', 0.9123)
+    assert 'applicability' not in signs[1]
+
+
+def test_a_reading_stays_good_when_the_applicability_network_cannot_say(drive, monkeypatch):
+    root, _video, _rows, _server = drive
+
+    def missing(root):
+        raise car_reading.CarReadingError('no applicability network in use')
+    monkeypatch.setattr(car_reading, 'decider_in_use', missing)
+    signs = [{'box': [1, 2, 3, 4], 'review': {'family': 'maximum_speed'}}]
+    assert car_reading.rule_signs(root, ROUTE, 0, 25, signs, 1344, 760, None) == 'no applicability network in use'
+    assert 'applicability' not in signs[0]
+
+
 def test_a_class_becomes_a_box_of_the_review():
     assert car_reading.review_box('road_marking:30') == {'family': 'road_marking_candidate', 'value_kph': 30}
     assert car_reading.review_box('maximum_speed:unknown') == {'family': 'maximum_speed', 'value_kph': None}

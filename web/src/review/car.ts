@@ -1,14 +1,16 @@
 // "Car networks" (key T, its button in the inspector): what the car's cutter (SignNet) and classifier read on the
 // frame on screen, run by the car's own code on the server (GET <api>/car/<segment>/<index>,
-// nnslr_tools.car_reading). On, it reads every frame the page shows, a picture at 1 a second or any frame between
-// them; its boxes are drawn on the photo in their own colour and listed in CarSection.vue, each with what the car
-// does with it and "Use", which makes it a box of the frame. Nothing is saved: Confirm saves the frame as always.
-// Hidden offline.
+// nnslr_tools.car_reading), with whom each box is for from the applicability network in use. On, it reads every frame
+// the page shows, a picture at 1 a second or any frame between them, and on a frame not confirmed each box goes
+// straight into the frame's boxes, the list on the right, in fuchsia (its detection_id starts with "car-"). On a
+// confirmed frame they are only drawn, and listed in CarSection.vue. Nothing is saved: Confirm saves the frame as
+// always, and a frame only passed over stays to review. Hidden offline.
 import {reactive, watch} from 'vue';
-import {familyHasValue, holdsPlate, signKindOf} from './catalog';
+import {familyHasValue, signKindOf} from './catalog';
 import {readLocal, writeLocal} from './dom';
-import {addManualBox} from './edits';
-import {overlap, sameBox} from './geometry';
+import {pushBox} from './edits';
+import {currentRow, frameStatus, workOf} from './frames';
+import {overlap} from './geometry';
 import {call} from './server';
 import {report, state} from './store';
 import type {Box, Detection, FrameEdit, FrameRow} from './types';
@@ -26,6 +28,9 @@ export interface CarSign {
   confidence: number;
   speed: number | null;
   use: CarUse;
+  /** Whom it applies to, from the applicability network in use and how sure: not on a box read as not a sign. */
+  applicability?: string;
+  applicability_score?: number;
   /** The class as a box of the review. */
   review: {family: string; value_kph: number | null; sign_type?: string; supplementary_panel?: string;
     plate_hours?: string};
@@ -50,6 +55,8 @@ export interface CarReading {
   width: number;
   height: number;
   release: CarRelease;
+  /** Why the applicability network gave no answer on this frame; null when it did. */
+  applicability_note?: string | null;
   ms: number;
 }
 
@@ -65,6 +72,9 @@ const KEPT = 64;
 const SETTLE_MS = 150;
 
 export const car = reactive({shown: false, asks: {} as Record<string, CarAsk>});
+
+// The frames whose boxes went to the list on the right, in this page: a box taken away there does not come back.
+const placed = new Set<string>();
 
 export function carAvailable(): boolean {
   return Boolean(report.apiBase);
@@ -118,6 +128,10 @@ export function useCarReading(): void {
     wanted = key;
     settle = window.setTimeout(() => void readWanted(), SETTLE_MS);
   }, {immediate: true});
+  watch(() => (state.currentKey === null ? null : carAskOf(state.currentKey)?.reading ?? null), (reading) => {
+    const row = currentRow();
+    if (reading && row) placeCarSigns(row, reading);
+  }, {immediate: true});
 }
 
 /** T: on (the frame on screen is read now, then every frame shown) or off. */
@@ -132,29 +146,34 @@ export function carAskOf(key: string): CarAsk | null {
   return car.shown ? car.asks[key] ?? null : null;
 }
 
-/** A box of the car as a box of the review (family, value, kind, panel), for its name and its "Use". */
+/** A box of the car as a box of the review (family, value, kind, panel, whom it is for). */
 export function carDetection(sign: CarSign): Detection {
   const {family, value_kph: value, sign_type: kind, supplementary_panel: panel, plate_hours: hours} = sign.review;
   const d: Detection = {bbox_xyxy: sign.box, family, value_kph: familyHasValue(family) ? value : null};
   if (kind && signKindOf(kind)) d.sign_type = kind;
   if (panel) d.supplementary_panel = panel;
   if (hours) d.plate_hours = hours;
+  if (sign.applicability) d.applicability = sign.applicability;
   return d;
 }
 
-/** True when a box of the frame already is this one: same box, or same family, value and plate of hours over it. */
-export function carSignUsed(work: FrameEdit, sign: CarSign): boolean {
-  const d = carDetection(sign);
-  return work.detections.some((box) => sameBox(box.bbox_xyxy, sign.box)
-    || (overlap(box.bbox_xyxy, sign.box) > 0.3 && box.family === d.family && (box.value_kph ?? null) === d.value_kph
-      && holdsPlate(box) === holdsPlate(d)));
+/** True while a sign of the car is not among the frame's boxes: no box of the frame is on it. */
+export function carSignLeft(work: FrameEdit, sign: CarSign): boolean {
+  return !work.detections.some((box) => overlap(box.bbox_xyxy, sign.box) > 0.3);
 }
 
-/** "Use": the box of the car becomes a box of the frame, inside the picture, with its family, value, kind and panel. */
-export function useCarSign(row: FrameRow, sign: CarSign): void {
-  const d = carDetection(sign);
-  const [x1, y1, x2, y2] = sign.box;
-  const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
-  if (box[2] - box[0] < 2 || box[3] - box[1] < 2) return;
-  addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours);
+/** What the car read becomes boxes of a frame not confirmed, once, inside the picture. */
+function placeCarSigns(row: FrameRow, reading: CarReading): void {
+  const status = frameStatus(row.frame_key);
+  if (report.readOnly || placed.has(row.frame_key) || (status !== 'todo' && status !== 'dirty')) return;
+  placed.add(row.frame_key);
+  const work = workOf(row);
+  for (const sign of reading.signs) {
+    const [x1, y1, x2, y2] = sign.box;
+    const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
+    if (box[2] - box[0] < 2 || box[3] - box[1] < 2 || !carSignLeft(work, sign)) continue;
+    const d = carDetection(sign);
+    pushBox(work, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours,
+      d.applicability, 'car');
+  }
 }

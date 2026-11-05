@@ -149,6 +149,7 @@ class ReviewService:
         self._log = log
         self._reports = {}
         self._reports_lock = threading.Lock()
+        self._car_positions = {}
 
     def log(self, text: str) -> None:
         if self._log is not None:
@@ -310,6 +311,26 @@ class ReviewService:
             raise ReviewRejected(404, 'image_not_found', 'This frame of the video cannot be shown: ' + str(exc)) from exc
         return row, snapshot.run_id, path
 
+    def car_speed(self, snapshot: RouteSnapshot, row: dict) -> float | None:
+        """The car's speed (m/s) at a frame, from the positions of its route: those of the nearest picture for a frame
+        between the seconds. None without them."""
+        path = positions_path(self.root, snapshot.route)
+        stamp = path.stat().st_mtime_ns if path.is_file() else None
+        kept = self._car_positions.get(snapshot.route)
+        if kept is None or kept[0] != stamp:
+            kept = self._car_positions[snapshot.route] = (stamp, load_positions(self.root, snapshot.route))
+        positions = kept[1]
+        rows = [snapshot.by_key[key] for key in snapshot.order if key in positions
+                and snapshot.by_key[key]['segment_index'] == row['segment_index']]
+        if row['frame_key'] in positions:
+            near = row
+        elif rows:
+            near = min(rows, key=lambda other: abs(frame_second(other) - frame_second(row)))
+        else:
+            return None
+        speed = positions[near['frame_key']].get('speed_mps')
+        return float(speed) if type(speed) in (int, float) and speed >= 0 else None
+
     def car_reading(self, route, frame_key) -> dict:
         """What the car's networks read on a frame (nnslr_tools.car_reading), for the button "Car networks" of Sign
         review: a row of the report or a frame of the video between the seconds not saved yet (video_stand_in), its
@@ -325,7 +346,7 @@ class ReviewService:
                                  "This frame has no place in a road video: the car's networks read only those.")
         try:
             found = car_reading.read_frame(self.root, snapshot.route, segment, decoded, width=row.get('width'),
-                                           height=row.get('height'))
+                                           height=row.get('height'), speed=self.car_speed(snapshot, row))
         except (video_frames.VideoFrameError, OSError) as exc:
             raise ReviewRejected(404, 'no_video_frame',
                                  "The car's networks cannot read this frame: " + str(exc)) from exc

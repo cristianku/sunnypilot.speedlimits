@@ -20,10 +20,16 @@ towards a motorway: only an input of the road-type network), 'nothing' (read sur
 another sign, not a sign, unreadable), 'unsure' (below MIN_CONFIDENCE: the car drops it). And as a box of the review
 (family, value_kph, sign_type) for "Use". Kept in memory per frame and release. Nothing is saved. Only the camera:
 no map.
+
+Whom each box applies to comes from the applicability network in use (Models tab), which is not on the car, with the
+car's speed at the frame (applicability and applicability_score of the sign; nothing on a box read as not a sign). It
+learnt on the speed families only, so on the other signs its answer is a hint for the reviewer. It runs in
+nnslr_tools._decider_worker. Where it cannot answer the reading stays good, and applicability_note says why.
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -32,16 +38,21 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_signs, video_frames
+from nnslr_tools.car_release import GPU_VENV_ENV
 from nnslr_tools.media import FULL_SIZE
 from nnslr_tools.sign_types import class_hours, class_parts
 
 MANIFEST = road_type_signs.RELEASE_MANIFEST
 MANIFEST_FORMAT = 2
 READINGS_KEPT = 256
+# The first frame waits for the worker to load torch and the network.
+DECIDER_TIMEOUT_S = 120
 
 _guard = threading.Lock()
 _loaded: dict = {}
 _readings: dict[tuple, dict] = {}
+_decider_guard = threading.Lock()
+_decider: dict = {}
 
 
 class CarReadingError(ValueError):
@@ -164,16 +175,98 @@ def read_nv12(loaded: dict, data: bytes, width: int, height: int,
             next((i for i, sign in enumerate(signs) if sign is surest), None))
 
 
+def decider_in_use(root: Path) -> Path:
+    """The checkpoint of the applicability network in use. Raises CarReadingError without one."""
+    from nnslr_tools.chain import resolve_model
+    try:
+        decider = resolve_model('active', 'decider', Path(root))
+    except (ValueError, OSError) as exc:
+        raise CarReadingError(f'no applicability network in use: {exc}') from exc
+    return Path(decider['path'])
+
+
+def _worker(root: Path, checkpoint: Path) -> subprocess.Popen:
+    """The worker of a checkpoint, started when it is not running (it leaves when idle)."""
+    worker = _decider.get('worker')
+    if worker is not None and worker.poll() is None and _decider.get('checkpoint') == checkpoint:
+        return worker
+    if worker is not None:
+        worker.kill()
+        worker.wait()
+    python = Path(os.environ.get(GPU_VENV_ENV) or Path(__file__).resolve().parents[2] / '.venv-gpu') / 'bin' / 'python'
+    worker = subprocess.Popen([str(python), '-m', 'nnslr_tools._decider_worker', str(checkpoint)], stdin=subprocess.PIPE,
+                              stdout=subprocess.PIPE, text=True, cwd=root)
+    _decider.update(worker=worker, checkpoint=checkpoint, ready=False)
+    return worker
+
+
+def _answer(worker: subprocess.Popen, line: str | None) -> str:
+    """The worker's next line, after sending one; '' when it died or took too long."""
+    stop = threading.Timer(DECIDER_TIMEOUT_S, worker.kill)
+    stop.start()
+    try:
+        if line is not None:
+            worker.stdin.write(line + '\n')
+            worker.stdin.flush()
+        return worker.stdout.readline()
+    except OSError:
+        return ''
+    finally:
+        stop.cancel()
+
+
+def decide(root: Path, checkpoint: Path, request: dict) -> list:
+    """The worker's answers on a frame. A worker gone idle is started again once. Raises CarReadingError."""
+    with _decider_guard:
+        for _ in range(2):
+            try:
+                worker = _worker(root, checkpoint)
+            except OSError as exc:
+                raise CarReadingError(f'the applicability network does not start: {exc}') from exc
+            if not _decider['ready']:
+                _decider['ready'] = bool(_answer(worker, None))
+            reply = _answer(worker, json.dumps(request)) if _decider['ready'] else ''
+            if reply:
+                return json.loads(reply)['answers']
+            worker.kill()
+            worker.wait()
+    raise CarReadingError('the applicability network does not answer')
+
+
+def rule_signs(root: Path, route: str, segment: int, decoded: int, signs: list[dict], width: int, height: int,
+               speed: float | None) -> str | None:
+    """Whom each sign applies to, written on the signs; why not when the network cannot say, else None."""
+    if not signs:
+        return None
+    try:
+        checkpoint = decider_in_use(root)
+        image = video_frames.preview(root, route, segment, decoded)
+        found = decide(root, checkpoint, {'image': str(image), 'width': width, 'height': height, 'speed': speed,
+                                          'boxes': [{'box': sign['box'], 'family': sign['review']['family']}
+                                                    for sign in signs]})
+    except (CarReadingError, video_frames.VideoFrameError, OSError) as exc:
+        return str(exc)
+    for sign, answer in zip(signs, found):
+        if answer is not None:
+            sign['applicability'], sign['applicability_score'] = answer[0], round(float(answer[1]), 4)
+    return None
+
+
 def read_frame(root: Path, route: str, segment: int, decoded: int, *, width: int | None = None,
-               height: int | None = None, package: Path | None = None) -> dict:
+               height: int | None = None, package: Path | None = None, speed: float | None = None) -> dict:
     """What the car's networks read on a decoded frame of a segment's road video: {'signs', 'surest' (the index of
     the reading the car's logs would show, vision.raw_reading; None without one), 'width', 'height', 'release', 'ms'}.
-    width x height: the frame's size in the review, which the video must have (the boxes are in its pixels).
+    width x height: the frame's size in the review, which the video must have (the boxes are in its pixels). speed: the
+    car's, m/s, for the applicability network.
     Raises video_frames.VideoFrameError (no such frame), CarReadingError (no networks)."""
     loaded = networks(package)
     video = video_frames.video_of(root, route, segment)
     stat = video.stat()
-    key = (str(video), stat.st_mtime_ns, stat.st_size, int(decoded), loaded['stamp'])
+    try:
+        decider = str(decider_in_use(root))
+    except CarReadingError:
+        decider = None
+    key = (str(video), stat.st_mtime_ns, stat.st_size, int(decoded), loaded['stamp'], decider)
     with _guard:
         found = _readings.get(key)
     if found is None:
@@ -183,12 +276,16 @@ def read_frame(root: Path, route: str, segment: int, decoded: int, *, width: int
         if video_frames.video_size(video) == FULL_SIZE:
             full = video_frames.nv12_frame(video, int(decoded), native=True)
         signs, surest = read_nv12(loaded, data, video_width, video_height, full)
+        note = rule_signs(root, route, segment, int(decoded), signs, video_width, video_height, speed)
         found = {'signs': signs, 'surest': surest, 'width': video_width, 'height': video_height,
-                 'release': loaded['release'], 'ms': round((time.monotonic() - started) * 1000)}
-        with _guard:
-            _readings[key] = found
-            while len(_readings) > READINGS_KEPT:
-                del _readings[next(iter(_readings))]
+                 'release': loaded['release'], 'applicability_note': note,
+                 'ms': round((time.monotonic() - started) * 1000)}
+        # Without the network's answer the frame is read again next time.
+        if note is None:
+            with _guard:
+                _readings[key] = found
+                while len(_readings) > READINGS_KEPT:
+                    del _readings[next(iter(_readings))]
     if (width, height) != (None, None) and (width, height) != (found['width'], found['height']):
         raise video_frames.VideoFrameError(f"the road video is {found['width']}x{found['height']}, the frame "
                                            f'{width}x{height}: its boxes would not be on the picture')

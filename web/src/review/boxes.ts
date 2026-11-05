@@ -1,7 +1,7 @@
 // The list of the boxes of the frame in the panel ("Signs"), as data for BoxList.vue: what each one is,
 // where it comes from, what the reviewer changed, the boxes that are the same sign twice.
 import type {AiAction} from '../common/ai-types';
-import {describe, shortName} from './catalog';
+import {CAR_BOX, describe, shortName} from './catalog';
 import {proposalsOf} from './frames';
 import {overlap} from './geometry';
 import type {Detection, FrameEdit, FrameRow} from './types';
@@ -44,7 +44,7 @@ export function addedBy(work: FrameEdit, d: Detection): string {
   const base = work.base;
   const byAi = base?.reviewer_kind === 'ai' && Boolean(d.detection_id)
     && (base.detections ?? []).some((saved) => saved.detection_id === d.detection_id);
-  if (!byAi) return 'added by hand';
+  if (!byAi) return d.detection_id?.startsWith(CAR_BOX) ? 'car networks' : 'added by hand';
   const name = String(base?.reviewer ?? '').replace(/^ai\//, '');
   return name ? 'added by the AI (' + name + ')' : 'added by the AI';
 }

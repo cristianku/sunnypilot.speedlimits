@@ -169,21 +169,29 @@ export function removeAllBoxes(): void {
     text: (count === 1 ? 'The box is' : 'All ' + count + ' boxes are') + ' removed: Confirm saves the frame without signs, Discard changes brings them back.'};
 }
 
-/** A detection id no other box of the frame has: manual-<time>[-n]. */
-function manualId(work: FrameEdit): string {
+/** A detection id no other box of the frame has: <prefix>-<time>[-n]. */
+function manualId(work: FrameEdit, prefix: string): string {
   const stamp = Date.now();
   const taken = new Set(work.detections.map((d) => d.detection_id));
-  let id = 'manual-' + stamp;
-  for (let n = 1; taken.has(id); n++) id = 'manual-' + stamp + '-' + n;
+  let id = prefix + '-' + stamp;
+  for (let n = 1; taken.has(id); n++) id = prefix + '-' + stamp + '-' + n;
   return id;
 }
 
-// A box added by the reviewer: drawn by hand or taken from the second reading or the car's networks. Same fields
-// every way; signType: the kind of an other sign.
 export function addManualBox(row: FrameRow, box: Box, family: string, value: number | null,
   signType: string | null = null, panel = 'unknown', hours: string | null = null): void {
   if (refuseChange()) return;
   const work = workOf(row);
+  pushBox(work, box, family, value, signType, panel, hours);
+  state.selected = work.detections.length - 1;
+  state.selectedByUser = true;
+  state.drawing = false;
+  changed(row);
+}
+
+/** A box added to the frame's list, nothing else: no box selected, and the frame still waits as it did. */
+export function pushBox(work: FrameEdit, box: Box, family: string, value: number | null, signType: string | null = null,
+  panel = 'unknown', hours: string | null = null, road = 'unresolved', prefix = 'manual'): void {
   work.detections.push({
     bbox_xyxy: box,
     family,
@@ -193,16 +201,12 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
     model_label: null,
     class_id: null,
     review_state: 'pending',
-    applicability: 'unresolved',
+    applicability: road,
     supplementary_panel: panel,
-    detection_id: manualId(work),
+    detection_id: manualId(work, prefix),
     ...(signType && family === 'other_sign' ? {sign_type: signType} : {}),
     ...(hours ? {plate_hours: hours} : {}),
   });
-  state.selected = work.detections.length - 1;
-  state.selectedByUser = true;
-  state.drawing = false;
-  changed(row);
 }
 
 /** "Use": the sign of the second reading becomes a box of the frame. */

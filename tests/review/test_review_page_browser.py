@@ -156,14 +156,38 @@ with sync_playwright() as p:
     car.route('**/car/**', lambda request: request.fulfill(json={
         'ok': True, 'frame_key': '0/0', 'signs': [tall, plain], 'surest': 0, 'width': 1344, 'height': 760, 'release': release,
         'ms': 5}))
-    car.locator('#boxList .box-main').first.click()
-    car.locator('#quickValues [data-value="30"]').click()
+    # Off a frame with its own box where the car finds one: none added there.
     car.keyboard.press('t')
-    car.wait_for_selector('#carList')
-    what = car.locator('#carList .hint-what').all_inner_texts()
-    assert what[0].endswith('30, with hours') and not what[1].endswith('with hours'), what
-    rows = car.locator('#carList .car-row')
-    assert rows.nth(0).locator('button').inner_text() == 'Use' and rows.nth(1).locator('button').inner_text() == 'Already used'
+    car.wait_for_timeout(400)
+    before = car.locator('#boxList .box-main').count()
+    assert before == 1
+    # A frame not confirmed takes them straight in its list, whom they are for too, and stays to review.
+    false_box = {**plain, 'box': [18, 22, 26, 30], 'class': 'not_a_sign', 'speed': None, 'use': 'nothing',
+                 'review': {'family': 'not_a_sign', 'value_kph': None}}
+    free = {**plain, 'box': [30, 22, 38, 30], 'applicability': 'own_road', 'applicability_score': .9}
+    car.unroute('**/car/**')
+    car.route('**/car/**', lambda request: request.fulfill(json={
+        'ok': True, 'frame_key': '0/3', 'signs': [free, false_box], 'surest': 0, 'width': 1344, 'height': 760,
+        'release': release, 'ms': 5}))
+    # 0/1 and 0/2 are confirmed.
+    for _ in range(3):
+        car.keyboard.press('ArrowRight')
+    placed = car.locator('#boxList .box-main', has_text='car networks')
+    placed.nth(1).wait_for()
+    assert 'OURS' in placed.first.inner_text() and 'Not a sign' in placed.nth(1).inner_text()
+    assert car.locator('#carList').count() == 0
+    # Deleted, it does not come back on its own.
+    placed.nth(1).click()
+    car.locator('#remove').click()
+    assert placed.count() == 1
+    car.keyboard.press('ArrowLeft')
+    car.keyboard.press('ArrowRight')
+    car.wait_for_timeout(400)
+    assert placed.count() == 1
+    # Confirm saves it with the frame.
+    car.locator('#reviewer').fill('Tester')
+    car.locator('#confirm').click()
+    until(car, "document.body.dataset.lastSaveResult === 'ok'")
     browser.close()
 assert not errors, errors
 '''

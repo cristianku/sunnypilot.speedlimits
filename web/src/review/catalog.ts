@@ -202,8 +202,12 @@ export function shortName(d: Detection): string {
   }
 }
 
+/** How the id of a box the car's networks found starts (car.ts). */
+export const CAR_BOX = 'car-';
+
 /** The colour of a box on the photo (overlay tokens of shared.css). */
 export function boxColor(d: Detection): string {
+  if (d.detection_id?.startsWith(CAR_BOX)) return 'var(--ov-car)';
   if (isSpeedFamily(d.family)) return 'var(--ov-speed)';
   if (d.family === 'cancellation') return 'var(--ov-cancel)';
   if (d.family === 'not_a_sign') return 'var(--ov-none)';
