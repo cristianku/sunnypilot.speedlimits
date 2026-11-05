@@ -16,6 +16,7 @@ from pathlib import Path
 
 from nnslr_tools.preannotate import MODEL_SHA256, semantic_label, suppress_overlaps, unletterbox
 from nnslr_tools.manifest import sha256_of
+from nnslr_tools.media import save_preview
 from nnslr_tools import onnx_device
 
 FRAMES_ENV = 'NNSLR_PREANNOTATE_FRAMES'
@@ -100,7 +101,7 @@ class Proposer:
         for i,item in enumerate(detections):
             item['detection_id']=f"{frame['frame_key']}/{i}"
         preview=f'images/{ordinal:08}.jpg'
-        image.save(self.output/preview,quality=92)
+        save_preview(image,source,self.output/preview)
         return {**frame,'schema_version':1,'kind':'preannotated_frame','run_id':request['run_id'],
                 'width':width,'height':height,'preview_path':preview,'detections':detections,
                 'review_state':'pending','ground_truth':False,'model':request['model'],

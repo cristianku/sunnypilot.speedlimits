@@ -27,6 +27,17 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
+# Every picture, row and box of the project is FRAME_SIZE. A road video recorded at full definition (the comma's switch
+# Record road at full resolution) is FULL_SIZE: its pictures are reduced to FRAME_SIZE, the filter below, and the frame
+# as it was recorded stays beside each one (full_picture). Videos of any other size are never reduced.
+FRAME_SIZE = (1344, 760)
+FULL_SIZE = (2688, 1520)
+REDUCE_FILTER = f"scale={FRAME_SIZE[0]}:{FRAME_SIZE[1]}:flags=area"
+FULL_SUFFIX = ".full.jpg"
+# ffmpeg's JPEG quality (2 best .. 31): about the quality 92 of the report's previews.
+FULL_JPEG_QUALITY = "3"
+
+
 class MediaToolError(RuntimeError):
     """Stable local-media failure with a machine-readable reason."""
 
@@ -351,6 +362,39 @@ def probe_frame_timestamps(path: Path, *, ffprobe: str | None = None) -> list[Vi
     return out
 
 
+def video_dimensions(video: Path, *, ffprobe: str | None = None) -> tuple[int, int]:
+    """(width, height) of a video from its stream header, without reading its frames as probe_video does."""
+    exe = _resolve_executable("ffprobe", ffprobe)
+    payload = _run_json([exe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                         "-of", "json", str(video)])
+    streams = payload.get("streams") or [{}]
+    width, height = streams[0].get("width"), streams[0].get("height")
+    if type(width) is not int or type(height) is not int:
+        raise MediaToolError("video_size_unknown", str(video))
+    return width, height
+
+
+def full_picture(image: Path | str) -> Path:
+    """Where the frame at full definition of a picture is, when its video has one."""
+    return Path(image).with_suffix(FULL_SUFFIX)
+
+
+def remove_picture(image: Path | str) -> None:
+    """Delete a picture and the frame at full definition beside it."""
+    Path(image).unlink(missing_ok=True)
+    full_picture(image).unlink(missing_ok=True)
+
+
+def save_preview(image: Any, source: Path | str, path: Path) -> None:
+    """The report's preview of a picture: the frame at full definition beside it, or else the picture (PIL ``image``).
+    Boxes stay in the size of the picture, and whoever shows them scales them to the preview."""
+    full = full_picture(source)
+    if full.is_file():
+        shutil.copyfile(full, path)
+    else:
+        image.save(path, quality=92)
+
+
 def extract_frames(
     video: Path,
     output_dir: Path,
@@ -370,7 +414,8 @@ def extract_frames(
     timings: Sequence[VideoFrameTiming] | None = None,
     gop: tuple[int, bytes] | None = None,
 ) -> list[ExtractedFrame]:
-    """Decode local video frames to PNG without resizing. ``decoded``: these frames of the video (decoded frame
+    """Decode local video frames to PNG, without resizing unless the video is FULL_SIZE: then each PNG is reduced to
+    FRAME_SIZE and the frame stays beside it as a JPEG (full_picture), both from one decode. ``decoded``: these frames of the video (decoded frame
     indices) instead of a sampling; ``prefix``: the name of the pictures (``<prefix>_<output index>.png``), only those
     are replaced; ``index_base``: each picture's output index is index_base + its decoded frame index instead of its
     number in the selection. ``timings``: probe_frame_timestamps of the video, when the caller has it already (the
@@ -427,6 +472,7 @@ def extract_frames(
         selected.append(frame)
     if not selected:
         raise MediaToolError("frame_extraction_failed", "no frames in requested interval")
+    full = video_dimensions(video, ffprobe=ffprobe) == FULL_SIZE
     first = 0 if gop is None else gop[0]
     if any(f.decoded_frame_index < first for f in selected):
         raise MediaToolError("frame_extraction_failed", f"a frame before the GOP from {first}")
@@ -436,18 +482,26 @@ def extract_frames(
         staging = Path(temporary)
         expression = "+".join(f"eq(n\\,{f.decoded_frame_index - first})" for f in selected)
         graph = staging / "select.txt"
-        graph.write_text("select=" + expression)
         source = ["-i", str(video)] if gop is None else ["-f", "hevc", "-i", "-"]
+        numbered = ["-vsync", "0", "-start_number", "0"]
+        if full:
+            graph.write_text(f"[0:v:0]select={expression},split[picture][full];[picture]{REDUCE_FILTER}[reduced]")
+            outputs = ["-filter_complex_script", str(graph), "-map", "[reduced]", *numbered,
+                       str(staging / "frame_%08d.png"), "-map", "[full]", *numbered, "-q:v", FULL_JPEG_QUALITY,
+                       str(staging / "full_%08d.jpg")]
+        else:
+            graph.write_text("select=" + expression)
+            outputs = ["-filter_script:v", str(graph), "-map", "0:v:0", *numbered, str(staging / "frame_%08d.png")]
         cmd = [exe, "-hide_banner", "-loglevel", "error", "-xerror", "-err_detect", "explode",
-               "-abort_on", "empty_output", "-n", *source, "-filter_script:v", str(graph),
-               "-map", "0:v:0", "-vsync", "0", "-start_number", "0", str(staging / "frame_%08d.png")]
+               "-abort_on", "empty_output", "-n", *source, *outputs]
         proc = subprocess.run(cmd, input=None if gop is None else gop[1], capture_output=True, check=False)
         stderr = proc.stderr.decode(errors="replace").strip()
         if proc.returncode != 0 or stderr:
             raise MediaToolError("frame_extraction_failed", str(video), stderr=stderr)
         files = sorted(staging.glob("frame_*.png"))
-        if len(files) != len(selected):
-            raise MediaToolError("extracted_frame_count_mismatch", f"{len(files)} != {len(selected)}")
+        fulls = sorted(staging.glob("full_*.jpg"))
+        if len(files) != len(selected) or len(fulls) != (len(selected) if full else 0):
+            raise MediaToolError("extracted_frame_count_mismatch", f"{len(files)}, {len(fulls)} != {len(selected)}")
         if _file_sha256(video) != source_hash:
             raise MediaToolError("source_video_changed", str(video))
         result = []
@@ -466,8 +520,12 @@ def extract_frames(
         if alignment is not None:
             extracted_frame_rows(result, route_id=route_id, segment_index=segment_index, alignment=alignment)
         # [dataset-review] - END
+        for path in existing:
+            full_picture(path).unlink(missing_ok=True)
         for path, name in zip(files, names):
             path.replace(output_dir / name)
+        for path, name in zip(fulls, names):
+            path.replace(full_picture(output_dir / name))
         current_names = set(names)
         for path in existing:
             if path.name not in current_names:

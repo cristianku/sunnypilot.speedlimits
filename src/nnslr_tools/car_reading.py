@@ -32,6 +32,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_signs, video_frames
+from nnslr_tools.media import FULL_SIZE
 
 MANIFEST = road_type_signs.RELEASE_MANIFEST
 MANIFEST_FORMAT = 2
@@ -137,15 +138,20 @@ def review_box(name: str) -> dict:
     return box
 
 
-def read_nv12(loaded: dict, data: bytes, width: int, height: int) -> tuple[list[dict], int | None]:
+def read_nv12(loaded: dict, data: bytes, width: int, height: int,
+              full: tuple[bytes, int, int] | None = None) -> tuple[list[dict], int | None]:
     """read_signs on one NV12 frame, each sign with its use and its box of the review, and the index of the one the
     car's logs give as the frame's reading (vision.raw_reading, on the confidences before they are rounded: two signs
-    of 0.99999 and 0.999999 are both 1.0 here, and the car takes the second)."""
+    of 0.99999 and 0.999999 are both 1.0 here, and the car takes the second). full: (NV12 bytes, width, height) of the
+    same frame at full definition, for the classifier's crops, as the car with Read signs at full resolution."""
     vision = loaded['vision']
     pixels = np.frombuffer(data, dtype=np.uint8)
     y, uv = vision.nv12_planes(pixels, width, height, width, width * height)
+    planes = None
+    if full is not None:
+        planes = vision.nv12_planes(np.frombuffer(full[0], dtype=np.uint8), full[1], full[2], full[1], full[1] * full[2])
     signs = vision.read_signs(y, uv, vision.SignNetInput(width, height), loaded['finder'], loaded['classifier'],
-                              loaded['classes'])
+                              loaded['classes'], planes)
     surest = vision.raw_reading(signs)
     return ([{'box': [round(float(value), 2) for value in sign['box']], 'score': round(float(sign['score']), 4),
               'class': sign['class'], 'confidence': round(float(sign['confidence']), 4), 'speed': sign['speed'],
@@ -168,7 +174,10 @@ def read_frame(root: Path, route: str, segment: int, decoded: int, *, width: int
     if found is None:
         started = time.monotonic()
         data, video_width, video_height = video_frames.nv12_frame(video, int(decoded))
-        signs, surest = read_nv12(loaded, data, video_width, video_height)
+        full = None
+        if video_frames.video_size(video) == FULL_SIZE:
+            full = video_frames.nv12_frame(video, int(decoded), native=True)
+        signs, surest = read_nv12(loaded, data, video_width, video_height, full)
         found = {'signs': signs, 'surest': surest, 'width': video_width, 'height': video_height,
                  'release': loaded['release'], 'ms': round((time.monotonic() - started) * 1000)}
         with _guard:

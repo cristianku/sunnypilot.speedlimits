@@ -25,6 +25,7 @@ from nnslr_tools.training import (
     _safe_image_path,
     checkpoint_class_scheme,
     crop_rectangle,
+    crop_source,
     cutter_families,
     family_label,
 )
@@ -478,13 +479,12 @@ def evaluate_reader(
         def __getitem__(self, index):
             row = records[index]
             path = _safe_image_path(root, row["image_path"])
-            with Image.open(path) as source:
-                image = source.convert("RGB")
-                if classifier:
-                    crop = image.crop(crop_rectangle(row["bbox_xyxy"], image.width, image.height))
-                else:
-                    x1, y1, x2, y2 = [int(v) for v in row["bbox_xyxy"]]
-                    crop = image.crop((x1, y1, x2, y2))
+            image, factor = crop_source(path)
+            if classifier:
+                rectangle = crop_rectangle(row["bbox_xyxy"], image.width // factor, image.height // factor)
+            else:
+                rectangle = [int(v) for v in row["bbox_xyxy"]]
+            crop = image.crop(tuple(value * factor for value in rectangle))
             transform = transforms.Compose([
                 transforms.Resize((input_size, input_size)),
                 transforms.ToTensor(),

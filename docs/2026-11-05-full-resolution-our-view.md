@@ -1,6 +1,8 @@
 # Full-resolution sign reading: our view
 
-5 November 2026. This says what we make of Astra's [design assessment](2026-11-05-full-resolution-sign-reader-design.md) and how recording and sign reading stay apart. Nothing here is authorised or built.
+5 November 2026. This says what we make of Astra's [design assessment](2026-11-05-full-resolution-sign-reader-design.md) and how recording and sign reading stay apart.
+
+**Update, same day.** Cristian decided: build it, no measure first, the road decides. The verdict, the order of work and the second file below are the view of that morning and no longer hold. What is built: one `fcamera.hevc` at 2688 × 1520 with the switch on (no second file), the reader's crop from the full frame, and the server's side ([the guide](GUIDE.md#drives-at-full-definition)). What is left: `camerad`. A correction: the ISP does not write the road's full frame anywhere today. The road camera goes through the IFE, which gives only the 1344 × 760; the full output that exists is the cabin's, through the BPS.
 
 ## Verdict
 
@@ -44,9 +46,9 @@ Cristian's point: what we save to disk for training is one question, what the re
 | Cutter | 1344 x 760, its 896 x 288 band | No, unless a second window is added later |
 | Brain | 1344 x 760 reduced to 256 x 144, plus the reader's result | No |
 | Reader | Only the pixels of the box, cut in memory from 2688 x 1520 | Yes, never saved |
-| Disk | `fcamera.hevc` as today, plus a second file when the switch is on | Only with the switch on |
+| Disk | `fcamera.hevc` as today, at 2688 x 1520 when the switch is on | Only with the switch on |
 
-**Two definitions cost little on the camera side.** The ISP already writes the full-size output every frame, to a placeholder nobody reads, so no new pass should be needed. That comes from reading the code; whether the image is valid has never been tested. What the reader adds is memory, about 140-170 MB by Astra's sums, and the copy of each crop. Neither is measured on the device.
+**The camera side.** (Wrong in the first version, see the update above: the road's full frame needs the BPS.) What the reader adds is memory, about 140-170 MB by Astra's sums, and the copy of each crop. Neither is measured on the device.
 
 **The real cost is disk and encoder, and only with the switch on.** At 10 fps it adds 2.7-4.5 GB an hour and 40.9 Mpixel/s to encode; at 20 fps, 4.5-9 GB an hour and 81.7 Mpixel/s. With the switch off the cost is zero. The encoder's spare capacity is not measured.
 

@@ -201,7 +201,18 @@ Both work only for a browser that has signed in, or the site on 127.0.0.1; the t
 
 ### What the classifier gets
 
-Beside the zoom of the selected box, the square **Classifier** shows that box as the network gets it: cut from the frame and stretched to 160 × 160, its proportions lost, each of its pixels one the network gets. Under it, how many pixels of the frame that is. It is made in the page from the photo on screen, so it follows a corner being dragged. That photo is the preview, a JPEG of the same size as the frame: measured on three signs, the square is 1 to 4 levels of 255 off the network's picture on average, most on the smallest sign. It saves nothing.
+Beside the zoom of the selected box, the square **Classifier** shows that box as the network gets it: cut from the frame and stretched to 160 × 160, its proportions lost, each of its pixels one the network gets. Under it, how many pixels of the frame that is. It is made in the page from the photo on screen, so it follows a corner being dragged. That photo is the preview, a JPEG of the same size as the frame: measured on three signs, the square is 1 to 4 levels of 255 off the network's picture on average, most on the smallest sign. On a drive at full definition the preview is the frame as recorded, so the square and its pixels are those of the 2688 × 1520 frame: a box 60 wide reads 120. It saves nothing.
+
+### Drives at full definition
+
+A comma with **Record road at full resolution** on (Developer tab) writes its `fcamera.hevc` at 2688 × 1520 instead of 1344 × 760. The server tells them apart by the size of the video, drive by drive, with no setting; old and new drives live side by side. Such a drive says **HD** beside its date.
+
+- **Rows, boxes and labels stay in 1344 × 760 pixels**, on every drive. Each picture `frame_XXXXXXXX.png` is the recorded frame reduced by 2, and the recorded frame stays beside it as `frame_XXXXXXXX.full.jpg`. So the cutter, the reviews already saved and the dataset do not change.
+- **Sign review** shows the recorded frame, in the photo, the zoom and the **Classifier** square. Drive review plays a video as wide as the recording.
+- **Training** cuts the classifier's crops from the `.full.jpg` when a frame has one, by itself, and the crop cache is rebuilt for those frames (`meta.json` and the log say `full_frames`). Frames without one keep their crops. A classifier trained before those drives is not changed: training stays your choice.
+- **What it costs:** about 4.5 GB an hour on the comma instead of 2.25, and on the server one more JPEG for each picture, with a preview of the full size. `deleter.py` removes the oldest segments when the comma has under 10 % or 5 GB free, so pull a full drive within days.
+
+The comma's `camerad` does not offer the 2688 × 1520 stream yet: until it does, the two switches change nothing.
 
 ### The car's networks on a frame (T)
 

@@ -40,6 +40,7 @@ from nnslr_tools import synthetic_signs, tracking
 from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_DETECTOR_INPUT_SIZE,
                                      DETECTOR_ANCHOR_MAX_RATIO, MAX_DETECTOR_INPUT_SIDE, atomic_torch_save,
                                      build_detector, detector_is_wide, model_weights, stable_weights, torch_load)
+from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
 from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
@@ -1095,6 +1096,18 @@ CLASSIFIER_BOX_JITTER = {"probability": 0.8, "scale": (0.85, 1.2), "shift": 0.1}
 MIN_CROP_SIDE = 2
 
 
+def crop_source(path: Path) -> tuple[Any, int]:
+    """(the RGB image the crops of a picture are cut from, how many of its pixels make one of the picture): the frame at
+    full definition beside the picture when its drive has one (nnslr_tools.media), or else the picture. A rectangle is
+    worked out on the picture and multiplied, as the car does with Read signs at full resolution (vision.classifier_input)."""
+    from PIL import Image
+
+    full = full_picture(path)
+    with Image.open(full if full.is_file() else path) as source:
+        image = source.convert("RGB")
+    return image, image.width // FRAME_SIZE[0] if full.is_file() else 1
+
+
 def crop_rectangle(box: list[float], width: int, height: int) -> tuple[int, int, int, int]:
     """The pixels of a box (x1, y1, x2, y2 in frame pixels) to cut from a frame of width x height: rounded
     outwards, inside the frame, at least MIN_CROP_SIDE pixels on each side. The classifier's crops (v2 training
@@ -2146,7 +2159,8 @@ def train_reader(
         size=config.input_size, scheme=scheme, workers=config.num_workers,
         content={"dataset_sha256": plan["dataset_sha256"], "mapillary_sha256": plan.get("mapillary_sha256")})
     print(f"crop cache: {'cut' if cache_summary['built'] else 'reused'} {cache_summary['crops']} crops of "
-          f"{cache_summary['frames']} images, {cache_summary['megabytes']} MB, {cache_summary['seconds']}s: "
+          f"{cache_summary['frames']} images ({cache_summary.get('full_frames', 0)} at full definition), "
+          f"{cache_summary['megabytes']} MB, {cache_summary['seconds']}s: "
           f"{cache_summary['folder']}", flush=True)
 
     class CropDataset(Dataset):

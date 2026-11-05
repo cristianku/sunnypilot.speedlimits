@@ -48,7 +48,8 @@ from nnslr_tools.comma_log import (
     map_speed_events,
     read_log_metadata,
 )
-from nnslr_tools.media import MediaToolError, extract_frames, make_clip, probe_frame_timestamps, probe_video
+from nnslr_tools.media import (MediaToolError, extract_frames, make_clip, probe_frame_timestamps, probe_video,
+                               remove_picture)
 # [frame-provenance] - START
 from nnslr_tools.media import extracted_frame_rows
 from nnslr_tools.manifest import sha256_of
@@ -497,7 +498,7 @@ def _cmd_extract_route(args: argparse.Namespace) -> int:
             kept = [frame for frame in frames if second(frame) in slow]
             for frame in frames:
                 if second(frame) not in slow:
-                    Path(frame.image_path).unlink()
+                    remove_picture(frame.image_path)
             summary["slow_only"] = {"kept": len(kept), "of": len(frames)}
             print(f"Segment {index} (start or end of the drive): {len(kept)} of {len(frames)} pictures below "
                   f"{SLOW_ONLY_SPEED * 3.6:.0f} km/h kept", file=sys.stderr, flush=True)

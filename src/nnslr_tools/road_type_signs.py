@@ -48,6 +48,8 @@ from pathlib import Path
 
 import numpy as np
 
+from nnslr_tools.media import FRAME_SIZE, FULL_SIZE, REDUCE_FILTER
+
 SIGNS_RELATIVE = Path('derived') / 'road_type_signs'
 RAW_RELATIVE = Path('raw') / 'routes'
 PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
@@ -199,18 +201,23 @@ def read_segment(task: tuple[str, int]) -> dict:
     cannot decode is read again on the CPU."""
     video, segment = task
     width, height = _video_size(Path(video))
+    # A video at full definition is read at the size of the others: these signs are big, no crop of the frame is needed.
+    reduce = (width, height) == FULL_SIZE
+    if reduce:
+        width, height = FRAME_SIZE
     if _WORKER.get('nvdec'):
-        result = _read_video(video, width, height, nvdec=True)
+        result = _read_video(video, width, height, nvdec=True, reduce=reduce)
         if result['frames']:
             return {'segment': segment, **result}
-    return {'segment': segment, **_read_video(video, width, height, nvdec=False)}
+    return {'segment': segment, **_read_video(video, width, height, nvdec=False, reduce=reduce)}
 
 
-def _read_video(video: str, width: int, height: int, *, nvdec: bool) -> dict:
+def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: bool = False) -> dict:
     vision, finder, classifier, classes = (_WORKER[name] for name in ('vision', 'finder', 'classifier', 'classes'))
     size = width * height * 3 // 2
+    chosen = f'select=not(mod(n\\,{VIDEO_STEP}))' + (',' + REDUCE_FILTER if reduce else '')
     command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', *(['-hwaccel', 'cuda'] if nvdec else []), '-threads', '1',
-               '-i', str(video), '-vf', f'select=not(mod(n\\,{VIDEO_STEP}))', '-vsync', '0', '-pix_fmt', 'nv12', '-f',
+               '-i', str(video), '-vf', chosen, '-vsync', '0', '-pix_fmt', 'nv12', '-f',
                'rawvideo', '-']
     signnet_input = vision.SignNetInput(width, height)
     found, count = [], 0

@@ -333,7 +333,8 @@ class ReviewApp(ReviewService):
             drive = drive_of(self.root, route)
             name = ' · '.join(part for part in (drive['title'], drive['when']) if part) or None
             links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name, 'title': drive['title'],
-                          'when': drive['when'], 'minutes': drive['minutes']})
+                          'when': drive['when'], 'minutes': drive['minutes'],
+                          'full_definition': drive['full_definition']})
         return links
 
     def route_summaries(self) -> list[dict]:

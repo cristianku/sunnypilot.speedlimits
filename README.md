@@ -56,6 +56,7 @@ flowchart TD
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
 - The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp, the acceleration lane after it, car park or garage. Where no sign holds, that gives the country's general limit; from the acceleration lane on, the carriageway's, not the ramp's. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 20 in a car park, 10 in a garage.
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
+- **Full definition, for far signs and plates.** Two Developer switches, both off by default. **Record road at full resolution** writes `fcamera.hevc` at 2688 × 1520, and the server then keeps that frame beside each picture for Sign review and the classifier's training ([the guide](docs/GUIDE.md#drives-at-full-definition)). **Read signs at full resolution** has the cutter search the 1344 × 760 frame as always and cuts the classifier's crop from the 2688 × 1520 one. Server and car code are ready; `camerad` does not offer that stream yet, so on the car both change nothing for now.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, when the Speed Limit Source is **Map Data + Vision**; with **Vision Only** the resolver takes the vision limit alone.
 
 ### The rules on the car

@@ -184,7 +184,7 @@ def run(request: dict) -> None:
                 for i, item in enumerate(detections):
                     item['detection_id'] = f"{frame['frame_key']}/{i}"
                 preview = f'images/{ordinal:08}.jpg'
-                image.save(output / preview, quality=92)
+                save_preview(image, root / frame['image_path'], output / preview)
                 row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
                        'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
                        'review_state': 'pending', 'ground_truth': False, 'model': request['model'], 'road_model': None,

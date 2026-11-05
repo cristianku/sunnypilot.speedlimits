@@ -2,7 +2,8 @@
 
 The comma records the road camera of every minute as raw HEVC (data/raw/routes/<route>/<segment>/fcamera.hevc,
 1344 x 760, 20 frames a second), which browsers do not play. Here the minutes of a drive, in order, become one H.264
-MP4 960 px wide, with an index of where each minute starts in it: derived/video/<route>.mp4 and <route>.json. A frame of
+MP4 960 px wide (a drive recorded at full definition, 2688 x 1520, stays that wide), with an index of where each minute
+starts in it: derived/video/<route>.mp4 and <route>.json. A frame of
 the reports is image N of a minute, N seconds into it (frames are sampled one a second), so the page finds it in the
 video at start(minute) + N.
 
@@ -29,8 +30,12 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
+from nnslr_tools.media import FULL_SIZE, video_dimensions
+
 FPS = 20
 WIDTH = 960
+# A drive recorded at full definition keeps it (nnslr_tools.media.FULL_SIZE).
+FULL_WIDTH = FULL_SIZE[0]
 # Minutes encoded at once, and the threads of each ffmpeg.
 WORKERS = 8
 THREADS = 2
@@ -108,29 +113,30 @@ def _ffmpeg(arguments: list[str], done: Callable[[int], None]) -> int:
     return frames
 
 
-def _encode(source: Path, target: Path, done: Callable[[int], None]) -> None:
+def _encode(source: Path, target: Path, width: int, done: Callable[[int], None]) -> None:
     """One minute of raw HEVC to H.264 (an MP4 of its own) on the CPU."""
     try:
-        _ffmpeg(['-f', 'hevc', '-r', str(FPS), '-i', str(source), '-an', '-vf', f'scale={WIDTH}:-2', '-c:v', CPU_ENCODER,
+        _ffmpeg(['-f', 'hevc', '-r', str(FPS), '-i', str(source), '-an', '-vf', f'scale={width}:-2', '-c:v', CPU_ENCODER,
                  '-preset', 'veryfast', '-crf', '27', '-g', str(2 * FPS), '-pix_fmt', 'yuv420p', '-threads', str(THREADS),
                  str(target)], done)
     except RuntimeError as exc:
         raise RuntimeError(f'ffmpeg failed on minute {source.parent.name}: {exc}') from exc
 
 
-def _encode_on_gpu(parts: list[tuple[int, Path]], target: Path, total: int, done: Callable[[int], None]) -> None:
+def _encode_on_gpu(parts: list[tuple[int, Path]], target: Path, width: int, total: int,
+                   done: Callable[[int], None]) -> None:
     """The whole drive to one MP4 on the GPU, its index at the front. The concat protocol reads the minutes as one stream,
     so a frame lost at a join would move every minute after it: any other count than the index's is a failure."""
     frames = _ffmpeg(['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda', '-f', 'hevc', '-r', str(FPS),
                       '-i', 'concat:' + '|'.join(str(path) for _segment, path in parts), '-an',
-                      '-vf', f'scale_cuda={WIDTH}:-2', '-c:v', GPU_ENCODER, '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr',
+                      '-vf', f'scale_cuda={width}:-2', '-c:v', GPU_ENCODER, '-preset', 'p5', '-tune', 'hq', '-rc', 'vbr',
                       '-cq', str(GPU_QUALITY), '-b:v', '0', '-spatial-aq', '1', '-g', str(2 * FPS), '-bf', '0',
                       '-movflags', '+faststart', str(target)], done)
     if frames != total:
         raise RuntimeError(f'{frames} frames written of {total}')
 
 
-def _encode_on_cpu(parts: list[tuple[int, Path]], folder: Path, target: Path, total: int,
+def _encode_on_cpu(parts: list[tuple[int, Path]], folder: Path, target: Path, width: int, total: int,
                    progress: Callable[[float], None] | None) -> None:
     """The minutes side by side in folder, then joined into target without encoding again."""
     folder.mkdir(exist_ok=True)
@@ -145,7 +151,7 @@ def _encode_on_cpu(parts: list[tuple[int, Path]], folder: Path, target: Path, to
                 progress(min(1.0, sum(done) / total))
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        jobs = [pool.submit(_encode, path, piece, functools.partial(advance, number))
+        jobs = [pool.submit(_encode, path, piece, width, functools.partial(advance, number))
                 for number, ((_segment, path), piece) in enumerate(zip(parts, pieces))]
         try:
             for job in jobs:
@@ -180,6 +186,7 @@ def make(root: Path, route: str, progress: Callable[[float], None] | None = None
         segments.append({'segment': segment, 'start': round(start, 3), 'frames': count})
         start += count / FPS
     total = sum(counts)
+    width = FULL_WIDTH if video_dimensions(parts[0][1]) == FULL_SIZE else WIDTH
     # Its own partial file and pieces: the site and `nnslr drive-video` may make the same drive at once; the last one
     # wins whole.
     stem = f'{route}.{os.getpid()}.{threading.get_ident()}'
@@ -192,17 +199,17 @@ def make(root: Path, route: str, progress: Callable[[float], None] | None = None
 
     try:
         try:
-            _encode_on_gpu(parts, partial, total, advance)
+            _encode_on_gpu(parts, partial, width, total, advance)
             encoder = GPU_ENCODER
         except (OSError, RuntimeError) as exc:
             print(f'Drive video {route}: on the CPU ({exc})', flush=True)
-            _encode_on_cpu(parts, folder, partial, total, progress)
+            _encode_on_cpu(parts, folder, partial, width, total, progress)
             encoder = CPU_ENCODER
         os.replace(partial, video)
     finally:
         partial.unlink(missing_ok=True)
         shutil.rmtree(folder, ignore_errors=True)
-    value = {'route': route, 'fps': FPS, 'width': WIDTH, 'encoder': encoder, 'segments': segments,
+    value = {'route': route, 'fps': FPS, 'width': width, 'encoder': encoder, 'segments': segments,
              'duration': round(start, 3), 'source': _signature(parts), 'made_at': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
     index_path.write_text(json.dumps(value, indent=1) + '\n', encoding='utf-8')
     return value

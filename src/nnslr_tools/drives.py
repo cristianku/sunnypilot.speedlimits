@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from nnslr_tools import video_frames
+from nnslr_tools.media import FULL_SIZE
+
 LOCAL = ZoneInfo('Europe/Zurich')
 # How much a kind of place counts against its distance: a town 2 km away beats a village 1.5 km away.
 WEIGHT = {'city': 3.0, 'town': 2.0, 'village': 1.0, 'suburb': 0.3, 'hamlet': 0.5}
@@ -109,9 +112,18 @@ def _times(root: Path, route: str) -> tuple[datetime | None, datetime | None]:
     return end - timedelta(minutes=last_segment + 1), end
 
 
+def full_definition(root: Path, route: str) -> bool:
+    """A drive recorded at full definition: one video tells, the comma's encoder chooses when it starts."""
+    video = next((Path(root) / 'raw' / 'routes' / route).glob('*/fcamera.hevc'), None)
+    try:
+        return video is not None and video_frames.video_size(video) == FULL_SIZE
+    except (video_frames.VideoFrameError, OSError):
+        return False
+
+
 def drive_of(root: Path, route: str) -> dict[str, Any]:
-    """{'when': "Thu 23 Oct 2026 · 08:11", 'minutes', 'start' (ISO), 'from', 'to', 'title'} of a route; the parts
-    that cannot be known are None ('title' is "Olten → Zürich", "around Olten" or None)."""
+    """{'when': "Thu 23 Oct 2026 · 08:11", 'minutes', 'start' (ISO), 'from', 'to', 'title', 'full_definition'} of a
+    route; the parts that cannot be known are None ('title' is "Olten → Zürich", "around Olten" or None)."""
     start, end = _times(root, route)
     first, last = _ends(root, route)
     origin = place_name(root, first['latitude'], first['longitude']) if first else None
@@ -125,4 +137,4 @@ def drive_of(root: Path, route: str) -> dict[str, Any]:
     return {'when': local.strftime('%a %-d %b %Y · %H:%M') if local else None,
             'minutes': round((end - start).total_seconds() / 60) if start and end else None,
             'start': start.isoformat(timespec='minutes') if start else None,
-            'from': origin, 'to': destination, 'title': title}
+            'from': origin, 'to': destination, 'title': title, 'full_definition': full_definition(root, route)}

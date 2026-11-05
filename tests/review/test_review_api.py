@@ -142,7 +142,8 @@ def test_routes_and_progress(api):
     assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 6, 'confirmed_count': 0,
                      'confirmed_by_human': 0, 'confirmed_by_ai': 0, 'missing_count': 6, 'withdrawn_count': 0,
                      'suspicious_count': 0, 'frames_with_proposals': 3, 'hint_frames': 0,
-                     'drive': {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None}}
+                     'drive': {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None,
+                               'full_definition': False}}
     assert server.post_frame(ROUTE, '0/0', page_body(rows['0/0']))[0] == 200
     assert save(server, ROUTE, '1/3', ai_body())[0] == 200
     progress = get_json(server, f'/api/v1/routes/{ROUTE}')

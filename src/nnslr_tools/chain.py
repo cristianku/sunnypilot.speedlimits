@@ -43,12 +43,13 @@ import tempfile
 import time
 from typing import Any, Iterator
 
+from nnslr_tools.media import full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
 from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
-                                  classifier_positives, crop_rectangle, cutter_families, family_label, frame_boxes,
+                                  classifier_positives, crop_rectangle, crop_source, cutter_families, family_label, frame_boxes,
                                   load_reviewed_dataset, negative_id, _prepare_classifier, reviewed_frames,
                                   scheme_label)
 
@@ -246,6 +247,18 @@ def _signnet_boxes(cutter: SignNetCutter, heat, shape, width: int, height: int, 
         item["box"] = [min(max(x1, 0.0), width), min(max(y1, 0.0), height),
                        min(max(x2, 0.0), width), min(max(y2, 0.0), height)]
     return found
+
+
+def crop_cutter(data_root: Path, frame: dict[str, Any], pixels):
+    """What turns a rectangle of a frame (pixels, its tensor) into its PIL crop: cut from the frame at full definition
+    when its drive has one (training.crop_source), the only case in which a file is read here."""
+    import torchvision.transforms.functional as TF
+
+    path = _safe_image_path(data_root, frame["image_path"])
+    if not full_picture(path).is_file():
+        return lambda rectangle: TF.to_pil_image(pixels[:, rectangle[1]:rectangle[3], rectangle[0]:rectangle[2]])
+    image, factor = crop_source(path)
+    return lambda rectangle: image.crop(tuple(value * factor for value in rectangle))
 
 
 def cutter_boxes(model, device, frames: list[dict[str, Any]], data_root: Path, *, min_score: float,
@@ -652,13 +665,13 @@ def evaluate_chain(dataset_path: Path, split_path: Path, data_root: Path, cutter
     for frame, pixels, predictions in cutter_boxes(cutter_model, device, frames, data_root, min_score=thresholds[0],
                                                    batch_size=batch_size, num_workers=num_workers, task="chain"):
         height, width = int(pixels.shape[1]), int(pixels.shape[2])
+        cut = crop_cutter(data_root, frame, pixels)
         # Every box of the lowest threshold, cut from the frame at full resolution and classified once.
         for start in range(0, len(predictions), CLASSIFIER_BATCH):
             chunk = predictions[start:start + CLASSIFIER_BATCH]
             crops = []
             for item in chunk:
-                left, top, right, bottom = crop_rectangle(item["box"], width, height)
-                crops.append(transform(TF.to_pil_image(pixels[:, top:bottom, left:right])))
+                crops.append(transform(cut(crop_rectangle(item["box"], width, height))))
             with torch.no_grad():
                 probabilities = torch.softmax(model(torch.stack(crops).to(device)).float(), dim=1)
             for item, index, confidence in zip(chunk, probabilities.argmax(1).tolist(),

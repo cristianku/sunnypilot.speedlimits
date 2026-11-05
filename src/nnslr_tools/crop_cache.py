@@ -13,11 +13,14 @@ first epoch, into a cache of small uint8 arrays; an epoch only reads those. What
   so the crop is again the pixels of the frame. Only a box larger than MAX_BOX_SIDE input sizes is kept smaller (its
   window scaled down, the crop resampled from it): a near sign, downscaled to the input size anyway.
 
+A frame of a drive at full definition is cut from the frame beside its picture (training.crop_source): rows and boxes
+stay in the picture's pixels, so a crop has twice the pixels and only the stored window is finer than its rectangle.
+
 The evaluation (evaluate-classifier, evaluate-chain) and the comma never use this cache: they cut from the frame.
 
 The cache is a folder of data/derived/crop-cache named by a hash of what it holds (the version of this format, the
-input size, the class scheme, every image path, its sha256 when the dataset gives it, the box and how it is stored,
-and the sha256 of the dataset and of the Mapillary crops): two runs of the same plan share it (the control and the
+input size, the class scheme, every image path, its sha256 when the dataset gives it, whether it has a frame at full
+definition, the box and how it is stored, and the sha256 of the dataset and of the Mapillary crops): two runs of the same plan share it (the control and the
 second stage of a two-stage run, for example), and a change of any of these makes a new one. Old folders can be
 deleted at any time (rm -r data/derived/crop-cache): the next run cuts its crops again.
 """
@@ -34,7 +37,8 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from nnslr_tools.training import CLASSIFIER_BOX_JITTER, _safe_image_path, crop_rectangle
+from nnslr_tools.media import full_picture
+from nnslr_tools.training import CLASSIFIER_BOX_JITTER, _safe_image_path, crop_rectangle, crop_source
 
 FORMAT_VERSION = 1
 CACHE_FOLDER = Path("derived") / "crop-cache"
@@ -89,32 +93,32 @@ def _cut(task: tuple[str, str, int, str, list[tuple[int, int, list[float]]]]) ->
 
     root, image_path, size, scheme, items = task
     rectangle = rectangle_of(scheme)
-    with Image.open(_safe_image_path(Path(root), image_path)) as source:
-        image = source.convert("RGB")
-    width, height = image.size
+    image, factor = crop_source(_safe_image_path(Path(root), image_path))
+    width, height = image.width // factor, image.height // factor
     out = []
     for index, kind, box in items:
         if kind == EXACT:
             region = rectangle(box, width, height)
-            pixels = image.crop(region).resize((size, size), Image.BILINEAR)
+            pixels = image.crop(tuple(value * factor for value in region)).resize((size, size), Image.BILINEAR)
         else:
             region = _window(box, width, height)
-            side_x = max(abs(float(box[2]) - float(box[0])), 1.0)
-            side_y = max(abs(float(box[3]) - float(box[1])), 1.0)
+            cut = tuple(value * factor for value in region)
+            side_x = max(abs(float(box[2]) - float(box[0])), 1.0) * factor
+            side_y = max(abs(float(box[3]) - float(box[1])), 1.0) * factor
             keep_x = min(1.0, MAX_BOX_SIDE * size / side_x)
             keep_y = min(1.0, MAX_BOX_SIDE * size / side_y)
-            span_x, span_y = region[2] - region[0], region[3] - region[1]
+            span_x, span_y = cut[2] - cut[0], cut[3] - cut[1]
             if keep_x == 1.0 and keep_y == 1.0:
-                pixels = image.crop(region)
+                pixels = image.crop(cut)
             else:
                 pixels = image.resize((max(1, round(span_x * keep_x)), max(1, round(span_y * keep_y))),
-                                      Image.BILINEAR, box=region)
+                                      Image.BILINEAR, box=cut)
         array = np.ascontiguousarray(np.asarray(pixels, dtype=np.uint8))
         out.append((index, kind, array.tobytes(), array.shape[0], array.shape[1], region, width, height))
     return out
 
 
-def cache_key(records: list[dict[str, Any]], kinds: list[int], *, size: int, scheme: str,
+def cache_key(records: list[dict[str, Any]], kinds: list[int], full_frames: set[str], *, size: int, scheme: str,
               content: dict[str, Any]) -> str:
     """The name of the cache of these records stored this way (see the module docstring)."""
     digest = hashlib.sha256()
@@ -122,8 +126,9 @@ def cache_key(records: list[dict[str, Any]], kinds: list[int], *, size: int, sch
                               "pad": WINDOW_PAD, "max_box_side": MAX_BOX_SIDE, "content": content},
                              sort_keys=True).encode())
     for record, kind in zip(records, kinds):
+        full = ["full"] if record["image_path"] in full_frames else []
         digest.update(json.dumps([record["image_path"], record.get("image_sha256"),
-                                  [float(value) for value in record["bbox_xyxy"]], kind]).encode())
+                                  [float(value) for value in record["bbox_xyxy"]], kind, *full]).encode())
         digest.update(b"\n")
     return digest.hexdigest()
 
@@ -197,7 +202,9 @@ def build_crop_cache(data_root: Path, records: list[dict[str, Any]], kinds: list
     if len(records) != len(kinds):
         raise ValueError("one storage kind per record")
     root = Path(data_root).resolve()
-    key = cache_key(records, kinds, size=size, scheme=scheme, content=content)
+    full_frames = {path for path in {record["image_path"] for record in records}
+                   if full_picture(_safe_image_path(root, path)).is_file()}
+    key = cache_key(records, kinds, full_frames, size=size, scheme=scheme, content=content)
     folder = root / CACHE_FOLDER / key[:32]
     started = time.perf_counter()
     if (folder / "meta.json").is_file():
@@ -233,7 +240,7 @@ def build_crop_cache(data_root: Path, records: list[dict[str, Any]], kinds: list
         np.save(staging / "index.npy", index)
         meta = {"format_version": FORMAT_VERSION, "key": key, "size": size, "scheme": scheme,
                 "crops": len(records), "windows": int(sum(1 for kind in kinds if kind == WINDOW)),
-                "frames": len(tasks), "megabytes": round(offset / 1e6, 1), "content": content,
+                "frames": len(tasks), "full_frames": len(full_frames), "megabytes": round(offset / 1e6, 1), "content": content,
                 "columns": list(COLUMNS)}
         (staging / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         try:

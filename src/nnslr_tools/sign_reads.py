@@ -105,7 +105,7 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
     """Write the pictures of the comma's reads of a drive (see the module's text); returns what was done. scan: read
     the drive's logs first when Drive review has not (or not with these files); workers: segments at once."""
     from nnslr_tools import drive_review
-    from nnslr_tools.media import extract_frames, extracted_frame_rows
+    from nnslr_tools.media import extract_frames, extracted_frame_rows, remove_picture
     from nnslr_tools.route_io import discover_segment_dirs
     from nnslr_tools.sync import SLOW_ONLY_MARK
     root = Path(root)
@@ -134,7 +134,7 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
         video = source / 'fcamera.hevc' if source else None
         if not wanted or video is None or not video.is_file():
             for path in directory.glob(f'{READ_PREFIX}_*.png'):
-                path.unlink()
+                remove_picture(path)
             manifest_path.unlink(missing_ok=True)
             return segment, 'none', 0
         video_sha = pictures[0].get('source_video_sha256') if pictures else None
@@ -150,7 +150,7 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
         for row in extracted_frame_rows(result, route_id=route, segment_index=segment, alignment=alignment):
             if not isinstance(row.get('media_time_s'), (int, float)):
                 # Without its time the frame would sit at the end of the segment: left out.
-                Path(row['image_path']).unlink(missing_ok=True)
+                remove_picture(row['image_path'])
                 continue
             read = by_decoded[row['decoded_frame_index']]
             rows.append({**row, 'comma_read_kph': read['kph'], 'comma_read_mono_ns': read['t_ns']})

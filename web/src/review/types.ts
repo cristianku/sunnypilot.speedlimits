@@ -111,6 +111,8 @@ export interface RouteLink {
   title?: string | null;
   when?: string | null;
   minutes?: number | null;
+  /** Recorded at 2688 x 1520 (drives.full_definition): its pictures here are sharper than the frame's pixels. */
+  full_definition?: boolean;
 }
 
 /** The JSON in <script id="payload">. server is false in the static index.html of write_review (offline). */

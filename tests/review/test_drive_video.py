@@ -82,7 +82,8 @@ def test_the_gpu_must_write_every_frame_of_the_index(tmp_path, monkeypatch):
     # A frame lost where two minutes join would move all the minutes after it.
     monkeypatch.setattr(drive_video, '_ffmpeg', lambda _arguments, _done: 59)
     with pytest.raises(RuntimeError, match='59 frames written of 60'):
-        drive_video._encode_on_gpu([(0, tmp_path / 'fcamera.hevc')], tmp_path / 'out.mp4', 60, lambda _frames: None)
+        drive_video._encode_on_gpu([(0, tmp_path / 'fcamera.hevc')], tmp_path / 'out.mp4', drive_video.WIDTH, 60,
+                                   lambda _frames: None)
 
 
 @needs_ffmpeg

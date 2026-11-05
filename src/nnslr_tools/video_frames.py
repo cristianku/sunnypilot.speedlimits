@@ -28,6 +28,8 @@ import threading
 from functools import lru_cache
 from pathlib import Path
 
+from nnslr_tools.media import (FRAME_SIZE, FULL_SIZE, REDUCE_FILTER, MediaToolError, extract_frames,
+                               extracted_frame_rows, full_picture, remove_picture, video_dimensions)
 from nnslr_tools.sign_reads import CAMERA_FPS, READ_INDEX_BASE, frame_second
 
 WIDE_VIDEO = 'ecamera.hevc'
@@ -45,7 +47,8 @@ _locks_guard = threading.Lock()
 # The frame timings of the videos last saved from (timings_of), oldest first.
 TIMINGS_KEPT = 16
 _timings: dict[tuple, tuple] = {}
-# The GOPs last decoded to NV12 (nv12_frame), oldest first: about 30 MB each for the road camera.
+# The GOPs last decoded to NV12 (nv12_frame), oldest first: about 30 MB each for the road camera, 180 MB as recorded at
+# full definition.
 NV12_GOPS_KEPT = 2
 _nv12: dict[tuple, bytes] = {}
 
@@ -177,13 +180,10 @@ def gop_bytes(video: Path, first: int, last: int) -> bytes:
 @lru_cache(maxsize=512)
 def _size(path: str, mtime_ns: int, size: int) -> tuple[int, int]:
     del mtime_ns, size
-    probe = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
-                            '-of', 'csv=p=0', path], capture_output=True, text=True, check=False)
     try:
-        width, height = (int(value) for value in probe.stdout.strip().split(',')[:2])
-    except ValueError:
-        raise VideoFrameError('the size of the road video cannot be read: ' + probe.stderr.strip()[:200]) from None
-    return width, height
+        return video_dimensions(Path(path))
+    except MediaToolError as error:
+        raise VideoFrameError(f'the size of the road video cannot be read: {error.stderr[:200] or error}') from None
 
 
 def video_size(video: Path) -> tuple[int, int]:
@@ -192,20 +192,25 @@ def video_size(video: Path) -> tuple[int, int]:
     return _size(str(video), stat.st_mtime_ns, stat.st_size)
 
 
-def nv12_frame(video: Path, decoded: int) -> tuple[bytes, int, int]:
+def nv12_frame(video: Path, decoded: int, *, native: bool = False) -> tuple[bytes, int, int]:
     """(NV12 bytes, width, height) of a frame of the road video, the road camera's pixel format (the one speedvisiond
-    reads): its GOP decoded on its own (gop_bytes), the last NV12_GOPS_KEPT GOPs kept."""
+    reads): its GOP decoded on its own (gop_bytes), the last NV12_GOPS_KEPT GOPs kept. A video at full definition comes
+    reduced to the size the cutter reads on the car, or as recorded with ``native`` (what speedvisiond crops from)."""
     first, last = gop_of(video, decoded)
     width, height = video_size(video)
+    reduce = (width, height) == FULL_SIZE and not native
+    if reduce:
+        width, height = FRAME_SIZE
     size = width * height * 3 // 2
     stat = video.stat()
-    key = (str(video), stat.st_mtime_ns, stat.st_size, first)
+    key = (str(video), stat.st_mtime_ns, stat.st_size, first, reduce)
     with _lock('nv12', str(video), first):
         with _locks_guard:
             frames = _nv12.get(key)
         if frames is None:
-            decode = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', '-', '-vsync', '0', '-pix_fmt',
-                                     'nv12', '-f', 'rawvideo', '-'], input=gop_bytes(video, first, last),
+            decode = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', '-', '-vsync', '0',
+                                     *(['-vf', REDUCE_FILTER] if reduce else []), '-pix_fmt', 'nv12',
+                                     '-f', 'rawvideo', '-'], input=gop_bytes(video, first, last),
                                     capture_output=True, check=False)
             frames = decode.stdout
             if decode.returncode != 0 or len(frames) != (last - first + 1) * size:
@@ -312,7 +317,6 @@ def added_rows(root: Path, route: str) -> list[dict]:
 def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dict, bool]:
     """(manifest row, made now) of a frame between the seconds: its PNG taken out of the video as the pictures at 1
     a second are (nnslr_tools.media.extract_frames), added to video_frames.jsonl of its segment."""
-    from nnslr_tools.media import extract_frames, extracted_frame_rows
     root = Path(root)
     video = video_of(root, route, segment)
     first, last = gop_of(video, decoded)
@@ -341,6 +345,8 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
                 raise VideoFrameError('the frame has no time in the video')
             final = directory / Path(made['image_path']).name
             Path(made['image_path']).replace(final)
+            if full_picture(made['image_path']).is_file():
+                full_picture(made['image_path']).replace(full_picture(final))
         made['image_path'] = str(final)
         rows = [row for row in rows if row.get('decoded_frame_index') != decoded] + [made]
         temporary = manifest.with_suffix('.jsonl.tmp')
@@ -358,7 +364,7 @@ def forget(root: Path, route: str, segment: int, decoded: int) -> None:
         kept = [row for row in rows if row.get('decoded_frame_index') != decoded]
         for row in rows:
             if row.get('decoded_frame_index') == decoded:
-                Path(row.get('image_path', '')).unlink(missing_ok=True)
+                remove_picture(row.get('image_path', ''))
         if not kept:
             manifest.unlink(missing_ok=True)
         elif len(kept) != len(rows):

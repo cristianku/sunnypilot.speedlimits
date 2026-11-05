@@ -47,9 +47,10 @@ def run(request: dict) -> None:
     import torch
     import torchvision.transforms.functional as TF
     from nnslr_tools import chain
-    from nnslr_tools.chain import (CLASSIFIER_BATCH, _device, _load_classifier, _load_cutter, cutter_boxes,
-                                   cutter_kind)
+    from nnslr_tools.chain import (CLASSIFIER_BATCH, _device, _load_classifier, _load_cutter, crop_cutter,
+                                   cutter_boxes, cutter_kind)
     from nnslr_tools.context_experiment import Decider
+    from nnslr_tools.media import save_preview
     from nnslr_tools.preannotate import suppress_overlaps
     from nnslr_tools.signnet import CAR_MAX_BOXES
     from nnslr_tools.training import crop_rectangle
@@ -81,13 +82,13 @@ def run(request: dict) -> None:
                                                                       batch_size=4, num_workers=2, task='prepare')):
             height, width = int(pixels.shape[1]), int(pixels.shape[2])
             image = TF.to_pil_image(pixels)
+            cut = crop_cutter(root, frame, pixels)
             detections = []
             for start in range(0, len(boxes), CLASSIFIER_BATCH):
                 chunk = boxes[start:start + CLASSIFIER_BATCH]
                 crops = []
                 for item in chunk:
-                    left, top, right, bottom = crop_rectangle(item['box'], width, height)
-                    crops.append(transform(TF.to_pil_image(pixels[:, top:bottom, left:right])))
+                    crops.append(transform(cut(crop_rectangle(item['box'], width, height))))
                 with torch.no_grad():
                     probabilities = torch.softmax(classifier(torch.stack(crops).to(device)).float(), dim=1)
                 for item, index, confidence in zip(chunk, probabilities.argmax(1).tolist(),
@@ -115,7 +116,7 @@ def run(request: dict) -> None:
             for i, item in enumerate(detections):
                 item['detection_id'] = f"{frame['frame_key']}/{i}"
             preview = f'images/{ordinal:08}.jpg'
-            image.save(output / preview, quality=92)
+            save_preview(image, root / frame['image_path'], output / preview)
             row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
                    'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
                    'review_state': 'pending', 'ground_truth': False, 'model': proposer, 'road_model': None, 'ocr': None,

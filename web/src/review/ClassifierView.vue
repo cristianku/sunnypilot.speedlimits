@@ -13,13 +13,16 @@ const props = defineProps<{row: FrameRow; box: Box | null}>();
 
 const view = useTemplateRef<HTMLCanvasElement>('view');
 const crop = computed(() => (props.box === null ? null : cropRectangle(props.box, props.row.width, props.row.height)));
-const pixels = computed(() => {
-  const c = crop.value;
-  return c === null ? '' : (c[2] - c[0]) + ' × ' + (c[3] - c[1]) + ' px';
-});
-
 /** The photo of this frame once loaded: a crop is never cut from the previous one. */
 const photo = shallowRef<HTMLImageElement | null>(null);
+// In the photo's own pixels: twice the row's on a drive at full definition.
+const pixels = computed(() => {
+  const c = crop.value;
+  if (c === null) return '';
+  const scale = (photo.value?.naturalWidth ?? props.row.width) / props.row.width;
+  return Math.round((c[2] - c[0]) * scale) + ' × ' + Math.round((c[3] - c[1]) * scale) + ' px';
+});
+
 watch(() => props.row.preview_path, (href) => {
   photo.value = null;
   const image = new Image();
