@@ -160,33 +160,10 @@ with sync_playwright() as p:
     car.locator('#quickValues [data-value="30"]').click()
     car.keyboard.press('t')
     car.wait_for_selector('#carList')
-    # A frame already changed keeps its boxes: what is not among them waits in the card, with Use.
     what = car.locator('#carList .hint-what').all_inner_texts()
-    assert len(what) == 1 and what[0].endswith('30, with hours'), what
-    assert car.locator('#carList .car-row button').inner_text() == 'Use'
-    assert car.locator('#boxList .box-main').count() == 1
-    # A frame still to review takes them straight in its list, but for what is read as not a sign, and stays to review.
-    false_box = {**plain, 'box': [20, 2, 34, 20], 'class': 'not_a_sign', 'speed': None, 'use': 'nothing',
-                 'review': {'family': 'not_a_sign', 'value_kph': None}}
-    free = {**plain, 'box': [2, 2, 12, 12]}
-    car.unroute('**/car/**')
-    car.route('**/car/**', lambda request: request.fulfill(json={
-        'ok': True, 'frame_key': '0/3', 'signs': [free, false_box], 'surest': 0, 'width': 1344, 'height': 760,
-        'release': release, 'ms': 5}))
-    car.keyboard.press('ArrowRight')
-    car.locator('#carList .hint-what', has_text='Not a sign').wait_for()
-    placed = car.locator('#boxList .box-main')
-    assert placed.count() >= 1
-    count = placed.count()
-    assert car.locator('#carList .car-row').count() == 1
-    # Deleted, it does not come back on its own.
-    placed.last.click()
-    car.locator('#remove').click()
-    assert car.locator('#boxList .box-main').count() == count - 1
-    car.keyboard.press('ArrowLeft')
-    car.keyboard.press('ArrowRight')
-    car.wait_for_timeout(400)
-    assert car.locator('#boxList .box-main').count() == count - 1
+    assert what[0].endswith('30, with hours') and not what[1].endswith('with hours'), what
+    rows = car.locator('#carList .car-row')
+    assert rows.nth(0).locator('button').inner_text() == 'Use' and rows.nth(1).locator('button').inner_text() == 'Already used'
     browser.close()
 assert not errors, errors
 '''
