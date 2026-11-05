@@ -301,7 +301,8 @@ class SpeedReviewStore:
             for row in under:
                 for first, last in ((row['start_ns'], start_ns), (end_ns, row['end_ns'])):
                     if first < last:
-                        known = row['known_ns'] if row['known_ns'] is not None and first <= row['known_ns'] < last else None
+                        known = row['known_ns']
+                        known = None if known is None or known < first else min(known, last - 1)
                         connection.execute(insert, (route, first, last, row['kph'], row['state'], known, row['note'],
                                                     row['reviewer'], row['revision']))
             if label is not None:

@@ -115,13 +115,15 @@ def test_a_write_clips_what_it_covers_and_a_clear_brings_the_proposal_back(store
     assert store.examined()[ROUTE] == 35 * NS
 
 
-def test_a_clipped_stretch_loses_a_known_time_outside_it(store):
+def test_a_clipped_stretch_stays_not_known_up_to_its_time(store):
     store.apply(ROUTE, at(0), at(100), label(120, known_ns=at(70)), 0, 'a')
     store.apply(ROUTE, at(50), at(60), label(80), 1, 'a')
     left, _middle, right = store.stretches(ROUTE)
-    assert left['known_ns'] is None and right['known_ns'] == at(70)
+    # Before the time nothing of it is known, up to its last instant, and the time stays inside the piece.
+    assert left['known_ns'] == at(50) - 1 and right['known_ns'] == at(70)
     store.apply(ROUTE, at(60), at(80), label(90), 2, 'a')
     assert store.stretches(ROUTE)[-1]['known_ns'] is None
+
 
 
 def test_a_stale_revision_changes_nothing(store):

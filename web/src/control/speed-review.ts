@@ -69,7 +69,8 @@ export function withCuts(stretches: readonly Stretch[], cuts: readonly number[])
     const edges = [item.start_ns, ...cuts.filter((cut) => item.start_ns < cut && cut < item.end_ns).sort((a, b) => a - b), item.end_ns];
     return edges.slice(1).map((end, index) => {
       const start = edges[index]!;
-      const known = item.known_ns !== null && start <= item.known_ns && item.known_ns < end ? item.known_ns : null;
+      // A piece before the time stays not known to its end, as the server clips it.
+      const known = item.known_ns === null || item.known_ns < start ? null : Math.min(item.known_ns, end - 1);
       return {...item, start_ns: start, end_ns: end, known_ns: known};
     });
   });
