@@ -465,11 +465,21 @@ def test_the_result_has_the_roads_seen_beside_those_not_seen(tmp_path, monkeypat
     assert result['answers'] == {'00000001--abcdef0123': 8}
 
 
-def signed_drive():
+def test_the_result_counts_the_labelled_frames_of_each_drive(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+
+    def one_frame_less(drive):
+        drive['speed_weight'][0] = 0
+
+    result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], one_frame_less)
+    assert result['answers'] == {'00000001--abcdef0123': 7}
+
+
+def signed_drive(partitions=('test',) * 7):
     """A number that its answers say, no number, and a number its answers do not say."""
     import numpy
     from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs, speed_class
-    drive = fake_drive(['test'] * 7)
+    drive = fake_drive(list(partitions))
     kph = numpy.array([100, 100, 100, 0, 0, 60, 60])
     drive['inputs']['signs'][:, 0], drive['inputs']['signs'][:, 1] = kph / BRAIN_INPUTS.SIGN_KPH_SCALE, kph > 0
     drive['speed'] = numpy.array([speed_class(value) for value in [100, 100, 100, 90, 90, 70, 70]])
@@ -477,10 +487,11 @@ def signed_drive():
     return drive
 
 
-def swapped_measure(monkeypatch, answer, drive):
+def swapped_measure(monkeypatch, answer, *drives, partition='test'):
     from nnslr_tools import brain_train
     monkeypatch.setattr(brain_train, 'predict', lambda _model, seen, _store, **_options: said(answer(seen)))
-    return brain_train._swapped_measure(None, [drive], [said(answer(drive))], 'test', GROUPS, None, chunk=4, device='cpu')
+    before = [said(answer(drive)) for drive in drives]
+    return brain_train._swapped_measure(None, list(drives), before, partition, GROUPS, None, chunk=4, device='cpu')
 
 
 def test_test_swapped_asks_only_the_frames_whose_number_changed_and_the_network_must_change_with_it(monkeypatch):
@@ -491,6 +502,29 @@ def test_test_swapped_asks_only_the_frames_whose_number_changed_and_the_network_
     assert follows['moved'] == 3
     stays = swapped_measure(monkeypatch, lambda seen: numpy.full(7, 100), signed_drive())
     assert stays['network'] == {'frames': 3, 'right': 0.0, 'mean_error_kph': 20.0} and stays['moved'] == 0
+
+
+def test_a_network_deaf_to_the_sign_can_be_right_on_a_swap_and_moves_nothing(monkeypatch):
+    import numpy
+    found = swapped_measure(monkeypatch, lambda seen: numpy.full(7, 120), signed_drive())
+    assert found['network']['right'] == 1.0 and found['moved'] == 0
+
+
+@pytest.mark.parametrize('partitions, frames', [(['validation'] * 7, 3), (['validation'] * 2 + ['test'] * 5, 2)])
+def test_the_swap_asks_the_frames_of_its_partition_alone(monkeypatch, partitions, frames):
+    from nnslr_tools.brain_targets import sign_kph
+    drive = signed_drive(partitions)
+    found = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), drive, partition='validation')
+    assert found['network']['frames'] == frames and found['moved'] == frames
+
+
+def test_each_drive_is_compared_with_its_own_answers(monkeypatch):
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, sign_kph
+    plain = signed_drive()
+    plain['speed'][:] = 16
+    plain['inputs']['signs'][:3, 0] = 120 / BRAIN_INPUTS.SIGN_KPH_SCALE
+    found = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), plain, signed_drive())
+    assert found['network']['frames'] == 3 and found['moved'] == 3
 
 
 def test_a_frame_after_an_end_read_is_not_asked_to_move(monkeypatch):
@@ -505,9 +539,11 @@ def test_a_frame_after_an_end_read_is_not_asked_to_move(monkeypatch):
 def test_the_swap_is_measured_on_validation_and_on_test_each_on_its_own(tmp_path, monkeypatch):
     torch = torch_or_skip()
     from nnslr_tools import brain_train
-    monkeypatch.setattr(brain_train, '_swapped_measure', lambda *found, **_options: found[3])
+    real = brain_train.predict
+    monkeypatch.setattr(brain_train, 'predict', lambda *args, cold=False, **options: {**real(*args, cold=cold, **options), 'cold': cold})
+    monkeypatch.setattr(brain_train, '_swapped_measure', lambda *found, **_options: [found[3], found[2][0]['cold']])
     result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
-    assert result['validation_swapped'] == 'validation' and result['test_swapped'] == 'test'
+    assert result['validation_swapped'] == ['validation', False] and result['test_swapped'] == ['test', False]
 
 
 def test_test_swapped_with_no_passage_to_change_has_no_frames(monkeypatch):

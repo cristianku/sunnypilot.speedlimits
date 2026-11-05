@@ -81,7 +81,7 @@ A family is numbers the same kind of road can have, so that no scene turns absur
 an answer off the number stays as it is: the sign was wrong there, and that too is for the brain to learn. A frame with no
 number in force keeps its answer, since the road alone says it there, and an end read keeps the answer after it. Besides the
 number, the single readings equal to it change, on the frames of the passage. Nothing of this reaches a measure, but
-brain_train's test_swapped, which asks exactly this of the frames of test.
+brain_train's test_swapped and validation_swapped, which ask exactly this of their frames.
 
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a

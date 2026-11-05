@@ -1,6 +1,6 @@
 """The brain: one network with memory that says the speed to hold, from the road camera and what was read, and nothing of a
 map. Here are the network and its loss, the end of the road from a person's labels to the weights
-(nnslr_tools.brain_targets makes the answers). There is no training yet: that is started only on request.
+(nnslr_tools.brain_targets makes the answers, nnslr_tools.brain_train trains it, only on request).
 
 The network, per frame: encoder (MobileNetV3-small, as the road-type network) -> features, with the inputs of the frame
 (brain_targets.INPUT_SIZES) -> GRU -> h, then two heads on h:
@@ -15,10 +15,11 @@ speed uses too: that is how a mark changes the network, without ever being an in
 (works=False), on sites of test and validation.
 
 The number goes straight to the answer too: number is 1 on the class of the number in force, so trust(h) is added to that
-class alone. As one value among the GRU's inputs it reached nothing: with the numbers swapped in training (5 Nov 2026) the
-answer did not move when the number changed, not even with one constant picture in place of the road. The network still
-decides: trust comes from the memory and can be 0 or below on a sign it has reason to doubt, and speed_head can say any speed.
-It is all comparisons, which export as they are.
+class alone. As one value among the GRU's inputs it hardly reached the answer: with the numbers swapped in training (5 Nov
+2026) the answer moved on almost no frame when the number changed, and on few even with one constant picture in place of the
+road. The network still decides: trust comes from the memory and can be 0 or below on a sign it has reason to doubt, and
+speed_head can say any speed. It is all comparisons, which export as they are. A comparison with no signs among the groups
+has no number and no such path.
 
 The picture's features. pool 'mean' is the road-type network's: the mean of the 8 x 5 map keeps what is in a frame and loses
 most of where, and a truck in the lane beside ours is a matter of where. pool 'grid' keeps the map: a 1 x 1 convolution to
@@ -55,7 +56,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
     if pool not in POOLS:
         raise ValueError(f'pool must be one of {POOLS}')
     extra = sum(INPUT_SIZES[name] for name in groups)
-    signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')])
+    signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -90,6 +91,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
 
         def number_in_force(self, extra_input):
             """(B, T, inputs) -> (B, T, SPEED_CLASSES): 1 on the class of the number in force, all 0 with none."""
+            if signs_at is None:
+                return extra_input.new_zeros(*extra_input.shape[:-1], SPEED_CLASSES)
             signs = extra_input[..., signs_at:signs_at + INPUT_SIZES['signs']]
             held = (signs[..., 1:2] > 0) & (signs[..., 6:7] == 0)
             near = (signs[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < GRID_KPH / 2

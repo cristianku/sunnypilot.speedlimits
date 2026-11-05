@@ -279,6 +279,33 @@ def test_the_trust_in_the_number_learns_from_a_frame_that_says_it():
     assert gradient_of(model, 'trust') > 0
 
 
+def test_the_trust_in_the_number_is_one_value_that_comes_from_the_memory():
+    from nnslr_tools.brain_targets import speed_class
+    model = net()
+    with torch.no_grad():
+        model.speed_head.weight.zero_()
+        model.speed_head.bias.zero_()
+        said = model(batch(2)[0], number_row(60))[0][0, :, speed_class(60)]
+    assert said[0] != said[1]
+    assert model.trust.out_features == 1
+
+
+def test_a_mark_does_not_reach_the_trust_through_the_number():
+    model = net()
+    backward(model, batch(2)[0], number_row(60), answers(2, works_on=[0, 1]))
+    assert gradient_of(model, 'works_head') > 0
+    assert gradient_of(model, 'trust') == 0
+
+
+def test_with_no_signs_among_the_groups_there_is_no_number_to_add():
+    from nnslr_tools.brain_net import build_brain_net
+    from nnslr_tools.brain_targets import INPUT_SIZES
+    groups = ('plate', 'hour', 'country')
+    model = trusting(build_brain_net(groups, pretrained=False), 3.0)
+    extra = torch.ones(1, 2, sum(INPUT_SIZES[name] for name in groups))
+    assert model(batch(2)[0], extra)[0].abs().sum() == 0
+
+
 def test_the_number_is_found_wherever_the_signs_are_among_the_groups():
     from nnslr_tools.brain_net import build_brain_net
     from nnslr_tools.brain_targets import speed_class
