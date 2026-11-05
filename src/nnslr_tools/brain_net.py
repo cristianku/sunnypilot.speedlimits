@@ -45,7 +45,7 @@ BACKBONE_CHANNELS = 576
 TRAINING_ONLY = 'works_head.'
 
 
-def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool = True, pretrained: bool = True,
+def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, pretrained: bool = True,
                     features: int = FEATURES, hidden: int = HIDDEN):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, SPEED_CLASSES), works logit (B, T) or None, state)."""

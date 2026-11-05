@@ -1661,8 +1661,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "result.json into --run-dir")
     p_brain_net.add_argument("--run-dir", required=True, help="the folder of this run")
     p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
-    p_brain_net.add_argument("--driver", action="store_true", help="with the gas, the brake and the car's speed as inputs")
-    p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="mean",
+    p_brain_net.add_argument("--no-driver", action="store_true", help="the comparison: without the gas, the brake and the "
+                                                                      "car's speed as inputs")
+    p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
     p_brain_net.add_argument("--seed", type=int, default=0)
@@ -2620,7 +2621,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
-                                     works=not args.no_works, driver=args.driver, device=args.device, dry_run=args.dry_run,
+                                     works=not args.no_works, driver=not args.no_driver, device=args.device, dry_run=args.dry_run,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},

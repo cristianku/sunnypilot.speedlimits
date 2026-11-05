@@ -95,12 +95,12 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # trained with and without memory and exported as one ONNX step, on a run of its own (start() adds <time>-road-type).
 ROAD_TYPE_SCRIPT = 'scripts/run_road_type.sh'
 # The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
-# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'off'|'on', 'pool': 'mean'|'grid'}, the variables
-# of the script. A brain with the driver's inputs is only to measure: the car does not give them.
+# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'on'|'off', 'pool': 'grid'|'mean'}, the variables
+# of the script, the first of each the usual one.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
-BRAIN_DRIVER = {'off': '0', 'on': '1'}
-BRAIN_POOLS = ('mean', 'grid')
+BRAIN_DRIVER = {'on': '1', 'off': '0'}
+BRAIN_POOLS = ('grid', 'mean')
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
@@ -267,10 +267,10 @@ def _settings_of(log: Path, action: str) -> list[str]:
     # The brain's choices (scripts/run_brain.sh), when not the usual ones.
     if '--no-works' in flags:
         chips.append('no roadworks')
-    if '--driver' in flags:
-        chips.append('driver’s inputs: not for the car')
-    if flags.get('--pool') == 'grid':
-        chips.append('picture as a grid')
+    if '--no-driver' in flags:
+        chips.append('no driver’s inputs')
+    if flags.get('--pool') == 'mean':
+        chips.append('picture as a mean')
     if flags.get('--batch-size') or flags.get('--batch'):
         chips.append('batch ' + (flags.get('--batch-size') or flags['--batch']))
     if flags.get('--learning-rate'):
@@ -1575,7 +1575,7 @@ class Panel:
     def _brain_choices(self, options: dict) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'driver', 'pool'}), the usual
         ones when not given."""
-        works, driver, pool = options.get('works', 'on'), options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
+        works, driver, pool = options.get('works', 'on'), options.get('driver', 'on'), options.get('pool', BRAIN_POOLS[0])
         if not all(isinstance(value, str) for value in (works, driver, pool)) or works not in BRAIN_WORKS \
                 or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
             raise PanelError(400, 'bad_option', 'Roadworks and the driver’s inputs are on or off, the picture mean or grid.')

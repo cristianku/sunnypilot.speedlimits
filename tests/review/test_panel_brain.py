@@ -1,6 +1,5 @@
 """The brain in the panel: "Train the brain" (scripts/run_brain.sh) from Train › Brain, what it learns, its progress read from
-its log (nnslr_tools.job_progress), what the labels give it, and a brain with the driver's inputs that cannot be chosen for
-the car. Nothing is trained: the script is a stand-in, the log has the lines nnslr_tools.brain_train writes."""
+its log (nnslr_tools.job_progress), what the labels give it, and which brains can be chosen for the car. Nothing is trained: the script is a stand-in, the log has the lines nnslr_tools.brain_train writes."""
 from __future__ import annotations
 
 import re
@@ -104,7 +103,7 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_speed_is_marked(root, ch
     assert first[:2] == ['==', 'scripts/run_brain.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-brain', first[2])
     assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the brain')
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_brain') == first[2]
-    assert 'choices: 1 0 mean' in lines
+    assert 'choices: 1 1 grid' in lines
 
 
 def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkout, monkeypatch):
@@ -112,15 +111,15 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     brain_script(checkout)
     speed_marked(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
-    job = panel.start('train_brain', {'works': 'off', 'driver': 'on', 'pool': 'grid'})
+    job = panel.start('train_brain', {'works': 'off', 'driver': 'off', 'pool': 'mean'})
     done = finished(panel, job['id'])
-    assert 'choices: 0 1 grid' in full_log(panel, job['id']).splitlines()
+    assert 'choices: 0 0 mean' in full_log(panel, job['id']).splitlines()
     assert done['state'] == 'ok'
     # The job's chips, from the settings line of the script.
     log = root / 'brain.log'
-    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --no-works --driver\n')
-    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no roadworks', 'driver’s inputs: not for the car', 'picture as a grid']
-    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean\n')
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean --no-works --no-driver\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no roadworks', 'no driver’s inputs', 'picture as a mean']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs']
 
 
@@ -136,7 +135,7 @@ def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, o
     assert panel.jobs() == []
 
 
-@pytest.mark.parametrize('key,value', [('works', 'off'), ('driver', 'on'), ('pool', 'grid')])
+@pytest.mark.parametrize('key,value', [('works', 'off'), ('driver', 'off'), ('pool', 'mean')])
 def test_its_choices_are_refused_on_another_training(root, checkout, key, value):
     with pytest.raises(PanelError) as refused:
         Panel(root, repo=checkout).start('train_road_type', {key: value})
@@ -151,11 +150,11 @@ def test_it_is_a_step_of_the_pipeline_with_its_choices(root, checkout, monkeypat
     with pytest.raises(PanelError) as refused:
         panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'pool': 'max'}}]}, None)
     assert refused.value.status == 400
-    view = panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'works': 'off', 'pool': 'grid'}}]}, None)
+    view = panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'works': 'off', 'pool': 'mean'}}]}, None)
     assert view['steps'][0]['action'] == 'train_brain'
     job = next(item for item in panel.jobs() if item['action'] == 'train_brain')
     finished(panel, job['id'])
-    assert 'choices: 0 0 grid' in full_log(panel, job['id']).splitlines()
+    assert 'choices: 0 1 mean' in full_log(panel, job['id']).splitlines()
 
 
 def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_log(root, checkout):
@@ -169,10 +168,10 @@ def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_lo
 
 
 # -- what can go to the car ---------------------------------------------------------------------------------------
-def test_a_brain_with_the_drivers_inputs_cannot_be_chosen_for_the_car():
+def test_a_brain_can_be_chosen_for_the_car_with_or_without_the_drivers_inputs():
     usual = {'role': 'brain', 'finished': True, 'groups': ['signs', 'plate', 'hour', 'lead', 'country']}
     assert selectable(usual) == (True, None)
-    assert selectable({**usual, 'groups': [*usual['groups'], 'pedals', 'speed']}) == (False, 'driver_inputs')
+    assert selectable({**usual, 'groups': [*usual['groups'], 'pedals', 'speed']}) == (True, None)
     assert selectable({**usual, 'finished': False}) == (False, 'not_finished')
 
 
@@ -216,11 +215,11 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         # Train › Brain's own button: a wrong choice is refused, never dropped (nothing starts).
         status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'pool': 'max'})
         assert status == 400 and json_of(data)['error'] == 'bad_option'
-        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'works': 'off', 'pool': 'grid'})
+        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'works': 'off', 'pool': 'mean'})
         assert status == 200, data
         job = json_of(data)['id']
         finished(server.app.panel, job)
-        assert 'choices: 0 0 grid' in full_log(server.app.panel, job).splitlines()
+        assert 'choices: 0 1 mean' in full_log(server.app.panel, job).splitlines()
         status, _, data = server.request('GET', '/api/panel/brain-labels')
         assert status == 200 and json_of(data)['to_read'] == 0
     finally:

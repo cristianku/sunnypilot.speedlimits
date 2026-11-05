@@ -61,12 +61,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
-    const driver = options?.driver === 'on' ? ' With the driver’s inputs: only to measure, it cannot go to the car.' : '';
-    const grid = options?.pool === 'grid' ? ' With the picture as a grid.' : '';
+    const driver = options?.driver === 'off' ? ' Without the driver’s inputs.' : '';
+    const mean = options?.pool === 'mean' ? ' With the picture as a mean.' : '';
     return {title: 'Train the brain?', action: 'Start training',
       text: 'First it reads the signs of the drives of Speed review as the car does today, then trains three seeds on the GPU: '
         + 'about 15 minutes. Three new versions in Models; '
-        + 'nothing goes to the car until you choose one and Publish.' + works + driver + grid};
+        + 'nothing goes to the car until you choose one and Publish.' + works + driver + mean};
   }
   if (name === 'train_decider') {
     return {title: 'Train applicability?', action: 'Start training',

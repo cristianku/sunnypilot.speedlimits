@@ -1,6 +1,6 @@
 // What the next training of the brain learns, kept once for Train › Brain and for its step of Train › Pipeline (the same
-// choice in both): its roadworks head, the picture's features as a mean or as a grid, and the driver's inputs (the gas, the
-// brake and the car's speed), only to measure what they are worth: the car does not give them, such a brain cannot go there.
+// choice in both): its roadworks head, the picture's features as a grid or as a mean, and the driver's inputs (the gas, the
+// brake and the car's speed).
 import {computed, reactive, ref} from 'vue';
 import type {ActionOptions} from '../common/panel-types';
 
@@ -11,17 +11,16 @@ export const POOL_OPTIONS: {key: BrainPool; label: string}[] = [{key: 'mean', la
 
 export function useBrainChoices() {
   const works = ref<OnOff>('on');
-  const driver = ref<OnOff>('off');
-  const pool = ref<BrainPool>('mean');
+  const driver = ref<OnOff>('on');
+  const pool = ref<BrainPool>('grid');
   /** The options of its training (ActionOptions.works, driver, pool). */
   const option = computed((): ActionOptions => ({works: works.value, driver: driver.value, pool: pool.value}));
   /** What it learns in words, after the training's own: "", or ", without the roadworks". */
   const words = computed(() => (works.value === 'off' ? ', without the roadworks' : '')
-    + (pool.value === 'grid' ? ', with the picture as a grid' : '')
-    + (driver.value === 'on' ? ', with the driver’s inputs (not for the car)' : ''));
+    + (pool.value === 'mean' ? ', with the picture as a mean' : '')
+    + (driver.value === 'off' ? ', without the driver’s inputs' : ''));
   /** A line under the choices. */
-  const note = computed(() => (driver.value === 'on' ? 'With the driver’s inputs it is only a measure: the car does not give '
-    + 'them, so this brain cannot be chosen in Models.' : 'Grid keeps where things are in the picture, Mean only what is in it.'));
+  const note = 'Grid keeps where things are in the picture, Mean only what is in it.';
   return reactive({works, driver, pool, option, words, note});
 }
 export type BrainChoice = ReturnType<typeof useBrainChoices>;

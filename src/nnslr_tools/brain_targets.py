@@ -38,19 +38,18 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, hour, lead, country: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
+- signs, plate, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
   yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
-  from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's;
-- pedals: gas and brake in the last second;
-- speed: the car's own speed.
+  from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
+  The pedals are in the last second, from the same carState (_pressed, as brain_inputs.PedalInputs does on the car).
 
-All but the two of the driver are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path
-(BRAIN_INPUTS): what the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
+They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
+the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
 
-pedals and speed are the driver, and they are apart for a reason: on the drives the gas is often pressed just where the
-label is above the limit the car held (he overrode it), and the car's speed is what the network itself decides on the
-car. A network that has them can learn to follow the driver, so they stay out until a comparison says otherwise.
+pedals and speed are the driver, and they are apart so that a comparison can leave them out: on the drives the gas is often
+pressed just where the label is above the limit the car held (he overrode it), and the car's speed is what the network itself
+decides on the car. The measure says it: the frames with no gas, and the ones with the car's speed far from the label.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
@@ -102,7 +101,7 @@ import numpy as np
 
 from nnslr_tools import drive_logs
 from nnslr_tools.gps import frame_country, load_positions
-from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path, speed_features
+from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_type_signs import fingerprint, load_signs, load_vision, package_path
 from nnslr_tools.speed_review import GRID_KPH, MAX_KPH, NS, db_path
 
@@ -134,7 +133,7 @@ BRAIN_INPUTS_PATH = package_path() / 'brain_inputs.py'
 BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
 VISION = load_vision(package_path())
 COUNTRIES = BRAIN_INPUTS.COUNTRIES
-INPUT_SIZES = {**BRAIN_INPUTS.INPUT_SIZES, 'pedals': 3, 'speed': 2}
+INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
 DRIVER_INPUTS = ('pedals', 'speed')
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
@@ -345,7 +344,7 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     lead = np.array([BRAIN_INPUTS.lead_row(metres, kph) for metres, kph in zip(distance, lead_speed)], dtype=np.float32)
     gas, gas_known = _pressed(series.get('gas') or [], ns)
     brake, brake_known = _pressed(series.get('brake') or [], ns)
-    speed = [speed_features(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
+    speed = [BRAIN_INPUTS.speed_row(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
     countries = countries_so_far(gps, ns, root)
     country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
     hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))

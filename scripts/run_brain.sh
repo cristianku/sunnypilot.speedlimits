@@ -21,8 +21,8 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
 # (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
-# roadworks; 0: not), NNSLR_BRAIN_DRIVER (1: also the pedals and the speed, to measure; such a network never goes to the
-# car), NNSLR_BRAIN_POOL (mean; grid: the picture's features keep where they are), NNSLR_SUNNYPILOT_CLONE
+# roadworks; 0: not), NNSLR_BRAIN_DRIVER (1: also the pedals and the speed; 0: not),
+# NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,8 +35,8 @@ CORES="$(nproc 2>/dev/null || echo 8)"
 SIGN_WORKERS_DEFAULT=$(( CORES / 2 > 1 ? CORES / 2 : 1 ))
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
-DRIVER="${NNSLR_BRAIN_DRIVER:-0}"
-POOL="${NNSLR_BRAIN_POOL:-mean}"
+DRIVER="${NNSLR_BRAIN_DRIVER:-1}"
+POOL="${NNSLR_BRAIN_POOL:-grid}"
 SEEDS=(0 1 2)
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
@@ -124,8 +124,8 @@ SETTINGS=(--epochs "$EPOCHS" --pool "$POOL")
 if [[ "$WORKS" == "0" ]]; then
   SETTINGS+=(--no-works)
 fi
-if [[ "$DRIVER" == "1" ]]; then
-  SETTINGS+=(--driver)
+if [[ "$DRIVER" == "0" ]]; then
+  SETTINGS+=(--no-driver)
 fi
 
 echo "== Brain =="

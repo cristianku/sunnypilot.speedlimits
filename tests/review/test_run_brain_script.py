@@ -50,19 +50,19 @@ def test_the_steps_read_the_signs_before_the_three_seeds(tmp_path):
 
 
 def test_the_choices_reach_the_check_and_every_seed(tmp_path):
-    process = run_script(tmp_path, env={'NNSLR_BRAIN_WORKS': '0', 'NNSLR_BRAIN_DRIVER': '1', 'NNSLR_BRAIN_POOL': 'grid',
+    process = run_script(tmp_path, env={'NNSLR_BRAIN_WORKS': '0', 'NNSLR_BRAIN_DRIVER': '0', 'NNSLR_BRAIN_POOL': 'mean',
                                         'NNSLR_BRAIN_EPOCHS': '7'})
     assert process.returncode == 0, process.stderr + process.stdout
     trainings = [line for line in (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
                  if line.startswith('args: train-brain')]
     assert len(trainings) == 4
-    assert all('--epochs 7 --pool grid --no-works --driver' in line for line in trainings)
+    assert all('--epochs 7 --pool mean --no-works --no-driver' in line for line in trainings)
 
 
 def test_the_usual_training_keeps_the_roadworks_and_leaves_the_driver_out(tmp_path):
     assert run_script(tmp_path).returncode == 0
     log = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text()
-    assert '--epochs 40 --pool mean' in log and '--no-works' not in log and '--driver' not in log
+    assert '--epochs 40 --pool grid' in log and '--no-works' not in log and '--no-driver' not in log
 
 
 def test_the_same_name_again_trains_only_the_seeds_left(tmp_path):

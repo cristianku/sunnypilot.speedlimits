@@ -167,6 +167,33 @@ def test_a_group_has_the_size_it_says():
     sizes = brain.INPUT_SIZES
     signs = fed((10.0, ('maximum_speed:80', .9)))
     rows = {'signs': signs.features(10.0), 'plate': signs.plate_row(), 'hour': brain.hour_row(12.0),
-            'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH')}
+            'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH'), 'pedals': brain.PedalInputs().row(10.0),
+            'speed': brain.speed_row(20.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
+
+
+def test_the_pedals_on_the_car_are_the_ones_of_the_training():
+    numpy = pytest.importorskip('numpy')
+    from nnslr_tools.brain_targets import NS, _pressed
+    brain, _ = _car()
+    points = [[2 * NS, False], [3 * NS, True], [5 * NS, False], [9 * NS, True], [10 * NS, False]]
+    seconds = list(range(1, 13))
+    pressed, known = _pressed(points, numpy.array(seconds) * NS)
+    pedals, said = brain.PedalInputs(), []
+    for tick in range(1301):  # carState at 100 Hz
+        at = tick / 100
+        state = [value for t, value in points if t <= tick * NS // 100]
+        if state:
+            pedals.add(at, state[-1], False)
+        if tick % 100 == 0 and tick // 100 in seconds:
+            said.append(pedals.row(at))
+    assert [row[0] for row in said] == list(pressed)
+    assert [row[2] for row in said] == list(known)
+
+
+def test_the_speed_on_the_car_is_the_one_of_the_road_type_network():
+    from nnslr_tools.road_type_data import speed_features
+    brain, _ = _car()
+    for speed in (None, float('nan'), -1.0, 0.0, 13.9, 75.0):
+        assert tuple(brain.speed_row(speed)) == pytest.approx(speed_features(speed))

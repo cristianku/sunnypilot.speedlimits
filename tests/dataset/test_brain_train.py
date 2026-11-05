@@ -6,7 +6,7 @@ import pytest
 
 NS = 1_000_000_000
 T = 8
-GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
+GROUPS = ('signs', 'plate', 'hour', 'lead', 'country', 'pedals', 'speed')
 
 
 def fake_drive(partitions, *, speed=19, works=None, marks=(), route='00000001--abcdef0123'):

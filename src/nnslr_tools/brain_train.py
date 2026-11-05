@@ -43,7 +43,7 @@ passage says its number, with that number changed to the other of its family. A 
 frames that go to the speed it says, so moved counts the answers that changed: the network reads the sign when they follow it.
 
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. The driver's
-inputs stay out unless driver=True: see brain_targets.
+inputs are in unless driver=False: see brain_targets.
 """
 from __future__ import annotations
 
@@ -284,7 +284,7 @@ def _swapped_measure(model, drives: list[dict], answers: list[dict], partition: 
     return {**measure(held, said, partition)['follow_the_sign'], 'moved': moved}
 
 
-def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean', works: bool = True, driver: bool = False,
+def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True, driver: bool = True,
                 epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None, dry_run: bool = False, seed: int = 0,
                 log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes brain-last.pt and result.json into run_dir; the checkpoint

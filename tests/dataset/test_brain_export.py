@@ -30,8 +30,8 @@ def test_refuses_a_network_trained_with_another_file_of_the_inputs(tmp_path, mon
         brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
 
 
-def test_refuses_a_network_with_the_driver_among_its_inputs(tmp_path, monkeypatch):
-    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, groups=(*GROUPS, 'pedals'))
+def test_refuses_a_network_with_an_input_the_car_does_not_give(tmp_path, monkeypatch):
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, groups=(*GROUPS, 'wheel'))
     with pytest.raises(ValueError, match='does not give'):
         brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
 
