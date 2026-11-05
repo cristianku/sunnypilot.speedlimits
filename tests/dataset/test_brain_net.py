@@ -66,13 +66,12 @@ def test_the_network_says_a_speed_and_works_on_every_frame():
 
 
 @pytest.mark.parametrize('pool', ['mean', 'grid'])
-def test_a_mark_reaches_the_memory_and_the_encoder_and_not_the_speed_head(pool):
+def test_a_mark_reaches_the_memory_and_the_picture_features_and_not_the_speed_head(pool):
     model = net(pool=pool)
     backward(model, *batch(), answers(works_on=[1, 2]))
     assert gradient_of(model, 'works_head') > 0
     assert gradient_of(model, 'gru') > 0
     assert gradient_of(model, 'project') > 0
-    assert gradient_of(model, 'backbone') > 0
     assert gradient_of(model, 'speed_head') == 0
 
 
@@ -146,6 +145,28 @@ def test_a_frame_never_sees_the_frames_after_it_also_in_training(pool):
     assert torch.equal(speed[0, :3], other[0, :3])
     assert torch.equal(works[0, :3], other_works[0, :3])
     assert not torch.equal(speed[0, 3:], other[0, 3:])
+
+
+def test_a_training_step_leaves_the_encoder_as_it_is():
+    model = net()
+    before = {name: value.clone() for name, value in model.backbone.state_dict().items()}
+    optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=1.0)
+    backward(model, *batch(), answers(speed_on=[1, 2], works_on=[1, 2]))
+    optimizer.step()
+    assert gradient_of(model, 'backbone') == 0
+    assert all(torch.equal(value, before[name]) for name, value in model.backbone.state_dict().items())
+
+
+def test_the_scale_of_the_picture_does_not_reach_the_memory():
+    model = net()
+    model.eval()
+    images, extra = batch()
+    with torch.no_grad():
+        before, _works, _state = model(images, extra)
+        model.project[0].weight.mul_(1000)
+        model.project[0].bias.mul_(1000)
+        after, _works, _state = model(images, extra)
+    assert float((before - after).abs().max()) < 1e-2
 
 
 def test_training_does_not_move_the_batch_norm():

@@ -2610,7 +2610,8 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, driver=args.driver, device=args.device, dry_run=args.dry_run,
                                      epochs=args.epochs or brain_train.EPOCHS)
-    print(json.dumps({part: result[part]['speed'] for part in ('validation', 'test')}, indent=2))
+    print(json.dumps({part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
+                      for part in ('validation', 'test')}, indent=2))
     return 0
 
 

@@ -9,8 +9,8 @@ The network, per frame: encoder (MobileNetV3-small, as the road-type network) ->
     works  = works_head(h)   are we inside roadworks: only in training
 
 loss = cross entropy(speed, his speed) + WORKS_LOSS * binary cross entropy(works, his marks), each only on the frames with
-an answer of its own. The works error goes back through h into the GRU and the encoder, which the speed uses too: that is
-how a mark changes the network, without ever being an input. works_head is one layer, left out of the car's network
+an answer of its own. The works error goes back through h into the GRU and the layer on the picture's features, which the
+speed uses too: that is how a mark changes the network, without ever being an input. works_head is one layer, left out of the car's network
 (car_weights), and no code goes from works to speed. Whether it helps is measured: the same training without it
 (works=False), on sites of test and validation.
 
@@ -19,7 +19,10 @@ most of where, and a truck in the lane beside ours is a matter of where. pool 'g
 GRID_CHANNELS, then all its cells into one layer. Which one sees works is measured too.
 
 Batch norm stays frozen in training: its statistics of a batch would let the frames after a moment reach it. On the car the
-network only ever has the past, so here too.
+network only ever has the past, so here too. With its statistics frozen and one sequence a step nothing brings a moving
+encoder back: in the first run (5 Nov 2026) its output grew 250 times, the GRU saturated, the signs reached nothing and the
+network said one speed on every frame. So the encoder does not learn, for now: a few drives would only teach it their roads.
+The picture's features go through a LayerNorm, so that they keep the scale of the inputs beside them in the GRU.
 """
 from __future__ import annotations
 
@@ -54,11 +57,11 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
             self.groups, self.pool = groups, pool
             self.register_buffer('mean', torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1))
             self.register_buffer('std', torch.tensor(IMAGENET_STD).view(1, 3, 1, 1))
-            self.backbone = backbone.features
+            self.backbone = backbone.features.requires_grad_(False)
             if pool == 'grid':
                 self.squeeze = nn.Conv2d(BACKBONE_CHANNELS, GRID_CHANNELS, 1)
             width = BACKBONE_CHANNELS if pool == 'mean' else GRID_CHANNELS * GRID_CELLS
-            self.project = nn.Sequential(nn.Linear(width, features), nn.Hardswish(), nn.Dropout(0.2))
+            self.project = nn.Sequential(nn.Linear(width, features), nn.LayerNorm(features), nn.Hardswish(), nn.Dropout(0.2))
             self.gru = nn.GRU(features + extra, hidden, batch_first=True)
             self.speed_head = nn.Linear(hidden, SPEED_CLASSES)
             self.works_head = nn.Linear(hidden, 1) if works else None

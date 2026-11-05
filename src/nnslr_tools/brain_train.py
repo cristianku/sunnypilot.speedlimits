@@ -15,7 +15,10 @@ The measure (measure), on validation to choose the epoch and on test once at the
 
 - speed: right, and the mean error in km/h, on all of them and on those without gas in the last second: the frames where
   the driver gives nothing away, so a network that follows the pedal shows here;
+- speeds_said: every speed the network said there: one alone is a network that learned only how often each speed comes;
 - one_speed: the error of the speed most frames have, said everywhere: what the network has to beat;
+- follow_the_sign: on the frames with a number in force, the error of that number and the network's own there: the other
+  thing it has to beat, or it adds nothing to the car's rule;
 - far_from_own_speed: the same on the frames where the car's speed is OWN_SPEED_GAP_KPH or more from his label, and how
   many of them the network puts nearer the car's speed than the label. Leaving pedals and speed out of the inputs is not
   enough: the video shows how fast the car goes, and at the end of works the label and the car's speed rise together, so
@@ -44,9 +47,9 @@ import numpy as np
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
 from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, epoch_drives,
-                                       inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs, read_split)
-from nnslr_tools.road_type_net import (BACKBONE_LEARNING_RATE, FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY,
-                                       _augment, _print, _torch)
+                                       inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs, read_split,
+                                       sign_kph)
+from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 
 EPOCHS = 40
 PATIENCE = 10
@@ -145,6 +148,12 @@ def _one_speed(truth: np.ndarray) -> dict:
     return {'kph': int(kph), 'mean_error_kph': float(np.abs(truth - kph).mean())}
 
 
+def _follow_the_sign(said: np.ndarray, truth: np.ndarray, number: np.ndarray) -> dict:
+    """The frames with a number in force (-1: none): that number said there, and the network on the same frames."""
+    held = number >= 0
+    return {'sign': _speed_measure(number[held], truth[held]), 'network': _speed_measure(said[held], truth[held])}
+
+
 def _far_from_own_speed(said: np.ndarray, truth: np.ndarray, own: np.ndarray) -> dict:
     """The frames where following the car is the wrong answer. An unknown speed (NaN) is not among them."""
     far = np.abs(own - truth) >= OWN_SPEED_GAP_KPH
@@ -170,7 +179,7 @@ def _site(drive: dict, said: dict, mark: dict, truth: np.ndarray, asked: np.ndar
 
 def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
     """What the network is worth on one partition: see the module's text."""
-    said_all, truth_all, own_all, free, works_frames, sites = [], [], [], [], [], []
+    said_all, truth_all, own_all, number_all, free, works_frames, sites = [], [], [], [], [], [], []
     hits = {'true_positive': 0, 'false_positive': 0, 'false_negative': 0}
     told = {'yes': 0, 'no': 0}
     for drive, said in zip(drives, answers):
@@ -180,6 +189,8 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
         said_all.append(said['kph'][asked])
         truth_all.append(truth[asked])
         own_all.append(drive['own_kph'][asked])
+        signs = drive['inputs']['signs'][asked]
+        number_all.append(np.where((signs[:, 1] > 0) & (signs[:, 6] == 0), sign_kph(signs), -1))
         free.append(drive['inputs']['pedals'][asked, 0] == 0)
         works_frames.append(drive['works'][asked] > 0)
         if said['works'] is not None:
@@ -194,10 +205,12 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
         for mark in drive['marks']:
             if held[(drive['ns'] >= mark['start_ns']) & (drive['ns'] < mark['end_ns'])].any():
                 sites.append(_site(drive, said, mark, truth, drive['speed_weight'] > 0))
-    said_all, truth_all, own_all = (np.concatenate(part or [[]]) for part in (said_all, truth_all, own_all))
+    said_all, truth_all, own_all, number_all = (np.concatenate(part or [[]]) for part in
+                                                (said_all, truth_all, own_all, number_all))
     free, works_frames = np.concatenate(free or [[]]).astype(bool), np.concatenate(works_frames or [[]]).astype(bool)
     found = hits['true_positive']
-    return {'speed': _speed_measure(said_all, truth_all), 'one_speed': _one_speed(truth_all),
+    return {'speed': _speed_measure(said_all, truth_all), 'speeds_said': sorted({int(kph) for kph in said_all}),
+            'one_speed': _one_speed(truth_all), 'follow_the_sign': _follow_the_sign(said_all, truth_all, number_all),
             'no_gas': _speed_measure(said_all[free], truth_all[free]),
             'far_from_own_speed': _far_from_own_speed(said_all, truth_all, own_all),
             'in_works': _speed_measure(said_all[works_frames], truth_all[works_frames]),
@@ -266,9 +279,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
         _works_needs_both(drives, log)
     store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device)
     model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run).to(device)
-    backbone = [value for name, value in model.named_parameters() if name.startswith('backbone')]
-    others = [value for name, value in model.named_parameters() if not name.startswith('backbone')]
-    optimizer = torch.optim.AdamW([{'params': others, 'lr': LEARNING_RATE}, {'params': backbone, 'lr': BACKBONE_LEARNING_RATE}],
+    optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
                                   weight_decay=WEIGHT_DECAY)
     source = {'groups': groups, 'pool': pool, 'works': works, 'features': FEATURES, 'hidden': HIDDEN,
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
@@ -282,7 +293,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
         score = validation['speed']['mean_error_kph']
         history.append({'epoch': epoch, 'error': error, 'validation': validation['speed']})
         log(f'Epoch {epoch}: error {error:.3f}, validation {score} km/h off on {validation["speed"]["frames"]} frames '
-            f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]})')
+            f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
+            f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]}')
         if best is None or (score is not None and score < best):
             best, best_epoch = score if score is not None else float('inf'), epoch
             torch.save({'weights': model.state_dict(), 'epoch': epoch, **source}, run_dir / CHECKPOINT)

@@ -110,6 +110,27 @@ def test_a_label_far_after_the_end_of_works_is_no_end_of_works():
     assert found['sites'][0]['end_delay_s'] is None
 
 
+def test_the_measure_says_which_speeds_the_network_said():
+    from nnslr_tools.brain_targets import speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test', 'test', 'test', 'train'], speed=speed_class(100))
+    assert measure([drive], [said([100, 120, 100, 80])], 'test')['speeds_said'] == [100, 120]
+
+
+def test_the_network_has_to_beat_the_sign_on_the_frames_with_a_number_in_force():
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 4 + ['train'], speed=speed_class(100))
+    signs = drive['inputs']['signs']
+    signs[:3, 0], signs[:3, 1] = 80 / BRAIN_INPUTS.SIGN_KPH_SCALE, 1
+    signs[0, 0] = 100 / BRAIN_INPUTS.SIGN_KPH_SCALE
+    signs[2, 6] = 1
+    signs[4, 0], signs[4, 1] = 100 / BRAIN_INPUTS.SIGN_KPH_SCALE, 1
+    found = measure([drive], [said([100, 120, 90, 90, 90])], 'test')['follow_the_sign']
+    assert found['sign'] == {'frames': 2, 'right': 0.5, 'mean_error_kph': 10.0}
+    assert found['network'] == {'frames': 2, 'right': 0.5, 'mean_error_kph': 10.0}
+
+
 def test_the_network_has_to_beat_one_speed_said_everywhere():
     from nnslr_tools.brain_targets import speed_class
     from nnslr_tools.brain_train import measure

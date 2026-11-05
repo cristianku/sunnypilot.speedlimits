@@ -470,10 +470,15 @@ def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:
     return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
 
 
+def sign_kph(signs: np.ndarray) -> np.ndarray:
+    """The km/h of the number confirmed in the rows of the signs input."""
+    return np.rint(signs[:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE).astype(np.int64)
+
+
 def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
     """(the frames a night copy can answer, the class of the number on each): see the module's text."""
     signs, hour = drive['inputs']['signs'], drive['inputs']['hour']
-    kph = np.rint(signs[:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE).astype(np.int64)
+    kph = sign_kph(signs)
     a_class = (kph >= GRID_KPH) & (kph <= MAX_KPH) & (kph % GRID_KPH == 0) & (signs[:, 6] == 0)
     plated, label = _hours_plate(drive) & a_class, class_kph(drive['speed'])
     answers = (hour[:, 2] > 0) & ~_at_night(_clock(hour)) & (loss_weights(drive, 'train')[0] > 0)
