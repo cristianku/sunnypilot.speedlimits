@@ -212,7 +212,7 @@ A comma with **Record road at full resolution** on (Developer tab) writes its `f
 - **Training** cuts the classifier's crops from the `.full.jpg` when a frame has one, by itself, and the crop cache is rebuilt for those frames (`meta.json` and the log say `full_frames`). Frames without one keep their crops. A classifier trained before those drives is not changed: training stays your choice.
 - **What it costs:** about 4.5 GB an hour on the comma instead of 2.25, and on the server one more JPEG for each picture, with a preview of the full size. `deleter.py` removes the oldest segments when the comma has under 10 % or 5 GB free, so pull a full drive within days.
 
-The comma's `camerad` does not offer the 2688 × 1520 stream yet: until it does, the two switches change nothing.
+With either switch on the road camera goes through the BPS, the comma's other image processor, and that also changes the picture the driving model sees: another debayer, no vignetting correction, about 7 ms later. Both off, everything is as before. A change applies from the next drive.
 
 ### The car's networks on a frame (T)
 
