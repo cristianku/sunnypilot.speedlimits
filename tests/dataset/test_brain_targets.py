@@ -254,8 +254,8 @@ def test_a_drive_not_read_yet_has_its_signs_unknown():
 
 
 def inputs_of(ns, series, readings=None, gps=()):
-    frames = [{'segment': 0, 'index': int(t // NS), 'country': 'CH', 'country_from': 'gps'} for t in ns]
-    return _targets().drive_inputs(frames, ns, {'series': series, 'gps': gps}, readings)
+    frames = [{'segment': 0, 'index': int(t // NS)} for t in ns]
+    return _targets().drive_inputs(frames, ns, {'series': series, 'gps': gps}, readings, None)
 
 
 def test_no_input_of_a_frame_knows_what_comes_after_it():
@@ -294,21 +294,31 @@ def test_the_lead_and_the_speed_are_unknown_until_they_are_known():
     assert found['speed'][0][1] == 0 and found['speed'][1][1] == 1
 
 
-def test_a_country_outside_the_list_is_one_of_its_own():
+def test_a_country_outside_the_list_is_one_of_its_own(monkeypatch):
     targets = _targets()
-    frames = [{'segment': 0, 'index': 1, 'country': 'CH', 'country_from': 'gps'},
-              {'segment': 0, 'index': 2, 'country': 'SM', 'country_from': 'gps'},
-              {'segment': 0, 'index': 3, 'country': None, 'country_from': None}]
-    found = targets.drive_inputs(frames, seconds(1, 2, 3), {'series': {}}, None)['country']
+    monkeypatch.setattr(targets, 'frame_country', lambda latitude, _longitude, _root: {1.0: 'CH', 2.0: 'SM'}.get(latitude))
+    gps = [[1 * NS, 1.0, 8.0, 1000], [2 * NS, 2.0, 8.0, 2000], [3 * NS, 3.0, 8.0, 3000]]
+    frames = [{'segment': 0, 'index': second} for second in (1, 2, 3)]
+    found = targets.drive_inputs(frames, seconds(1, 2, 3), {'series': {}, 'gps': gps}, None, None)['country']
     assert found[0][targets.COUNTRIES.index('CH')] == 1
     assert found[1][-1] == 1 and found[2][-1] == 1
     assert found.sum() == 3
 
 
-def test_a_frame_without_a_fix_never_takes_the_country_of_a_later_one():
-    frames = [{'country': 'DE', 'country_from': 'nearest_fix'}, {'country': 'DE', 'country_from': 'gps'},
-              {'country': 'CH', 'country_from': 'nearest_fix'}, {'country': 'CH', 'country_from': 'gps'}]
-    assert _targets().countries_so_far(frames) == [None, 'DE', 'DE', 'CH']
+def test_a_frame_has_the_country_of_its_last_fix_and_never_of_a_later_one(monkeypatch):
+    numpy, targets = _np(), _targets()
+    monkeypatch.setattr(targets, 'frame_country', lambda latitude, _longitude, _root: {1.0: 'DE', 2.0: 'CH'}[latitude])
+    gps = [[10 * NS, 1.0, 8.0, 1000], [20 * NS, 2.0, 8.0, 2000]]
+    assert targets.countries_so_far(gps, seconds(5, 10, 19, 20, 30), None) == [None, 'DE', 'DE', 'CH', 'CH']
+    assert targets.countries_so_far(gps, numpy.array([-1]), None) == [None]
+    assert targets.countries_so_far([], seconds(5), None) == [None]
+
+
+def test_before_the_first_fix_neither_the_country_nor_the_hour_is_known():
+    targets = _targets()
+    found = inputs_of(seconds(5, 11), {}, gps=[[10 * NS, 47.0, 8.0, 1_750_000_000_000]])
+    assert found['country'][0][-1] == 1 and not found['hour'][0].any()
+    assert found['country'][1][targets.COUNTRIES.index('CH')] == 1 and found['hour'][1][2] == 1
 
 
 def test_the_gps_clock_runs_on_from_its_last_fix_and_says_nothing_before_the_first():
@@ -365,15 +375,31 @@ def label_db(root, stretches=(), works=(), checked=()):
     connection.close()
 
 
-def test_from_the_database_to_the_answers_of_a_drive(tmp_path):
+def test_a_piece_clipped_off_before_the_known_time_gives_no_answer(tmp_path):
+    from nnslr_tools.speed_review import SpeedReviewStore
+    targets, route = _targets(), '00000001--abcdef0123'
+    store = SpeedReviewStore(tmp_path)
+    wrong = {'kph': 120, 'state': 'corrected', 'known_ns': 30 * NS, 'note': ''}
+    store.apply(route, 0, 100 * NS, wrong, 0, 'a')
+    store.apply(route, 10 * NS, 20 * NS, {**wrong, 'kph': 80, 'known_ns': None}, 1, 'a')
+    _classes, out = targets.speed_answers(seconds(5, 25, 40), store.stretches(route))
+    assert list(out) == [targets.NOT_KNOWN_YET, targets.NOT_KNOWN_YET, 0]
+
+
+def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     targets = _targets()
+    borders = []
+    monkeypatch.setattr(targets, 'frame_country', lambda _latitude, _longitude, root: borders.append(root) or 'CH')
     route = '00000001--abcdef0123'
     frames = [(0, i) for i in range(40)]
     write_drive(tmp_path, route, frames)
-    (tmp_path / 'derived' / 'frames' / route / '0' / 'frame_00000030.png').unlink()
+    for second in (22, 30):
+        (tmp_path / 'derived' / 'frames' / route / '0' / f'frame_{second:08d}.png').unlink()
     label_db(tmp_path, stretches=[(route, 0, 20 * NS, 100, 'corrected'), (route, 20 * NS, 40 * NS, 120, 'confirmed')],
              works=[(route, 5 * NS, 15 * NS)], checked=[(route, 25 * NS)])
-    merged = {'frames': {'0': {'sof': [i * NS // 20 for i in range(800)], 'ids': list(range(800))}}, 'series': {}}
+    encoded = [i for i in range(800) if i != 23 * 20]
+    merged = {'frames': {'0': {'sof': [i * NS // 20 for i in encoded], 'ids': encoded}}, 'series': {},
+              'gps': [[1 * NS, 47.0, 8.0, 1_750_000_000_000]]}
     split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
     labels = targets.read_labels(tmp_path)
     assert labels[route]['checked_ns'] == 25 * NS
@@ -385,6 +411,10 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path):
     assert drive['works'][10] == 1 and drive['works_weight'][10] == 1
     assert drive['works'][20] == 0 and drive['works_weight'][20] == 1
     assert drive['works_weight'][30] == 0
+    # Inside what a person went through too, a frame with no picture or no time teaches nothing.
+    assert drive['speed_out'][22] == drive['speed_out'][23] == targets.NO_FRAME
+    assert drive['works_weight'][22] == drive['works_weight'][23] == 0 and drive['works_weight'][21] == 1
+    assert borders == [tmp_path]
     assert drive['partitions'] == ['buffer'] * 40
     assert len(drive['own_kph']) == 40 and all(kph != kph for kph in drive['own_kph'])
     found = targets.summary([drive])
@@ -490,12 +520,59 @@ def test_a_plate_of_hours_read_by_day_goes_through_the_night_with_the_number_as_
 
 
 @pytest.mark.parametrize('drive', [
-    {'label': 30}, {'number': 33}, {'number': 0}, {'number': 250}, {'hours': (23.0, 23.1)}, {'hours': (5.5,)}, {'plate': 'other'},
+    {'label': 30}, {'label': 20}, {'number': 33}, {'number': 0}, {'number': 250}, {'hours': (23.0, 23.1)}, {'hours': (5.5,)}, {'plate': 'other'},
     {'plate': 'none'}, {'ended': 1}, {'hours': (14.0, 14.0), 'partitions': ['validation', 'test']},
     {'hours': (14.0, 14.0), 'partitions': ['buffer', 'buffer']}], ids=str)
 def test_no_night_copy_of_what_does_not_say_the_number_holds_at_night(drive):
     assert not _targets().night_frames(plated(**drive))[0].any()
     assert len(in_an_epoch(plated(**drive))) == 1
+
+
+def test_a_plate_of_hours_outside_train_leaves_the_clock_of_train_moving():
+    np = _np()
+    drive = plated(hours=(14.0, 14.0), partitions=['validation', 'train'])
+    drive['inputs']['plate'][1] = 0
+    drive['inputs']['plate'][1, -1] = 1
+    (seen,) = in_an_epoch(drive)
+    assert not np.allclose(clock_of(seen), clock_of(drive))
+
+
+def test_a_label_equal_to_the_number_takes_its_whole_passage_out():
+    targets = _targets()
+    drive = plated(hours=(14.0,) * 4)
+    drive['speed'][2] = targets.speed_class(30)
+    assert not targets.night_frames(drive)[0].any()
+
+
+def test_a_label_equal_to_the_number_says_nothing_of_the_next_number():
+    targets = _targets()
+    drive = plated(hours=(14.0,) * 4)
+    drive['inputs']['signs'][2:, 0] = 40 / targets.BRAIN_INPUTS.SIGN_KPH_SCALE
+    drive['speed'][3] = targets.speed_class(40)
+    assert list(targets.night_frames(drive)[0]) == [True, True, False, False]
+
+
+def test_a_label_equal_to_the_number_says_nothing_of_another_plate_with_that_number():
+    targets = _targets()
+    drive = plated(hours=(14.0,) * 5)
+    drive['inputs']['plate'][2] = 0
+    drive['inputs']['plate'][2, -1] = 1
+    drive['speed'][4] = targets.speed_class(30)
+    assert list(targets.night_frames(drive)[0]) == [True, True, False, False, False]
+
+
+def test_a_label_out_of_the_loss_says_nothing_of_its_passage():
+    targets = _targets()
+    drive = plated(hours=(14.0,) * 4)
+    drive['speed'][2], drive['speed_weight'][2] = targets.speed_class(30), 0
+    assert list(targets.night_frames(drive)[0]) == [True, True, False, True]
+
+
+def test_a_label_equal_to_the_number_at_night_says_nothing_of_the_day():
+    targets = _targets()
+    drive = plated(hours=(5.0, 7.0, 7.5))
+    drive['speed'][0] = targets.speed_class(30)
+    assert list(targets.night_frames(drive)[0]) == [False, True, True]
 
 
 def test_no_night_copy_at_an_unknown_hour():

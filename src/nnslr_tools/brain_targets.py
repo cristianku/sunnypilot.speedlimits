@@ -39,8 +39,9 @@ The inputs (drive_inputs), one group each so that a comparison can leave one out
 before the frame:
 
 - signs, plate, hour, lead, country: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
-  yet has its signs unknown throughout. The hour comes from the GPS clock (merged['gps']), the country from the GPS and the
-  borders (gps.py), the last one a fix gave: a frame without a fix never takes the country of a later one;
+  yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
+  (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
+  from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's;
 - pedals: gas and brake in the last second;
 - speed: the car's own speed.
 
@@ -58,17 +59,19 @@ without a frame (memory_cuts), as on the car.
 
 The hour in training (epoch_drives). Every labelled drive is by day, so the real hour says which drive a frame is from and
 nothing of the speed, unless a plate gives it a meaning. So every epoch a drive takes a clock moved by a random number of
-hours, one for all its frames, since on the car the clock runs on. A drive with a plate of hours keeps its real clock: there
-the hour is part of the answer. Validation and test always have the real one.
+hours, one for all its frames, since on the car the clock runs on. A drive with a plate of hours on frames of train keeps its
+real clock: there the hour is part of the answer. Validation and test always have the real one.
 
 The night copies (night_copy). A plate of hours read by day, with his label another speed than the number, says only that
 the number does not hold now. Nothing shows when it does, and drives after 22:00 are few. So such a drive goes through the
 epoch once more with its clock moved into the night, and on those frames the answer is the number: the same pictures, made
-only here, nothing on the car, and no answer on roadworks. Only frames of train with his speed, a plate of hours, a number
-that is a class of the speed and was not ended, and a known hour by day. A label equal to the number says it holds by day:
-such a plate is no 22-6, and it has no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) gets a
-night answer that is wrong, a number stays until the next sign also where the road was left, and the picture is of the day.
-The reader gives no plate yet, so today there is no copy at all: plate is unknown on every frame.
+only here, nothing on the car, and no answer on roadworks. Only frames of train with his speed above the number, a plate of
+hours, a number that is a class of the speed and was not ended, and a known hour by day. A label under the number has
+another reason, roadworks for one, and a copy would raise it. A label equal to the number, on one frame by day of the
+passage (the frames in a row with that number and plate), says it holds by day: such a plate is no 22-6, and the passage has
+no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) gets a night answer that is wrong, a number
+stays until the next sign also where the road was left, and the picture is of the day. The reader gives no plate yet, so
+today there is no copy at all: plate is unknown on every frame.
 
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
@@ -87,7 +90,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import drive_logs
-from nnslr_tools.gps import load_positions
+from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path, speed_features
 from nnslr_tools.road_type_signs import fingerprint, load_signs, load_vision, package_path
 from nnslr_tools.speed_review import GRID_KPH, MAX_KPH, NS, db_path
@@ -204,7 +207,7 @@ def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> 
 
 def drive_frames(root: Path, route: str, merged: dict) -> list[dict]:
     """The 1 Hz frames of a drive in drive order: key, segment, index, ns (the exposure start; None when the encode index
-    lacks it), latitude, longitude, country, country_from, image, present."""
+    lacks it), latitude, longitude, image, present."""
     index = drive_logs.frame_index(merged)
     positions = load_positions(root, route)
     frames = []
@@ -219,8 +222,8 @@ def drive_frames(root: Path, route: str, merged: dict) -> list[dict]:
             gps = positions.get(key, {})
             frames.append({'route': route, 'key': key, 'segment': segment, 'index': second,
                            'ns': drive_logs.frame_time(index, segment, row['decoded_frame_index']),
-                           'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'country': gps.get('country'),
-                           'country_from': gps.get('country_from'), 'image': str(image), 'present': image.is_file()})
+                           'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'image': str(image),
+                           'present': image.is_file()})
     frames.sort(key=lambda frame: (frame['segment'], frame['index']))
     return frames
 
@@ -296,12 +299,15 @@ def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray,
     return signs, plates
 
 
-def countries_so_far(frames: list[dict]) -> list[str | None]:
-    """The country of each frame as the car has it: the last one a fix gave, none before the first."""
-    found, country = [], None
-    for frame in frames:
-        country = frame['country'] if frame.get('country_from') == 'gps' else country
-        found.append(country)
+def countries_so_far(gps: list, ns: np.ndarray, root: Path | None) -> list[str | None]:
+    """The country at each time as the car has it: that of the last fix at or before it [t_ns, latitude, longitude,
+    unix_ms], none before the first."""
+    times, of_fix, found = [row[0] for row in gps], {}, []
+    for t in ns:
+        at = bisect.bisect_right(times, int(t)) - 1
+        if at >= 0 and at not in of_fix:
+            of_fix[at] = frame_country(gps[at][1], gps[at][2], root)
+        found.append(of_fix.get(at))
     return found
 
 
@@ -317,19 +323,20 @@ def unix_at(gps: list, ns: np.ndarray) -> list[float | None]:
     return found
 
 
-def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None) -> dict[str, np.ndarray]:
+def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None,
+                 root: Path | None) -> dict[str, np.ndarray]:
     """{group: (frames, size) float32}: see the module's text. Nothing after a frame reaches it."""
-    series = merged.get('series') or {}
+    series, gps = merged.get('series') or {}, merged.get('gps') or []
     seconds = np.array([frame['segment'] * 60 + frame['index'] for frame in frames], dtype=np.float64)
     distance, lead_speed = _last_at(series.get('lead_d') or [], ns), _last_at(series.get('lead_v') or [], ns)
     lead = np.array([BRAIN_INPUTS.lead_row(metres, kph) for metres, kph in zip(distance, lead_speed)], dtype=np.float32)
     gas, gas_known = _pressed(series.get('gas') or [], ns)
     brake, brake_known = _pressed(series.get('brake') or [], ns)
     speed = [speed_features(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
-    countries = countries_so_far(frames)
+    countries = countries_so_far(gps, ns, root)
     country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
     hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))
-                     for unix, name in zip(unix_at(merged.get('gps') or [], ns), countries)], dtype=np.float32)
+                     for unix, name in zip(unix_at(gps, ns), countries)], dtype=np.float32)
     signs, plate = sign_inputs(seconds, readings)
     return {'signs': signs, 'plate': plate, 'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
@@ -369,7 +376,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'cells': frame_cells(frames), 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'works': works, 'works_weight': works_weight,
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
-            'inputs': drive_inputs(frames, ns, merged, readings), 'signs_read': readings is not None,
+            'inputs': drive_inputs(frames, ns, merged, readings, root), 'signs_read': readings is not None,
             'reader': record.get('fingerprint') if record else None,
             'no_picture_s': max(round(sum(row['end_ns'] - row['start_ns'] for row in labels['stretches']) / NS) -
                                 int(sum(((ns >= row['start_ns']) & (ns < row['end_ns'])).sum() for row in labels['stretches'])), 0)}
@@ -468,9 +475,13 @@ def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
     signs, hour = drive['inputs']['signs'], drive['inputs']['hour']
     kph = np.rint(signs[:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE).astype(np.int64)
     a_class = (kph >= GRID_KPH) & (kph <= MAX_KPH) & (kph % GRID_KPH == 0) & (signs[:, 6] == 0)
-    by_day = (hour[:, 2] > 0) & ~_at_night(_clock(hour))
-    return (_hours_plate(drive) & a_class & by_day & (loss_weights(drive, 'train')[0] > 0) &
-            (class_kph(drive['speed']) != kph)), speed_class(kph)
+    plated, label = _hours_plate(drive) & a_class, class_kph(drive['speed'])
+    answers = (hour[:, 2] > 0) & ~_at_night(_clock(hour)) & (loss_weights(drive, 'train')[0] > 0)
+    frames = plated & answers & (label > kph)
+    for passage in np.split(np.arange(len(kph)), np.flatnonzero((np.diff(kph) != 0) | (np.diff(plated) != 0)) + 1):
+        if (answers[passage] & (label[passage] == kph[passage])).any():
+            frames[passage] = False
+    return frames, speed_class(kph)
 
 
 def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
@@ -491,7 +502,7 @@ def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]
     module's text. Never for a measure: drives stays as it is."""
     found = []
     for drive in drives:
-        if _hours_plate(drive).any():
+        if (_hours_plate(drive) & (np.array(drive['partitions']) == 'train')).any():
             copy = night_copy(drive, groups, rng)
             found += [drive] if copy is None else [drive, copy]
         else:

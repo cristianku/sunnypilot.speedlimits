@@ -69,7 +69,7 @@ def _piece(drive: dict, first: int, last: int, store: FrameStore, device):
 
 def _same_augment(torch, images, seed: int, device):
     """_augment with the numbers of seed: one look for a whole drive, since the car never sees the light jump between two
-    pieces."""
+    pieces. Only the centre of the contrast is the piece's own, its mean light: a step far smaller than the look."""
     with torch.random.fork_rng(devices=[device] if device.type == 'cuda' else []):
         torch.manual_seed(seed)
         return _augment(torch, images)
