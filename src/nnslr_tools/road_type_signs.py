@@ -1,7 +1,7 @@
 """The motorway signs the comma confirms on the drives of the road types: an input of the road-type network (how long
 ago a motorway or expressway sign was confirmed), derived offline the way the car derives it.
 
-On the car, speedvisiond reads the road camera every PERIOD (0.2 s) with SignNet and the classifier
+On the car, speedvisiond reads the road camera about 4 times a second with SignNet and the classifier
 (vision.read_signs), keeps the signs read sure enough (vision.MIN_CONFIDENCE) and gives their classes to
 vision.SpeedLimitMemory. That confirms a sign seen in CONFIRM_FRAMES frames within CONFIRM_SECONDS and notes when a
 motorway or expressway sign was confirmed (_road_sign_at). The road-type network gets the seconds since then
@@ -10,8 +10,8 @@ begins, and the network can learn that the carriageway comes after that ramp.
 
 Here the car's own code does the same on the recorded drives: the car's vision.py and its two networks from the
 sunnypilot clone (read only: openpilot/sunnypilot/speed_limits and its models), on each segment's fcamera.hevc
-decoded to NV12 by ffmpeg (the road camera's pixel format), one decoded frame in VIDEO_STEP (20 fps: 5 a second, as
-speedvisiond). The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
+decoded to NV12 by ffmpeg (the road camera's pixel format), one decoded frame in VIDEO_STEP (20 fps: 4 a second, as
+speedvisiond), the settings of the car's release in place. The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
 the car never has them; what the car's networks miss or misread, the road-type network meets the same way.
 
 Per drive, data/derived/road_type_signs/<route>.json: the fingerprint of the code and networks used, the frames read
@@ -53,11 +53,14 @@ RAW_RELATIVE = Path('raw') / 'routes'
 PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
 SUNNYPILOT_ENV, SUNNYPILOT_DEFAULT = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'
 NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
+RELEASE_MANIFEST = 'speed_limits.json'
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
 CACHE_VERSION = 2  # 2: the boards
 CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
 VIDEO_FPS = 20
-VIDEO_STEP = 4  # 20 fps / 4: the 5 frames a second of speedvisiond (PERIOD 0.2 s)
+# 20 fps / 5: the 4 frames a second of speedvisiond. Its PERIOD is 0.2 s, but it waits from a frame for the next one on the
+# camera's 50 ms grid, and its logs read 4.1 a second.
+VIDEO_STEP = 5
 SEGMENT_SECONDS = 60
 # The roads whose confirmed sign the network gets (vision.SpeedLimitMemory sets _road_sign_at for these).
 SIGN_ROADS = ('motorway', 'expressway')
@@ -100,10 +103,19 @@ def network_paths(package: Path, classifier: Path | None = None) -> dict[str, Pa
     return paths
 
 
+def release_settings(package: Path) -> dict:
+    """The settings of the car's release, as speedvisiond gives them to vision.apply_settings."""
+    try:
+        settings = json.loads((Path(package) / 'models' / RELEASE_MANIFEST).read_text('utf-8')).get('settings')
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return settings if isinstance(settings, dict) else {}
+
+
 def fingerprint(package: Path, classifier: Path | None = None) -> dict:
-    """What the readings depend on: the car's vision.py and the two networks (sha256), the rate."""
+    """What the readings depend on: the car's vision.py and the two networks (sha256), its settings, the rate."""
     package = Path(package)
-    return {'version': CACHE_VERSION, 'video_step': VIDEO_STEP,
+    return {'version': CACHE_VERSION, 'video_step': VIDEO_STEP, 'settings': release_settings(package),
             'vision': _sha256(package / 'vision.py'),
             **{name: _sha256(path) for name, path in network_paths(package, classifier).items()}}
 
@@ -127,8 +139,11 @@ def classifier_classes(path: Path) -> list[str]:
 
 
 def load_vision(package: Path):
+    """The car's vision.py as speedvisiond starts it, with the settings of its release."""
     from nnslr_tools.comma_trial import load_vision as load
-    return load(Path(package) / 'vision.py')
+    vision = load(Path(package) / 'vision.py')
+    vision.apply_settings(release_settings(package))
+    return vision
 
 
 class _Network:
@@ -309,7 +324,7 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 2))
         which = f'the classifier {classifier}' if classifier is not None else "the car's classifier"
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
-            f'SignNet and {which}, 5 frames a second, {workers} processes')
+            f'SignNet and {which}, 4 frames a second, {workers} processes')
         results: dict[str, list] = {}
         gpu = device != 'cpu'
         with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start,

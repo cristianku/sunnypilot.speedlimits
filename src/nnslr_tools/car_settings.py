@@ -22,7 +22,7 @@ SETTINGS = (
      'help': 'How sure the classifier must be of a sign for its number to count.', 'default': 0.7, 'min': 0.3,
      'max': 0.99, 'step': 0.01, 'unit': 'sure', 'group': 'signs'},
     {'key': 'confirm_frames', 'constant': 'CONFIRM_FRAMES', 'label': 'Seen in',
-     'help': 'A number becomes the limit when it is read in this many pictures (5 a second)…', 'default': 2, 'min': 1,
+     'help': 'A number becomes the limit when it is read in this many pictures (4 a second)…', 'default': 2, 'min': 1,
      'max': 10, 'step': 1, 'unit': 'pictures', 'group': 'signs'},
     {'key': 'confirm_seconds', 'constant': 'CONFIRM_SECONDS', 'label': 'Within',
      'help': '…within this many seconds.', 'default': 1.5, 'min': 0.2, 'max': 5.0, 'step': 0.1, 'unit': 's',

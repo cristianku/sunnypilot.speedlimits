@@ -1807,7 +1807,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_net.set_defaults(func=_cmd_train_road_type)
     p_road_signs = sub.add_parser("road-type-signs", help="read the motorway signs of the drives with road types as the "
                                                           "comma does (its vision.py, SignNet and classifier from the "
-                                                          "sunnypilot clone, 5 frames a second of fcamera.hevc): "
+                                                          "sunnypilot clone, 4 frames a second of fcamera.hevc): "
                                                           "derived/road_type_signs/<route>.json, the sign input of the "
                                                           "road-type network (the GPU when there is one)")
     p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "

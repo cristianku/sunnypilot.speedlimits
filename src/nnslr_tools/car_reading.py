@@ -33,7 +33,7 @@ import numpy as np
 
 from nnslr_tools import road_type_signs, video_frames
 
-MANIFEST = 'speed_limits.json'
+MANIFEST = road_type_signs.RELEASE_MANIFEST
 MANIFEST_FORMAT = 2
 READINGS_KEPT = 256
 
@@ -73,9 +73,8 @@ def _release(package: Path) -> dict:
                      for name in ('finder', 'classifier')}
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise CarReadingError(f'no release of the car\'s networks in {models}: {exc}') from exc
-    settings = manifest.get('settings') if isinstance(manifest.get('settings'), dict) else {}
     return {'version': str(manifest.get('version') or ''), 'finder': finder, 'classifier': classifier,
-            'classes': list(contracts['classifier']['output']['classes']), 'settings': settings,
+            'classes': list(contracts['classifier']['output']['classes']),
             'checkpoints': {name: contract.get('checkpoint') for name, contract in contracts.items()},
             'files': [package / 'vision.py', models / MANIFEST, finder, classifier]}
 
@@ -95,7 +94,6 @@ def networks(package: Path | None = None) -> dict:
             return _loaded
         try:
             vision = road_type_signs.load_vision(package)
-            vision.apply_settings(release['settings'])
             finder = road_type_signs._Network(release['finder'])
             classifier = road_type_signs._Network(release['classifier'])
         except Exception as exc:  # noqa: BLE001 - whatever the clone's files raise, the car's networks are not here

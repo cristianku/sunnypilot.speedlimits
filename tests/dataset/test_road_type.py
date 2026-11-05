@@ -561,6 +561,25 @@ def test_a_chosen_classifier_is_part_of_the_readings_fingerprint(tmp_path):
     assert signs.fingerprint(package)['version'] == signs.CACHE_VERSION == 2
 
 
+def test_the_readings_go_by_the_settings_of_the_release(tmp_path):
+    import json
+    import shutil
+    from nnslr_tools import road_type_signs as signs
+    source = signs.package_path()
+    if not (source / 'vision.py').is_file():
+        pytest.skip('no sunnypilot clone with the car code')
+    package = tmp_path / 'package'
+    (package / 'models').mkdir(parents=True)
+    shutil.copy(source / 'vision.py', package)
+    for file in signs.NETWORK_FILES.values():
+        (package / 'models' / file).write_bytes(b'car ' + file.encode())
+    before = signs.fingerprint(package)
+    assert signs.load_vision(package).CONFIRM_FRAMES == 2
+    (package / 'models' / signs.RELEASE_MANIFEST).write_text(json.dumps({'settings': {'confirm_frames': 3}}))
+    assert signs.load_vision(package).CONFIRM_FRAMES == 3
+    assert signs.fingerprint(package) != before
+
+
 # -- the comma's rule on the merges (road_type_metrics) ---------------------------------------------------------------
 def _entry_drive():
     """60 s of town, 20 s of ramp, 100 s of motorway."""

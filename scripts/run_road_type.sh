@@ -18,7 +18,7 @@ set -euo pipefail
 #      data/derived/junctions: the labels of the junction head, a person's corrections over them) and resizes every
 #      frame of the drives with road types to 256 x 144 once (data/derived/road_type_frames);
 #   4. reads the motorway signs of those drives as the comma does (nnslr road-type-signs: the car's vision.py,
-#      SignNet and classifier from the sunnypilot clone, read only, 5 frames a second of fcamera.hevc, decoded and
+#      SignNet and classifier from the sunnypilot clone, read only, 4 frames a second of fcamera.hevc, decoded and
 #      read on the GPU (NVDEC and onnxruntime-gpu of .venv, the CPU when there is none);
 #      data/derived/road_type_signs; NNSLR_ROAD_TYPE_CLASSIFIER: another classifier's reader-best.pt instead of the
 #      car's, exported once to ONNX): the comma's rule measured with the signs the car confirms today, and the green
