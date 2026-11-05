@@ -207,16 +207,16 @@ Beside the zoom of the selected box, the square **Classifier** shows that box as
 
 ### A limit with hours (Panel below: Hours)
 
-A 30 with a plate of hours under it is another sign for the classifier: "Speed limit 30, with hours", the class `maximum_speed_hours:30`. In **Sign review** choose **Speed limit**, its number and **Panel below › Hours**, and draw one box around the disc and the plate; the page says so under the row. A limit with hours and no readable number stays a limit with no number. **Apply previous** carries such a box with its shape: a box of the disc alone it finds there is taken down over the plate, to check. A plain number that the cutter finds closer with **Hours** keeps **Hours**. **None** and **Other** keep the box on the disc.
+A 30 with a plate of hours under it is another sign for the classifier: "Speed limit 30, with hours", the class `maximum_speed_hours:30`. In **Sign review** choose **Speed limit**, its number and **Panel below › Hours**, and draw one box around the disc and the plate; the page says so under the row. When the plate can be read, set **From** and **To** under it: whole hours, saved with the sign, and the class becomes `maximum_speed_hours:30:22-6`, so that the car and the brain know them. Leave them empty for a plate too small to read, or one with days, minutes or two ranges. Hours with fewer than 3 crops of train stay in `maximum_speed_hours:30`. A limit with hours and no readable number stays a limit with no number. **Apply previous** carries such a box with its shape and its hours: a box of the disc alone it finds there is taken down over the plate, to check. A plain number that the cutter finds closer with **Hours** keeps **Hours**. **None** and **Other** keep the box on the disc.
 
 To reach the car, in this order:
 
 1. Mark the signs in **Sign review**.
 2. **Import the reviews.**
 3. **Train the cutter**: the car's classifier sees only the box SignNet cuts, so SignNet has to learn the tall box too. Choose it on **Models**: the classifier learns the false boxes of the cutter in use (Train › Pipeline does steps 2 to 4 in a row, with the new cutter).
-4. **Train the classifier**: it gets one class for each number with hours.
+4. **Train the classifier**: it gets one class for each number with hours, and one for each number with hours read. The hours need drives at full definition to be read on the car: at 1344 × 760 the plate is a blob.
 5. On **Models** choose the classifier, then **Publish**. The brain reads the drives with the networks of the release, so a brain trained before this Publish has never seen the new class.
-6. **Train the brain**: it reads the labelled drives again first. Models › Brain then says **Reads them** under **Hours plates**, if frames of train with a speed labelled had a plate.
+6. **Train the brain**: it reads the labelled drives again first. Models › Brain then says **Reads them** under **Hours plates**, if frames of train with a speed labelled had a plate, and **Reads them and their hours** if they had their hours read.
 7. Choose a seed on **Models** and **Publish** again.
 
 With no Hours label nothing changes: no such class, and the same classes as today.
