@@ -205,7 +205,7 @@ Beside the zoom of the selected box, the square **Classifier** shows that box as
 
 ### Drives at full definition
 
-A comma with **Record road at full resolution** on (Developer tab) writes its `fcamera.hevc` at 2688 × 1520 instead of 1344 × 760. The server tells them apart by the size of the video, drive by drive, with no setting; old and new drives live side by side. Such a drive says **HD** beside its date.
+A comma with **Record road at full resolution** on (Developer tab) writes its `fcamera.hevc` at 2688 × 1520 instead of 1344 × 760. The server tells them apart by the size of the video when it extracts the frames, drive by drive, with no setting; old and new drives live side by side. Such a drive says **HD** beside its date.
 
 - **Rows, boxes and labels stay in 1344 × 760 pixels**, on every drive. Each picture `frame_XXXXXXXX.png` is the recorded frame reduced by 2, and the recorded frame stays beside it as `frame_XXXXXXXX.full.jpg`. So the cutter, the reviews already saved and the dataset do not change.
 - **Sign review** shows the recorded frame, in the photo, the zoom and the **Classifier** square. Drive review plays a video as wide as the recording.

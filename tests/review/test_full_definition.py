@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from nnslr_tools import video_frames
+from nnslr_tools import drives, video_frames
 from nnslr_tools.crop_cache import EXACT, WINDOW, build_crop_cache
 from nnslr_tools.media import (FRAME_SIZE, FULL_SIZE, extract_frames, extracted_frame_rows, full_picture,
                                remove_picture, save_preview)
@@ -115,6 +115,12 @@ def test_the_preview_is_the_full_frame_when_there_is_one(tmp_path, full_video):
     save_preview(Image.new('RGB', FRAME_SIZE), tmp_path / 'plain.png', tmp_path / 'plain.jpg')
     with Image.open(tmp_path / 'plain.jpg') as preview:
         assert preview.size == FRAME_SIZE
+
+
+def test_a_drive_says_it_is_at_full_definition(segment, tmp_path):
+    root, _video = segment
+    assert drives.full_definition(root, ROUTE)
+    assert not drives.full_definition(tmp_path / 'nothing', ROUTE)
 
 
 def stored_crops(root, path, box, kind):

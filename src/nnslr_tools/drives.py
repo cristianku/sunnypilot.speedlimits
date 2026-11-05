@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from nnslr_tools import video_frames
-from nnslr_tools.media import FULL_SIZE
+from nnslr_tools.media import FULL_SUFFIX
 
 LOCAL = ZoneInfo('Europe/Zurich')
 # How much a kind of place counts against its distance: a town 2 km away beats a village 1.5 km away.
@@ -113,12 +112,9 @@ def _times(root: Path, route: str) -> tuple[datetime | None, datetime | None]:
 
 
 def full_definition(root: Path, route: str) -> bool:
-    """A drive recorded at full definition: one video tells, the comma's encoder chooses when it starts."""
-    video = next((Path(root) / 'raw' / 'routes' / route).glob('*/fcamera.hevc'), None)
-    try:
-        return video is not None and video_frames.video_size(video) == FULL_SIZE
-    except (video_frames.VideoFrameError, OSError):
-        return False
+    """A drive recorded at full definition: its pictures have the recorded frame beside them. Asked of every drive of a
+    list, so it reads folders and no video."""
+    return next((Path(root) / 'derived' / 'frames' / route).glob('*/*' + FULL_SUFFIX), None) is not None
 
 
 def drive_of(root: Path, route: str) -> dict[str, Any]:
