@@ -7,9 +7,15 @@ import pytest
 torch = pytest.importorskip('torch')
 pytest.importorskip('torchvision')
 
-GROUPS = ('signs', 'lead', 'country')
-SIZE = 6 + 3 + 7
+GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
+SIZE = 0
 T = 5
+
+
+def setup_module():
+    global SIZE
+    from nnslr_tools.brain_targets import INPUT_SIZES
+    SIZE = sum(INPUT_SIZES[name] for name in GROUPS)
 
 
 def net(**options):

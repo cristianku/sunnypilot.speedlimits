@@ -234,24 +234,28 @@ def test_the_training_refuses_what_would_go_wrong_without_a_word(change, says):
 
 def test_a_sign_read_counts_from_its_second_on_and_never_before():
     numpy = _np()
-    readings = [[10.0, [['maximum_speed:100', .9]]], [20.0, [['cancellation', .9]]], [30.0, [['variable_display:80', .9]]],
+    readings = [[10.0, [['maximum_speed:100', .9]]], [10.2, [['maximum_speed:100', .9]]], [20.0, [['cancellation', .9]]],
+                [20.2, [['cancellation', .9]]], [30.0, [['variable_display:80', .9]]], [30.2, [['variable_display:80', .9]]],
                 [31.0, [['other_sign:give_way', .9]]]]
-    found = _targets().sign_inputs(numpy.array([9.0, 10.0, 15.0, 20.0, 30.0, 40.0]), readings)
+    found, plates = _targets().sign_inputs(numpy.array([9.0, 10.0, 11.0, 15.0, 21.0, 31.0, 40.0]), readings)
     assert found[0].sum() == 0
-    assert found[1][:3] == pytest.approx([100 / 130, 1, 0])
-    assert found[1][5] == 1 and found[2][5] == 0
-    assert found[2][4] == 0 and found[3][4] == 1
-    assert found[4][:3] == pytest.approx([80 / 130, 1, 1]) and found[4][4] == 0
+    assert found[1][:2].sum() == 0 and found[1][8] == pytest.approx(100 / 130)
+    assert found[2][:3] == pytest.approx([100 / 130, 1, 0])
+    assert found[2][7] == 1 and found[3][7] == 0
+    assert found[3][6] == 0 and found[4][6] == 1
+    assert found[5][:3] == pytest.approx([80 / 130, 1, 1]) and found[5][6] == 0
+    assert (plates[:, -1] == 1).all()
 
 
 def test_a_drive_not_read_yet_has_its_signs_unknown():
     numpy = _np()
-    assert _targets().sign_inputs(numpy.array([1.0, 2.0]), None).sum() == 0
+    signs, plates = _targets().sign_inputs(numpy.array([1.0, 2.0]), None)
+    assert signs.sum() == 0 and (plates[:, -1] == 1).all() and plates.sum() == 2
 
 
-def inputs_of(ns, series, readings=None):
-    frames = [{'segment': 0, 'index': int(t // NS), 'country': 'CH'} for t in ns]
-    return _targets().drive_inputs(frames, ns, {'series': series}, readings)
+def inputs_of(ns, series, readings=None, gps=()):
+    frames = [{'segment': 0, 'index': int(t // NS), 'country': 'CH', 'country_from': 'gps'} for t in ns]
+    return _targets().drive_inputs(frames, ns, {'series': series, 'gps': gps}, readings)
 
 
 def test_no_input_of_a_frame_knows_what_comes_after_it():
@@ -262,9 +266,10 @@ def test_no_input_of_a_frame_knows_what_comes_after_it():
     future = {name: [*points, [21 * NS, points[-1][1] if name == 'brake' else 99.0]] for name, points in past.items()}
     future['gas'] = [*past['gas'], [21 * NS, True]]
     future['brake'] = [*past['brake'], [21 * NS, True]]
-    readings = [[5.0, [['maximum_speed:80', .9]]]]
+    readings = [[5.0, [['maximum_speed:80', .9]]], [5.2, [['maximum_speed:80', .9]]]]
     later = [*readings, [21.0, [['maximum_speed:120', .9]]]]
-    before, after = inputs_of(ns, past, readings), inputs_of(ns, future, later)
+    fixes = [[5 * NS, 47.0, 8.0, 1_750_000_000_000]]
+    before, after = inputs_of(ns, past, readings, fixes), inputs_of(ns, future, later, [*fixes, [21 * NS, 47.0, 8.0, 1_760_000_000_000]])
     for name in before:
         assert numpy.array_equal(before[name][:2], after[name][:2]), name
         assert before[name].shape[1] == _targets().INPUT_SIZES[name]
@@ -291,11 +296,34 @@ def test_the_lead_and_the_speed_are_unknown_until_they_are_known():
 
 def test_a_country_outside_the_list_is_one_of_its_own():
     targets = _targets()
-    frames = [{'segment': 0, 'index': 1, 'country': 'CH'}, {'segment': 0, 'index': 2, 'country': 'SM'}, {'segment': 0, 'index': 3, 'country': None}]
+    frames = [{'segment': 0, 'index': 1, 'country': 'CH', 'country_from': 'gps'},
+              {'segment': 0, 'index': 2, 'country': 'SM', 'country_from': 'gps'},
+              {'segment': 0, 'index': 3, 'country': None, 'country_from': None}]
     found = targets.drive_inputs(frames, seconds(1, 2, 3), {'series': {}}, None)['country']
     assert found[0][targets.COUNTRIES.index('CH')] == 1
     assert found[1][-1] == 1 and found[2][-1] == 1
     assert found.sum() == 3
+
+
+def test_a_frame_without_a_fix_never_takes_the_country_of_a_later_one():
+    frames = [{'country': 'DE', 'country_from': 'nearest_fix'}, {'country': 'DE', 'country_from': 'gps'},
+              {'country': 'CH', 'country_from': 'nearest_fix'}, {'country': 'CH', 'country_from': 'gps'}]
+    assert _targets().countries_so_far(frames) == [None, 'DE', 'DE', 'CH']
+
+
+def test_the_gps_clock_runs_on_from_its_last_fix_and_says_nothing_before_the_first():
+    numpy = _np()
+    gps = [[10 * NS, 47.0, 8.0, 1_000_000], [20 * NS, 47.0, 8.0, None], [30 * NS, 47.0, 8.0, 1_020_000]]
+    assert _targets().unix_at(gps, numpy.array([5 * NS, 10 * NS, 25 * NS, 31 * NS, -1])) == [None, 1000, 1015, 1021, None]
+
+
+def test_the_hour_of_a_frame_is_the_local_one_from_the_gps_clock():
+    ns = seconds(10, 20)
+    summer_noon_utc = 1_751_371_200_000  # 1 July 2025 12:00 UTC
+    hour = inputs_of(ns, {}, gps=[[15 * NS, 47.0, 8.0, summer_noon_utc]])['hour']
+    assert list(hour[0]) == [0, 0, 0]
+    assert hour[1][2] == 1
+    assert hour[1][0] == pytest.approx(-.5, abs=.01)  # 14:05 on the circle
 
 
 def test_a_comparison_can_leave_out_the_driver():

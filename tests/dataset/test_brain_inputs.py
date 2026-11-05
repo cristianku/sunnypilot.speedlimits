@@ -1,0 +1,172 @@
+"""The car's file of the brain's inputs, loaded as the training loads it: what a frame hands to the network, and the rules
+that must be the same on the server and on the car."""
+import ast
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from zoneinfo import ZoneInfo
+
+
+def _car():
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, VISION
+    return BRAIN_INPUTS, VISION
+
+
+def fed(*frames):
+    """SignInputs after the frames (now, signs...)."""
+    brain, vision = _car()
+    signs = brain.SignInputs(vision)
+    for now, *read in frames:
+        signs.add(now, list(read))
+    return signs
+
+
+def kph(row):
+    return round(float(row[0]) * 130), round(float(row[8]) * 130)
+
+
+def test_the_file_of_the_car_needs_nothing_of_openpilot_and_reads_no_map():
+    from nnslr_tools.brain_targets import BRAIN_INPUTS_PATH
+    tree = ast.parse(BRAIN_INPUTS_PATH.read_text(encoding='utf-8'))
+    imported = {name.name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for name in node.names}
+    imported |= {node.module.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
+    assert imported <= {'datetime', 'math', 'numpy'}
+    code = ''.join(ast.unparse(node) for node in tree.body[1:])
+    assert 'liveMapData' not in code and 'roadName' not in code
+
+
+def test_one_reading_is_a_single_reading_and_a_second_within_the_time_confirms_it():
+    one = fed((10.0, ('maximum_speed:80', .9)))
+    assert kph(one.features(10.0)) == (0, 80)
+    two = fed((10.0, ('maximum_speed:80', .9)), (10.2, ('maximum_speed:80', .9)))
+    assert kph(two.features(10.2)) == (80, 80)
+    late = fed((10.0, ('maximum_speed:80', .9)), (12.0, ('maximum_speed:80', .9)))
+    assert kph(late.features(12.0)) == (0, 80)
+
+
+def test_a_number_read_once_leaves_the_confirmed_one_where_it_is():
+    signs = fed((10.0, ('maximum_speed:80', .9)), (10.2, ('maximum_speed:80', .9)), (30.0, ('maximum_speed:60', .9)))
+    assert kph(signs.features(30.0)) == (80, 60)
+
+
+@pytest.mark.parametrize('name, flag', [('variable_display:80', 2), ('zone:30', 3), ('road_marking:30', 4)])
+def test_every_kind_of_number_counts_and_says_its_kind(name, flag):
+    row = fed((10.0, (name, .9)), (10.2, (name, .9))).features(10.2)
+    assert row[1] == 1 and [at for at in (2, 3, 4) if row[at]] == [flag]
+
+
+def test_a_reading_not_sure_enough_or_no_number_is_nothing():
+    brain, vision = _car()
+    doubt = vision.MIN_CONFIDENCE - .01
+    signs = fed((10.0, ('maximum_speed:80', doubt)), (10.2, ('maximum_speed:80', doubt)),
+                (10.4, ('other_sign:give_way', .9)), (10.6, ('not_a_sign', .9)))
+    assert not signs.features(11.0).any()
+
+
+def test_an_end_is_confirmed_as_a_number_is_and_the_number_stays_beside_it():
+    number = ((10.0, ('maximum_speed:80', .9)), (10.2, ('maximum_speed:80', .9)))
+    once = fed(*number, (20.0, ('cancellation', .9)))
+    assert once.features(20.0)[6] == 0 and once.features(20.0)[8] == 0 and once.features(20.0)[9] == 1
+    ended = fed(*number, (20.0, ('cancellation', .9)), (20.2, ('cancellation', .9)))
+    assert ended.features(20.2)[6] == 1 and kph(ended.features(20.2))[0] == 80
+    again = fed(*number, (20.0, ('cancellation', .9)), (20.2, ('cancellation', .9)), (30.0, ('maximum_speed:60', .9)),
+                (30.2, ('maximum_speed:60', .9)))
+    assert again.features(30.2)[6] == 0
+
+
+def test_the_same_frames_give_the_same_answer_in_any_order_of_the_signs():
+    a, b = ('maximum_speed:80', .9), ('maximum_speed:60', .9)
+    first = fed((10.0, a, b), (10.2, a, b)).features(10.2)
+    second = fed((10.0, b, a), (10.2, b, a)).features(10.2)
+    assert (first == second).all()
+    assert kph(first)[0] == 60  # the car's rule: the lower on a tie
+    assert kph(first)[1] == 80  # same confidence: the class name decides, never the order
+
+
+def test_the_surest_of_a_frame_is_its_single_reading():
+    signs = fed((10.0, ('maximum_speed:80', .75), ('maximum_speed:120', .95)))
+    assert kph(signs.features(10.0))[1] == 120
+
+
+def test_a_number_read_twice_in_a_frame_is_its_surest_reading():
+    display, sign = ('variable_display:80', .95), ('maximum_speed:80', .75)
+    assert fed((10.0, display, sign), (10.2, display, sign)).features(10.2)[2] == 1
+    assert fed((10.0, sign, display), (10.2, sign, display)).features(10.2)[2] == 1
+
+
+def test_read_in_the_last_second_and_the_age_are_of_the_last_reading_of_the_number():
+    number = ((10.0, ('maximum_speed:80', .9)), (10.2, ('maximum_speed:80', .9)))
+    assert fed(*number).features(11.0)[7] == 1
+    assert fed(*number).features(11.3)[7] == 0
+    later = fed(*number, (20.0, ('maximum_speed:80', .9)))
+    assert later.features(20.0)[5] == 0 and later.features(20.5)[7] == 1
+    assert fed(*number).features(20.0)[5] > 0
+
+
+def test_a_plate_is_unknown_until_the_reader_says_it():
+    brain, _ = _car()
+    number = (10.0, ('maximum_speed:30', .9)), (10.2, ('maximum_speed:30', .9))
+    assert list(fed(*number).plate_row()) == [0, 0, 0, 1]
+    assert list(fed().plate_row()) == [0, 0, 0, 1]
+
+
+def test_the_plate_is_of_the_number_confirmed_and_its_last_reading_wins():
+    read = lambda now, plate, number=30: (now, (f'maximum_speed:{number}', .9, plate))  # noqa: E731
+    assert list(fed(read(10.0, 'time'), read(10.2, None)).plate_row()) == [0, 1, 0, 0]
+    assert list(fed(read(10.0, 'time'), read(10.2, 'none')).plate_row()) == [1, 0, 0, 0]
+    assert list(fed(read(10.0, 'none'), read(10.2, 'none'), read(30.0, 'time'), read(30.2, None)).plate_row()) == [0, 1, 0, 0]
+
+
+def test_the_plate_of_another_sign_never_stays():
+    read = lambda now, plate, number=30: (now, (f'maximum_speed:{number}', .9, plate))  # noqa: E731
+    assert list(fed(read(10.0, 'time'), read(10.2, 'time'), read(30.0, None, 50), read(30.2, None, 50)).plate_row()) == [0, 0, 0, 1]
+    assert list(fed(read(10.0, 'time'), read(10.2, 'time'), read(30.0, 'none', 50)).plate_row()) == [0, 1, 0, 0]
+    assert list(fed(read(10.0, 'time'), read(10.2, 'time'), read(30.0, None), read(30.2, None)).plate_row()) == [0, 1, 0, 0]
+    ended = (read(10.0, 'time'), read(10.2, 'time'), (20.0, ('cancellation', .9)), (20.2, ('cancellation', .9)),
+             read(30.0, None), read(30.2, None))
+    assert list(fed(*ended).plate_row()) == [0, 0, 0, 1]
+
+
+@pytest.mark.parametrize('country, zone', [('CH', 'Europe/Zurich'), ('DE', 'Europe/Berlin'), ('FR', 'Europe/Paris'),
+                                           ('IT', 'Europe/Rome'), ('AT', 'Europe/Vienna')])
+def test_the_local_hour_is_the_one_of_the_time_zones_for_every_hour_of_these_years(country, zone):
+    brain, _ = _car()
+    place = ZoneInfo(zone)
+    moment = datetime(2024, 1, 1, 0, 30, tzinfo=timezone.utc)
+    while moment.year < 2031:
+        there = moment.astimezone(place)
+        expected = there.hour + there.minute / 60
+        assert brain.local_hour(moment.timestamp(), country) == pytest.approx(expected), moment
+        moment += timedelta(hours=1)
+
+
+@pytest.mark.parametrize('moment', [datetime(2026, 3, 29, 0, 59, 59, tzinfo=timezone.utc), datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc),
+                                    datetime(2026, 10, 25, 0, 59, 59, tzinfo=timezone.utc), datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc)])
+def test_the_change_of_the_clock_falls_on_its_second(moment):
+    brain, _ = _car()
+    there = moment.astimezone(ZoneInfo('Europe/Zurich'))
+    assert brain.local_hour(moment.timestamp(), 'CH') == pytest.approx(there.hour + there.minute / 60 + there.second / 3600)
+
+
+def test_with_no_time_or_a_country_outside_the_table_the_hour_is_unknown():
+    brain, _ = _car()
+    assert brain.local_hour(None, 'CH') is None
+    assert brain.local_hour(1_750_000_000, 'US') is None
+    assert brain.local_hour(1_750_000_000, None) is None
+    assert list(brain.hour_row(None)) == [0, 0, 0]
+
+
+def test_a_minute_to_midnight_is_next_to_midnight():
+    brain, _ = _car()
+    before, after = brain.hour_row(23.99), brain.hour_row(0.0)
+    assert abs(before - after).max() < .01 and before[2] == 1
+
+
+def test_a_group_has_the_size_it_says():
+    brain, _ = _car()
+    sizes = brain.INPUT_SIZES
+    signs = fed((10.0, ('maximum_speed:80', .9)))
+    rows = {'signs': signs.features(10.0), 'plate': signs.plate_row(), 'hour': brain.hour_row(12.0),
+            'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH')}
+    assert {name: len(row) for name, row in rows.items()} == sizes
+    assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)

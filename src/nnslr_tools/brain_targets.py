@@ -38,10 +38,9 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs: the last number read, whether a display showed it, its age, whether an end was read since, a number read in this
-  second. From the car's own code on the server (road_type_signs.readings). A drive not read yet is unknown throughout;
-- lead: distance and speed of the car ahead;
-- country: where the frame is, from the GPS and the borders (gps.py): a country, no map;
+- signs, plate, hour, lead, country: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
+  yet has its signs unknown throughout. The hour comes from the GPS clock (merged['gps']), the country from the GPS and the
+  borders (gps.py), the last one a fix gave: a frame without a fix never takes the country of a later one;
 - pedals: gas and brake in the last second;
 - speed: the car's own speed.
 
@@ -76,7 +75,7 @@ import numpy as np
 from nnslr_tools import drive_logs
 from nnslr_tools.gps import load_positions
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path, speed_features
-from nnslr_tools.road_type_signs import fingerprint, load_signs, package_path
+from nnslr_tools.road_type_signs import fingerprint, load_signs, load_vision, package_path
 from nnslr_tools.speed_review import GRID_KPH, MAX_KPH, NS, db_path
 
 SPLIT_RELATIVE = Path('splits') / 'speed-brain-split.json'
@@ -103,6 +102,7 @@ def _load_brain_inputs(path: Path):
 
 BRAIN_INPUTS_PATH = package_path() / 'brain_inputs.py'
 BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
+VISION = load_vision(package_path())
 COUNTRIES = BRAIN_INPUTS.COUNTRIES
 INPUT_SIZES = {**BRAIN_INPUTS.INPUT_SIZES, 'pedals': 3, 'speed': 2}
 DRIVER_INPUTS = ('pedals', 'speed')
@@ -189,7 +189,7 @@ def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> 
 
 def drive_frames(root: Path, route: str, merged: dict) -> list[dict]:
     """The 1 Hz frames of a drive in drive order: key, segment, index, ns (the exposure start; None when the encode index
-    lacks it), latitude, longitude, country, image, present."""
+    lacks it), latitude, longitude, country, country_from, image, present."""
     index = drive_logs.frame_index(merged)
     positions = load_positions(root, route)
     frames = []
@@ -205,7 +205,7 @@ def drive_frames(root: Path, route: str, merged: dict) -> list[dict]:
             frames.append({'route': route, 'key': key, 'segment': segment, 'index': second,
                            'ns': drive_logs.frame_time(index, segment, row['decoded_frame_index']),
                            'latitude': gps.get('latitude'), 'longitude': gps.get('longitude'), 'country': gps.get('country'),
-                           'image': str(image), 'present': image.is_file()})
+                           'country_from': gps.get('country_from'), 'image': str(image), 'present': image.is_file()})
     frames.sort(key=lambda frame: (frame['segment'], frame['index']))
     return frames
 
@@ -266,20 +266,40 @@ def _pressed(points: list, ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return pressed, known
 
 
-def sign_inputs(seconds: np.ndarray, readings: list | None) -> np.ndarray:
-    """The signs group (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a drive, by the
-    car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
-    out = np.zeros((len(seconds), INPUT_SIZES['signs']), dtype=np.float32)
-    if readings is None:
-        return out
-    ordered = sorted(readings, key=lambda item: item[0])
-    signs, pointer = BRAIN_INPUTS.SignInputs(), 0
+def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray]:
+    """The signs and plate groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
+    drive, by the car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
+    signs = np.zeros((len(seconds), INPUT_SIZES['signs']), dtype=np.float32)
+    plates = np.zeros((len(seconds), INPUT_SIZES['plate']), dtype=np.float32)
+    ordered = sorted(readings or [], key=lambda item: item[0])
+    memory, pointer = BRAIN_INPUTS.SignInputs(VISION), 0
     for row, second in enumerate(seconds):
         while pointer < len(ordered) and ordered[pointer][0] <= second:
-            signs.add(*ordered[pointer])
+            memory.add(*ordered[pointer])
             pointer += 1
-        out[row] = signs.features(second)
-    return out
+        signs[row], plates[row] = memory.features(second), memory.plate_row()
+    return signs, plates
+
+
+def countries_so_far(frames: list[dict]) -> list[str | None]:
+    """The country of each frame as the car has it: the last one a fix gave, none before the first."""
+    found, country = [], None
+    for frame in frames:
+        country = frame['country'] if frame.get('country_from') == 'gps' else country
+        found.append(country)
+    return found
+
+
+def unix_at(gps: list, ns: np.ndarray) -> list[float | None]:
+    """The GPS clock at each time, seconds: its last fix at or before it [t_ns, latitude, longitude, unix_ms] and the time
+    since. None before the first."""
+    fixes = [row for row in gps if row[3]]
+    times = [row[0] for row in fixes]
+    found = []
+    for t in ns:
+        at = bisect.bisect_right(times, int(t)) - 1
+        found.append(None if at < 0 or t < 0 else fixes[at][3] / 1000 + (int(t) - times[at]) / NS)
+    return found
 
 
 def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None) -> dict[str, np.ndarray]:
@@ -291,9 +311,13 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     gas, gas_known = _pressed(series.get('gas') or [], ns)
     brake, brake_known = _pressed(series.get('brake') or [], ns)
     speed = [speed_features(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
-    country = np.array([BRAIN_INPUTS.country_row(frame['country']) for frame in frames], dtype=np.float32)
-    return {'signs': sign_inputs(seconds, readings), 'lead': lead.reshape(len(ns), INPUT_SIZES['lead']),
-            'country': country.reshape(len(ns), INPUT_SIZES['country']),
+    countries = countries_so_far(frames)
+    country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
+    hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))
+                     for unix, name in zip(unix_at(merged.get('gps') or [], ns), countries)], dtype=np.float32)
+    signs, plate = sign_inputs(seconds, readings)
+    return {'signs': signs, 'plate': plate, 'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
+            'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
 
