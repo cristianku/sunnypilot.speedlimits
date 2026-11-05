@@ -5,14 +5,20 @@ map. Here are the network and its loss, the end of the road from a person's labe
 The network, per frame: encoder (MobileNetV3-small, as the road-type network) -> features, with the inputs of the frame
 (brain_targets.INPUT_SIZES) -> GRU -> h, then two heads on h:
 
-    speed  = speed_head(h)   the speed to hold, a class of 5 km/h: the only output on the car
-    works  = works_head(h)   are we inside roadworks: only in training
+    speed  = speed_head(h) + trust(h) * number   the speed to hold, a class of 5 km/h: the only output on the car
+    works  = works_head(h)                       are we inside roadworks: only in training
 
 loss = cross entropy(speed, his speed) + WORKS_LOSS * binary cross entropy(works, his marks), each only on the frames with
 an answer of its own. The works error goes back through h into the GRU and the layer on the picture's features, which the
 speed uses too: that is how a mark changes the network, without ever being an input. works_head is one layer, left out of the car's network
 (car_weights), and no code goes from works to speed. Whether it helps is measured: the same training without it
 (works=False), on sites of test and validation.
+
+The number goes straight to the answer too: number is 1 on the class of the number in force, so trust(h) is added to that
+class alone. As one value among the GRU's inputs it reached nothing: with the numbers swapped in training (5 Nov 2026) the
+answer did not move when the number changed, not even with one constant picture in place of the road. The network still
+decides: trust comes from the memory and can be 0 or below on a sign it has reason to doubt, and speed_head can say any speed.
+It is all comparisons, which export as they are.
 
 The picture's features. pool 'mean' is the road-type network's: the mean of the 8 x 5 map keeps what is in a frame and loses
 most of where, and a truck in the lane beside ours is a matter of where. pool 'grid' keeps the map: a 1 x 1 convolution to
@@ -26,7 +32,7 @@ The picture's features go through a LayerNorm, so that they keep the scale of th
 """
 from __future__ import annotations
 
-from nnslr_tools.brain_targets import INPUT_SIZES, SPEED_CLASSES
+from nnslr_tools.brain_targets import BRAIN_INPUTS, GRID_KPH, INPUT_SIZES, SPEED_CLASSES, class_kph
 from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_STD, _torch
 
 WORKS_LOSS = 0.3
@@ -49,6 +55,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
     if pool not in POOLS:
         raise ValueError(f'pool must be one of {POOLS}')
     extra = sum(INPUT_SIZES[name] for name in groups)
+    signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')])
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -64,7 +71,9 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
             self.project = nn.Sequential(nn.Linear(width, features), nn.LayerNorm(features), nn.Hardswish(), nn.Dropout(0.2))
             self.gru = nn.GRU(features + extra, hidden, batch_first=True)
             self.speed_head = nn.Linear(hidden, SPEED_CLASSES)
+            self.trust = nn.Linear(hidden, 1)
             self.works_head = nn.Linear(hidden, 1) if works else None
+            self.register_buffer('class_kph', class_kph(torch.arange(SPEED_CLASSES, dtype=torch.float32)))
 
         def train(self, mode: bool = True):
             super().train(mode)
@@ -79,11 +88,20 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
             x = x.mean(dim=(2, 3)) if self.pool == 'mean' else self.squeeze(x).flatten(1)
             return self.project(x)
 
+        def number_in_force(self, extra_input):
+            """(B, T, inputs) -> (B, T, SPEED_CLASSES): 1 on the class of the number in force, all 0 with none."""
+            signs = extra_input[..., signs_at:signs_at + INPUT_SIZES['signs']]
+            held = (signs[..., 1:2] > 0) & (signs[..., 6:7] == 0)
+            near = (signs[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < GRID_KPH / 2
+            return (near & held).to(extra_input.dtype)
+
         def forward(self, images, extra_input, state=None):
             b, t = images.shape[:2]
-            x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input.to(images.dtype)], dim=-1)
+            extra_input = extra_input.to(images.dtype)
+            x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
             out, last = self.gru(x, None if state is None else state[None].contiguous())
-            return self.speed_head(out), None if self.works_head is None else self.works_head(out)[..., 0], last[0]
+            speed = self.speed_head(out) + self.trust(out) * self.number_in_force(extra_input)
+            return speed, None if self.works_head is None else self.works_head(out)[..., 0], last[0]
 
     return BrainNet()
 

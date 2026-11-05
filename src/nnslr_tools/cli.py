@@ -2612,7 +2612,8 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      works=not args.no_works, driver=args.driver, device=args.device, dry_run=args.dry_run,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
-                         for part in ('train', 'validation', 'test')}, 'test_swapped': result['test_swapped']}, indent=2))
+                         for part in ('train', 'validation', 'test')},
+                      **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))
     return 0
 
 

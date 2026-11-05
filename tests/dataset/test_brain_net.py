@@ -73,6 +73,7 @@ def test_a_mark_reaches_the_memory_and_the_picture_features_and_not_the_speed_he
     assert gradient_of(model, 'gru') > 0
     assert gradient_of(model, 'project') > 0
     assert gradient_of(model, 'speed_head') == 0
+    assert gradient_of(model, 'trust') == 0
 
 
 def test_one_step_on_a_mark_changes_what_the_network_says_of_the_speed():
@@ -226,3 +227,67 @@ def test_a_network_with_another_input_is_the_same_network():
     model = build_brain_net(groups, pretrained=False)
     speed, _works, _state = model(torch.rand(1, 2, 3, 144, 256), torch.rand(1, 2, sum(INPUT_SIZES.values())))
     assert speed.shape[1] == 2
+
+
+def number_row(kph, known=1.0, ended=0.0, groups=GROUPS):
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES
+    at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')])
+    extra = torch.zeros(1, 2, sum(INPUT_SIZES[name] for name in groups))
+    extra[..., at], extra[..., at + 1], extra[..., at + 6] = kph / BRAIN_INPUTS.SIGN_KPH_SCALE, known, ended
+    return extra
+
+
+def trusting(model, trust, head=None):
+    """A network whose only say is a trust of this much and, with head, one class of its own."""
+    with torch.no_grad():
+        for layer in (model.speed_head, model.trust):
+            layer.weight.zero_()
+            layer.bias.zero_()
+        model.trust.bias.fill_(trust)
+        if head is not None:
+            model.speed_head.bias[head] = 1
+    return model
+
+
+@pytest.mark.parametrize('kph', [30, 50, 60, 100, 120, 130])
+def test_the_number_in_force_goes_to_its_class_alone_as_much_as_the_network_trusts_it(kph):
+    from nnslr_tools.brain_targets import speed_class
+    speed = trusting(net(), 3.0)(batch(2)[0], number_row(kph))[0]
+    assert speed.argmax(dim=-1).tolist() == [[speed_class(kph)] * 2]
+    assert speed.sum(dim=-1).tolist() == [[3.0, 3.0]]
+
+
+@pytest.mark.parametrize('changes', [{'kph': 0}, {'kph': 100, 'known': 0.0}, {'kph': 100, 'ended': 1.0}])
+def test_a_number_not_in_force_goes_nowhere(changes):
+    assert trusting(net(), 3.0)(batch(2)[0], number_row(**changes))[0].abs().sum() == 0
+
+
+def test_the_network_can_say_another_speed_than_the_number():
+    from nnslr_tools.brain_targets import speed_class
+    model = trusting(net(), 0.5, head=speed_class(120))
+    assert model(batch(2)[0], number_row(60))[0].argmax(dim=-1).tolist() == [[speed_class(120)] * 2]
+    assert trusting(net(), -1.0)(batch(2)[0], number_row(60))[0][0, 0, speed_class(60)] == -1
+
+
+def test_the_trust_in_the_number_learns_from_a_frame_that_says_it():
+    model = net()
+    images, extra = batch(2)[0], number_row(60)
+    speed, works, _state = model(images, extra)
+    from nnslr_tools.brain_net import brain_loss
+    from nnslr_tools.brain_targets import speed_class
+    brain_loss(speed, works, torch.full((1, 2), speed_class(60)), torch.ones(1, 2), torch.zeros(1, 2), torch.zeros(1, 2)).backward()
+    assert gradient_of(model, 'trust') > 0
+
+
+def test_the_number_is_found_wherever_the_signs_are_among_the_groups():
+    from nnslr_tools.brain_net import build_brain_net
+    from nnslr_tools.brain_targets import speed_class
+    groups = ('plate', 'hour', 'signs', 'country')
+    model = trusting(build_brain_net(groups, pretrained=False), 3.0)
+    assert model(batch(2)[0], number_row(80, groups=groups))[0].argmax(dim=-1).tolist() == [[speed_class(80)] * 2]
+
+
+def test_the_car_gets_the_trust():
+    from nnslr_tools.brain_net import car_weights
+    assert 'trust.weight' in car_weights(net())
+

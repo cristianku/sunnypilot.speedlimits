@@ -461,7 +461,8 @@ def test_the_result_has_the_roads_seen_beside_those_not_seen(tmp_path, monkeypat
     torch = torch_or_skip()
     result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
     assert result['train']['speed']['frames'] == 4 and result['test']['speed']['frames'] == 2
-    assert result['test_swapped']['network']['frames'] == 0
+    assert result['test_swapped']['network']['frames'] == 0 and result['validation_swapped']['moved'] == 0
+    assert result['answers'] == {'00000001--abcdef0123': 8}
 
 
 def signed_drive():
@@ -479,7 +480,7 @@ def signed_drive():
 def swapped_measure(monkeypatch, answer, drive):
     from nnslr_tools import brain_train
     monkeypatch.setattr(brain_train, 'predict', lambda _model, seen, _store, **_options: said(answer(seen)))
-    return brain_train._test_swapped(None, [drive], GROUPS, None, chunk=4, device='cpu')
+    return brain_train._swapped_measure(None, [drive], [said(answer(drive))], 'test', GROUPS, None, chunk=4, device='cpu')
 
 
 def test_test_swapped_asks_only_the_frames_whose_number_changed_and_the_network_must_change_with_it(monkeypatch):
@@ -487,8 +488,26 @@ def test_test_swapped_asks_only_the_frames_whose_number_changed_and_the_network_
     from nnslr_tools.brain_targets import sign_kph
     follows = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), signed_drive())
     assert follows['network'] == {'frames': 3, 'right': 1.0, 'mean_error_kph': 0.0} and follows['sign']['right'] == 1.0
+    assert follows['moved'] == 3
     stays = swapped_measure(monkeypatch, lambda seen: numpy.full(7, 100), signed_drive())
-    assert stays['network'] == {'frames': 3, 'right': 0.0, 'mean_error_kph': 20.0}
+    assert stays['network'] == {'frames': 3, 'right': 0.0, 'mean_error_kph': 20.0} and stays['moved'] == 0
+
+
+def test_a_frame_after_an_end_read_is_not_asked_to_move(monkeypatch):
+    from nnslr_tools.brain_targets import pack_inputs, sign_kph
+    drive = signed_drive()
+    drive['inputs']['signs'][2, 6] = 1
+    drive['extra'] = pack_inputs(drive['inputs'], GROUPS)
+    found = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), drive)
+    assert found['network']['frames'] == 2 and found['moved'] == 2
+
+
+def test_the_swap_is_measured_on_validation_and_on_test_each_on_its_own(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+    monkeypatch.setattr(brain_train, '_swapped_measure', lambda *found, **_options: found[3])
+    result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
+    assert result['validation_swapped'] == 'validation' and result['test_swapped'] == 'test'
 
 
 def test_test_swapped_with_no_passage_to_change_has_no_frames(monkeypatch):

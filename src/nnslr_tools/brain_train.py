@@ -7,8 +7,8 @@ cuts every epoch, and the gradient stops at each of them. Every epoch the drives
 swapped, and those with a plate of hours go through once more at night (brain_targets.epoch_drives): the measure has only
 the real hour and the real numbers.
 
-The last epoch is what is kept. Validation is one stretch of one drive today, with one speed: choosing on it rewards the epoch
-that remembers that road, the opposite of what the swap asks. It is shown every epoch and it chooses nothing.
+The last epoch is what is kept. Validation is a few stretches of two drives today: choosing on it rewards the epoch that
+remembers those roads, the opposite of what the swap asks. It is shown every epoch and it chooses nothing.
 
 A picture of test or validation runs in no training step and in no memory of one: the training skips those frames, and the
 memory starts again after them (brain_targets.learning_pieces). A frame of the buffer runs under no_grad, only to keep the
@@ -38,8 +38,9 @@ predict goes through a whole drive as on the car, so a held-out stretch starts f
 and a network that only holds its last speed scores well there. So the result has each partition twice: as on the car, and
 cold, with the memory starting again where the stretch out of train begins.
 
-test_swapped asks the network what the swap asks in training, on roads it never saw: the frames of test whose passage says its
-number, with that number changed to the other of its family. Whatever the picture shows, the network right there has read it.
+test_swapped and validation_swapped ask the network what the swap asks in training, on roads it never saw: the frames whose
+passage says its number, with that number changed to the other of its family. A network deaf to the sign is still right on the
+frames that go to the speed it says, so moved counts the answers that changed: the network reads the sign when they follow it.
 
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. The driver's
 inputs stay out unless driver=True: see brain_targets.
@@ -48,6 +49,7 @@ from __future__ import annotations
 
 import json
 import random
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -184,6 +186,10 @@ def _site(drive: dict, said: dict, mark: dict, truth: np.ndarray, asked: np.ndar
     return site
 
 
+def _in_force(signs: np.ndarray) -> np.ndarray:
+    return (signs[:, 1] > 0) & (signs[:, 6] == 0)
+
+
 def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
     """What the network is worth on one partition: see the module's text."""
     said_all, truth_all, own_all, number_all, free, works_frames, sites = [], [], [], [], [], [], []
@@ -197,7 +203,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
         truth_all.append(truth[asked])
         own_all.append(drive['own_kph'][asked])
         signs = drive['inputs']['signs'][asked]
-        number_all.append(np.where((signs[:, 1] > 0) & (signs[:, 6] == 0), sign_kph(signs), -1))
+        number_all.append(np.where(_in_force(signs), sign_kph(signs), -1))
         free.append(drive['inputs']['pedals'][asked, 0] == 0)
         works_frames.append(drive['works'][asked] > 0)
         if said['works'] is not None:
@@ -260,16 +266,21 @@ def _works_needs_both(drives: list[dict], log) -> None:
         drive['works_weight'] = drive['works_weight'] * (np.array(drive['partitions']) != 'train')
 
 
-def _test_swapped(model, drives: list[dict], groups: tuple[str, ...], store: FrameStore, *, chunk: int, device) -> dict:
-    """follow_the_sign on the frames of test whose number was swapped: see the module's text."""
-    held = []
-    for drive in drives:
-        passages = swap_passages(drive, 'test')
+def _swapped_measure(model, drives: list[dict], answers: list[dict], partition: str, groups: tuple[str, ...], store: FrameStore, *,
+                     chunk: int, device) -> dict:
+    """follow_the_sign on the frames of a partition whose number was swapped, and how many answers moved: see the module's
+    text."""
+    held, said, moved = [], [], 0
+    for drive, before in zip(drives, answers):
+        passages = swap_passages(drive, partition)
         if passages:
             inside = np.zeros_like(drive['speed_weight'])
             inside[np.concatenate(passages)] = 1
             held.append({**swapped(drive, passages, groups), 'speed_weight': drive['speed_weight'] * inside})
-    return measure(held, [predict(model, drive, store, chunk=chunk, device=device) for drive in held], 'test')['follow_the_sign']
+            said.append(predict(model, held[-1], store, chunk=chunk, device=device))
+            asked = (loss_weights(held[-1], partition)[0] > 0) & _in_force(held[-1]['inputs']['signs'])
+            moved += int((said[-1]['kph'][asked] != before['kph'][asked]).sum())
+    return {**measure(held, said, partition)['follow_the_sign'], 'moved': moved}
 
 
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean', works: bool = True, driver: bool = False,
@@ -316,10 +327,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
             f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]}')
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
+    swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
     result = {'groups': list(groups), 'pool': pool, 'works': works, 'dry_run': dry_run, 'seed': seed, 'history': history,
+              'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),
               'test_cold': measure(drives, cold, 'test'),
-              'test_swapped': _test_swapped(model, drives, groups, store, chunk=chunk, device=device)}
+              'validation_swapped': swapped_measure('validation'), 'test_swapped': swapped_measure('test')}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result
