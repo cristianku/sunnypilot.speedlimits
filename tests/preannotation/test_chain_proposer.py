@@ -1,5 +1,5 @@
 """The labels of our classifier as proposals of the review page (nnslr preannotate --proposer ours)."""
-from nnslr_tools._chain_proposer import car_speed, proposal_of
+from nnslr_tools._chain_proposer import car_speed, proposal_of, proposal_panel
 
 
 def test_classifier_labels_become_proposals():
@@ -10,6 +10,12 @@ def test_classifier_labels_become_proposals():
     assert proposal_of('other_sign') == ('other_sign', None)
     assert proposal_of('cancellation') == ('cancellation', None)
     assert proposal_of('not_a_sign') is None
+
+
+def test_a_number_with_hours_is_a_proposal_of_a_limit_with_its_panel():
+    assert proposal_of('maximum_speed_hours:30') == ('maximum_speed', 30)
+    assert proposal_panel('maximum_speed_hours:30') == 'time'
+    assert proposal_panel('maximum_speed:30') == 'unknown' and proposal_panel('other_sign:give_way') == 'unknown'
 
 
 def test_the_decider_gets_the_car_speed_of_each_frame_from_its_route(tmp_path):

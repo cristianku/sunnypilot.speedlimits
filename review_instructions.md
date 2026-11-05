@@ -82,7 +82,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - **Altro valore**, per i numeri che non ci sono tra quelli rapidi. Compare solo quando il tipo ammette un numero;
   - **Tipo**: Limite massimo, Fine limitazione, Illeggibile, Segnale variabile, Zona; più in piccolo Numero a terra, Altro cartello, Non è un cartello;
   - **Strada**: La nostra, Un'altra, Da chiarire;
-  - **Panel below**, sempre aperto: None, Hours (un limite valido solo a certe ore, come il 22-6 tedesco), Other; il box resta sul disco;
+  - **Panel below**, always open: None, Hours (a limit valid only at some hours, such as the German 22-6), Other. With None and Other the box stays on the disc; with Hours it takes the disc and the plate, one box for both, and the page says so under the row. Fit box (C, ⇧C) leaves such a box as it is;
   - **Dettagli del cartello**, chiuso: visibilità, occlusione, pannello sotto, temporaneo, display variabile, note.
 - **Seconda lettura**: c'è solo sui fotogrammi che ne hanno una. Ogni voce indica tipo, valore, sicurezza, letture (A, B) e lato, con il pulsante **Usa**, che diventa **Già usato** quando quel cartello c'è già.
 - **Altro**, chiuso: sito fisico, incontro, esportazione JSONL, scorciatoie.
@@ -270,7 +270,7 @@ Più indicazioni:
   | `applicability` | `own_road`, `other_road`, `unresolved` |
   | `visibility` | `unknown`, `clear`, `partial`, `poor` |
   | `occlusion` | `unknown`, `none`, `partial`, `heavy` |
-  | `supplementary_panel` | `unknown`, `none`, `time` (orario, es. 22-6), `present` (altro pannello), `unresolved` |
+  | `supplementary_panel` | `unknown`, `none`, `time` (hours, e.g. 22-6: one box around disc and plate), `present` (another panel: the box stays on the disc), `unresolved` |
   | `temporary`, `variable_display` | `true`, `false` oppure `null` |
   | `notes` | testo, anche vuoto; mai `null` |
   | `bbox_xyxy` | dentro l'immagine, con `x1 < x2` e `y1 < y2` |

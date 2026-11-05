@@ -1026,3 +1026,56 @@ def test_a_box_on_a_vehicle_is_imported_as_not_a_sign_with_its_kind(tmp_path, ca
     # The classifier keeps the plain "not a sign" box only: cut to its box, the sticker is a sign.
     from nnslr_tools.training import _classifier_label
     assert sorted(str(_classifier_label(r)) for r in canonical) == ["None", "not_a_sign"]
+
+
+def test_a_number_with_a_plate_of_hours_is_a_sign_of_its_own():
+    hours = {**_row("maximum_speed", 30), "supplementary_panel": "time"}
+    assert _classifier_label(hours) == "maximum_speed_hours:30"
+    # The v1 reader, the classes it was published with, stays as it was.
+    assert _reader_label(hours) == "maximum_speed:30"
+    # Without a number there is nothing to read: it stays what it was.
+    assert _classifier_label({**_row("maximum_speed"), "supplementary_panel": "time"}) == "maximum_speed:unknown"
+    assert _classifier_label({**_row("zone", 30), "supplementary_panel": "time"}) == "zone:30"
+    for panel in ("none", "present", "unknown", "unresolved", None):
+        assert _classifier_label({**_row("maximum_speed", 30), "supplementary_panel": panel}) == "maximum_speed:30"
+    assert family_label("maximum_speed_hours:30") == "maximum_speed:30"
+
+
+def _frames_with_hours(frames, count):
+    """FRAMES with the first boxes of a limit of 30 in train marked Hours, as tall boxes of the disc and its plate."""
+    changed, left = [], count
+    for split, who, kept, removed in frames:
+        boxes = []
+        for box in kept:
+            if left and split == "train" and box["value_kph"] == 30:
+                box, left = {**box, "bbox_xyxy": [4, 6, 20, 36], "supplementary_panel": "time"}, left - 1
+            boxes.append(box)
+        changed.append((split, who, boxes, removed))
+    return changed
+
+
+def test_the_classes_change_only_with_an_hours_label(tmp_path, capsys, monkeypatch):
+    from nnslr_tools.training import prepare_detector_training
+
+    plain = tmp_path / "plain"
+    latest = plain / "splits" / "latest.json"
+    before = prepare_reader_training(_classifier_fixture(plain, capsys), latest, plain, class_scheme="v2")
+    assert not any("hours" in label for label in before["classes"])
+    assert not any("holds_plate" in record for record in before["records"])
+    cutter = prepare_detector_training(plain / "annotations" / "objects.jsonl", latest, plain)
+    assert not any("plate_boxes" in frame for frame in cutter["frames"])
+
+    marked = tmp_path / "marked"
+    monkeypatch.setitem(globals(), "FRAMES", _frames_with_hours(FRAMES, 2))
+    latest = marked / "splits" / "latest.json"
+    plan = prepare_reader_training(_classifier_fixture(marked, capsys), latest, marked, class_scheme="v2")
+    assert sorted(set(plan["classes"]) - set(before["classes"])) == ["maximum_speed_hours:30"]
+    plated = [record for record in plan["records"] if record["label"] == "maximum_speed_hours:30"]
+    assert len(plated) == 2 and all(record["holds_plate"] for record in plated)
+    v1 = prepare_reader_training(marked / "annotations" / "objects.jsonl", latest, marked)
+    assert not any("hours" in label for label in v1["classes"])
+    cutter = prepare_detector_training(marked / "annotations" / "objects.jsonl", latest, marked)
+    assert sum(len(frame.get("plate_boxes", [])) for frame in cutter["frames"]) == 2
+    assert all(box in frame["boxes"] for frame in cutter["frames"] for box in frame.get("plate_boxes", []))
+    # Still a speed limit for the cutter: its family does not change.
+    assert cutter["boxes_by_family"]["train"]["maximum_speed"] == 5

@@ -33,7 +33,7 @@ from nnslr_tools.annotations import ENUMS, LABEL_KEYS
 from nnslr_tools.llm_providers import LlmError
 from nnslr_tools.review_db import MAX_DETECTIONS_PER_FRAME, ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, MAX_PAGE_SIZE
-from nnslr_tools.sign_types import SIGN_TYPES
+from nnslr_tools.sign_types import SIGN_TYPES, holds_plate
 
 ANSWER_TIMEOUT = 120.0
 RUN_TIMEOUT = 180.0
@@ -508,6 +508,9 @@ def to_suggestion(answer: dict, boxes: list[dict], width: int, height: int) -> d
                 warnings.append(f'{label}: the corrected box is not [x1, y1, x2, y2]: the old box stays')
             elif _small(corrected):
                 warnings.append(f'{label}: the corrected box is smaller than 2 px: the old box stays')
+            elif holds_plate(box):
+                # Rule 11 asks for the sign face: a box around a disc and its plate of hours would lose the plate.
+                warnings.append(f'{label}: the box holds a sign and its plate of hours: the old box stays')
             else:
                 pixels = corrected
         labels = _labels(item, box, label, warnings, keep_value=verdict == 'keep')

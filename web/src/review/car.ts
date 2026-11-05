@@ -5,7 +5,7 @@
 // does with it and "Use", which makes it a box of the frame. Nothing is saved: Confirm saves the frame as always.
 // Hidden offline.
 import {reactive, watch} from 'vue';
-import {familyHasValue, signKindOf} from './catalog';
+import {familyHasValue, holdsPlate, signKindOf} from './catalog';
 import {readLocal, writeLocal} from './dom';
 import {addManualBox} from './edits';
 import {overlap, sameBox} from './geometry';
@@ -27,7 +27,7 @@ export interface CarSign {
   speed: number | null;
   use: CarUse;
   /** The class as a box of the review. */
-  review: {family: string; value_kph: number | null; sign_type?: string};
+  review: {family: string; value_kph: number | null; sign_type?: string; supplementary_panel?: string};
 }
 
 export interface CarRelease {
@@ -131,26 +131,28 @@ export function carAskOf(key: string): CarAsk | null {
   return car.shown ? car.asks[key] ?? null : null;
 }
 
-/** A box of the car as a box of the review (family, value, kind), for its name and its "Use". */
+/** A box of the car as a box of the review (family, value, kind, panel), for its name and its "Use". */
 export function carDetection(sign: CarSign): Detection {
-  const {family, value_kph: value, sign_type: kind} = sign.review;
+  const {family, value_kph: value, sign_type: kind, supplementary_panel: panel} = sign.review;
   const d: Detection = {bbox_xyxy: sign.box, family, value_kph: familyHasValue(family) ? value : null};
   if (kind && signKindOf(kind)) d.sign_type = kind;
+  if (panel) d.supplementary_panel = panel;
   return d;
 }
 
-/** True when a box of the frame already is this one: same box, or same family and value over it. */
+/** True when a box of the frame already is this one: same box, or same family, value and plate of hours over it. */
 export function carSignUsed(work: FrameEdit, sign: CarSign): boolean {
   const d = carDetection(sign);
   return work.detections.some((box) => sameBox(box.bbox_xyxy, sign.box)
-    || (overlap(box.bbox_xyxy, sign.box) > 0.3 && box.family === d.family && (box.value_kph ?? null) === d.value_kph));
+    || (overlap(box.bbox_xyxy, sign.box) > 0.3 && box.family === d.family && (box.value_kph ?? null) === d.value_kph
+      && holdsPlate(box) === holdsPlate(d)));
 }
 
-/** "Use": the box of the car becomes a box of the frame, inside the picture, with its family, value and kind. */
+/** "Use": the box of the car becomes a box of the frame, inside the picture, with its family, value, kind and panel. */
 export function useCarSign(row: FrameRow, sign: CarSign): void {
   const d = carDetection(sign);
   const [x1, y1, x2, y2] = sign.box;
   const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
   if (box[2] - box[0] < 2 || box[3] - box[1] < 2) return;
-  addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null);
+  addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel);
 }

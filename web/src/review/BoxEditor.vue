@@ -174,12 +174,14 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <button type="button" class="chip quick variable" id="variable" :aria-pressed="variable"
               @click="toggleVariable(); releaseFocus($event)">Variable speed limit<kbd>L</kbd></button>
     </div>
-    <!-- The panel under the sign: the box stays on the disc. A second tap takes the choice back. -->
+    <!-- The panel under the sign: with None and Other the box stays on the disc, with Hours it takes disc and plate
+         (a sign of its own for the classifier). A second tap takes the choice back. -->
     <p class="field-label">Panel below</p>
     <div class="segmented" id="panels" role="group" aria-label="Panel below the sign">
       <button v-for="item in PANELS" :key="item.id" type="button" :aria-pressed="panel === item.id" :data-panel="item.id"
               @click="setField('supplementary_panel', panel === item.id ? 'unknown' : item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
+    <p v-if="panel === 'time'" class="effect-note" id="plateNote">The box takes the disc and the plate.</p>
     <div id="valueBlock" class="value-line" :hidden="!hasValueField">
       <label for="value">Other value</label>
       <input v-fill="detection?.value_kph === null || detection?.value_kph === undefined ? '' : String(detection.value_kph)"

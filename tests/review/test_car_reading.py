@@ -148,6 +148,8 @@ def test_a_class_becomes_a_box_of_the_review():
     assert car_reading.review_box('other_sign') == {'family': 'other_sign', 'value_kph': None}
     for name in ('cancellation', 'unreadable', 'not_a_sign'):
         assert car_reading.review_box(name) == {'family': name, 'value_kph': None}
+    assert car_reading.review_box('maximum_speed_hours:30') == {'family': 'maximum_speed', 'value_kph': 30,
+                                                                'supplementary_panel': 'time'}
 
 
 def test_the_nv12_of_a_gop_is_the_frame_of_a_decode_of_the_whole_video(drive):

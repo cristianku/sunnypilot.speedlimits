@@ -181,7 +181,7 @@ function manualId(work: FrameEdit): string {
 // A box added by the reviewer: drawn by hand or taken from the second reading or the car's networks. Same fields
 // every way; signType: the kind of an other sign.
 export function addManualBox(row: FrameRow, box: Box, family: string, value: number | null,
-  signType: string | null = null): void {
+  signType: string | null = null, panel = 'unknown'): void {
   if (refuseChange()) return;
   const work = workOf(row);
   work.detections.push({
@@ -194,7 +194,7 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
     class_id: null,
     review_state: 'pending',
     applicability: 'unresolved',
-    supplementary_panel: 'unknown',
+    supplementary_panel: panel,
     detection_id: manualId(work),
     ...(signType && family === 'other_sign' ? {sign_type: signType} : {}),
   });

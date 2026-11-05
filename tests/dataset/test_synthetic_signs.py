@@ -160,3 +160,14 @@ def test_tiny_cpu_classifier_learns_drawn_end_of_limit_signs(tmp_path, capsys, m
                      process.stdout, re.M), process.stdout
     drawn = json.loads((output / "result.json").read_text())["augmentation"]["synthetic_end_of_limit"]
     assert drawn["paintable_train_crops"] == 5 and drawn["label"] == "cancellation" and drawn["share"] == 1.0
+
+
+def test_a_sign_with_its_plate_of_hours_is_never_drawn_over():
+    assert synthetic_signs.style_of("maximum_speed_hours:60") is None
+    assert synthetic_signs.value_of("maximum_speed_hours:60") == 60
+    assert not paintable(BOX, "maximum_speed_hours:60")
+    frame = {"boxes": [BOX, [10.0, 10.0, 40.0, 40.0]], "box_families": ["maximum_speed", "maximum_speed"],
+             "plate_boxes": [[10.0, 10.0, 40.0, 40.0]]}
+    assert synthetic_signs.frame_families(frame) == ["maximum_speed", None]
+    assert synthetic_signs.frame_families({"boxes": [BOX], "box_families": ["maximum_speed"]}) == ["maximum_speed"]
+    assert synthetic_signs.frame_families({"boxes": [BOX]}) == []

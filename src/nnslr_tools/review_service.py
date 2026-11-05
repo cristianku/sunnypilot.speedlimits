@@ -1032,6 +1032,9 @@ def review_schema() -> dict:
             'overexposed: value_kph null and a note.',
             'applicability: own_road for our road, other_road for e.g. a side access, unresolved only when it '
             'cannot be decided.',
+            'A limit with a plate of hours under it (22-6...): supplementary_panel "time" and one box around the disc '
+            'and the plate, never the disc alone: with its number it is a class of its own. With any other panel the '
+            'box stays on the disc.',
             'Other traffic signs (give way, stop, direction signs, town entry and exit, main road, motorway, '
             'no entry, no overtaking, weight, height or width limits, minimum speed, danger signs...) get a box '
             'too: family "other_sign" with their sign_type (get_review_schema lists them), so the model learns '

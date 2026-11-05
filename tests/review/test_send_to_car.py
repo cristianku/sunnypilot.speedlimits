@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from datetime import date
 from pathlib import Path
 
@@ -394,6 +395,28 @@ def test_a_road_type_with_the_board_input_goes_only_with_a_classifier_that_has_t
     assert car_release.choose(data, 's1')['road_type']['id'] == model_id
 
 
+def test_a_brain_that_reads_the_plates_goes_only_with_a_classifier_that_has_a_class_with_hours(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    use_brain(data, brain_run(data, 'b1', result={'groups': ['signs', 'plate'], 'seed': 1, 'plates': True, 'history': [{}],
+                                                  'test': {}, 'validation': {}}))
+    classes = data / 'runs/r1/reader/result.json'
+    result = json.loads(classes.read_text()) if classes.is_file() else {}
+    write(classes, {**result, 'classes': ['maximum_speed:30', 'maximum_speed:50']})
+    with pytest.raises(ValueError, match='reads the plates of hours, and the classifier .* has no class with hours'):
+        car_release.choose(data, 's1')
+    write(classes, {**result, 'classes': ['maximum_speed:30', 'maximum_speed_hours:30']})
+    assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b1/brain'
+
+
+def test_a_brain_without_plates_goes_with_any_classifier(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    use_brain(data, brain_run(data, 'b1'))
+    write(data / 'runs/r1/reader/result.json', {'classes': ['maximum_speed:50']})
+    assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b1/brain'
+
+
 def test_a_dry_run_exports_and_compares_only(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)
@@ -687,6 +710,18 @@ def test_send_to_car_takes_only_a_finished_signnet_of_the_models_tab(root, check
     assert done['state'] == 'ok' and done['run'] == 's1'
     assert 'args: --signnet=s1\n' in full_log(panel, job['id'])
     assert [step['key'] for step in panel.job_progress(done, None)['steps']] == ['export', 'publish', 'record', 'move', 'build']
+    # Build again: --rebuild only from 'on', nothing else reaches the command line, and only for this action.
+    for value in ('yes', '--dry-run', True):
+        with pytest.raises(PanelError) as refused:
+            panel.start('send_to_car', {'signnet': 's1', 'rebuild': value})
+        assert (refused.value.status, refused.value.reason) == (400, 'bad_option'), value
+    with pytest.raises(PanelError) as refused:
+        panel.start('try_on_comma', {'signnet': 's1', 'rebuild': 'on'})
+    assert refused.value.reason == 'bad_option'
+    time.sleep(1.1)  # a job's id is its second
+    again = panel.start('send_to_car', {'signnet': 's1', 'rebuild': 'on'})
+    assert finished(panel, again['id'])['state'] == 'ok'
+    assert 'args: --signnet=s1 --rebuild\n' in full_log(panel, again['id'])
 
 
 def test_the_signnet_option_over_http(root, checkout, tmp_path, monkeypatch):

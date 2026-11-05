@@ -255,7 +255,7 @@ def paints(frame: dict[str, Any], train: bool) -> bool:
 def paintable_train_boxes(frames: list[dict[str, Any]]) -> int:
     """How many train boxes synthetic_signs may draw over: those of the frames that paints."""
     return sum(synthetic_signs.paintable(box, family) for frame in frames if paints(frame, True)
-               for box, family in zip(frame['boxes'], frame.get('box_families') or []))
+               for box, family in zip(frame['boxes'], synthetic_signs.frame_families(frame)))
 
 
 def start_run(path: Path) -> tuple[str, bool]:
@@ -292,7 +292,7 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
                 # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones are
                 # not enough to learn them. Python's random is seeded apart in every DataLoader worker.
                 def paint(image):
-                    return synthetic_signs.paint_frame(image, frame['boxes'], frame.get('box_families') or [],
+                    return synthetic_signs.paint_frame(image, frame['boxes'], synthetic_signs.frame_families(frame),
                                                        random)[0]
             image, width = _band_image(data_root / frame['image_path'], band_width, paint)
             boxes = band_boxes(frame['boxes'], width, band_width)

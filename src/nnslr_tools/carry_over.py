@@ -10,8 +10,9 @@ from the centre of the view. For every box confirmed on the previous frame:
   it carries ``check_position: true`` and no save accepts it until the reviewer has looked at it
   (moved it onto the sign, or removed it) and the flag is gone.
 
-A box of this frame of another shape (MAX_SHAPE_CHANGE) is never the same sign. Boxes of this frame that match
-nothing stay as they are. Boxes the reviewer already changed keep their labels: changed from ``proposals``, which
+A box of this frame of another shape (MAX_SHAPE_CHANGE) is never the same sign. A box of the disc alone is the sign of a
+box around a disc and its plate of hours (Panel below: Hours), but the plate would be lost (PLATE_SHAPE): it is taken down
+to that shape, and where the plate ends is a guess, so it carries ``check_position`` too. Boxes of this frame that match nothing stay as they are. Boxes the reviewer already changed keep their labels: changed from ``proposals``, which
 holds the model's proposals and, on a frame confirmed before, its saved boxes (a drive reviewed again takes the
 labels of the frame before, as one never reviewed does). Signs only grow and move outwards from the point the road runs to (``FOCUS``), which is
 what the matching expects; it was measured on 359 pairs of confirmed boxes one frame apart.
@@ -23,6 +24,8 @@ from __future__ import annotations
 
 import copy
 import math
+
+from nnslr_tools.sign_types import holds_plate
 
 # Where the road runs to, as a fraction of width and height: signs move away from it as they come
 # closer (median of the confirmed pairs: x 0.52, y 0.53).
@@ -37,6 +40,10 @@ MAX_SCALE = 3.5
 # left or right edge (EDGE pixels) is not checked: the edge cuts it.
 MAX_SHAPE_CHANGE = 2.0
 EDGE = 2
+# A box around a disc and its plate is about 1.6 times taller than the disc alone, under MAX_SHAPE_CHANGE: a box of this
+# frame flatter than the old one by more than this holds the disc only, and the plate would be lost with Hours kept.
+# Such a box has no shape of its own to match on: it is measured as if it had the old one's (_with_plate).
+PLATE_SHAPE = 1.3
 # How far the whole view may slide in a turn, as a fraction of the width, and what a slide costs: a slide
 # of TURN_COST * width costs as much as one pair at the edge of its tolerance.
 MAX_TURN = 0.35
@@ -104,6 +111,17 @@ def _same_shape(old: list[float], new: list[float], width: float) -> bool:
         return True
     change = ((old[2] - old[0]) / (old[3] - old[1])) / ((new[2] - new[0]) / (new[3] - new[1]))
     return max(change, 1 / change) <= MAX_SHAPE_CHANGE
+
+
+def _with_plate(old: dict, new: list[float]) -> list[float] | None:
+    """``new``, or when it holds only the disc of ``old``, a box with a plate of hours (PLATE_SHAPE): taken down to the
+    shape of ``old``, its top and its width staying. None when it is flatter than a disc too: that is no part of ``old``."""
+    box = _box(old)
+    tall = (box[3] - box[1]) / (box[2] - box[0])
+    shape = (new[3] - new[1]) / (new[2] - new[0])
+    if not holds_plate(old) or tall <= PLATE_SHAPE * shape:
+        return new
+    return None if PLATE_SHAPE * shape < 1 else [new[0], new[1], new[2], new[1] + (new[2] - new[0]) * tall]
 
 
 def _cost(pair, new: list[float], turn: tuple[float, float], unit: float) -> float | None:
@@ -186,8 +204,9 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
             new_box = _box(new)
             if new_box is None:
                 continue
-            pair = _pair(old_box, new_box, focus)
-            if pair is not None and _same_shape(old_box, new_box, width):
+            seen = _with_plate(old, new_box)
+            pair = None if seen is None else _pair(old_box, seen, focus)
+            if pair is not None and _same_shape(old_box, seen, width):
                 candidates[(i, j)] = pair
     # In a turn the whole view slides: try no slide and the slide each candidate pair implies, keep the one
     # that explains most signs (then the smallest slide). One sign alone can always be explained by its slide:
@@ -226,19 +245,21 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
     taken_old = match_boxes(olds, result, width=width, height=height)
 
     matched = 0
+    estimated = 0
     kept = 0
     for i, (j, scale, shift) in taken_old.items():
         target = result[j]
         if _edited(target, by_id):
             kept = kept + 1
             continue
-        _take_labels(target, olds[i], source_key)
-        matched = matched + 1
+        if _carry(target, olds[i], source_key, height):
+            matched = matched + 1
+        else:
+            estimated = estimated + 1
 
     ids = {item.get('detection_id') for item in result if isinstance(item.get('detection_id'), str)}
     ids.update(by_id)
     taken_new = {j for j, scale, shift in taken_old.values()}
-    estimated = 0
     dropped = 0
     for i, old in enumerate(olds):
         # A box the reviewer marked "not a sign" is only carried onto a box of this frame; one on a vehicle (a
@@ -264,14 +285,15 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             continue
         # A box of this frame where the sign should be (the growth was off, a proposal smaller than the
         # reviewer's box): that is the sign, at a position the model found.
-        snap = _covering(clipped, result, taken_new)
+        snap = _covering(clipped, result, taken_new, old)
         if snap is not None:
             taken_new.add(snap)
             if _edited(result[snap], by_id):
                 kept = kept + 1
-            else:
-                _take_labels(result[snap], old, source_key)
+            elif _carry(result[snap], old, source_key, height):
                 matched = matched + 1
+            else:
+                estimated = estimated + 1
             continue
         item = {'bbox_xyxy': [round(value, 1) for value in clipped], 'score': None, 'model_label': None,
                 'class_id': None, 'review_state': 'pending', 'visibility': 'unknown', 'occlusion': 'unknown'}
@@ -301,6 +323,19 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             'duplicates': len(duplicates)}
 
 
+def _carry(target: dict, old: dict, source_key: str, height: float) -> bool:
+    """The labels of ``old`` on a box of this frame: True when the box stays where it is, False when it held the disc
+    alone of ``old`` and went down over the plate (_with_plate), a guess to check."""
+    _take_labels(target, old, source_key)
+    box = _box(target)
+    tall = _with_plate(old, box)
+    if tall == box:
+        return True
+    target['bbox_xyxy'] = box[:3] + [round(min(float(height), tall[3]), 1)]
+    target[CHECK_FIELD] = True
+    return False
+
+
 def _take_labels(target: dict, old: dict, source_key: str) -> None:
     """The labels of the previous box on a box of this frame, whose position stays."""
     # Closer, a number unreadable before may be readable now: a value the model reads here is kept.
@@ -309,6 +344,8 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
                     and old.get('family') in VALUE_FAMILIES + ('unreadable',)
                     and target.get('family') in VALUE_FAMILIES)
     reading = (target.get('family'), read_here)
+    # So may a plate: far away the sign read as a plain number. Hours read here is kept, with the box around disc and plate.
+    plate_here = holds_plate(target)
     original_reading = {k: target[k] for k in ('sign_value','sign_unit') if k in target}
     for key in CARRIED_KEYS:
         if key in old:
@@ -320,6 +357,8 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
             target['family'] = reading[0]
         target['value_kph'] = reading[1]
         target.update(original_reading)
+    if plate_here and target.get('family') == 'maximum_speed':
+        target['supplementary_panel'] = 'time'
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
     target.pop(CHECK_FIELD, None)
     target[FROM_FIELD] = source_key
@@ -335,12 +374,12 @@ def _overlap(a: list[float], b: list[float]) -> float:
     return w * h / smaller if smaller > 0 else 0.0
 
 
-def _covering(box: list[float], boxes: list, taken: set) -> int | None:
-    """The free box of this frame that is where ``box`` was placed, of a similar size, or None."""
+def _covering(box: list[float], boxes: list, taken: set, old: dict) -> int | None:
+    """The free box of this frame that is where ``box`` was placed for ``old``, of a similar size, or None."""
     best = None
     for j, item in enumerate(boxes):
         other = _box(item)
-        if j in taken or other is None:
+        if j in taken or other is None or _with_plate(old, other) is None:
             continue
         ratio = _size(other) / _size(box)
         share = _overlap(box, other)

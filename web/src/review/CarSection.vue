@@ -5,7 +5,7 @@
 // a box of the frame. Nothing is saved. Hidden offline.
 import {computed} from 'vue';
 import {car, carAskOf, carAvailable, carDetection, carSignUsed, useCarSign, type CarSign} from './car';
-import {describe} from './catalog';
+import {describe, holdsPlate} from './catalog';
 import {releaseFocus} from './dom';
 import type {FrameEdit, FrameRow} from './types';
 
@@ -32,7 +32,8 @@ const rows = computed(() => {
     const [use, kind] = useText(sign, value.release.min_confidence);
     const sure = Math.round(sign.confidence * 100);
     return {
-      index: i, what: describe({...d, value_kph: null}) + (d.value_kph === null ? '' : ' · ' + d.value_kph),
+      index: i, what: describe({...d, value_kph: null}) + (d.value_kph === null ? '' : ' · ' + d.value_kph)
+        + (holdsPlate(d) ? ', with hours' : ''),
       sure: sure + '%', sureKind: sign.confidence >= 0.9 ? 'high' : sign.confidence >= value.release.min_confidence ? 'medium' : 'low',
       use, kind, sub: 'box ' + Math.round(sign.score * 100) + '%' + (i === value.surest ? ' · the frame’s reading' : ''),
       used: carSignUsed(props.work, sign), sign,

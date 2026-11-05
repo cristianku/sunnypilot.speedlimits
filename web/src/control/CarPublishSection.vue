@@ -10,7 +10,7 @@ import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersio
 import {askConfirm} from '../composables/confirm';
 import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, startedWhen} from './jobs';
-import {publishQuestion} from './models';
+import {publishQuestion, rebuildQuestion} from './models';
 
 const props = defineProps<{status: PanelStatus | null; models: ModelsPayload | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions];
@@ -48,9 +48,12 @@ const signnet = computed((): ModelVersion | null => {
 const pending = computed(() => Boolean(props.models?.car_build_pending));
 const differing = computed(() => rows.value.filter((row) => row.differs).length);
 
-/** The last publication to the car: running or failed, in place of the button; one done is a line. */
+/** The last publication to the car: running, or failed with something still owed, in full; one done is a line. A failure
+ * with nothing owed was finished afterwards, from a terminal: this page only knows the jobs of its own button. */
 const job = computed(() => jobOf(props.status, ['send_to_car']));
-const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
+const running = computed(() => job.value?.state === 'running');
+const owed = computed(() => pending.value || differing.value > 0);
+const bigJob = computed(() => job.value && (running.value || (job.value.state === 'failed' && owed.value)) ? job.value : null);
 
 /** The state in one line: the comma's software has the networks in use, or not yet and why. */
 const headline = computed((): {tone: 'ok' | 'warn' | ''; text: string} => {
@@ -72,8 +75,9 @@ const published = computed((): string => {
 });
 
 const state = computed(() => props.status?.actions.send_to_car ?? null);
-/** Publish while the comma's software lacks a network in use, or its build is still owed. */
-const publishable = computed(() => signnet.value !== null && (differing.value > 0 || pending.value));
+/** The button is always there with a SignNet the comma can run: Publish, Finish publishing, or Build again when nothing is owed. */
+const publishable = computed(() => signnet.value !== null && !running.value);
+const buttonText = computed(() => differing.value > 0 ? 'Publish' : pending.value ? 'Finish publishing' : 'Build again');
 /** Why Publish is off, under it. */
 const blocked = computed((): string => {
   if (props.status !== null && !props.status.actions_enabled) return 'Read-only: the buttons are turned off on this server.';
@@ -86,8 +90,9 @@ async function publish(): Promise<void> {
   const version = signnet.value;
   const current = state.value;
   if (version === null || current === null || blocked.value) return;
-  if (!await askConfirm(publishQuestion(version, inUseOf('classifier'), inUseOf('road_type'), inUseOf('brain')))) return;
-  emit('run', 'send_to_car', current, undefined, {signnet: version.run});
+  if (!await askConfirm(owed.value ? publishQuestion(version, inUseOf('classifier'), inUseOf('road_type'), inUseOf('brain'))
+    : rebuildQuestion())) return;
+  emit('run', 'send_to_car', current, undefined, owed.value ? {signnet: version.run} : {signnet: version.run, rebuild: 'on'});
 }
 </script>
 
@@ -107,16 +112,15 @@ async function publish(): Promise<void> {
     <div class="train-slot">
       <JobProgress v-if="bigJob" :job="bigJob" :heading="bigJob.run ? 'SignNet ' + bigJob.run : undefined"
                    @details="emit('details', $event)" @stop="emit('stop', $event)"/>
-      <div v-else-if="publishable" class="car-go">
+      <div v-if="publishable" class="car-go">
         <button class="btn primary" type="button" id="car-publish-button" :disabled="blocked !== ''"
-                :aria-describedby="blocked ? 'car-publish-reason' : undefined" @click="publish">{{
-                  pending && differing === 0 ? 'Finish publishing' : 'Publish' }}</button>
+                :aria-describedby="blocked ? 'car-publish-reason' : undefined" @click="publish">{{ buttonText }}</button>
         <p v-if="blocked" class="act-reason" id="car-publish-reason">{{ blocked }}</p>
       </div>
       <p v-if="job && !bigJob" class="last-line" :class="{'pub-done': job.state === 'ok'}" id="car-last"><template
         v-if="job.state === 'ok'">✓ Published to the car, {{ job.ended_at ? isoWhen(job.ended_at) : startedWhen(job) }}: on
         the comma, Check for updates</template><template
-        v-else>Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }}</template> ·
+        v-else>Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : job.state === 'failed' ? 'failed, finished later' : JOB_STATE[job.state][0] }}</template> ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
     <p v-if="models?.comma_trial" class="note warn-text" id="car-trial">A trial is on the comma now (SignNet

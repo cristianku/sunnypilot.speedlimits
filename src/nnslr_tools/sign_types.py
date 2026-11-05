@@ -19,6 +19,8 @@ An "Other sign" may also be painted on the road (``painted``: true), such as the
 """
 from __future__ import annotations
 
+from typing import Any
+
 SIGN_TYPES = (
     # Danger
     'pedestrian_crossing', 'children', 'cyclists', 'traffic_queue', 'roadworks', 'danger_other',
@@ -38,6 +40,22 @@ SIGN_TYPES = (
 )
 # What a "not a sign" box is, when said.
 NOT_A_SIGN_TYPES = ('on_vehicle',)
+# The kind of a classifier's class for a speed limit with a plate of hours under it (maximum_speed_hours:30): one box
+# around disc and plate, a sign of its own for the classifier. A review row stays family maximum_speed with
+# supplementary_panel "time"; this name lives only in the classes (the car's vision.MAXIMUM_SPEED_HOURS).
+HOURS_CLASS = 'maximum_speed_hours'
+
+
+def class_parts(label: Any) -> tuple[str, str, str | None]:
+    """(family, what follows the ":", panel) of a classifier class: "maximum_speed_hours:30" is ("maximum_speed", "30",
+    "time"), any other class has no panel ("maximum_speed:30" is ("maximum_speed", "30", None))."""
+    family, _, value = str(label).partition(':')
+    return ('maximum_speed', value, 'time') if family == HOURS_CLASS else (family, value, None)
+
+
+def holds_plate(row: dict) -> bool:
+    """Whether a box takes in a plate of hours as well as its sign (the review's Panel below: Hours)."""
+    return row.get('supplementary_panel') == 'time'
 
 
 def sign_type_problem(detection: dict) -> str | None:

@@ -163,6 +163,7 @@ export function shortLabel(label: string | null | undefined): string {
   const shown = value === 'unknown' ? '?' : value.replace(/_/g, ' ');
   switch (family) {
     case 'maximum_speed': return value === 'unknown' ? 'speed ?' : shown || 'speed';
+    case 'maximum_speed_hours': return shown + ' with hours';
     case 'cancellation': return 'end' + (shown ? ' ' + shown : '');
     case 'zone': return 'zone' + (shown ? ' ' + shown : '');
     case 'variable_display': return 'variable' + (shown ? ' ' + shown : '');

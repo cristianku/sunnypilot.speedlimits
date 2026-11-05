@@ -123,6 +123,11 @@ export const PANELS: readonly {id: string; label: string}[] = [
   {id: 'present', label: 'Other'},
 ];
 
+/** A box around a sign and its plate of hours: taller than the sign on purpose, so no fit may bring it to the disc. */
+export function holdsPlate(d: Detection): boolean {
+  return d.supplementary_panel === 'time';
+}
+
 // The selects and the text field of "Sign details" (their ids are the field names).
 export const SELECT_FIELDS = ['visibility', 'occlusion', 'supplementary_panel'] as const;
 export const BOOLEAN_FIELDS = ['temporary', 'variable_display'] as const;

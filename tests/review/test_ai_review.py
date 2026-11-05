@@ -125,6 +125,15 @@ def test_correct_takes_the_model_box_and_labels_but_never_echoes_the_old_value()
     assert second['bbox_xyxy'] == [300, 300, 400, 400] and second['sign_type'] == 'stop'
 
 
+def test_a_box_with_its_plate_of_hours_keeps_its_place():
+    held = [{**SENT[0], 'supplementary_panel': 'time'}]
+    result = suggest({'boxes': [{'n': 1, 'verdict': 'correct', 'box': [110, 90, 190, 210], 'family': 'maximum_speed',
+                                 'value_kph': 30}]}, held)
+    assert result['detections'][0]['bbox_xyxy'] == held[0]['bbox_xyxy']
+    assert result['detections'][0]['supplementary_panel'] == 'time'
+    assert any('plate of hours' in warning for warning in result['warnings'])
+
+
 def test_scale_of_the_coordinates_is_detected():
     unit = suggest({'added': [{'box': [0.1, 0.2, 0.3, 0.4], 'family': 'other_sign'}]}, [], 1164, 874)
     assert unit['detections'][0]['bbox_xyxy'] == [116.4, 174.8, 349.2, 349.6]

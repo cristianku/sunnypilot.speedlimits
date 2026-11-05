@@ -58,6 +58,8 @@ export interface ActionOptions {
   package?: string;
   /** The run of the SignNet sent to the car (send_to_car) or tried on the comma (try_on_comma). */
   signnet?: string;
+  /** Build psa-torque-sunny-testing also when nothing changed (send_to_car, "Build again"). */
+  rebuild?: 'on';
   /** Whether the classifier's training adds the signs of the Mapillary dataset to train, or first learns on them alone
    * and then on ours from those weights (pretrain; train_classifier). */
   mapillary?: 'on' | 'off' | 'pretrain';
@@ -1426,6 +1428,8 @@ export interface BrainModel extends ModelBase {
   role: 'brain';
   /** What it is given beside the picture (signs, plate, hour, lead, country). */
   groups: string[] | null;
+  /** It learnt the plates of hours: frames of train with a speed to answer had one. */
+  plates: boolean;
   seed: number | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;

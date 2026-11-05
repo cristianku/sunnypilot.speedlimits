@@ -260,10 +260,12 @@ export function frameIndex(frames: WindowFrame[], segment: number | null, frame:
   return frames.findIndex((item) => item.segment === segment && item.frame === frame);
 }
 
-/** A sign's class as the car logged it ("maximum_speed:30") in words: "Maximum speed 30". */
+/** A sign's class as the car logged it ("maximum_speed:30") in words: "Maximum speed 30"; a number with hours
+ * ("maximum_speed_hours:30"): "Speed limit 30, with hours". */
 export function classText(raw: string | null): string {
   if (!raw) return 'Sign';
   const [family, value] = raw.split(':');
+  if (family === 'maximum_speed_hours') return 'Speed limit ' + value + ', with hours';
   const name = (family ?? raw).replace(/_/g, ' ');
   return value ? name.charAt(0).toUpperCase() + name.slice(1) + ' ' + value : name.charAt(0).toUpperCase() + name.slice(1);
 }

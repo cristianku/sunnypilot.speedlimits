@@ -137,6 +137,15 @@ export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion 
   };
 }
 
+/** The question before "Build again": nothing to publish, only the branch built once more. */
+export function rebuildQuestion(): ConfirmOptions {
+  return {
+    title: 'Build the comma’s software again?', action: 'Build again',
+    text: 'The networks stay the ones published. psa-torque-sunny-testing is built again from the sunnypilot speed-limits '
+      + 'branch: a few minutes. Then, on the comma: Settings, Software, Check for updates, and install.',
+  };
+}
+
 /** The question before "Try on the comma now" (scripts/try_on_comma.sh): the same two networks copied straight onto the
  * comma, checked first with the comma's own code; no publication, no build. */
 export function tryQuestion(signnet: ModelVersion, classifier: ModelVersion | null): ConfirmOptions {

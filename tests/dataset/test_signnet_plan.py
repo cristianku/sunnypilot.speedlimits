@@ -29,6 +29,8 @@ def test_only_our_train_frames_get_synthetic_signs():
     assert paints(ours, True) and not paints(ours, False)
     assert not paints(window, True)
     assert paintable_train_boxes([ours, window, {**ours, "box_families": ["other_sign"]}]) == 1
+    # A box around a disc and its plate of hours: an end of limit over it would leave no plate and teach a wrong box.
+    assert paintable_train_boxes([{**ours, "plate_boxes": [[0, 0, 40, 40]]}]) == 0
 
 
 def test_the_run_of_a_start():

@@ -32,7 +32,8 @@ CANCELLATION = "cancellation"
 SHARE = 0.25
 # Below this side (frame pixels) a sign is left as it is: its stripes would not show.
 MIN_SIDE = 9
-# What each family becomes; the other families are never replaced.
+# What each family becomes; the other families are never replaced, and neither is a box around a disc and its plate of
+# hours: the classifier's maximum_speed_hours:<number> has no style here, and a frame says its boxes (plate_boxes).
 STYLE_OF_FAMILY = {"maximum_speed": "fixed", "variable_display": "led"}
 # Of the round signs replaced, this share becomes the end of all restrictions (no number).
 ALL_RESTRICTIONS_SHARE = 0.15
@@ -56,7 +57,7 @@ def style_of(family: str | None) -> str | None:
 
 
 def value_of(label: str | None) -> int | None:
-    """The number of a classifier label (maximum_speed:60 -> 60), None without one."""
+    """The number of a classifier label (maximum_speed:60 or maximum_speed_hours:60 -> 60), None without one."""
     value = str(label or "").partition(":")[2]
     return int(value) if value.isdigit() else None
 
@@ -278,6 +279,12 @@ def paintable(box: list[float], family: str | None) -> bool:
     """A box a training may draw as an end of limit: of a family (or classifier label) with a style, and large enough."""
     x1, y1, x2, y2 = (float(v) for v in box)
     return style_of(family) is not None and min(x2 - x1, y2 - y1) >= MIN_SIDE
+
+
+def frame_families(frame: dict[str, Any]) -> list[str | None]:
+    """The family of each box of a cutter's frame as paintable takes it: None for a box around a disc and its plate."""
+    plates = frame.get("plate_boxes") or []
+    return [None if box in plates else family for box, family in zip(frame["boxes"], frame.get("box_families") or [])]
 
 
 def paint_frame(image, boxes: list[list[float]], families: list[str | None], rng: random.Random):

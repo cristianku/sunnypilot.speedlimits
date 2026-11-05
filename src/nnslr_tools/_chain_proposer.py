@@ -12,15 +12,22 @@ import json
 from pathlib import Path
 import sys
 
+from nnslr_tools.sign_types import class_parts
+
 
 def proposal_of(label: str) -> tuple[str, int | None] | None:
-    """(family, value) of a classifier label ("maximum_speed:60", "variable_display:unknown", "other_sign",
-    "road_marking:30"); None for not_a_sign."""
+    """(family, value) of a classifier label ("maximum_speed:60", "maximum_speed_hours:30", "variable_display:unknown",
+    "other_sign", "road_marking:30"); None for not_a_sign. Its panel: proposal_panel."""
     if label == 'not_a_sign':
         return None
-    family, _, value = label.partition(':')
+    family, value, _ = class_parts(label)
     family = {'road_marking': 'road_marking_candidate'}.get(family, family)
     return family, int(value) if value.isdigit() else None
+
+
+def proposal_panel(label: str) -> str:
+    """The supplementary_panel of a proposal: "time" for a number with hours, else "unknown"."""
+    return class_parts(label)[2] or 'unknown'
 
 
 def dataset_family(family: str) -> str:
@@ -102,7 +109,7 @@ def run(request: dict) -> None:
                                        'cutter_score': round(float(item['score']), 4), 'family': family,
                                        'value_kph': value, 'value_state': 'proposed' if value is not None else 'unknown',
                                        'review_state': 'pending', 'applicability': 'unresolved',
-                                       'supplementary_panel': 'unknown'})
+                                       'supplementary_panel': proposal_panel(classes[index])})
             detections = suppress_overlaps(detections)
             # Whom each speed sign applies to: all the boxes of the frame in one call. The other families keep
             # unresolved: the decider learnt ownership only on the speed families.

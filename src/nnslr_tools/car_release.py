@@ -43,6 +43,7 @@ from nnslr_tools.model_roles import (
     role_of,
 )
 from nnslr_tools.runs import RUN_NAME, RunsIndex
+from nnslr_tools.sign_types import class_parts
 from nnslr_tools.signnet import CAR_BAND, CAR_STRIDE
 
 CAR_SCRIPT = 'scripts/send_to_car.sh'
@@ -158,7 +159,18 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
     found['brain'] = _brain(Path(root), runs, index)
     found['road_type'] = None if found['brain'] else _road_type(runs, index)
     _check_boards(runs, found, chosen)
+    _check_plates(runs, found, chosen)
     return found
+
+
+def _classes(runs: RunsIndex, classifier: dict) -> Any:
+    """The classes of a classifier (its result.json), None when they cannot be read."""
+    run = runs._run_dir(classifier['run'])
+    result = None if run is None else runs._file(run, f'{classifier["part"]}/result.json')
+    try:
+        return json.loads(Path(result).read_text(encoding='utf-8')).get('classes') if result else None
+    except (OSError, ValueError):
+        return None
 
 
 def _check_boards(runs: RunsIndex, found: dict, classifier: dict) -> None:
@@ -174,17 +186,25 @@ def _check_boards(runs: RunsIndex, found: dict, classifier: dict) -> None:
         raise ValueError(f'the contract of the scene network {road_type["id"]} cannot be read') from None
     if not step.get('boards'):
         return
-    run = runs._run_dir(classifier['run'])
-    result = None if run is None else runs._file(run, f'{classifier["part"]}/result.json')
-    try:
-        classes = json.loads(Path(result).read_text(encoding='utf-8')).get('classes') if result else None
-    except (OSError, ValueError):
-        classes = None
+    classes = _classes(runs, classifier)
     wanted = step.get('board_signs') or []
     if not isinstance(classes, list) or not set(wanted) <= set(classes):
         raise ValueError(f'the scene network {road_type["id"]} reads the green boards towards a motorway '
                          f'({", ".join(wanted)}), and the classifier {classifier["id"]} has no such class: choose a '
                          'classifier that has it, or a scene network without the board input')
+
+
+def _check_plates(runs: RunsIndex, found: dict, classifier: dict) -> None:
+    """A brain that learnt the plates of hours only with a classifier that has a number with hours among its classes: with
+    another one the car never reads a plate, and the brain takes every such limit for a plain number. A check of the
+    class's name only, as _check_boards."""
+    brain = found.get('brain')
+    if not brain or not brain['plates']:
+        return
+    classes = _classes(runs, classifier)
+    if not isinstance(classes, list) or not any(class_parts(name)[2] for name in classes):
+        raise ValueError(f'the brain {brain["id"]} reads the plates of hours, and the classifier {classifier["id"]} has no '
+                         'class with hours: choose a classifier that has one, or a brain trained without them')
 
 
 def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:
@@ -221,7 +241,7 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
     weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
     if weights is None:
         raise ValueError(f'{entry["id"]} has no weights on this server')
-    return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root}
+    return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root, 'plates': entry['plates']}
 
 
 def export_brain(chosen: dict, folder: Path) -> None:

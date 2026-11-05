@@ -90,8 +90,13 @@ with sync_playwright() as p:
     hours = page.locator('#panels [data-panel="time"]')
     hours.click()
     assert hours.get_attribute('aria-pressed') == 'true' and page.locator('#supplementary_panel').input_value() == 'time'
+    assert page.locator('#plateNote').inner_text() == 'The box takes the disc and the plate.'
+    # Fit box looks for the disc: a box with its plate stays as it is.
+    page.locator('#fitLocal').click()
+    assert 'The box takes the disc and the plate: kept as it is.' in page.locator('body').inner_text()
     hours.click()
     assert hours.get_attribute('aria-pressed') == 'false' and page.locator('#supplementary_panel').input_value() == 'unknown'
+    assert page.locator('#plateNote').count() == 0
     page.locator('#reviewer').fill('Tester')
     page.locator('#confirm').click()
     assert data(page, 'lastSaveResult') == 'need-duplicate-check', data(page, 'lastSaveResult')
@@ -134,6 +139,26 @@ with sync_playwright() as p:
     square.mouse.move(corner['x'] - 40, corner['y'] - 40, steps=4)
     assert caption.inner_text() != 'Classifier · 14 × 18 px', 'the square did not follow the corner while dragging'
     square.mouse.up()
+
+    # Car networks: a number with hours says so, and the plain disc of the frame under it does not use up that reading.
+    car = open_page(browser, '/route/' + route + '/', 1500)
+    tall = {'box': [1, 2, 15, 40], 'score': .9, 'class': 'maximum_speed_hours:30', 'confidence': .95, 'speed': 30,
+            'use': 'speed', 'review': {'family': 'maximum_speed', 'value_kph': 30, 'supplementary_panel': 'time'}}
+    plain = {**tall, 'class': 'maximum_speed:30',
+             'review': {'family': 'maximum_speed', 'value_kph': 30}}
+    release = {'name': 'r', 'cutter': None, 'classifier': None, 'models_commit': None, 'sunnypilot_commit': None,
+               'min_confidence': .5, 'min_box_score': .3, 'max_boxes': 8}
+    car.route('**/car/**', lambda request: request.fulfill(json={
+        'ok': True, 'frame_key': '0/0', 'signs': [tall, plain], 'surest': 0, 'width': 1344, 'height': 760, 'release': release,
+        'ms': 5}))
+    car.locator('#boxList .box-main').first.click()
+    car.locator('#quickValues [data-value="30"]').click()
+    car.keyboard.press('t')
+    car.wait_for_selector('#carList')
+    what = car.locator('#carList .hint-what').all_inner_texts()
+    assert what[0].endswith('30, with hours') and not what[1].endswith('with hours'), what
+    rows = car.locator('#carList .car-row')
+    assert rows.nth(0).locator('button').inner_text() == 'Use' and rows.nth(1).locator('button').inner_text() == 'Already used'
     browser.close()
 assert not errors, errors
 '''

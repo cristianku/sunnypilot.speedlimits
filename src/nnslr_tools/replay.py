@@ -11,14 +11,25 @@ from pathlib import Path
 from typing import Any
 
 from nnslr_tools.checkpoints import load_detector, safe_torch_load
+from nnslr_tools.sign_types import class_parts
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
 def decode_reader_label(label: str) -> dict[str, Any]:
     if not isinstance(label, str) or not label:
         raise ValueError("invalid_reader_label")
+    family, suffix, panel = class_parts(label)
+    if panel is not None:
+        if not suffix.isdigit() or int(suffix) <= 0:
+            raise ValueError(f"invalid_reader_label: {label}")
+        return {
+            "sign_family": family,
+            "value_state": "read",
+            "value_kph": int(suffix),
+            "supplementary_panel": panel,
+            "supported_domain": True,
+        }
     if ":" in label:
-        family, suffix = label.split(":", 1)
         try:
             value = int(suffix)
         except ValueError:

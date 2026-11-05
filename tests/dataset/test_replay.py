@@ -82,6 +82,18 @@ def test_route_replay_dry_run_reads_manifests_without_torch(tmp_path, capsys) ->
 def test_decode_reader_label_rejects_unknown_encoding() -> None:
     with pytest.raises(ValueError):
         decode_reader_label("maximum_speed:banana")
+    with pytest.raises(ValueError):
+        decode_reader_label("maximum_speed_hours:unknown")
+
+
+def test_decode_reader_label_of_a_number_with_hours() -> None:
+    assert decode_reader_label("maximum_speed_hours:30") == {
+        "sign_family": "maximum_speed",
+        "value_state": "read",
+        "value_kph": 30,
+        "supplementary_panel": "time",
+        "supported_domain": True,
+    }
 
 
 

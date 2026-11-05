@@ -457,6 +457,14 @@ def test_a_night_copy_goes_through_the_training_and_not_through_the_measure(tmp_
     assert len(measured) == 3
 
 
+def test_a_brain_says_whether_it_learnt_the_plates(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
+    assert result['plates'] is False and saved['plates'] is False
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], plate_of_hours)
+    assert result['plates'] is True and saved['plates'] is True
+
+
 def test_the_result_has_the_roads_seen_beside_those_not_seen(tmp_path, monkeypatch):
     torch = torch_or_skip()
     result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])

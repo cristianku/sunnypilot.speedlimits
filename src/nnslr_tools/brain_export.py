@@ -161,7 +161,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         'outputs': [{'name': 'speed', 'shape': [1, SPEED_CLASSES], 'dtype': 'float32'},
                     {'name': 'hidden_out', 'shape': [1, hidden], 'dtype': 'float32', 'meaning': 'give it back as hidden'}],
         'step': {'rate_hz': 1.0, 'groups': list(groups), 'memory_gap_seconds': BRAIN_INPUTS.MEMORY_GAP_SECONDS,
-                 'inputs': INPUT_NAMES, 'outputs': OUTPUT_NAMES},
+                 'inputs': INPUT_NAMES, 'outputs': OUTPUT_NAMES, 'plates': bool(saved.get('plates', False))},
         'verification': verification,
     }
     contract_path = output.with_name(output.name + '.contract.json')

@@ -225,3 +225,11 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         assert status == 200 and json_of(data)['to_read'] == 0
     finally:
         server.close()
+
+
+def test_models_say_whether_a_brain_reads_the_plates():
+    from nnslr_tools.model_roles import brain_digest
+    result = {'groups': ['signs', 'plate'], 'test': {}}
+    assert brain_digest(result)['plates'] is False  # a brain trained before there were plates
+    assert brain_digest({**result, 'plates': False})['plates'] is False
+    assert brain_digest({**result, 'plates': True})['plates'] is True

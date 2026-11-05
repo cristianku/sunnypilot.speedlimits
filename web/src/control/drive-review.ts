@@ -291,6 +291,7 @@ export function readText(signClass: Value | undefined, speed: Value | undefined)
   if (signClass === 'cancellation') return 'end';
   const [family = '', kind = ''] = signClass.split(':');
   if (family === 'maximum_speed') return typeof speed === 'number' && speed > 0 ? String(Math.round(speed)) : kind || '?';
+  if (family === 'maximum_speed_hours') return kind + ' with hours';
   return (kind || family).replaceAll('_', ' ');
 }
 

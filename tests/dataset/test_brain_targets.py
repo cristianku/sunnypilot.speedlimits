@@ -700,3 +700,39 @@ def test_the_night_copy_takes_no_swap_and_the_day_of_its_drive_does():
     seen = [in_an_epoch(drive, seed) for seed in range(40)]
     assert all(len(epoch) == 2 and numbers(epoch[1]) == [30, 30, 60, 60] for epoch in seen)
     assert {tuple(numbers(epoch[0])) for epoch in seen} == {(30, 30, 60, 60), (30, 30, 50, 50)}
+
+
+def test_a_number_with_hours_gives_its_number_and_its_plate():
+    numpy = _np()
+    targets = _targets()
+    read = [[10.0, [['maximum_speed_hours:30', .9]]], [10.2, [['maximum_speed_hours:30', .9]]]]
+    found, plates = targets.sign_inputs(numpy.array([9.0, 11.0]), read)
+    time = targets.BRAIN_INPUTS.PLATES.index('time')
+    assert found[1][0] == pytest.approx(30 / 130) and plates[1][time] == 1 and plates[0][time] == 0
+    plain = targets.sign_inputs(numpy.array([9.0, 11.0]), [[second, [['maximum_speed:30', .9]]] for second, _ in read])
+    assert (plain[0] == found).all() and plain[1][1][time] == 0
+
+
+def test_a_plate_counts_for_a_brain_only_on_frames_of_train():
+    numpy = _np()
+    targets = _targets()
+    plate = numpy.zeros((2, targets.INPUT_SIZES['plate']), dtype=numpy.float32)
+    plate[1, targets.BRAIN_INPUTS.PLATES.index('time')] = 1
+
+    def drive(plates, partitions, answered=(1, 1)):
+        weights = numpy.array(answered, dtype=numpy.float32)
+        return {'inputs': {'plate': plates}, 'partitions': partitions, 'speed_weight': weights,
+                'works_weight': numpy.zeros_like(weights)}
+
+    plain = drive(numpy.zeros_like(plate), ['train', 'train'])
+    assert targets.plates_in_train([drive(plate, ['validation', 'train']), plain])
+    assert not targets.plates_in_train([drive(plate, ['train', 'validation']), plain])
+    assert not targets.plates_in_train([plain])
+    # A plate on a frame nobody gave a speed: its weights get no answer, though the frame is of train.
+    assert not targets.plates_in_train([drive(plate, ['train', 'train'], answered=(1, 0))])
+
+
+def test_the_server_gives_a_number_with_hours_the_speed_of_the_car():
+    from nnslr_tools import comma_trial
+    for name in ('maximum_speed_hours:30', 'maximum_speed:30', 'cancellation', 'other_sign:give_way', 'not_a_sign'):
+        assert comma_trial.speed_of(name) == _targets().VISION.class_speed(name), name

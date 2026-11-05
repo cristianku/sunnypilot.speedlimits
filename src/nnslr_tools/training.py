@@ -16,6 +16,7 @@ checkpoint; what has none is v1):
   (``maximum_speed:60``, ``maximum_speed:unknown``, ``cancellation``, ``other_sign``, ...);
 - v2, the classifier of the pipeline (cutter -> classifier -> decider, docs/NEURAL_NETWORK.md): the same
   labels, the kind of an other sign (``other_sign:give_way`` when the review says it, else ``other_sign``),
+  a number with a plate of hours as a class of its own (``maximum_speed_hours:30``, one box around disc and plate),
   and ``not_a_sign``, learnt from boxes that are not signs: the proposals a reviewer removed, the boxes a
   reviewer marked "not a sign" and the false boxes of the cutter mined by nnslr_tools.chain.mine_negatives.
   Its training crops are photometrically augmented (darker, lower contrast) and their boxes jittered, as the
@@ -43,7 +44,7 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
 from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
-from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
+from nnslr_tools.sign_types import HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, class_parts, holds_plate
 
 # The kind of a "not a sign" box on a vehicle.
 ON_VEHICLE = NOT_A_SIGN_TYPES[0]
@@ -155,8 +156,9 @@ def _without_reviewers(records: list[dict[str, Any]], rows: list[dict[str, Any]]
 
 def _classifier_label(row: dict[str, Any]) -> str | None:
     """The v2 label of a reviewed box: the v1 label, the kind of an other sign (``other_sign:<kind>`` when the
-    review gives one, else ``other_sign``), and ``not_a_sign`` for a kept box a reviewer marked so (none for one on
-    a vehicle)."""
+    review gives one, else ``other_sign``), ``maximum_speed_hours:<number>`` for a speed limit with a plate of hours
+    and a known number (with no number it stays ``maximum_speed:unknown``), and ``not_a_sign`` for a kept box a
+    reviewer marked so (none for one on a vehicle)."""
     if row.get("review_state") not in ELIGIBLE_REVIEW_STATES:
         return None
     bbox = row.get("bbox_xyxy")
@@ -171,7 +173,11 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
     if family == OTHER_SIGN:
         kind = row.get("sign_type")
         return f"{OTHER_SIGN}:{kind}" if isinstance(kind, str) and kind in SIGN_TYPES else OTHER_SIGN
-    return _reader_label(row)
+    label = _reader_label(row)
+    number = (label or "").partition(":")[2]
+    if family == "maximum_speed" and number.isdigit() and holds_plate(row):
+        return f"{HOURS_CLASS}:{number}"
+    return label
 
 
 def scheme_label(row: dict[str, Any], class_scheme: str) -> str | None:
@@ -183,7 +189,11 @@ def scheme_label(row: dict[str, Any], class_scheme: str) -> str | None:
 
 def family_label(label: str) -> str:
     """A label as the v1 reader names it: the kind of an other sign dropped (``other_sign:give_way`` ->
-    ``other_sign``), every other label unchanged. Compares the classifier with the old reader."""
+    ``other_sign``), a number with hours as its number (``maximum_speed_hours:30`` -> ``maximum_speed:30``), every other
+    label unchanged. Compares the classifier with the old reader."""
+    family, value, panel = class_parts(label)
+    if panel is not None:
+        return f"{family}:{value}"
     return OTHER_SIGN if str(label).startswith(OTHER_SIGN + ":") else str(label)
 
 
@@ -545,6 +555,8 @@ def _record(row: dict[str, Any], split: str, label: str, source: str, **extra: A
         "decoded_frame_index": row.get("decoded_frame_index"),
         "label_basis": _label_basis(row),
         "source": source,
+        # Never drawn as an end of limit (synthetic_signs): only a box with a plate of hours says so.
+        **({"holds_plate": True} if holds_plate(row) else {}),
         **extra,
     }
 
@@ -842,7 +854,8 @@ def prepare_detector_training(
     """Build a full-frame detector plan from reviewed annotations.
 
     The boxes of the families chosen (CUTTER_FAMILIES: the speed signs, or those and the other signs) are the
-    positive detector boxes; every frame keeps the family of each box (box_families). A frame is a
+    positive detector boxes; every frame keeps the family of each box (box_families), and the boxes around a disc and
+    its plate of hours (plate_boxes, only on a frame that has one), which no end of limit is drawn over. A frame is a
     detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign rows alone are not silently promoted to
     whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
@@ -941,6 +954,8 @@ def prepare_detector_training(
             frame["boxes"].append(list(row["bbox_xyxy"]))
             frame["box_families"].append(family)
             frame["annotation_ids"].append(annotation_id)
+            if holds_plate(row):
+                frame.setdefault("plate_boxes", []).append(list(row["bbox_xyxy"]))
         else:
             ignored["non_detector_label"] += 1
 
@@ -2189,7 +2204,7 @@ def train_reader(
             box = row["bbox_xyxy"]
             label = row["label"]
             paint = None
-            if self.training and synthetic and synthetic_signs.paintable(box, label):
+            if self.training and synthetic and synthetic_signs.paintable(box, label) and not row.get("holds_plate"):
                 # A speed sign drawn as an end of limit now and then (synthetic_signs): the crop is a cancellation.
                 draw = random.Random(_sample_seed("cancellation", config.seed, epoch, index))
                 if draw.random() < synthetic_signs.SHARE:
@@ -2439,7 +2454,8 @@ def train_reader(
                                        for key, value in CLASSIFIER_BOX_JITTER.items()},
                         "rotation_degrees": 4,
                         "synthetic_end_of_limit": {**synthetic_signs.summary(), "paintable_train_crops": sum(
-                            synthetic_signs.paintable(r["bbox_xyxy"], r["label"]) for r in train_records)}
+                            synthetic_signs.paintable(r["bbox_xyxy"], r["label"]) and not r.get("holds_plate")
+                            for r in train_records)}
                         if synthetic else None}
     if classifier:
         counts = Counter(record["label"] == NOT_A_SIGN for record in train_records)

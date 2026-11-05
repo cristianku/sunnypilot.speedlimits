@@ -11,6 +11,7 @@ import {messageOf} from '../common/api';
 import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
 import type {Box, Detection, FrameRow} from './types';
 import {askConfirm} from '../composables/confirm';
+import {holdsPlate} from './catalog';
 import {clone} from './dom';
 import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, startingDetections, workOf} from './frames';
@@ -184,19 +185,25 @@ function meanwhile(count: Record<FitOutcome, number>): string {
 /** The box being fitted (Fit with AI), by frame key and index; null when none. */
 export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
 
+/** The words for a box a fit leaves alone because it holds a plate of hours (holdsPlate): a fit looks for the disc. */
+const PLATE_KEPT = 'The box takes the disc and the plate: kept as it is.';
+
 /** Fit with AI (Shift+C): the box the reviewer picked (``selected``: the one selected, as the button of its
  * editor), else every box of the frame (the page selects the first one by itself), sent with only the picture
  * around it (…/ai-fit, ai_review.fit_box), one after the other; each comes back tight, as an unsaved change to
- * confirm. A box moved or removed meanwhile is left as it is. */
+ * confirm. A box moved or removed meanwhile is left as it is, and so is one that holds a plate of hours. */
 export async function fitBox(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
   if (!row || !apiBase || fitting.key !== null || aiBlocker() !== '' || refuseChange()) return;
   const boxes = workOf(row).detections;
   const chosen = selected || state.selectedByUser ? boxes[state.selected] : undefined;
-  const targets = chosen ? [chosen] : [...boxes];
-  if (targets.length === 0) return;
+  const targets = (chosen ? [chosen] : boxes).filter((detection) => !holdsPlate(detection));
   const key = row.frame_key;
+  if (targets.length === 0) {
+    if (boxes.length > 0) state.notice = {key, text: PLATE_KEPT, error: false};
+    return;
+  }
   fitting.key = key;
   fitting.index = chosen ? state.selected : -1;
   const outcomes: FitOutcome[] = [];
@@ -239,7 +246,7 @@ export function canFitLocally(): boolean {
  * or not. Each to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all in one request and in a
  * fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with Fit with AI; a box with
  * no better box found (no sign there, or already right), moved less than a pixel, or moved or removed meanwhile, is
- * left as it is. */
+ * left as it is. So is a box that holds a plate of hours, even selected: the fit would bring it towards the disc. */
 export async function fitLocal(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
@@ -247,13 +254,15 @@ export async function fitLocal(selected = false): Promise<void> {
   const boxes = workOf(row).detections;
   const chosen = selected ? boxes[state.selected] : undefined;
   if (selected && !chosen) return;
-  const targets = chosen ? [chosen] : boxes.filter((detection) => !isPlacedByHand(detection));
-  const byHand = chosen ? 0 : boxes.length - targets.length;
+  const free = (chosen ? [chosen] : boxes).filter((detection) => !holdsPlate(detection));
+  const targets = chosen ? free : free.filter((detection) => !isPlacedByHand(detection));
+  const byHand = chosen ? 0 : free.length - targets.length;
   const key = row.frame_key;
   if (targets.length === 0) {
     if (byHand) state.notice = {key, error: false, warn: true,
       text: (byHand === 1 ? 'The box was' : 'All ' + byHand + ' boxes were') + ' placed by hand: kept as '
         + (byHand === 1 ? 'it is' : 'they are') + '. Fit box in its editor fits one anyway.'};
+    else if (boxes.length > 0) state.notice = {key, text: PLATE_KEPT, error: false};
     return;
   }
   localFitting.key = key;

@@ -286,3 +286,92 @@ def test_tracks_follow_the_same_sign_across_consecutive_frames():
     assert len(set(speed[:4])) == 1 and speed[4] != speed[0]
     others = {line['track_id'] for line in lines if line['family'] == 'other_sign'}
     assert len(others) == 1 and others.isdisjoint(speed)
+
+
+def tall_at(cx, cy, width, shape=1.6):
+    return [cx - width / 2, cy - width * shape / 2, cx + width / 2, cy + width * shape / 2]
+
+
+def tall_closer(box, scale):
+    """``closer`` of a box that is no square: its four sides moved away from the focus."""
+    return [FX + scale * (box[0] - FX), FY + scale * (box[1] - FY), FX + scale * (box[2] - FX), FY + scale * (box[3] - FY)]
+
+
+def disc_of(box):
+    """The disc alone of a box around disc and plate: the square at its top."""
+    return [box[0], box[1], box[2], box[1] + box[2] - box[0]]
+
+
+@pytest.mark.parametrize('cx, cy, scale', [(680, 350, 1.1), (1000, 330, 1.15), (1000, 330, 1.3), (800, 330, 1.3),
+                                           (720, 330, 1.2)])
+def test_a_disc_alone_goes_down_over_the_plate_of_a_box_with_hours_and_is_one_box(cx, cy, scale):
+    tall = tall_at(cx, cy, 40)
+    old = confirmed(tall, family='maximum_speed', value=30, supplementary_panel='time')
+    now = tall_closer(tall, scale)
+    disc = proposal(disc_of(now), 'p', 'maximum_speed', 30)
+    result = carry_over([old], [disc], width=W, height=H, source_key='1/2', proposals=[disc])
+    (carried,) = result['detections']
+    assert carried['detection_id'] == 'p' and carried['supplementary_panel'] == 'time'
+    assert carried['check_position'] is True and carried['bbox_xyxy'] == pytest.approx(now, abs=0.1)
+    assert result['matched'] == 0 and result['estimated'] == 1 and result['duplicates'] == 0
+
+
+def test_a_wide_board_beside_a_box_with_hours_is_not_its_disc():
+    old = confirmed(tall_at(1000, 330, 40), family='maximum_speed', value=30, supplementary_panel='time')
+    wide = proposal([1015, 290, 1075, 320], 'p')
+    result = carry_over([old], [wide], width=W, height=H, source_key='1/2', proposals=[wide])
+    board, placed = result['detections']
+    assert board == wide and result['matched'] == 0 and result['estimated'] == 1
+    assert placed['supplementary_panel'] == 'time' and placed['check_position'] is True
+
+
+def test_a_disc_alone_at_the_foot_of_the_picture_stops_at_its_edge():
+    tall = tall_at(1000, 690, 40)
+    old = confirmed(tall, family='maximum_speed', value=30, supplementary_panel='time')
+    disc = proposal(disc_of(tall_closer(tall, 1.15)), 'p', 'maximum_speed', 30)
+    (carried,) = carry_over([old], [disc], width=W, height=H, source_key='1/2', proposals=[disc])['detections']
+    assert carried['bbox_xyxy'][3] == H and carried['check_position'] is True
+
+
+def test_a_disc_the_reviewer_already_changed_stays_as_it_is_under_a_box_with_hours():
+    tall = tall_at(1000, 330, 40)
+    old = confirmed(tall, family='maximum_speed', value=30, supplementary_panel='time')
+    disc = proposal(disc_of(tall_closer(tall, 1.15)), 'p', 'maximum_speed', 30)
+    changed = {**disc, 'value_kph': 50}
+    result = carry_over([old], [changed], width=W, height=H, source_key='1/2', proposals=[disc])
+    assert result['kept'] == 1 and result['detections'] == [changed]
+
+
+def test_hours_read_here_stay_on_a_sign_confirmed_plain_when_it_was_far():
+    for panel in ('unknown', 'none'):
+        old = confirmed(box_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel=panel)
+        tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time'}
+        result = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])
+        (carried,) = result['detections']
+        assert result['matched'] == 1 and carried['supplementary_panel'] == 'time'
+        assert carried['bbox_xyxy'] == tall['bbox_xyxy'] and 'check_position' not in carried
+
+
+def test_a_sign_of_another_family_takes_no_hours_from_the_proposal():
+    old = confirmed(box_at(900, 315, 30), family='other_sign', value=None, supplementary_panel='none')
+    tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time'}
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert carried['family'] == 'other_sign' and carried['supplementary_panel'] == 'none'
+
+
+def test_a_box_with_its_plate_of_hours_is_the_same_sign_as_a_tall_box_of_this_frame():
+    tall = tall_at(560, 330, 30)
+    old = confirmed(tall, family='maximum_speed', value=30, supplementary_panel='time')
+    now = proposal(tall_closer(tall, 1.2), 'p', 'maximum_speed', 30)
+    result = carry_over([old], [now], width=W, height=H, source_key='1/2', proposals=[now])
+    (carried,) = result['detections']
+    assert carried['bbox_xyxy'] == now['bbox_xyxy'] and carried['supplementary_panel'] == 'time'
+    assert result['matched'] == 1 and 'check_position' not in carried
+
+
+def test_a_tall_box_with_another_panel_still_matches_a_square_one():
+    tall = tall_at(560, 330, 30)
+    old = confirmed(tall, family='maximum_speed', value=30, supplementary_panel='present')
+    disc = proposal(disc_of(tall_closer(tall, 1.2)), 'p', 'maximum_speed', 30)
+    result = carry_over([old], [disc], width=W, height=H, source_key='1/2', proposals=[disc])
+    assert result['matched'] == 1 and result['detections'][0]['bbox_xyxy'] == disc['bbox_xyxy']

@@ -509,7 +509,7 @@ def brain_digest(result: Any) -> dict:
         return {key: found.get(key) for key in ('frames', 'right', 'mean_error_kph')} if isinstance(found, dict) else None
 
     return {'groups': result['groups'], 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
-            'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
+            'plates': bool(result.get('plates')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
             'validation': speed('validation'), 'test': speed('test')}
 
 
@@ -1018,8 +1018,8 @@ class ModelIndex:
         entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': 'says the speed to hold',
                       'groups': trained.get('groups'),
                       'architecture': 'mobilenet_v3_small+gru', 'initialization': 'ImageNet', 'best_epoch': None,
-                      'seed': seed, 'works': trained.get('works'), 'epochs': trained.get('epochs'),
-                      'epochs_run': trained.get('epochs'),
+                      'seed': seed, 'works': trained.get('works'), 'plates': bool(trained.get('plates')),
+                      'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test')})
         return entry
 

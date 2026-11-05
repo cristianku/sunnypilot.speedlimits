@@ -70,8 +70,9 @@ hours, a number that is a class of the speed and was not ended, and a known hour
 another reason, roadworks for one, and a copy would raise it. A label equal to the number, on one frame by day of the
 passage (the frames in a row with that number and plate), says it holds by day: such a plate is no 22-6, and the passage has
 no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) gets a night answer that is wrong, a number
-stays until the next sign also where the road was left, and the picture is of the day. The reader gives no plate yet, so
-today there is no copy at all: plate is unknown on every frame.
+stays until the next sign also where the road was left, and the picture is of the day. The plate comes from the class the
+reader gives (vision.class_plate: maximum_speed_hours:<number>, a sign with its plate in one box), so with a classifier
+without that class there is no copy at all: plate is unknown on every frame, and the export says so (plates_in_train).
 
 The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
@@ -304,7 +305,8 @@ def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray,
     memory, pointer = BRAIN_INPUTS.SignInputs(VISION), 0
     for row, second in enumerate(seconds):
         while pointer < len(ordered) and ordered[pointer][0] <= second:
-            memory.add(*ordered[pointer])
+            now, read = ordered[pointer]
+            memory.add(now, [(name, confidence, VISION.class_plate(name)) for name, confidence in read])
             pointer += 1
         signs[row], plates[row] = memory.features(second), memory.plate_row()
     return signs, plates
@@ -472,6 +474,12 @@ def _at_night(clock: np.ndarray) -> np.ndarray:
 
 def _hours_plate(drive: dict) -> np.ndarray:
     return drive['inputs']['plate'][:, BRAIN_INPUTS.PLATES.index('time')] > 0
+
+
+def plates_in_train(drives: list[dict]) -> bool:
+    """Whether a brain trained on these drives learnt the plate: a plate of hours on a frame of train with a speed to answer.
+    The car gives a brain its plates only then (contract step.plates), since weights never trained are no reading."""
+    return any(bool((_hours_plate(drive) & (loss_weights(drive, 'train')[0] > 0)).any()) for drive in drives)
 
 
 def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:

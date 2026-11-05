@@ -44,3 +44,11 @@ def test_the_contract_says_what_the_car_reads(tmp_path, monkeypatch):
     assert contract['inputs_sha256'] == inputs_sha256()
     assert contract['step']['groups'] == list(GROUPS) and contract['step']['rate_hz'] == 1.0
     assert contract['output']['kph'][:2] == [5, 10]
+
+
+@pytest.mark.parametrize('saved, plates', [({}, False), ({'plates': False}, False), ({'plates': True}, True)])
+def test_the_contract_says_whether_the_car_gives_the_plates(tmp_path, monkeypatch, saved, plates):
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    assert contract['step']['plates'] is plates

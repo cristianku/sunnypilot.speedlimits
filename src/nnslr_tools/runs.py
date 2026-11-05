@@ -60,6 +60,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from nnslr_tools.job_progress import progress
+from nnslr_tools.sign_types import HOURS_CLASS, class_parts
 
 # The name of a run (helpers/3_train.sh: letters, digits, . _ -), never "." or "..".
 RUN_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
@@ -199,11 +200,14 @@ def _read_json(path: Path) -> Any:
 
 
 def label_name(label: str) -> str:
-    """'maximum_speed:60' -> 'Speed limit 60', 'variable_display:unknown' -> 'Variable speed limit, value unknown',
-    'other_sign:give_way' -> 'Other sign: give way', 'not_a_sign' -> 'Not a sign'."""
+    """'maximum_speed:60' -> 'Speed limit 60', 'maximum_speed_hours:30' -> 'Speed limit 30, with hours',
+    'variable_display:unknown' -> 'Variable speed limit, value unknown', 'other_sign:give_way' -> 'Other sign: give way',
+    'not_a_sign' -> 'Not a sign'."""
     from nnslr_tools.panel import FAMILY_LABELS
-    family, _, value = str(label).partition(':')
+    family, value, panel = class_parts(label)
     name = FAMILY_LABELS.get(family, family.replace('_', ' ').capitalize())
+    if panel is not None:
+        return f'{name} {value}, with hours'
     if value == 'unknown':
         return name + ', value unknown'
     if family == 'other_sign' and value:
@@ -264,7 +268,7 @@ def _human_share(value: Any) -> dict | None:
 
 
 # The labels of speed signs (the family before ":"): the classifier's number on them alone is the one that matters.
-SPEED_LABEL_FAMILIES = ('maximum_speed', 'variable_display', 'zone', 'cancellation', 'road_marking')
+SPEED_LABEL_FAMILIES = ('maximum_speed', HOURS_CLASS, 'variable_display', 'zone', 'cancellation', 'road_marking')
 
 
 def _speed_share(labels: list[dict]) -> dict:
@@ -820,7 +824,7 @@ def _watch_frame(image: dict, level: str, chain: bool, iou: float) -> dict | Non
             if box is None:
                 continue
             label = item.get('label') if isinstance(item.get('label'), str) else None
-            family = item.get('family') if isinstance(item.get('family'), str) else (label or '').partition(':')[0] or None
+            family = item.get('family') if isinstance(item.get('family'), str) else class_parts(label or '')[0] or None
             row = {'box': _px(box), 'family': family, 'label': label}
             if level == 'verdicts':
                 row.update(found=bool(item.get('found')),

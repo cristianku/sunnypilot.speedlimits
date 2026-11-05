@@ -152,7 +152,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'train_road_type': ('start', 'classifier', 'boards'), 'train_brain': ('works', 'driver', 'pool'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
-                  'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet',),
+                  'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
                   'try_on_comma': ('signnet',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
 # [ai-reviewer] - START
@@ -1760,6 +1760,10 @@ class Panel:
             kept = hf_account.token(self.root)
             if kept:
                 start_env['HF_TOKEN'] = kept
+        # "Build again": the build also when nothing changed. Only 'on' reaches the command line.
+        rebuild = (options or {}).get('rebuild')
+        if rebuild not in (None, 'on') or (rebuild and action != 'send_to_car'):
+            raise PanelError(400, 'bad_option', 'Only "Publish to the car" builds again, with on.')
         signnet = (options or {}).get('signnet')
         if signnet is not None and action not in SIGNNET_ACTIONS:
             raise PanelError(400, 'bad_option', 'Only "Publish to the car" and "Try on the comma now" take a SignNet.')
@@ -1781,6 +1785,8 @@ class Panel:
             if missing:
                 raise PanelError(409, 'not_available', missing[0].upper() + missing[1:] + '.')
             start_args.append('--signnet=' + signnet)
+            if rebuild:
+                start_args.append('--rebuild')
         if action == 'networks_prepare':
             from nnslr_tools.networks_package import new_name
             from nnslr_tools.preannotate import ours_missing

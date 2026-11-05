@@ -41,13 +41,14 @@ export interface DriveSummary {
   invented: number;
 }
 
-/** The limit a label sets: 80 for maximum_speed:80 (also a zone or a display showing a number), 'end' for an end of
- * limit; null for any other label (another sign, a speed sign whose number was not read, "not a sign"). */
+/** The limit a label sets: 80 for maximum_speed:80 (also a number with hours, a zone or a display showing a number),
+ * 'end' for an end of limit; null for any other label (another sign, a speed sign whose number was not read, "not a sign"). */
 export function limitOf(label: string | null | undefined): Limit {
   if (!label || label === NOT_A_SIGN) return null;
   const [family = '', value = ''] = label.split(':');
   if (family === 'cancellation') return 'end';
-  if (family !== 'maximum_speed' && family !== 'zone' && family !== 'variable_display') return null;
+  if (family !== 'maximum_speed' && family !== 'maximum_speed_hours' && family !== 'zone'
+    && family !== 'variable_display') return null;
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;
 }
