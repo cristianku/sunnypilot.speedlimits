@@ -352,6 +352,27 @@ def test_hours_read_here_stay_on_a_sign_confirmed_plain_when_it_was_far():
         assert carried['bbox_xyxy'] == tall['bbox_xyxy'] and 'check_position' not in carried
 
 
+def test_the_hours_of_a_plate_go_on_with_its_sign():
+    old = confirmed(tall_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel='time', plate_hours='22-6')
+    tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time'}
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert carried['plate_hours'] == '22-6'
+
+
+def test_hours_read_here_stay_on_a_sign_confirmed_without_them():
+    old = confirmed(box_at(900, 315, 30), family='maximum_speed', value=30, supplementary_panel='none')
+    tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time', 'plate_hours': '22-6'}
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert (carried['supplementary_panel'], carried['plate_hours']) == ('time', '22-6')
+
+
+def test_hours_of_the_proposal_leave_with_its_plate():
+    old = confirmed(box_at(900, 315, 30), family='other_sign', value=None, supplementary_panel='none')
+    tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time', 'plate_hours': '22-6'}
+    (carried,) = carry_over([old], [tall], width=W, height=H, source_key='1/2', proposals=[tall])['detections']
+    assert 'plate_hours' not in carried
+
+
 def test_a_sign_of_another_family_takes_no_hours_from_the_proposal():
     old = confirmed(box_at(900, 315, 30), family='other_sign', value=None, supplementary_panel='none')
     tall = {**proposal(tall_at(958, 308, 36), 'p', 'maximum_speed', 30), 'supplementary_panel': 'time'}

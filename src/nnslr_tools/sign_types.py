@@ -19,6 +19,7 @@ An "Other sign" may also be painted on the road (``painted``: true), such as the
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 SIGN_TYPES = (
@@ -44,18 +45,47 @@ NOT_A_SIGN_TYPES = ('on_vehicle',)
 # around disc and plate, a sign of its own for the classifier. A review row stays family maximum_speed with
 # supplementary_panel "time"; this name lives only in the classes (the car's vision.MAXIMUM_SPEED_HOURS).
 HOURS_CLASS = 'maximum_speed_hours'
+# The hours of a plate when the reviewer read them (plate_hours, "22-6": from and to, whole hours 0-23, no leading zero):
+# one spelling, because they end the class (maximum_speed_hours:30:22-6). A plate with days, minutes or two ranges, or
+# one too small to read, says none: its class is the number alone (maximum_speed_hours:30).
+PLATE_HOURS = re.compile(r'([0-9]|1[0-9]|2[0-3])-([0-9]|1[0-9]|2[0-3])')
 
 
 def class_parts(label: Any) -> tuple[str, str, str | None]:
-    """(family, what follows the ":", panel) of a classifier class: "maximum_speed_hours:30" is ("maximum_speed", "30",
-    "time"), any other class has no panel ("maximum_speed:30" is ("maximum_speed", "30", None))."""
+    """(family, its value, panel) of a classifier class: "maximum_speed_hours:30" and "maximum_speed_hours:30:22-6" are
+    ("maximum_speed", "30", "time"), any other class has no panel ("maximum_speed:30" is ("maximum_speed", "30", None)).
+    The hours: class_hours."""
     family, _, value = str(label).partition(':')
-    return ('maximum_speed', value, 'time') if family == HOURS_CLASS else (family, value, None)
+    return ('maximum_speed', value.partition(':')[0], 'time') if family == HOURS_CLASS else (family, value, None)
+
+
+def class_hours(label: Any) -> str | None:
+    """The hours a classifier class says: "22-6" for "maximum_speed_hours:30:22-6", None for any other class."""
+    family, _, value = str(label).partition(':')
+    return (value.partition(':')[2] or None) if family == HOURS_CLASS else None
+
+
+def without_hours(label: str) -> str:
+    """A class without the hours it says: "maximum_speed_hours:30:22-6" is "maximum_speed_hours:30"."""
+    return label.rpartition(':')[0] if class_hours(label) else label
 
 
 def holds_plate(row: dict) -> bool:
     """Whether a box takes in a plate of hours as well as its sign (the review's Panel below: Hours)."""
     return row.get('supplementary_panel') == 'time'
+
+
+def plate_hours_problem(detection: dict) -> str | None:
+    """Why the plate_hours of a box are not allowed, or None when they are."""
+    value = detection.get('plate_hours')
+    if value is None:
+        return None
+    if detection.get('family') != 'maximum_speed' or not holds_plate(detection):
+        return 'plate_hours is only for boxes of family maximum_speed with supplementary_panel time'
+    read = PLATE_HOURS.fullmatch(value) if isinstance(value, str) else None
+    if read is None or read[1] == read[2]:
+        return 'plate_hours must be from-to in whole hours from 0 to 23, such as 22-6, or null'
+    return None
 
 
 def sign_type_problem(detection: dict) -> str | None:

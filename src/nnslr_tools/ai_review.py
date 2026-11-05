@@ -444,6 +444,9 @@ def _detection(detection_id: str, box: list[float], labels: dict, original: dict
                    'variable_display': original.get('variable_display')
                    if type(original.get('variable_display')) is bool else None,
                    'notes': labels['notes'], 'ai_action': action})
+    # The hours read on the plate: the reviewer's, kept while the box stays a limit with hours.
+    if labels['family'] == 'maximum_speed' and panel == 'time' and original.get('plate_hours'):
+        result['plate_hours'] = original['plate_hours']
     return result
 
 

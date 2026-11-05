@@ -289,9 +289,9 @@ export const REASON_LABEL: Record<string, string> = {sign: 'a sign', end_sign: '
 export function readText(signClass: Value | undefined, speed: Value | undefined): string {
   if (typeof signClass !== 'string' || !signClass) return '';
   if (signClass === 'cancellation') return 'end';
-  const [family = '', kind = ''] = signClass.split(':');
+  const [family = '', kind = '', hours = ''] = signClass.split(':');
   if (family === 'maximum_speed') return typeof speed === 'number' && speed > 0 ? String(Math.round(speed)) : kind || '?';
-  if (family === 'maximum_speed_hours') return kind + ' with hours';
+  if (family === 'maximum_speed_hours') return kind + (hours ? ', hours ' + hours : ' with hours');
   return (kind || family).replaceAll('_', ' ');
 }
 

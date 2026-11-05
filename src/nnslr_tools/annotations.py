@@ -44,18 +44,18 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
-    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit",
+    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours",
 }
 # Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
 # position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
 # the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
-# uses gps.
-OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit"}
+# uses gps. The hours read on a plate (nnslr_tools.sign_types.PLATE_HOURS) are there only when read.
+OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
 LABEL_KEYS = ('bbox_xyxy', 'family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_value', 'sign_unit')
+              'temporary', 'variable_display', 'sign_value', 'sign_unit', 'plate_hours')
 
 
 class DatasetError(ValueError):
@@ -205,6 +205,8 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
                 or (sign_type in NOT_A_SIGN_TYPES and row['sign_family'] == 'not_a_sign'), "invalid_schema", "sign_type")
     painted = row.get('painted')
     require(painted is None or (painted is True and row['sign_family'] == 'other_sign'), "invalid_schema", "painted")
+    from nnslr_tools.sign_types import plate_hours_problem
+    require(plate_hours_problem({**row, 'family': row['sign_family']}) is None, "invalid_schema", "plate_hours")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
     for field in ('source_video_sha256', 'source_log_sha256'):
         require(row[field] is None or _hash(row[field]), "missing_provenance", field)
@@ -397,6 +399,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'image_sha256': frame.get('frame_sha256'), 'bbox_xyxy': d.get('bbox_xyxy'), 'sign_family': family,
         'value_state': value_state, 'value_kph': value,
         **{k: d[k] for k in ('sign_value', 'sign_unit') if k in d},
+        **({'plate_hours': d['plate_hours']} if family == 'maximum_speed' and d.get('plate_hours') else {}),
         'applicability': d.get('applicability', 'unresolved'), 'supplementary_panel': d.get('supplementary_panel', 'unknown'),
         'visibility': d.get('visibility', 'unknown'), 'occlusion': d.get('occlusion', 'unknown'),
         'temporary': d.get('temporary'), 'variable_display': d.get('variable_display'),

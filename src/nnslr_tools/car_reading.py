@@ -33,7 +33,7 @@ import numpy as np
 
 from nnslr_tools import road_type_signs, video_frames
 from nnslr_tools.media import FULL_SIZE
-from nnslr_tools.sign_types import class_parts
+from nnslr_tools.sign_types import class_hours, class_parts
 
 MANIFEST = road_type_signs.RELEASE_MANIFEST
 MANIFEST_FORMAT = 2
@@ -129,7 +129,7 @@ def use_of(vision, sign: dict) -> str:
 def review_box(name: str) -> dict:
     """A class of the classifier as a box of the review: its family, value, kind and panel ("other_sign:give_way" is an
     other sign of the kind give_way; "road_marking:30" a road marking of 30; "maximum_speed:unknown" a speed limit without
-    its number; "maximum_speed_hours:30" a speed limit of 30 with a plate of hours)."""
+    its number; "maximum_speed_hours:30" a speed limit of 30 with a plate of hours, "maximum_speed_hours:30:22-6" says them)."""
     family, value, panel = class_parts(name)
     if family == 'road_marking':
         family = 'road_marking_candidate'
@@ -138,6 +138,8 @@ def review_box(name: str) -> dict:
         box['sign_type'] = value
     if panel is not None:
         box['supplementary_panel'] = panel
+    if class_hours(name):
+        box['plate_hours'] = class_hours(name)
     return box
 
 

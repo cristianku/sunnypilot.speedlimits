@@ -144,6 +144,8 @@ def test_a_class_becomes_a_box_of_the_review():
     assert car_reading.review_box('road_marking:30') == {'family': 'road_marking_candidate', 'value_kph': 30}
     assert car_reading.review_box('maximum_speed:unknown') == {'family': 'maximum_speed', 'value_kph': None}
     assert car_reading.review_box('zone:30') == {'family': 'zone', 'value_kph': 30}
+    assert car_reading.review_box('maximum_speed_hours:30:22-6') == {
+        'family': 'maximum_speed', 'value_kph': 30, 'supplementary_panel': 'time', 'plate_hours': '22-6'}
     assert car_reading.review_box('variable_display:unknown') == {'family': 'variable_display', 'value_kph': None}
     assert car_reading.review_box('other_sign') == {'family': 'other_sign', 'value_kph': None}
     for name in ('cancellation', 'unreadable', 'not_a_sign'):

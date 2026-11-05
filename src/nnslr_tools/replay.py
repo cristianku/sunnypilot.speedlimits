@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from nnslr_tools.checkpoints import load_detector, safe_torch_load
-from nnslr_tools.sign_types import class_parts
+from nnslr_tools.sign_types import class_hours, class_parts
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
 
 
@@ -27,6 +27,7 @@ def decode_reader_label(label: str) -> dict[str, Any]:
             "value_state": "read",
             "value_kph": int(suffix),
             "supplementary_panel": panel,
+            **({"plate_hours": class_hours(label)} if class_hours(label) else {}),
             "supported_domain": True,
         }
     if ":" in label:

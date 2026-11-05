@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import sys
 
-from nnslr_tools.sign_types import class_parts
+from nnslr_tools.sign_types import class_hours, class_parts
 
 
 def proposal_of(label: str) -> tuple[str, int | None] | None:
@@ -110,6 +110,8 @@ def run(request: dict) -> None:
                                        'value_kph': value, 'value_state': 'proposed' if value is not None else 'unknown',
                                        'review_state': 'pending', 'applicability': 'unresolved',
                                        'supplementary_panel': proposal_panel(classes[index])})
+                    if class_hours(classes[index]):
+                        detections[-1]['plate_hours'] = class_hours(classes[index])
             detections = suppress_overlaps(detections)
             # Whom each speed sign applies to: all the boxes of the frame in one call. The other families keep
             # unresolved: the decider learnt ownership only on the speed families.

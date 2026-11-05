@@ -27,7 +27,8 @@ export interface CarSign {
   speed: number | null;
   use: CarUse;
   /** The class as a box of the review. */
-  review: {family: string; value_kph: number | null; sign_type?: string; supplementary_panel?: string};
+  review: {family: string; value_kph: number | null; sign_type?: string; supplementary_panel?: string;
+    plate_hours?: string};
 }
 
 export interface CarRelease {
@@ -133,10 +134,11 @@ export function carAskOf(key: string): CarAsk | null {
 
 /** A box of the car as a box of the review (family, value, kind, panel), for its name and its "Use". */
 export function carDetection(sign: CarSign): Detection {
-  const {family, value_kph: value, sign_type: kind, supplementary_panel: panel} = sign.review;
+  const {family, value_kph: value, sign_type: kind, supplementary_panel: panel, plate_hours: hours} = sign.review;
   const d: Detection = {bbox_xyxy: sign.box, family, value_kph: familyHasValue(family) ? value : null};
   if (kind && signKindOf(kind)) d.sign_type = kind;
   if (panel) d.supplementary_panel = panel;
+  if (hours) d.plate_hours = hours;
   return d;
 }
 
@@ -154,5 +156,5 @@ export function useCarSign(row: FrameRow, sign: CarSign): void {
   const [x1, y1, x2, y2] = sign.box;
   const box: Box = [Math.max(0, x1), Math.max(0, y1), Math.min(row.width, x2), Math.min(row.height, y2)];
   if (box[2] - box[0] < 2 || box[3] - box[1] < 2) return;
-  addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel);
+  addManualBox(row, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours);
 }

@@ -44,7 +44,8 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
 from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
-from nnslr_tools.sign_types import HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, class_parts, holds_plate
+from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, class_hours, class_parts, holds_plate,
+                                     without_hours)
 
 # The kind of a "not a sign" box on a vehicle.
 ON_VEHICLE = NOT_A_SIGN_TYPES[0]
@@ -176,7 +177,8 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
     label = _reader_label(row)
     number = (label or "").partition(":")[2]
     if family == "maximum_speed" and number.isdigit() and holds_plate(row):
-        return f"{HOURS_CLASS}:{number}"
+        hours = row.get("plate_hours")
+        return f"{HOURS_CLASS}:{number}:{hours}" if hours else f"{HOURS_CLASS}:{number}"
     return label
 
 
@@ -632,7 +634,7 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
                         mapillary_share: float = 100.0, mapillary_only: bool = False,
                         start: dict[str, Any] | None = None) -> dict[str, Any]:
     """The v2 plan (see prepare_reader_training): the sign crops with their v2 labels, the kinds too rare to
-    learn folded into other_sign, the not_a_sign crops of each partition from its own frames only, and the
+    learn folded into other_sign and the hours too rare to learn into their number, the not_a_sign crops of each partition from its own frames only, and the
     Mapillary crops in train when asked (after the folding, which counts our crops only), of the region and share
     asked (nnslr_tools.mapillary.training_records).
 
@@ -678,9 +680,12 @@ def _prepare_classifier(loaded: dict[str, Any], dataset_path: Path, split_path: 
                     if record["split"] == TRAIN_SPLIT and record["label"].startswith(OTHER_SIGN + ":"))
     every_kind = {record["label"] for record in records if record["label"].startswith(OTHER_SIGN + ":")}
     folded = {label: OTHER_SIGN for label in sorted(every_kind) if kinds[label] < MIN_KIND_TRAIN_CROPS}
+    # So are the hours of a plate: its class stays the number with hours, which hours not said.
+    windows = Counter(record["label"] for record in records if record["split"] == TRAIN_SPLIT)
+    every_window = {record["label"] for record in records if class_hours(record["label"])}
+    folded.update({label: without_hours(label) for label in sorted(every_window) if windows[label] < MIN_KIND_TRAIN_CROPS})
     for record in records:
-        if record["label"] in folded:
-            record["label"] = OTHER_SIGN
+        record["label"] = folded.get(record["label"], record["label"])
     mapillary = None
     ours = {r["label"] for r in records if r["split"] == TRAIN_SPLIT}
     extra: list[dict[str, Any]] = []

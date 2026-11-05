@@ -179,6 +179,27 @@ def test_a_not_a_sign_box_on_a_vehicle_is_kept_only_as_not_a_sign(server):
     assert "ON_VEHICLE = 'on_vehicle'" in CATALOG.read_text()
 
 
+def test_the_hours_read_on_a_plate_reach_the_dataset(server, tmp_path):
+    from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset
+    running, rows = server
+    body = page_body(rows['0/0'])
+    body['detections'][0].update(family='maximum_speed', value_kph=30, supplementary_panel='time', plate_hours='22-6')
+    status, response, data = running.post_frame(ROUTE, '0/0', body)
+    assert status == 200 and json_of(data)['review']['detections'][0]['plate_hours'] == '22-6'
+    payload = {review['frame_key']: review for review in running.app.store.reviews(ROUTE, RUN_ID)}['0/0']['payload']
+    annotations = reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')
+    assert [row['plate_hours'] for row in annotations] == ['22-6']
+    assert validate_dataset(annotations, tmp_path, dataset_kind='gold')['valid'] is True
+    # A box that says none has no such field: the rows of today stay as they are.
+    payload['detections'][0].pop('plate_hours')
+    assert 'plate_hours' not in reviewed_frame_annotations(payload, '0' * 64, dataset_kind='gold', name='test')[0]
+    for panel, hours in (('time', '22-06'), ('none', '22-6')):
+        body = page_body(rows['0/2'])
+        body['detections'][0].update(family='maximum_speed', value_kph=30, supplementary_panel=panel, plate_hours=hours)
+        status, response, data = running.post_frame(ROUTE, '0/2', body)
+        assert status == 400 and json_of(data)['error'] == 'invalid_plate_hours'
+
+
 def test_an_other_sign_painted_on_the_road_keeps_its_kind(server, tmp_path):
     """The children's triangle with "SCHULE" painted in front of a school: Children, painted on the road."""
     from nnslr_tools.annotations import reviewed_frame_annotations, validate_dataset

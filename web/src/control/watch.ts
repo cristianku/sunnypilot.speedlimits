@@ -159,11 +159,11 @@ export function frameView(frame: WatchFrame, level: WatchLevel, score: number, s
 export function shortLabel(label: string | null | undefined): string {
   if (!label) return '';
   if (label === NOT_A_SIGN) return 'not a sign';
-  const [family = '', value = ''] = label.split(':');
+  const [family = '', value = '', hours = ''] = label.split(':');
   const shown = value === 'unknown' ? '?' : value.replace(/_/g, ' ');
   switch (family) {
     case 'maximum_speed': return value === 'unknown' ? 'speed ?' : shown || 'speed';
-    case 'maximum_speed_hours': return shown + ' with hours';
+    case 'maximum_speed_hours': return shown + (hours ? ', hours ' + hours : ' with hours');
     case 'cancellation': return 'end' + (shown ? ' ' + shown : '');
     case 'zone': return 'zone' + (shown ? ' ' + shown : '');
     case 'variable_display': return 'variable' + (shown ? ' ' + shown : '');

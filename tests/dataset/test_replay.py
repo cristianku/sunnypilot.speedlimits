@@ -94,6 +94,14 @@ def test_decode_reader_label_of_a_number_with_hours() -> None:
         "supplementary_panel": "time",
         "supported_domain": True,
     }
+    assert decode_reader_label("maximum_speed_hours:30:22-6") == {
+        "sign_family": "maximum_speed",
+        "value_state": "read",
+        "value_kph": 30,
+        "supplementary_panel": "time",
+        "plate_hours": "22-6",
+        "supported_domain": True,
+    }
 
 
 

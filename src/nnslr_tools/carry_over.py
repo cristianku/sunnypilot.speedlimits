@@ -55,10 +55,10 @@ TURN_COST = 0.3
 MAX_TURN_UP = 0.1
 # The labels a box takes from the previous frame. Visibility and occlusion belong to this picture.
 CARRIED_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'temporary', 'variable_display',
-                'sign_type', 'painted', 'notes', 'sign_value', 'sign_unit')
+                'sign_type', 'painted', 'notes', 'sign_value', 'sign_unit', 'plate_hours')
 # The labels that tell whether the reviewer already changed a box (the review page's fields).
 LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'visibility', 'occlusion',
-              'temporary', 'variable_display', 'sign_type', 'painted', 'sign_value', 'sign_unit')
+              'temporary', 'variable_display', 'sign_type', 'painted', 'sign_value', 'sign_unit', 'plate_hours')
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 CHECK_FIELD = 'check_position'
 FROM_FIELD = 'carried_from'
@@ -359,6 +359,8 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
         target.update(original_reading)
     if plate_here and target.get('family') == 'maximum_speed':
         target['supplementary_panel'] = 'time'
+    if target.get('family') != 'maximum_speed' or not holds_plate(target):
+        target.pop('plate_hours', None)
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
     target.pop(CHECK_FIELD, None)
     target[FROM_FIELD] = source_key

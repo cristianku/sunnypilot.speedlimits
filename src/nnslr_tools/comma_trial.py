@@ -241,6 +241,7 @@ def speed_of(name: str) -> float | None:
     if name == CANCELLATION:
         return 0.0
     family, _, value = name.partition(':')
+    value = value.partition(':')[0]  # a number with hours: maximum_speed_hours:30:22-6
     return float(value) if family in SPEED_FAMILIES and value.isdigit() else None
 
 

@@ -41,7 +41,7 @@ from nnslr_tools.annotations import (
     validate_dataset,
 )
 from nnslr_tools.carry_over import unchecked_boxes
-from nnslr_tools.sign_types import painted_problem, sign_type_problem
+from nnslr_tools.sign_types import painted_problem, plate_hours_problem, sign_type_problem
 from nnslr_tools.manifest import parse_route_id
 from speed_vision_core.types import MAX_VALUE_KPH, MIN_VALUE_KPH
 
@@ -844,6 +844,9 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         problem = painted_problem(item) if isinstance(item, dict) else None
         if problem is not None:
             raise ReviewRejected(400, 'invalid_painted', f'Box {number}: {problem}.')
+        problem = plate_hours_problem(item) if isinstance(item, dict) else None
+        if problem is not None:
+            raise ReviewRejected(400, 'invalid_plate_hours', f'Box {number}: {problem}.')
     # "Apply previous" placed these boxes where a sign should be: someone must have looked at them.
     unchecked = unchecked_boxes(body['detections'])
     if unchecked:

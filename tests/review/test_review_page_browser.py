@@ -91,12 +91,17 @@ with sync_playwright() as p:
     hours.click()
     assert hours.get_attribute('aria-pressed') == 'true' and page.locator('#supplementary_panel').input_value() == 'time'
     assert page.locator('#plateNote').inner_text() == 'The box takes the disc and the plate.'
+    # The hours on the plate: the box takes them with both chosen, and From alone waits.
+    page.locator('#hoursFrom').select_option('22')
+    assert page.locator('#hoursFrom').input_value() == '22' and '22-6' not in page.locator('#boxList').inner_text()
+    page.locator('#hoursTo').select_option('6')
+    assert 'hours 22-6' in page.locator('#boxList').inner_text()
     # Fit box looks for the disc: a box with its plate stays as it is.
     page.locator('#fitLocal').click()
     assert 'The box takes the disc and the plate: kept as it is.' in page.locator('body').inner_text()
     hours.click()
     assert hours.get_attribute('aria-pressed') == 'false' and page.locator('#supplementary_panel').input_value() == 'unknown'
-    assert page.locator('#plateNote').count() == 0
+    assert page.locator('#plateNote').count() == 0 and page.locator('#plateHours').count() == 0
     page.locator('#reviewer').fill('Tester')
     page.locator('#confirm').click()
     assert data(page, 'lastSaveResult') == 'need-duplicate-check', data(page, 'lastSaveResult')

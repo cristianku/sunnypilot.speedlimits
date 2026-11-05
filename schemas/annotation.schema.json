@@ -326,6 +326,11 @@
         "null"
       ]
     },
+    "plate_hours": {
+      "description": "The hours of a plate when the reviewer read them: from-to in whole hours, such as 22-6. Only with family maximum_speed and supplementary_panel time.",
+      "type": ["string", "null"],
+      "pattern": "^([0-9]|1[0-9]|2[0-3])-([0-9]|1[0-9]|2[0-3])$"
+    },
     "supplementary_panel": {
       "enum": [
         "none",

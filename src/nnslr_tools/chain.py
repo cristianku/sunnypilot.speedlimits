@@ -46,6 +46,7 @@ from typing import Any, Iterator
 from nnslr_tools.media import full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE
+from nnslr_tools.sign_types import without_hours
 from nnslr_tools.training import (BOXES_OTHER_SIGNS, DEFAULT_WORKERS, DETECTOR_FAMILIES, NEGATIVE_MAX_IOU, NEGATIVE_PARTITIONS, NEGATIVES_KIND,
                                   NOT_A_SIGN, OTHER_SIGN_RULE_AT, READER_NORMALIZE_MEAN, READER_NORMALIZE_STD,
                                   REVIEW_TIERS, _label_basis, _safe_image_path, box_overlap, checkpoint_class_scheme,
@@ -484,14 +485,15 @@ def truth_objects(frame: dict[str, Any], class_scheme: str, classes: list[str],
                   folded: dict[str, str] | None = None) -> list[dict[str, Any]]:
     """The reviewed boxes of a frame the chain must find and read: every kept box with a label of the
     classifier's scheme, except those marked not a sign. A kind the classifier does not know is its family
-    (folded_labels of the checkpoint, else other_sign)."""
+    (folded_labels of the checkpoint, else other_sign), hours it does not know their number with hours."""
     found = []
     for row in frame["kept"]:
         label = scheme_label(row, class_scheme)
         if label is None or label == NOT_A_SIGN:
             continue
         if label not in classes:
-            label = (folded or {}).get(label) or (family_label(label) if family_label(label) in classes else label)
+            label = (folded or {}).get(label) or without_hours(label)
+            label = label if label in classes or family_label(label) not in classes else family_label(label)
         found.append({"box": [float(value) for value in row["bbox_xyxy"]], "label": label,
                       "family": row.get("sign_family"), "speed_sign": row.get("sign_family") in DETECTOR_FAMILIES,
                       "label_basis": _label_basis(row)})

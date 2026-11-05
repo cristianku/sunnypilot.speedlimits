@@ -1002,6 +1002,9 @@ def review_schema() -> dict:
             'visibility': sorted(ENUMS['visibility']),
             'occlusion': sorted(ENUMS['occlusion']),
             'supplementary_panel': sorted(ENUMS['supplementary_panel']),
+            'plate_hours': 'with family maximum_speed and supplementary_panel time: the hours written on the plate, '
+                           'from-to in whole hours 0-23 without leading zeros ("22-6"); null or omitted when they '
+                           'cannot be read, or the plate has days, minutes or two ranges',
             'temporary': 'true, false or null',
             'variable_display': 'true, false or null',
             'notes': 'string, possibly empty; never null',
@@ -1034,7 +1037,7 @@ def review_schema() -> dict:
             'cannot be decided.',
             'A limit with a plate of hours under it (22-6...): supplementary_panel "time" and one box around the disc '
             'and the plate, never the disc alone: with its number it is a class of its own. With any other panel the '
-            'box stays on the disc.',
+            'box stays on the disc. plate_hours says the hours when the plate can be read in this frame.',
             'Other traffic signs (give way, stop, direction signs, town entry and exit, main road, motorway, '
             'no entry, no overtaking, weight, height or width limits, minimum speed, danger signs...) get a box '
             'too: family "other_sign" with their sign_type (get_review_schema lists them), so the model learns '

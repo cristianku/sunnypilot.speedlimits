@@ -33,6 +33,7 @@ export const ON_VEHICLE = 'on_vehicle';
  * typed, which made it a speed limit. The server refuses such a box, so it goes before every save too. */
 export function dropStaleKind(d: Detection): void {
   if (d.family !== 'other_sign') delete d.painted;
+  if (d.family !== 'maximum_speed' || !holdsPlate(d)) delete d.plate_hours;
   if (d.sign_type == null) return;
   if (d.family === 'other_sign' || (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE)) return;
   delete d.sign_type;
@@ -128,6 +129,9 @@ export function holdsPlate(d: Detection): boolean {
   return d.supplementary_panel === 'time';
 }
 
+/** The whole hours a plate can say, from and to (0 is also the 24 of "20-24"). */
+export const PLATE_HOURS: readonly number[] = Array.from({length: 24}, (_, hour) => hour);
+
 // The selects and the text field of "Sign details" (their ids are the field names).
 export const SELECT_FIELDS = ['visibility', 'occlusion', 'supplementary_panel'] as const;
 export const BOOLEAN_FIELDS = ['temporary', 'variable_display'] as const;
@@ -178,6 +182,7 @@ export function describe(d: Detection): string {
   const family = familyOf(d.family);
   let text = family ? family.brief ?? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + (d.sign_unit === 'mph' || d.sign_unit === 'km/h' ? ' ' + d.sign_unit : ' (unit not recorded)');
+  if (d.plate_hours) text += ' · hours ' + d.plate_hours;
   return text;
 }
 

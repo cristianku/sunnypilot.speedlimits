@@ -21,6 +21,8 @@ export interface Detection {
   review_state?: string;
   applicability?: string;
   supplementary_panel?: string;
+  /** The hours read on a plate of hours, "22-6" (nnslr_tools.sign_types.PLATE_HOURS); absent or null: not said. */
+  plate_hours?: string | null;
   visibility?: string;
   occlusion?: string;
   temporary?: boolean | null;

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The editor of the selected box: zoom (its corners and inside move the box too) with what the classifier gets beside it, road, speed signs, other
 // value, type and kinds of other signs, details.
-import {computed, ref, useTemplateRef, watchEffect} from 'vue';
-import {BOOLEAN_FIELDS, FAMILIES, PANELS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
+import {computed, ref, useTemplateRef, watch, watchEffect} from 'vue';
+import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
@@ -55,6 +55,14 @@ const noValue = computed(() => hasValueField.value
 const road = computed(() => props.detection?.applicability || 'unresolved');
 const panel = computed(() => props.detection?.supplementary_panel ?? 'unknown');
 const variable = computed(() => props.detection?.family === 'variable_display');
+// From and to of a plate of hours. The box takes them when both are chosen: until then they wait here.
+const asksHours = computed(() => panel.value === 'time' && props.detection?.family === 'maximum_speed');
+const halfHours = ref<[string, string]>(['', '']);
+watch(() => [props.row.frame_key, state.selected], () => { halfHours.value = ['', '']; });
+const hours = computed<[string, string]>(() => {
+  const [from = '', to = ''] = props.detection?.plate_hours?.split('-') ?? [];
+  return props.detection?.plate_hours ? [from, to] : halfHours.value;
+});
 // O X U, G P R on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
 const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M'};
@@ -107,6 +115,15 @@ function valueChanged(event: Event): void {
 }
 function selectChanged(key: SelectField, event: Event): void {
   setField(key, (event.target as HTMLSelectElement).value);
+}
+function hoursChanged(side: 0 | 1, event: Event): void {
+  const chosen: [string, string] = [...hours.value];
+  chosen[side] = (event.target as HTMLSelectElement).value;
+  halfHours.value = chosen;
+  const [from, to] = chosen;
+  const value = from !== '' && to !== '' && from !== to ? from + '-' + to : null;
+  if ((props.detection?.plate_hours ?? null) !== value) setField('plate_hours', value);
+  releaseFocus(event);
 }
 function booleanChanged(key: BooleanField, event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -182,6 +199,19 @@ function booleanChanged(key: BooleanField, event: Event): void {
               @click="setField('supplementary_panel', panel === item.id ? 'unknown' : item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
     <p v-if="panel === 'time'" class="effect-note" id="plateNote">The box takes the disc and the plate.</p>
+    <!-- The hours written on the plate; empty when they cannot be read, or the plate has days or two ranges. -->
+    <div v-if="asksHours" id="plateHours" class="value-line plate-hours">
+      <label for="hoursFrom">From</label>
+      <select id="hoursFrom" aria-label="Plate valid from" :value="hours[0]" @change="hoursChanged(0, $event)">
+        <option value="">–</option>
+        <option v-for="hour in PLATE_HOURS" :key="hour" :value="String(hour)">{{ hour }}</option>
+      </select>
+      <label for="hoursTo">to</label>
+      <select id="hoursTo" aria-label="Plate valid to" :value="hours[1]" @change="hoursChanged(1, $event)">
+        <option value="">–</option>
+        <option v-for="hour in PLATE_HOURS" :key="hour" :value="String(hour)">{{ hour === 0 ? '0 / 24' : hour }}</option>
+      </select>
+    </div>
     <div id="valueBlock" class="value-line" :hidden="!hasValueField">
       <label for="value">Other value</label>
       <input v-fill="detection?.value_kph === null || detection?.value_kph === undefined ? '' : String(detection.value_kph)"

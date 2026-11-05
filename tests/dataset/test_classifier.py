@@ -23,7 +23,10 @@ from nnslr_tools import cli
 from nnslr_tools.annotations import load_jsonl, validate_dataset
 from nnslr_tools.chain import (ChainTally, classifier_comparison, frame_candidates, resolve_model,
                                select_negatives, truth_objects)
+from nnslr_tools.comma_trial import speed_of
 from nnslr_tools.evaluation import PER_FRAME_MAX_BOXES, PER_FRAME_STEPS, classifier_metrics
+from nnslr_tools.sign_types import class_hours, class_parts, plate_hours_problem, without_hours
+from nnslr_tools.synthetic_signs import value_of
 from nnslr_tools.training import (MIN_KIND_TRAIN_CROPS, TrainConfig, _classifier_label, _reader_label,
                                   crop_rectangle, family_label, jitter_box, prepare_reader_training,
                                   read_negatives, resume_arguments, review_tier, reviewed_frames)
@@ -1041,7 +1044,35 @@ def test_a_number_with_a_plate_of_hours_is_a_sign_of_its_own():
     assert family_label("maximum_speed_hours:30") == "maximum_speed:30"
 
 
-def _frames_with_hours(frames, count):
+def test_a_plate_with_its_hours_read_says_them_in_the_class():
+    read = {**_row("maximum_speed", 30), "supplementary_panel": "time", "plate_hours": "22-6"}
+    assert _classifier_label(read) == "maximum_speed_hours:30:22-6"
+    assert _reader_label(read) == "maximum_speed:30"
+    assert family_label("maximum_speed_hours:30:22-6") == "maximum_speed:30"
+    assert class_parts("maximum_speed_hours:30:22-6") == ("maximum_speed", "30", "time")
+    assert class_hours("maximum_speed_hours:30:22-6") == "22-6"
+    assert class_hours("maximum_speed_hours:30") is None and class_hours("other_sign:give_way") is None
+    assert without_hours("maximum_speed_hours:30:22-6") == "maximum_speed_hours:30"
+    assert without_hours("maximum_speed_hours:30") == "maximum_speed_hours:30"
+    assert value_of("maximum_speed_hours:30:22-6") == 30 and speed_of("maximum_speed_hours:30:22-6") == 30.0
+
+
+@pytest.mark.parametrize("hours", ["22-6", "0-6", "7-17", "20-0", None])
+def test_the_hours_of_a_plate_have_one_spelling(hours):
+    assert plate_hours_problem({"family": "maximum_speed", "supplementary_panel": "time", "plate_hours": hours}) is None
+
+
+@pytest.mark.parametrize("hours", ["22-06", "22–6", "22h-6h", "22-24", "6-6", "22", "", 22])
+def test_any_other_spelling_of_the_hours_is_refused(hours):
+    assert "22-6" in plate_hours_problem({"family": "maximum_speed", "supplementary_panel": "time", "plate_hours": hours})
+
+
+def test_hours_belong_to_a_limit_with_a_plate_of_hours():
+    assert "only for" in plate_hours_problem({"family": "maximum_speed", "supplementary_panel": "none", "plate_hours": "22-6"})
+    assert "only for" in plate_hours_problem({"family": "zone", "supplementary_panel": "time", "plate_hours": "22-6"})
+
+
+def _frames_with_hours(frames, count, hours=None):
     """FRAMES with the first boxes of a limit of 30 in train marked Hours, as tall boxes of the disc and its plate."""
     changed, left = [], count
     for split, who, kept, removed in frames:
@@ -1049,6 +1080,7 @@ def _frames_with_hours(frames, count):
         for box in kept:
             if left and split == "train" and box["value_kph"] == 30:
                 box, left = {**box, "bbox_xyxy": [4, 6, 20, 36], "supplementary_panel": "time"}, left - 1
+                box = {**box, "plate_hours": hours} if hours else box
             boxes.append(box)
         changed.append((split, who, boxes, removed))
     return changed
@@ -1079,3 +1111,19 @@ def test_the_classes_change_only_with_an_hours_label(tmp_path, capsys, monkeypat
     assert all(box in frame["boxes"] for frame in cutter["frames"] for box in frame.get("plate_boxes", []))
     # Still a speed limit for the cutter: its family does not change.
     assert cutter["boxes_by_family"]["train"]["maximum_speed"] == 5
+
+
+def test_hours_too_rare_to_learn_stay_a_number_with_hours(tmp_path, capsys, monkeypatch):
+    monkeypatch.setitem(globals(), "FRAMES", _frames_with_hours(FRAMES, MIN_KIND_TRAIN_CROPS - 1, "22-6"))
+    plan = prepare_reader_training(_classifier_fixture(tmp_path, capsys), tmp_path / "splits" / "latest.json", tmp_path,
+                                   class_scheme="v2")
+    assert "maximum_speed_hours:30" in plan["classes"] and "maximum_speed_hours:30:22-6" not in plan["classes"]
+    assert plan["folded_labels"]["maximum_speed_hours:30:22-6"] == "maximum_speed_hours:30"
+
+
+def test_hours_with_enough_crops_are_a_class(tmp_path, capsys, monkeypatch):
+    monkeypatch.setitem(globals(), "FRAMES", _frames_with_hours(FRAMES, MIN_KIND_TRAIN_CROPS, "22-6"))
+    plan = prepare_reader_training(_classifier_fixture(tmp_path, capsys), tmp_path / "splits" / "latest.json", tmp_path,
+                                   class_scheme="v2")
+    assert "maximum_speed_hours:30:22-6" in plan["classes"] and "maximum_speed_hours:30" not in plan["classes"]
+    assert "maximum_speed_hours:30:22-6" not in plan["folded_labels"]

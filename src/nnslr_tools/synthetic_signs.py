@@ -57,8 +57,8 @@ def style_of(family: str | None) -> str | None:
 
 
 def value_of(label: str | None) -> int | None:
-    """The number of a classifier label (maximum_speed:60 or maximum_speed_hours:60 -> 60), None without one."""
-    value = str(label or "").partition(":")[2]
+    """The number of a classifier label (maximum_speed:60 or maximum_speed_hours:60:22-6 -> 60), None without one."""
+    value = str(label or "").partition(":")[2].partition(":")[0]
     return int(value) if value.isdigit() else None
 
 

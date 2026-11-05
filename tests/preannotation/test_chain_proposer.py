@@ -16,6 +16,8 @@ def test_a_number_with_hours_is_a_proposal_of_a_limit_with_its_panel():
     assert proposal_of('maximum_speed_hours:30') == ('maximum_speed', 30)
     assert proposal_panel('maximum_speed_hours:30') == 'time'
     assert proposal_panel('maximum_speed:30') == 'unknown' and proposal_panel('other_sign:give_way') == 'unknown'
+    assert proposal_of('maximum_speed_hours:30:22-6') == ('maximum_speed', 30)
+    assert proposal_panel('maximum_speed_hours:30:22-6') == 'time'
 
 
 def test_the_decider_gets_the_car_speed_of_each_frame_from_its_route(tmp_path):
