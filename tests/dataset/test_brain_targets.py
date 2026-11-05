@@ -406,3 +406,121 @@ def test_reading_the_labels_changes_nothing(tmp_path):
 
 def test_no_labels_yet_is_no_drive(tmp_path):
     assert _targets().read_labels(tmp_path) == {}
+
+
+GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
+
+
+def plated(hours=(14.0, 14.0, 14.0), label=50, number=30, plate='time', ended=0, partitions=None):
+    """A drive with a number and a plate on every frame, at these hours, his label on all of them."""
+    np, targets = _np(), _targets()
+    inputs = {name: np.zeros((len(hours), size), dtype=np.float32) for name, size in targets.INPUT_SIZES.items()}
+    inputs['signs'][:, 0], inputs['signs'][:, 1], inputs['signs'][:, 6] = number / targets.BRAIN_INPUTS.SIGN_KPH_SCALE, 1, ended
+    inputs['plate'][:, targets.BRAIN_INPUTS.PLATES.index(plate) if plate else -1] = 1
+    inputs['hour'][:] = [targets.BRAIN_INPUTS.hour_row(hour) for hour in hours]
+    return {'route': 'r', 'partitions': partitions or ['train'] * len(hours), 'inputs': inputs,
+            'extra': targets.pack_inputs(inputs, GROUPS), 'speed': np.full(len(hours), targets.speed_class(label)),
+            'speed_weight': np.ones(len(hours), dtype=np.float32), 'works': np.ones(len(hours), dtype=np.float32),
+            'works_weight': np.ones(len(hours), dtype=np.float32)}
+
+
+def in_an_epoch(drive, seed=0):
+    import random
+    return _targets().epoch_drives([drive], GROUPS, random.Random(seed))
+
+
+def clock_of(drive):
+    return _targets()._clock(drive['inputs']['hour'])
+
+
+@pytest.mark.parametrize('hour, moved, after', [(10.0, 3.0, 13.0), (23.0, 2.0, 1.0), (1.0, -2.0, 23.0), (7.5, 24.0, 7.5)])
+def test_a_moved_clock_is_what_the_car_says_at_that_hour(hour, moved, after):
+    np, targets = _np(), _targets()
+    row = targets.BRAIN_INPUTS.hour_row
+    assert np.allclose(targets.other_hour(row(hour)[None], moved)[0], row(after), atol=1e-5)
+
+
+def test_a_moved_clock_leaves_an_unknown_hour_unknown():
+    np, targets = _np(), _targets()
+    assert not targets.other_hour(targets.BRAIN_INPUTS.hour_row(None)[None], 5.0).any()
+
+
+def test_a_drive_takes_one_clock_for_all_its_frames_and_nothing_else_changes():
+    np, targets = _np(), _targets()
+    drive = plated(hours=(10.0, 10.5, 11.0), plate=None)
+    real, extra = drive['inputs']['hour'].copy(), drive['extra'].copy()
+    (seen,) = in_an_epoch(drive)
+    moved = clock_of(seen)
+    assert not np.allclose(moved, clock_of(drive))
+    assert np.allclose((moved - moved[0]) % 24, [0, .5, 1], atol=1e-3)
+    assert seen['speed'] is drive['speed'] and seen['speed_weight'] is drive['speed_weight']
+    assert np.array_equal(seen['extra'], targets.pack_inputs(seen['inputs'], GROUPS))
+    assert np.array_equal(drive['inputs']['hour'], real) and np.array_equal(drive['extra'], extra)
+
+
+def test_every_epoch_has_another_clock_and_a_seed_the_same_ones():
+    import random
+    np, targets = _np(), _targets()
+    drive = plated(plate=None)
+    rng = random.Random(0)
+    first, second = (targets.epoch_drives([drive], GROUPS, rng)[0] for _ in range(2))
+    assert not np.allclose(clock_of(first), clock_of(second))
+    assert np.array_equal(first['extra'], in_an_epoch(drive)[0]['extra'])
+
+
+def test_a_drive_with_a_plate_of_hours_keeps_its_real_clock():
+    drive = plated()
+    assert in_an_epoch(drive)[0] is drive
+
+
+def test_a_plate_of_hours_read_by_day_goes_through_the_night_with_the_number_as_the_answer():
+    np, targets = _np(), _targets()
+    drive = plated(hours=(14.0, 14.5, 15.0))
+    speed = drive['speed'].copy()
+    for seed in range(30):
+        _day, night = in_an_epoch(drive, seed)
+        answered = night['speed_weight'] > 0
+        assert answered[0] and targets._at_night(clock_of(night)[answered]).all()
+        assert not targets._at_night(clock_of(night)[~answered]).any()
+        assert np.allclose((clock_of(night) - clock_of(night)[0]) % 24, [0, .5, 1], atol=1e-3)
+        assert set(night['speed'][answered]) == {targets.speed_class(30)}
+        assert not night['works_weight'].any()
+        assert np.array_equal(night['extra'], targets.pack_inputs(night['inputs'], GROUPS))
+    assert np.array_equal(drive['speed'], speed)
+
+
+@pytest.mark.parametrize('drive', [
+    {'label': 30}, {'number': 33}, {'number': 0}, {'number': 250}, {'hours': (23.0, 23.1)}, {'hours': (5.5,)}, {'plate': 'other'},
+    {'plate': 'none'}, {'ended': 1}, {'hours': (14.0, 14.0), 'partitions': ['validation', 'test']},
+    {'hours': (14.0, 14.0), 'partitions': ['buffer', 'buffer']}], ids=str)
+def test_no_night_copy_of_what_does_not_say_the_number_holds_at_night(drive):
+    assert not _targets().night_frames(plated(**drive))[0].any()
+    assert len(in_an_epoch(plated(**drive))) == 1
+
+
+def test_no_night_copy_at_an_unknown_hour():
+    drive = plated()
+    drive['inputs']['hour'][:] = 0
+    assert len(in_an_epoch(drive)) == 1
+
+
+def test_no_night_copy_of_a_frame_with_no_speed_of_his():
+    drive = plated()
+    drive['speed_weight'][:] = 0
+    assert len(in_an_epoch(drive)) == 1
+
+
+def test_a_night_copy_answers_only_its_frames():
+    np, targets = _np(), _targets()
+    drive = plated(hours=(14.0,) * 5, partitions=['train', 'train', 'validation', 'buffer', 'train'])
+    drive['speed_weight'][1] = 0
+    _day, night = in_an_epoch(drive)
+    assert list(night['speed_weight']) == [1, 0, 0, 0, 1]
+    assert night['partitions'] == drive['partitions']
+    assert night['speed'][1] == drive['speed'][1]
+
+
+def test_a_frame_that_falls_after_the_night_has_no_answer():
+    for seed in range(30):
+        _day, night = in_an_epoch(plated(hours=(10.0, 19.0)), seed)
+        assert list(night['speed_weight']) == [1, 0]

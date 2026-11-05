@@ -343,9 +343,10 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
     assert (plain == other).all()
 
 
-def run_training(torch, tmp_path, monkeypatch, scores):
+def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
+    change(drive)
     drive['reader'], drive['reader_current'], drive['signs_read'] = {'vision': 'abc'}, True, True
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
@@ -372,6 +373,64 @@ def test_the_epoch_kept_is_the_best_on_validation_and_the_checkpoint_says_what_i
     assert saved['split'] == 'split' and saved['reader'] == {'vision': 'abc'}
     assert saved['features'] == 128 and saved['hidden'] == 128
     assert {'validation_cold', 'test_cold'} <= set(result)
+
+
+def at_two_in_the_afternoon(drive):
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    drive['inputs']['hour'][:] = BRAIN_INPUTS.hour_row(14.0)
+
+
+def plate_of_hours(drive):
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    at_two_in_the_afternoon(drive)
+    drive['inputs']['signs'][:, 0], drive['inputs']['signs'][:, 1] = 30 / BRAIN_INPUTS.SIGN_KPH_SCALE, 1
+    drive['inputs']['plate'][:, BRAIN_INPUTS.PLATES.index('time')] = 1
+
+
+def watched(monkeypatch):
+    """What each epoch trains on and what the network is measured on: the hours of them, as rows."""
+    from nnslr_tools import brain_train
+    trained, measured = [], []
+    train, predict = brain_train.train_epoch, brain_train.predict
+
+    def train_watched(model, optimizer, drives, *args, **options):
+        trained.append([drive['inputs']['hour'].copy() for drive in drives])
+        return train(model, optimizer, drives, *args, **options)
+
+    def predict_watched(model, drive, *args, **options):
+        measured.append(drive['extra'].copy())
+        return predict(model, drive, *args, **options)
+
+    monkeypatch.setattr(brain_train, 'train_epoch', train_watched)
+    monkeypatch.setattr(brain_train, 'predict', predict_watched)
+    return trained, measured
+
+
+def test_the_training_moves_the_clock_every_epoch_and_the_measure_has_the_real_one(tmp_path, monkeypatch):
+    import numpy
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs
+    torch = torch_or_skip()
+    trained, measured = watched(monkeypatch)
+    run_training(torch, tmp_path, monkeypatch, [5.0, 4.0], at_two_in_the_afternoon)
+    real = BRAIN_INPUTS.hour_row(14.0)
+    assert [len(epoch) for epoch in trained] == [1, 1]
+    assert not numpy.allclose(trained[0][0][0], real) and not numpy.allclose(trained[0][0][0], trained[1][0][0])
+    drive = fake_drive(['train'] * T)
+    at_two_in_the_afternoon(drive)
+    assert len(measured) >= 4 and all(numpy.array_equal(extra, pack_inputs(drive['inputs'], GROUPS)) for extra in measured)
+
+
+def test_a_night_copy_goes_through_the_training_and_not_through_the_measure(tmp_path, monkeypatch):
+    import numpy
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    torch = torch_or_skip()
+    trained, measured = watched(monkeypatch)
+    run_training(torch, tmp_path, monkeypatch, [5.0, 4.0], plate_of_hours)
+    real = BRAIN_INPUTS.hour_row(14.0)
+    assert [len(epoch) for epoch in trained] == [2, 2]
+    for day, night in trained:
+        assert numpy.allclose(day[0], real) and not numpy.allclose(night[0], real)
+    assert len(measured) == 4
 
 
 def test_the_training_stops_when_validation_gets_no_better(tmp_path, monkeypatch):

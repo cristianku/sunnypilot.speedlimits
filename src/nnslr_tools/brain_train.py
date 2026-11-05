@@ -3,7 +3,8 @@ request (nnslr train-brain); a dry run is two steps on the CPU, nothing kept but
 
 An epoch goes drive after drive in a random order, each drive in its order with the state carried from piece to piece, so
 that approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces move their
-cuts every epoch, and the gradient stops at each of them.
+cuts every epoch, and the gradient stops at each of them. Every epoch the drives get another clock, and those with a plate
+of hours go through once more at night (brain_targets.epoch_drives): the measure has only the real hour.
 
 A picture of test or validation runs in no training step and in no memory of one: the training skips those frames, and the
 memory starts again after them (brain_targets.learning_pieces). A frame of the buffer runs under no_grad, only to keep the
@@ -42,8 +43,8 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
-from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, inputs_sha256,
-                                       learning_pieces, loss_weights, pack_inputs, read_split)
+from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, epoch_drives,
+                                       inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs, read_split)
 from nnslr_tools.road_type_net import (BACKBONE_LEARNING_RATE, FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY,
                                        _augment, _print, _torch)
 
@@ -271,9 +272,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
                                   weight_decay=WEIGHT_DECAY)
     source = {'groups': groups, 'pool': pool, 'works': works, 'features': FEATURES, 'hidden': HIDDEN,
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
+    log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     best, best_epoch, history = None, None, []
     for epoch in range(epochs):
-        error = train_epoch(model, optimizer, drives, store, chunk=chunk, rng=rng, device=device,
+        error = train_epoch(model, optimizer, epoch_drives(drives, groups, rng), store, chunk=chunk, rng=rng, device=device,
                             steps=DRY_STEPS if dry_run else None)
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')

@@ -56,6 +56,20 @@ approach, crossing and exit are one sequence and the network sees only the past,
 gradient, and they never mix train with the rest: nnslr_tools.brain_train. The memory starts again after MEMORY_GAP_SECONDS
 without a frame (memory_cuts), as on the car.
 
+The hour in training (epoch_drives). Every labelled drive is by day, so the real hour says which drive a frame is from and
+nothing of the speed, unless a plate gives it a meaning. So every epoch a drive takes a clock moved by a random number of
+hours, one for all its frames, since on the car the clock runs on. A drive with a plate of hours keeps its real clock: there
+the hour is part of the answer. Validation and test always have the real one.
+
+The night copies (night_copy). A plate of hours read by day, with his label another speed than the number, says only that
+the number does not hold now. Nothing shows when it does, and drives after 22:00 are few. So such a drive goes through the
+epoch once more with its clock moved into the night, and on those frames the answer is the number: the same pictures, made
+only here, nothing on the car, and no answer on roadworks. Only frames of train with his speed, a plate of hours, a number
+that is a class of the speed and was not ended, and a known hour by day. A label equal to the number says it holds by day:
+such a plate is no 22-6, and it has no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) gets a
+night answer that is wrong, a number stays until the next sign also where the road was left, and the picture is of the day.
+The reader gives no plate yet, so today there is no copy at all: plate is unknown on every frame.
+
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
 speed; a drive with no frame; a validation with no answer, which would keep the first epoch.
@@ -88,6 +102,7 @@ NOT_EXAMINED, UNDETERMINED, NOT_KNOWN_YET, BOUNDARY, NO_FRAME = range(1, 6)
 OUT_REASONS = {NOT_EXAMINED: 'not_examined', UNDETERMINED: 'undetermined', NOT_KNOWN_YET: 'not_known_yet', BOUNDARY: 'boundary',
                NO_FRAME: 'no_frame'}
 HELD_OUT = ('test', 'validation')
+NIGHT_FROM, NIGHT_TO = 22, 6
 
 
 def _load_brain_inputs(path: Path):
@@ -422,6 +437,66 @@ def loss_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray]:
     """(speed weight, works weight) of a drive in one partition: the rest of the drive still runs through the memory."""
     inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
     return drive['speed_weight'] * inside, drive['works_weight'] * inside
+
+
+def other_hour(hour: np.ndarray, hours: float) -> np.ndarray:
+    """The hour group with the clock moved by hours on every frame. An unknown hour stays unknown."""
+    sin, cos, angle = hour[:, 0], hour[:, 1], 2 * np.pi * hours / 24
+    return np.stack([sin * np.cos(angle) + cos * np.sin(angle), cos * np.cos(angle) - sin * np.sin(angle), hour[:, 2]],
+                    axis=1).astype(np.float32)
+
+
+def _clock(hour: np.ndarray) -> np.ndarray:
+    return np.arctan2(hour[:, 0], hour[:, 1]) / (2 * np.pi) * 24 % 24
+
+
+def _at_night(clock: np.ndarray) -> np.ndarray:
+    return (clock >= NIGHT_FROM) | (clock < NIGHT_TO)
+
+
+def _hours_plate(drive: dict) -> np.ndarray:
+    return drive['inputs']['plate'][:, BRAIN_INPUTS.PLATES.index('time')] > 0
+
+
+def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:
+    inputs = {**drive['inputs'], 'hour': other_hour(drive['inputs']['hour'], hours)}
+    return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
+
+
+def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
+    """(the frames a night copy can answer, the class of the number on each): see the module's text."""
+    signs, hour = drive['inputs']['signs'], drive['inputs']['hour']
+    kph = np.rint(signs[:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE).astype(np.int64)
+    a_class = (kph >= GRID_KPH) & (kph <= MAX_KPH) & (kph % GRID_KPH == 0) & (signs[:, 6] == 0)
+    by_day = (hour[:, 2] > 0) & ~_at_night(_clock(hour))
+    return (_hours_plate(drive) & a_class & by_day & (loss_weights(drive, 'train')[0] > 0) &
+            (class_kph(drive['speed']) != kph)), speed_class(kph)
+
+
+def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
+    """The drive with its first frame to answer at a random hour of the night, the number the answer of the frames that fall
+    in the night: see the module's text. None with nothing to answer."""
+    frames, number = night_frames(drive)
+    if not frames.any():
+        return None
+    clock = _clock(drive['inputs']['hour'])
+    hours = rng.uniform(NIGHT_FROM, NIGHT_TO + 24) - clock[frames][0]
+    answered = frames & _at_night((clock + hours) % 24)
+    return {**_with_hour(drive, groups, hours), 'speed': np.where(answered, number, drive['speed']),
+            'speed_weight': answered.astype(np.float32), 'works_weight': np.zeros_like(drive['works_weight'])}
+
+
+def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]:
+    """What an epoch of training goes through, new every epoch: the drives with a moved clock, and the night copies. See the
+    module's text. Never for a measure: drives stays as it is."""
+    found = []
+    for drive in drives:
+        if _hours_plate(drive).any():
+            copy = night_copy(drive, groups, rng)
+            found += [drive] if copy is None else [drive, copy]
+        else:
+            found.append(_with_hour(drive, groups, rng.uniform(0, 24)))
+    return found
 
 
 def drive_chunks(length: int, chunk: int, offset: int = 0) -> list[tuple[int, int]]:
