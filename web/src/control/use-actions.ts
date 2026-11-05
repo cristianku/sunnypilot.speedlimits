@@ -53,11 +53,9 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     const signs = options?.classifier && options.classifier !== 'car'
       ? ' The signs are read with the classifier of ' + (/^classifier:(.+)\/classifier$/.exec(options.classifier)?.[1] ?? options.classifier)
         + ', not the car’s: the first time it reads every drive again.' : '';
-    const boards = options?.boards === 'on' ? ' With the green boards as an input.'
-      : options?.boards === 'off' ? ' Without the green boards.' : '';
     return {title: 'Train the scene network?', action: 'Start training',
       text: 'Trains the scene network on the GPU twice, with memory and without, compares them and exports the one '
-        + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.' + signs + boards};
+        + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.' + signs};
   }
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';

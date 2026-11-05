@@ -73,10 +73,8 @@ export interface ActionOptions {
    * others), or the id of a finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
   /** The classifier that reads the signs of the drives for the scene network (train_road_type): "car" (the car's), or the
-   * id of a finished classifier of Models (classifier:<run>/classifier); and its board input: "auto" (when that
-   * classifier read the green boards on enough drives), "on" or "off" (road-signs.ts). */
+   * id of a finished classifier of Models (classifier:<run>/classifier). */
   classifier?: string;
-  boards?: 'auto' | 'on' | 'off';
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, the driver's inputs (only to measure: the car
    * does not give them), the picture's features as a mean or as a grid. */
   works?: 'on' | 'off';
