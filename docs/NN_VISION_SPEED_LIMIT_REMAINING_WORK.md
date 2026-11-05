@@ -305,12 +305,10 @@ This replaces the older `nn-speed-limit-vision` scaffolding below for the comma 
 - Known limits: no 120 km/h class, some 40 and 50 missed by the classifier on the test route, and no decider, so a
   sign of a side road can be read.
 - Speed Limit Assist (31 Oct 2026, `speed_limit_assist.py`, `longitudinal_planner.py`): with openpilot longitudinal on
-  a car whose cruise is the PCM's (the PSA), the limit applies as soon as it is known, with no confirmation and no
-  alert (the PSA has no button to confirm with); the set speed stays the driver's maximum. The sunnylink toggle
-  Set Speed Only Engages (Alpha) (`SpeedLimitSetSpeedEngageOnly`, only with Speed Limit Mode Assist) lets the limit
-  replace the set speed, above it too, but only while the big driving model runs (`modelV2.big`, the external GPU);
-  the screen then shows a green AUTO square with an eye left of the vision square (alone in the bottom right corner
-  without the speed-limit squares) and no longer the set speed.
+  every car, the limit applies as soon as it is known, with no confirmation and no alert. This is **Smartspeed**
+  (5 Nov 2026), the one choice in sunnylink (`SpeedLimitMode` 3): it replaces Speed Limit Source and the option Set
+  Speed Only Engages. The set speed is only on and off, the car drives to the limit, above the set speed too. The
+  screen shows the word smartspeed left of the vision square, never the set speed; + or - makes the word blink.
   The rules are listed in the README, "The rules on the car".
 
 Older runtime branch:
