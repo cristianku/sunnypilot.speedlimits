@@ -13,6 +13,7 @@
 #                (format 2, version = the day, .2 .3 ... for another one the same day), one commit pushed to main.
 #                Nothing when every ONNX is the published one already (the export is the same byte for byte).
 #                Without a road type in use the published one is removed (the comma reads the signs alone).
+#                The brain in use, when one is chosen, is exported here too, and with it no road type goes.
 #   3/5 Record   models/on-car.json of the data root (what `nnslr on-car` writes): Models, "On the car".
 #   4/5 Move     the submodule openpilot/sunnypilot/speed_limits/models of the sunnypilot clone (branch speed-limits)
 #                to that commit, one commit of that path alone pushed to speed-limits; nothing when it is there.

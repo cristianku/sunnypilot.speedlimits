@@ -135,6 +135,7 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
     if (merge?.merges) return {value: pct(merge.accuracy), text: 'motorway said right in the minute after a ramp'};
     return version.test ? {value: pct(version.test.macro_f1), text: 'road types, mean F1 on the test'} : null;
   }
+  if (version.role === 'brain') return version.test ? {value: pct(version.test.right), text: 'speed right on the test'} : null;
   return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
 }
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);

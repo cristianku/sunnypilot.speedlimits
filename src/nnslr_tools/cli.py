@@ -1671,6 +1671,13 @@ def build_parser() -> argparse.ArgumentParser:
                                                                     "nothing is learned, nothing written outside --run-dir")
     p_brain_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_net.set_defaults(func=_cmd_train_brain)
+    p_brain_export = sub.add_parser("export-brain", help="the brain of a run as the car runs it: one step a second as ONNX with "
+                                                         "its contract, checked against PyTorch and along a real drive (CPU, "
+                                                         ".venv-gpu). Writes <run>/export/brain.onnx")
+    p_brain_export.add_argument("--run-dir", required=True, help="the folder of the run with brain-last.pt")
+    p_brain_export.add_argument("--route", help="the drive of the check; default: the one with the most frames in test")
+    p_brain_export.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_brain_export.set_defaults(func=_cmd_export_brain)
     p_junctions = sub.add_parser("junctions", help="the intersections the car drives through, from its GPS track and "
                                                    "the OpenStreetMap roads: derived/junctions/<route>.json, the "
                                                    "labels of the junction head of the road-type network (in the "
@@ -2615,6 +2622,19 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))
+    return 0
+
+
+def _cmd_export_brain(args: argparse.Namespace) -> int:
+    from nnslr_tools import brain_export
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    run = Path(args.run_dir)
+    print(json.dumps(brain_export.export_brain_onnx(run / brain_export.CHECKPOINT, run / 'export' / brain_export.BRAIN_FILE,
+                                                    data_root=root, merged_of=lambda route: store.merged(route, keep=False),
+                                                    route=args.route), indent=2))
     return 0
 
 

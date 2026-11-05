@@ -31,6 +31,7 @@ const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== fa
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const roadType = computed(() => props.version.role === 'road_type' ? props.version : null);
+const brain = computed(() => props.version.role === 'brain' ? props.version : null);
 /** The earlier run a SignNet, an applicability variant or a scene network went on from (Train › Start from). */
 const networkStart = computed(() => props.version.role === 'cutter' || props.version.role === 'decider'
   || props.version.role === 'road_type' ? props.version.start ?? null : null);
@@ -343,6 +344,23 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
           change and the path it drove (the radius), no network. The car turned that much in {{ turnRule.turned_60 ?? 0 }} of the {{ turnRule.passed }} intersections of the
           test<template v-if="turnRule.caught">; within 2 s the network’s “passed” caught {{ caught('turned') }} turned and
           {{ caught('straight') }} straight</template>.</template></p>
+        </details>
+      </template>
+    </template>
+
+    <template v-else-if="brain">
+      <template v-if="brain.test">
+        <div class="model-big">
+          <strong>{{ pct(brain.test.right) }}</strong>
+          <span>right on {{ thousands(brain.test.frames ?? 0) }} test frames</span>
+        </div>
+        <details class="model-more"><summary>Details</summary>
+        <dl class="model-facts">
+          <div><dt>Off on average</dt><dd>{{ brain.test.mean_error_kph?.toFixed(1) ?? '–' }} km/h</dd></div>
+          <div><dt>On validation</dt><dd>{{ pct(brain.validation?.right) }}</dd></div>
+          <div><dt title="What it reads each second beside the picture; never the map">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
+          <div><dt>Seed</dt><dd>{{ brain.seed ?? '–' }}</dd></div>
+        </dl>
         </details>
       </template>
     </template>

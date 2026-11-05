@@ -1260,7 +1260,10 @@ class Panel:
         active, problem = self.models_index.read_active()
         on_car, car_problem = self.models_index.read_on_car()
         roles = tuple(CAR_NETWORKS.values())
-        return {'in_use': {role: (active.get(role) or {}).get('id') for role in roles},
+        in_use = {role: (active.get(role) or {}).get('id') for role in roles}
+        if in_use['brain']:
+            in_use['road_type'] = None  # stays chosen, but does not go with a brain
+        return {'in_use': in_use,
                 'on_car': None if on_car is None else {role: on_car['ids'].get(role) for role in roles},
                 'problem': problem or car_problem, 'build_pending': build_pending(self.root)}
 

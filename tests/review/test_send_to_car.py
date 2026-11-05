@@ -21,7 +21,7 @@ from test_panel_runs import write
 
 from nnslr_tools import car_release, car_settings
 from nnslr_tools.job_progress import progress
-from nnslr_tools.model_roles import NOT_SELECTABLE, ModelIndex
+from nnslr_tools.model_roles import NOT_SELECTABLE, ModelChoiceError, ModelIndex, role_of
 from nnslr_tools.panel import Panel, PanelError
 from nnslr_tools.runs import RunsIndex
 
@@ -274,6 +274,88 @@ def test_the_road_type_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
     assert 'road_type' not in json.loads((clone / 'speed_limits.json').read_text())
     assert git(clone, 'ls-files', 'road-type.onnx', 'road-type.onnx.contract.json') == ''
     assert 'road_type' not in json.loads((data / 'models/on-car.json').read_text())
+
+
+def brain_run(data: Path, name: str, *, result: dict | None | bool = None) -> str:
+    """A brain at the root of its run, finished unless result is False."""
+    run = data / 'runs' / name
+    run.mkdir(parents=True)
+    (run / 'brain-last.pt').write_bytes(b'brain ' + name.encode())
+    if result is not False:
+        write(run / 'result.json', result or {
+            'groups': ['signs', 'lead'], 'seed': 1, 'works': True, 'history': [{}],
+            'test': {'speed': {'frames': 10, 'right': 0.9, 'mean_error_kph': 1.0}},
+            'validation': {'speed': {'frames': 9, 'right': 0.8, 'mean_error_kph': 2.0}}})
+    return f'brain:{name}/brain'
+
+
+def use_brain(data: Path, model_id: str) -> None:
+    runs = RunsIndex(data)
+    runs.running_runs = dict
+    ModelIndex(runs).set_active('brain', model_id, who=None, via='local')
+
+
+def fake_export_with_brain(content: bytes, onnx: bytes):
+    """fake_export, and a brain's step as the real export writes it."""
+    signs = fake_export(content)
+
+    def exporter(chosen: dict, folder: Path) -> dict:
+        (folder / car_release.BRAIN_FILE).write_bytes(onnx)
+        write(folder / (car_release.BRAIN_FILE + '.contract.json'), {
+            'task': 'brain', 'checkpoint': str(chosen['brain']['weights']), 'onnx_sha256': sha256(onnx),
+            'checkpoint_sha256': sha256(Path(chosen['brain']['weights']).read_bytes())})
+        return signs(chosen, folder)
+    return exporter
+
+
+def test_the_brain_in_use_goes_on_the_car_instead_of_the_road_type_and_goes_away_with_it(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    _, clone = models_clone(tmp_path)
+    use_road_type(data, road_type_run(data, 't1', b'road'))
+    first = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'))
+    assert first['changed'] and (clone / 'road-type.onnx').is_file()
+    use_brain(data, brain_run(data, 'b1'))
+
+    second = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_brain(b'v1', b'brain v1'))
+
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    assert second['changed'] and manifest['brain'] == {'file': 'brain.onnx', 'contract': 'brain.onnx.contract.json'}
+    assert 'road_type' not in manifest and not (clone / 'road-type.onnx').exists()  # nothing on the car would read it
+    assert manifest['settings']['country_policy'] == car_release.COUNTRY_POLICY
+    assert (clone / 'brain.onnx').read_bytes() == b'brain v1'
+    assert json.loads((clone / 'brain.onnx.contract.json').read_text())['checkpoint'] == 'brain:b1/brain'
+    record = json.loads((data / 'models/on-car.json').read_text())
+    assert record['brain']['id'] == 'brain:b1/brain' and 'road_type' not in record
+    again = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_brain(b'v1', b'brain v1'))
+    assert not again['changed']
+
+    path = data / 'models/active.json'
+    value = json.loads(path.read_text())
+    value.pop('brain')
+    path.write_text(json.dumps(value))
+    third = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export_with_road_type(b'v1'))
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    assert third['changed'] and 'brain' not in manifest and not (clone / 'brain.onnx').exists()
+    assert 'country_policy' not in manifest['settings'] and manifest['road_type']
+
+
+def test_a_brain_goes_only_finished_and_its_dry_run_is_not_a_version(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    brain_run(data, 'b1', result={'groups': ['signs'], 'dry_run': True, 'test': {}})
+    assert ModelIndex(RunsIndex(data)).artifacts(('brain',))['brain'] == []
+    model_id = brain_run(data, 'b2', result=False)
+    with pytest.raises(ModelChoiceError):
+        use_brain(data, model_id)
+    assert car_release.choose(data, 's1')['brain'] is None
+
+
+def test_the_brain_part_is_the_brains_alone():
+    assert role_of('brain:b1/brain') == 'brain'
+    assert role_of('cutter:b1/brain') is None
+    assert role_of('brain:b1/signnet') is None
+    assert role_of('brain:b1/detector') is None
 
 
 def test_only_a_road_type_with_memory_and_its_exported_step_goes_on_the_car(tmp_path):

@@ -444,8 +444,8 @@ export interface PanelStatus {
 /** The networks the car runs: in use here (models/active.json) and in the comma's software (models/on-car.json, null
  * before the first Publish), by role and id; why one of the files cannot be read; a build of the testing branch owed. */
 export interface CarSummary {
-  in_use: Record<'cutter' | 'classifier' | 'road_type', string | null>;
-  on_car: Record<'cutter' | 'classifier' | 'road_type', string | null> | null;
+  in_use: Record<'cutter' | 'classifier' | 'road_type' | 'brain', string | null>;
+  on_car: Record<'cutter' | 'classifier' | 'road_type' | 'brain', string | null> | null;
   problem: string | null;
   build_pending: boolean;
 }
@@ -1111,8 +1111,8 @@ export interface CutterSize {
 
 // GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
 
-/** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md), and the road type from the camera. */
-export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'road_type';
+/** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md), the road type from the camera, and the brain. */
+export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'road_type' | 'brain';
 
 /** Signs of one width found by the cutter. */
 export interface WidthRecall {
@@ -1405,7 +1405,24 @@ export interface RoadTypeModel extends ModelBase {
   test_smoothed: RoadTypeNumbers | null;
 }
 
-export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | RoadTypeModel;
+/** The speed a brain says against the labels of Speed review on one partition (nnslr_tools.model_roles.brain_digest). */
+export interface BrainNumbers {
+  frames: number | null;
+  right: number | null;
+  mean_error_kph: number | null;
+}
+
+/** The brain of a run of nnslr train-brain: it says the speed to hold, and on the car it is the vision limit. */
+export interface BrainModel extends ModelBase {
+  role: 'brain';
+  /** What it is given beside the picture (signs, plate, hour, lead, country). */
+  groups: string[] | null;
+  seed: number | null;
+  validation: BrainNumbers | null;
+  test: BrainNumbers | null;
+}
+
+export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | RoadTypeModel | BrainModel;
 
 /** The model in use for a role (models/active.json of the data root). */
 export interface ActiveModel {

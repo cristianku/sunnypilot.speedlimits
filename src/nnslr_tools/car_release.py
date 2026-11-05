@@ -1,16 +1,16 @@
 """``nnslr send-to-car``: the first three steps of Publish to the car (the Publish tab), the networks the
-comma downloads replaced by a SignNet of this server, the classifier in use and the road type in use.
+comma downloads replaced by a SignNet of this server, the classifier in use and the road type or the brain in use.
 
 1. Export: the SignNet of a run (or the cutter in use) and the classifier in use (models/active.json, or one given)
    to ONNX on the CPU, each
    checked against PyTorch with onnxruntime; the road type in use (with memory: road-type/gru), when one is chosen,
-   is the ONNX step its training exported and checked (<run>/road-type/export). Each contract names its network by
-   its id of the Models tab.
-2. Publish: the ONNX, their contracts and speed_limits.json (format 2: finder, classifier and road_type when there is
-   one in use) in the clone of the models repository the comma downloads (cristianku/speed-limits-models), one commit
+   is the ONNX step its training exported and checked (<run>/road-type/export); the brain in use, when one is chosen, is
+   exported here too, and with it no road type goes. Each contract names its network by its id of the Models tab.
+2. Publish: the ONNX, their contracts and speed_limits.json (format 2: finder, classifier, and road_type or brain when
+   there is one in use) in the clone of the models repository the comma downloads (cristianku/speed-limits-models), one commit
    pushed to its main. The export is the same byte for byte each time: when every ONNX is already the one there,
    nothing changes and nothing is pushed. Without a road type in use the published one is removed: speedvisiond
-   then reads the signs alone.
+   then reads the signs alone. The same for a brain: speedvisiond then runs its rules again.
 3. Record: models/on-car.json (record_on_car, what ``nnslr on-car`` writes), the "On the car" of the Models tab.
 
 scripts/send_to_car.sh runs it, then moves the models submodule of the sunnypilot speed-limits branch (step 4) and
@@ -32,6 +32,7 @@ from typing import Any
 
 from nnslr_tools import car_settings
 from nnslr_tools.model_roles import (
+    BRAIN_WEIGHTS,
     ON_CAR_FILE,
     ROAD_TYPE_PART,
     SIGNNET_PART,
@@ -56,6 +57,9 @@ PENDING_FILE = 'models/send-to-car.pending'
 # The files of the models repository, as speed_limits.json names them; the road type's only when one is in use.
 FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 ROAD_TYPE_FILE = 'road-type.onnx'
+BRAIN_FILE = 'brain.onnx'
+# The brain's country (speed_limits/country.py): a first try, not validated on the road. Only a release with a brain has it.
+COUNTRY_POLICY = {'gps_max_age_s': 5, 'gps_max_accuracy_m': 50, 'border_margin_m': 200, 'confirm_s': 10, 'max_sample_gap_s': 5}
 # The road type that goes on the car: the one with memory, whose training exported its ONNX step (one second each).
 ROAD_TYPE_ON_CAR = ROAD_TYPE_PART + '/gru'
 ROAD_TYPE_EXPORT = ROAD_TYPE_PART + '/export/'
@@ -90,8 +94,9 @@ def car_missing(repo: Path) -> str:
 
 
 def car_files(chosen: dict) -> dict[str, str]:
-    """The networks of a publication and their file: the SignNet and the classifier, the road type when chosen."""
-    return {**FILES, **({'road_type': ROAD_TYPE_FILE} if chosen.get('road_type') else {})}
+    """The networks of a publication and their file: the SignNet and the classifier, the road type or the brain when chosen."""
+    return {**FILES, **({'road_type': ROAD_TYPE_FILE} if chosen.get('road_type') else {}),
+            **({'brain': BRAIN_FILE} if chosen.get('brain') else {})}
 
 
 def build_pending(root: Path) -> bool:
@@ -103,8 +108,9 @@ def build_pending(root: Path) -> bool:
 def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
     """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
     of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
-    road type in use, or None when none is chosen. Each with its id and its weights on this server (the road type
-    with its exported ONNX step and contract)."""
+    road type in use, or None when none is chosen; the brain in use, or None: with a brain no road type goes, nothing on
+    the car would read it. Each with its id and its weights on this server (the road type with its exported ONNX step
+    and contract)."""
     if signnet is not None and (not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet)):
         raise ValueError(f'{signnet!r} is not a run name')
     runs = RunsIndex(Path(root))
@@ -149,7 +155,8 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
         if weights is None:
             raise ValueError(f'{entry["id"]} has no weights on this server')
         found[network] = {'id': entry['id'], 'run': entry['run'], 'weights': weights}
-    found['road_type'] = _road_type(runs, index)
+    found['brain'] = _brain(Path(root), runs, index)
+    found['road_type'] = None if found['brain'] else _road_type(runs, index)
     _check_boards(runs, found, chosen)
     return found
 
@@ -201,6 +208,34 @@ def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:
     return {'id': entry['id'], 'run': entry['run'], **files}
 
 
+def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
+    active, problem = index.read_active()
+    if problem is not None or active.get('brain') is None:
+        return None
+    entry, why = index.in_use('brain')
+    if entry is None:
+        raise ValueError(why)
+    if not entry['finished']:
+        raise ValueError(f'the brain {entry["id"]} has not finished its training')
+    run = runs._run_dir(entry['run'])
+    weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
+    if weights is None:
+        raise ValueError(f'{entry["id"]} has no weights on this server')
+    return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root}
+
+
+def export_brain(chosen: dict, folder: Path) -> None:
+    """The brain's step to ONNX in folder, checked against PyTorch and along a real drive (it raises when it differs)."""
+    if chosen.get('brain'):
+        from nnslr_tools.brain_export import export_brain_onnx
+        from nnslr_tools.drive_review import DriveReviewStore
+
+        root = chosen['brain']['root']
+        store = DriveReviewStore(root)
+        export_brain_onnx(chosen['brain']['weights'], folder / BRAIN_FILE, data_root=root,
+                          merged_of=lambda route: store.merged(route, keep=False))
+
+
 def copy_road_type(chosen: dict, folder: Path) -> None:
     """The road type's ONNX step and its contract in folder, as its training exported and checked them."""
     if chosen.get('road_type'):
@@ -211,8 +246,8 @@ def copy_road_type(chosen: dict, folder: Path) -> None:
 # -- 2. the export ------------------------------------------------------------------------------------------
 def export(chosen: dict, folder: Path) -> dict:
     """Both sign networks to ONNX in folder (signnet.onnx, classifier.onnx and their contracts), each checked against
-    PyTorch with onnxruntime (they raise when it differs), and the road type's step when one is in use; each contract
-    names its checkpoint by its id."""
+    PyTorch with onnxruntime (they raise when it differs), and the road type's or the brain's step when one is in use;
+    each contract names its checkpoint by its id."""
     from nnslr_tools.exporting import export_reader_onnx
     from nnslr_tools.signnet import export_signnet_onnx
 
@@ -220,6 +255,7 @@ def export(chosen: dict, folder: Path) -> dict:
     for network, name in FILES.items():
         exporters[network](chosen[network]['weights'], folder / name, verify=True)
     copy_road_type(chosen, folder)
+    export_brain(chosen, folder)
     return finish_contracts(chosen, folder)
 
 
@@ -249,12 +285,14 @@ def _git(folder: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def manifest_of(version: str, road_type: bool = False, settings: dict | None = None) -> dict:
-    """speed_limits.json; settings: the car's (car_settings.values), each a constant of vision.py on the comma."""
-    files = {**FILES, **({'road_type': ROAD_TYPE_FILE} if road_type else {})}
+def manifest_of(version: str, road_type: bool = False, settings: dict | None = None, brain: bool = False) -> dict:
+    """speed_limits.json; settings: the car's (car_settings.values), each a constant of vision.py on the comma, and with a
+    brain the policy of its country."""
+    files = {**FILES, **({'road_type': ROAD_TYPE_FILE} if road_type else {}), **({'brain': BRAIN_FILE} if brain else {})}
+    settings = {**(settings or {}), **({'country_policy': COUNTRY_POLICY} if brain else {})}
     return {'format': 2, 'version': version,
             **{network: {'file': name, 'contract': name + '.contract.json'} for network, name in files.items()},
-            **({'settings': dict(settings)} if settings else {})}
+            **({'settings': settings} if settings else {})}
 
 
 def published_settings(models: Path | None = None) -> dict | None:
@@ -315,9 +353,9 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
     manifest = _read_manifest(models)
     current_version = (manifest or {}).get('version')
     files = car_files(chosen)
-    road_type = 'road_type' in files
+    road_type, brain = 'road_type' in files, 'brain' in files
     same_manifest = manifest is not None and {key: value for key, value in manifest.items() if key != 'version'} == {
-        key: value for key, value in manifest_of('', road_type, settings).items() if key != 'version'}
+        key: value for key, value in manifest_of('', road_type, settings, brain).items() if key != 'version'}
     same = same_manifest and all(
         (models / name).is_file() and not (models / name).is_symlink()
         and _sha256(models / name) == exported[network]['onnx_sha256'] for network, name in files.items())
@@ -327,9 +365,9 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
     if dry_run:
         return {'changed': True, 'commit': None, 'version': version}
     paths = []
-    # No road type in use: the published one goes, speedvisiond reads the signs alone.
-    gone = [] if road_type else [file for file in (ROAD_TYPE_FILE, ROAD_TYPE_FILE + '.contract.json')
-                                 if _git(models, 'ls-files', '--', file)]
+    # No road type in use: the published one goes, speedvisiond reads the signs alone. The same for the brain.
+    unused = [name for name, used in ((ROAD_TYPE_FILE, road_type), (BRAIN_FILE, brain)) if not used]
+    gone = [file for name in unused for file in (name, name + '.contract.json') if _git(models, 'ls-files', '--', file)]
     for name in files.values():
         for file in (name, name + '.contract.json'):
             target = models / file
@@ -337,11 +375,12 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
                 raise ValueError(f'{target} is a link: the clone must hold the files themselves')
             shutil.copyfile(folder / file, target)
             paths.append(file)
-    (models / MANIFEST).write_text(json.dumps(manifest_of(version, road_type, settings), indent=2) + '\n',
+    (models / MANIFEST).write_text(json.dumps(manifest_of(version, road_type, settings, brain), indent=2) + '\n',
                                    encoding='utf-8')
     paths.append(MANIFEST)
     message = (f'speed limits {version}: SignNet {chosen["finder"]["run"]}, classifier {chosen["classifier"]["run"]}'
-               + (f', road type {chosen["road_type"]["run"]}' if road_type else '') + '\n\n'
+               + (f', road type {chosen["road_type"]["run"]}' if road_type else '')
+               + (f', brain {chosen["brain"]["run"]}' if brain else '') + '\n\n'
                + ''.join(f'{network} {exported[network]["id"]} (onnx sha256 {exported[network]["onnx_sha256"][:12]})\n'
                          for network in files)
                + 'Sent from the review site (Models, Send to the car: nnslr send-to-car).\n')
@@ -382,8 +421,9 @@ def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, mode
     models = Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE)
     chosen = choose(root, signnet, classifier)
     road_type = f', the road type {chosen["road_type"]["id"]}' if chosen.get('road_type') else ''
+    brain = f', the brain {chosen["brain"]["id"]}' if chosen.get('brain') else ''
     say(f'== 1/{steps_of} Export the SignNet of {chosen["finder"]["run"]} and the classifier {chosen["classifier"]["id"]}'
-        + road_type)
+        + road_type + brain)
     work = root / 'tmp'
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='send-to-car-', dir=work) as name:
@@ -414,6 +454,6 @@ def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, mode
         else:
             record = record_on_car(root, models)
             say('recorded in ' + ON_CAR_FILE)
-        road = f', {record["road_type"]["id"]}' if record.get('road_type') else ''
+        road = ''.join(f', {record[role]["id"]}' for role in ('road_type', 'brain') if record.get(role))
         say(f'on the car: {record["cutter"]["id"]} and {record["classifier"]["id"]}{road}, commit {record["commit"][:7]}')
     return {**published, 'record': record}

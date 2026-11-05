@@ -63,6 +63,8 @@ flowchart TD
 
 How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
 
+**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). "Map Data + Vision" stays the one choice in sunnylink and the resolver does not change. The brain always says a number, so while it runs the map is not used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS; never the map. If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
+
 **Signs**
 
 - A number counts once it is read in 2 pictures within 1.5 s (*settings*), the classifier at least 70 % sure (*setting*). Two at once (a gantry, roadworks): the one seen most; on a tie, the lower.
@@ -187,7 +189,7 @@ On the site: **Models › Versions**. Every version has its test numbers. **Use 
 
 To the car:
 
-- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the scene network in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
+- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the scene network or the brain in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
 - **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The scene network stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
 
 The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.

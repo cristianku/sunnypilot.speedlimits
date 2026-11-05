@@ -71,8 +71,9 @@ from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NA
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_the_car
 from nnslr_tools.training import DETECTOR_FAMILIES
 
-ROLES = ('cutter', 'classifier', 'decider', 'road_type')
-ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'road_type': 'Scene'}
+ROLES = ('cutter', 'classifier', 'decider', 'road_type', 'brain')
+ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'road_type': 'Scene',
+               'brain': 'Brain'}
 # The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory (and the sign input,
 # since the second version, and the car's own motion, since the fourth), with memory without the car's motion (with
 # memory without the sign input in the runs before), and without memory.
@@ -97,8 +98,10 @@ _RUN = RUN_NAME.pattern
 # SignNet, the cutter: its weights at the root of its run (<run>/signnet-best.pt), its id cutter:<run>/signnet.
 SIGNNET_PART = 'signnet'
 SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
+# The brain (nnslr train-brain): its weights at the root of its run too, its id brain:<run>/brain.
+BRAIN_PART = 'brain'
 # Any id of the index; the signnet part only for the cutter (role_of).
-MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type):({_RUN})/({SIGNNET_PART}|detector|'
+MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type|brain):({_RUN})/({SIGNNET_PART}|{BRAIN_PART}|detector|'
                       rf'detector-sizes/{SIZE_NAME.pattern}|reader|classifier|{EXPERIMENT_DIR}/{_RUN}|'
                       rf'{ROAD_TYPE_PART}/(?:gru|gru-nomotion|gru-nosign|frame))')
 # The boxes a frame the classifier reads after the cutter in the car (SignNet keeps its epoch with the best recall
@@ -108,12 +111,13 @@ MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
 ON_CAR_FILE = 'models/on-car.json'
 # The networks of the published models repository (speed_limits.json, format 2) by the role they play here.
-CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'road_type': 'road_type'}
-# A release may have no road type: speedvisiond then reads the signs alone.
-OPTIONAL_CAR_NETWORKS = ('road_type',)
+CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'road_type': 'road_type', 'brain': 'brain'}
+# A release may have no road type: speedvisiond then reads the signs alone. With a brain it says the limit itself.
+OPTIONAL_CAR_NETWORKS = ('road_type', 'brain')
 SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
 # The weights file of a version, inside its part (SignNet's is at the root of its run).
 WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt', 'road_type': 'road-type-best.pt'}
+BRAIN_WEIGHTS = 'brain-last.pt'
 SHA256 = re.compile(r'[0-9a-f]{64}')
 COMMIT = re.compile(r'[0-9a-f]{40}')
 # How the person who chose was recognised: signed in on the site, the access token of an agent, 127.0.0.1 without
@@ -490,6 +494,21 @@ def _turn_rule(report: Any) -> dict | None:
             'turned_30': _int(passages.get('turned_30')), 'caught': caught or None}
 
 
+def brain_digest(result: Any) -> dict:
+    """result.json of ``nnslr train-brain``: what it was given and how it did on validation and test, the speed it says
+    against the labels of Speed review (nnslr_tools.brain_train)."""
+    if not isinstance(result, dict) or not isinstance(result.get('groups'), list) or 'test' not in result:
+        raise ValueError('not a brain result')
+
+    def speed(partition: str) -> dict | None:
+        found = _dig(result, (partition, 'speed'))
+        return {key: found.get(key) for key in ('frames', 'right', 'mean_error_kph')} if isinstance(found, dict) else None
+
+    return {'groups': result['groups'], 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
+            'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
+            'validation': speed('validation'), 'test': speed('test')}
+
+
 def road_type_digest(result: Any) -> dict:
     """result.json of ``nnslr train-road-type``: how it was trained (no history) and validation and test as the road
     type is judged; the frame network also with its 5-second majority vote (``test_smoothed``)."""
@@ -562,11 +581,14 @@ def decider_digest(result: Any) -> dict:
 
 
 def role_of(model_id: Any) -> str | None:
-    """The role of an id of the index (None when it is not one): the signnet part is the cutter's alone."""
+    """The role of an id of the index (None when it is not one): the signnet part is the cutter's alone, the brain part
+    the brain's, and the brain has no other."""
     if not isinstance(model_id, str) or len(model_id) > MAX_ID:
         return None
     match = MODEL_ID.fullmatch(model_id)
     if match is None or (match.group(3) == SIGNNET_PART and match.group(1) != 'cutter'):
+        return None
+    if (match.group(3) == BRAIN_PART) != (match.group(1) == 'brain'):
         return None
     return match.group(1)
 
@@ -691,8 +713,8 @@ def _git(folder: Path, *args: str) -> str:
 
 def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
     """``nnslr on-car``: <root>/models/on-car.json from a clone of the published models repository, the networks
-    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier, road_type when there
-    is one) must match its contract (the ONNX sha256), name weights of a run on this server, and those weights must be
+    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier, road_type and brain when
+    there is one) must match its contract (the ONNX sha256), name weights of a run on this server, and those weights must be
     the ones the contract was made from (checkpoint sha256); the clone must be clean and its commit on a remote
     branch. Reads only the clone (no network) and the runs; writes the one file, unless dry_run."""
     root, models = Path(root), Path(models)
@@ -722,8 +744,8 @@ def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
             raise ValueError(f'the {network} {model_id} is not on this server')
         run_name, part = model_id.split(':', 1)[1].split('/', 1)
         run = runs._run_dir(run_name)
-        weights = None if run is None else runs._file(
-            run, SIGNNET_PART + '-best.pt' if part == SIGNNET_PART else f'{part}/{WEIGHTS[role]}')
+        relative = {SIGNNET_PART: SIGNNET_PART + '-best.pt', BRAIN_PART: BRAIN_WEIGHTS}.get(part) or f'{part}/{WEIGHTS[role]}'
+        weights = None if run is None else runs._file(run, relative)
         wanted = contract.get('checkpoint_sha256')
         if weights is None or not isinstance(wanted, str) or not SHA256.fullmatch(wanted) or _sha256(weights) != wanted:
             raise ValueError(f'the weights of {model_id} on this server are not the ones of the published {network}')
@@ -975,6 +997,26 @@ class ModelIndex:
             found.append(entry)
         return found
 
+    def _brain(self, name: str, run: Path) -> dict | None:
+        """The brain of a run of ``nnslr train-brain`` (its dry run is not a version)."""
+        checkpoint = self.runs._file(run, BRAIN_WEIGHTS)
+        if checkpoint is None:
+            return None
+        problems: list[str] = []
+        result = self._read(run, 'result.json', brain_digest, problems)
+        trained = result or {}
+        if trained.get('dry_run'):
+            return None
+        entry = self._base('brain', name, BRAIN_PART, checkpoint, result, problems)
+        seed = trained.get('seed')
+        entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': 'says the speed to hold',
+                      'groups': trained.get('groups'),
+                      'architecture': 'mobilenet_v3_small+gru', 'initialization': 'ImageNet', 'best_epoch': None,
+                      'seed': seed, 'works': trained.get('works'), 'epochs': trained.get('epochs'),
+                      'epochs_run': trained.get('epochs'),
+                      'validation': trained.get('validation'), 'test': trained.get('test')})
+        return entry
+
     def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:
         """Every trained artifact by role (of the roles asked), newest first (by the time of its weights)."""
         found: dict[str, list[dict]] = {role: [] for role in ROLES}
@@ -989,6 +1031,8 @@ class ModelIndex:
                 found['decider'] += self._deciders(name, run)
             if 'road_type' in roles:
                 found['road_type'] += self._road_types(name, run)
+            if 'brain' in roles:
+                found['brain'] += [entry for entry in (self._brain(name, run),) if entry is not None]
             if 'cutter' not in roles:
                 continue
             cutters = [self._cutter(name, run, 'detector', 'evaluation', 'detector', None)]
@@ -1106,7 +1150,7 @@ class ModelIndex:
         can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector); the
         file keeps the other roles as they are."""
         if not isinstance(role, str) or role not in ROLES:
-            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider or road_type.')
+            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider, road_type or brain.')
         if not isinstance(model_id, str) or len(model_id) > MAX_ID or MODEL_ID.fullmatch(model_id) is None:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
         if role_of(model_id) != role:

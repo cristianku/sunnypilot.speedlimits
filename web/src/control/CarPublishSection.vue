@@ -17,7 +17,7 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
   stop: [job: Job]; details: [job: Job]}>();
 
 /** The networks the comma runs, in the order they work. */
-const CAR_ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'road_type'];
+const CAR_ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'road_type', 'brain'];
 const versionsOf = (role: ModelRole): ModelVersion[] => props.models?.roles.find((item) => item.role === role)?.versions ?? [];
 const inUseOf = (role: ModelRole): ModelVersion | null => versionsOf(role).find((version) => version.in_use) ?? null;
 const whenOf = (version: ModelVersion): string => version.trained_at ? isoWhen(version.trained_at) : version.run;
@@ -26,11 +26,13 @@ const whenOf = (version: ModelVersion): string => version.trained_at ? isoWhen(v
  * two versions often have the same name). */
 const rows = computed(() => CAR_ROLES.map((role) => {
   const label = props.models?.roles.find((item) => item.role === role)?.label ?? role;
-  const used = inUseOf(role);
+  // With a brain in use the scene network stays chosen here but does not go.
+  const used = role === 'road_type' && inUseOf('brain') !== null ? null : inUseOf(role);
   const car = versionsOf(role).find((version) => version.on_car) ?? null;
   const same = used !== null && car !== null && used.id === car.id;
   const usedText = used ? used.label + ', ' + whenOf(used)
-    : role === 'road_type' ? 'None in use: the comma reads the signs alone' : 'None in use';
+    : role === 'road_type' ? (inUseOf('brain') ? 'Does not go: the brain takes its place' : 'None in use: the comma reads the signs alone')
+    : role === 'brain' ? 'None in use: the comma runs the rules of the signs' : 'None in use';
   const older = car !== null && used?.trained_at && car.trained_at && Date.parse(car.trained_at) < Date.parse(used.trained_at);
   const carText = same ? 'On the car: this one' : car ? 'On the car: ' + (older ? 'an older one, ' : 'another one, ') + whenOf(car)
     : used ? 'Not on the car yet' : 'None on the car either';
@@ -84,7 +86,7 @@ async function publish(): Promise<void> {
   const version = signnet.value;
   const current = state.value;
   if (version === null || current === null || blocked.value) return;
-  if (!await askConfirm(publishQuestion(version, inUseOf('classifier'), inUseOf('road_type')))) return;
+  if (!await askConfirm(publishQuestion(version, inUseOf('classifier'), inUseOf('road_type'), inUseOf('brain')))) return;
   emit('run', 'send_to_car', current, undefined, {signnet: version.run});
 }
 </script>

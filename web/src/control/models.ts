@@ -4,7 +4,7 @@
 import {ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ActionState, ActiveChosen, ActiveModel, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
+import type {ActionState, ActiveChosen, ActiveModel, BrainNumbers, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {chooseRun, pct} from './evaluate';
@@ -50,6 +50,14 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     empty: 'No scene network trained yet.',
     emptyMore: '“Train the scene network” on the Train tab; its two networks appear here.',
     uses: 'The comma runs the scene network in use once Publish puts it in its software.',
+  },
+  brain: {
+    what: 'Says the speed to hold, once a second, from the camera, the signs read, the car ahead, the hour and the country. '
+      + 'On the comma it is the vision limit: the rules of the signs and the scene network no longer run.',
+    today: 'Today: trained on the speeds of Speed review, judged on the frames of drives it never learned.',
+    empty: 'No brain trained yet.',
+    emptyMore: 'nnslr train-brain on the server; it appears here.',
+    uses: 'The comma runs the brain in use once Publish puts it in its software, in place of the scene network.',
   },
 };
 
@@ -111,10 +119,12 @@ export interface CarState {
 /** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which road
  * type (the ones in use) the comma gets, what the job prepares, publishes and builds, and what is left to do on the comma. */
 export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
-                                roadType: ModelVersion | null = null): ConfirmOptions {
+                                roadType: ModelVersion | null = null, brain: ModelVersion | null = null): ConfirmOptions {
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
-  const scene = roadType
+  const scene = brain
+    ? ' and the brain of ' + brain.run + ' to say the speed to hold, in place of the rules and the scene network'
+    : roadType
     ? ' and the scene network ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
       + '(a garage 10, a car park 20, a town 50)'
     : '; no scene network is in use, so it reads the signs alone';
@@ -288,6 +298,13 @@ export function metricsOf(version: ModelVersion): Metric[] {
         count: of(chain.correct, chain.truth), detail: chain.truth ? of(chain.correct, chain.truth) + ' speed signs, end to end' : 'speed signs, end to end'});
     }
     return metrics;
+  }
+  if (version.role === 'brain') {
+    const speed = (label: string, key: string, numbers: BrainNumbers | null): Metric => ({key, label, value: numbers?.right ?? null,
+      count: numbers?.frames ? thousands(numbers.frames) + ' frames' : '',
+      detail: numbers?.mean_error_kph == null ? '' : numbers.mean_error_kph.toFixed(1) + ' km/h off on average'});
+    return version.test === null ? [] : [speed('Right on the test', 'test', version.test),
+      speed('On validation', 'validation', version.validation)];
   }
   if (version.role === 'road_type') {
     const test = version.test;
