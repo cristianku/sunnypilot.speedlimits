@@ -69,8 +69,9 @@ SETTINGS = (
              '3 Nov 2026).', 'default': 0.34, 'min': 0.0, 'max': 1.5, 'step': 0.01, 'unit': 's of the speed',
      'group': 'distance'},
     {'key': 'distance_lead_metres', 'constant': 'DISTANCE_LEAD_METRES', 'label': '…and by',
-     'help': 'The zero is where the sign leaves the picture, a few metres before the car passes it (the same '
-             'measurement).', 'default': 1.8, 'min': 0.0, 'max': 15.0, 'step': 0.1, 'unit': 'm', 'group': 'distance'},
+     'help': 'The zero is where the sign leaves the picture, a few metres before the car passes it: 20 signs marked '
+             'in Data › Sign distance on builds with 1.8 m still came about 5 m late (5 Nov 2026).', 'default': 6.8,
+     'min': 0.0, 'max': 15.0, 'step': 0.1, 'unit': 'm', 'group': 'distance'},
     {'key': 'variable_display_diameter', 'constant': 'VARIABLE_DISPLAY_DIAMETER', 'label': 'A gantry\'s LED limit is',
      'help': 'Its distance comes from its size on the camera: the median of 10 approaches on our drives, from how its '
              'box grew with the metres driven.', 'default': 1.4, 'min': 0.6, 'max': 3.0, 'step': 0.05,
