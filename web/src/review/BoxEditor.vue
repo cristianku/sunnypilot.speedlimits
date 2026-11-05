@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// The editor of the selected box: zoom (its corners and inside move the box too), road, speed signs, other
+// The editor of the selected box: zoom (its corners and inside move the box too) with what the classifier gets beside it, road, speed signs, other
 // value, type and kinds of other signs, details.
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, PANELS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
   type BooleanField, type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
+import ClassifierView from './ClassifierView.vue';
 import {coarsePointer, releaseFocus} from './dom';
 import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted, toggleVariable} from './edits';
 import {workOf} from './frames';
@@ -133,6 +134,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
                 :data-corner="handle.corner"/>
         </g>
       </svg>
+      <ClassifierView :row="row" :box="detection?.bbox_xyxy ?? null"/>
     </div>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>

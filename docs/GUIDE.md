@@ -199,6 +199,10 @@ On the review page a rough box is fitted to the sign under it in two ways:
 
 Both work only for a browser that has signed in, or the site on 127.0.0.1; the token alone cannot fit boxes. At most two fits run at a time. The models are `src/nnslr_tools/box_fit/colour.npz` and `edges.npz`: `scripts/train_box_fit.sh` trains them again on every box people drew (CPU only, about 15 minutes), and the site uses them after its next restart.
 
+### What the classifier gets
+
+Beside the zoom of the selected box, the square **Classifier** shows that box as the network gets it: cut from the frame and stretched to 160 × 160, its proportions lost, each of its pixels one the network gets. Under it, how many pixels of the frame that is. It is made in the page from the photo on screen, so it follows a corner being dragged. That photo is the preview, a JPEG of the same size as the frame: measured on three signs, the square is 1 to 4 levels of 255 off the network's picture on average, most on the smallest sign. It saves nothing.
+
 ### The car's networks on a frame (T)
 
 In Sign review on a computer, the short bar between the photo and the bar under it is a grip: drag it up and the photo gets lower, the timeline under it gets the room; drag it down and it grows back, at most to the width of the column. With the grip focused, ↑ and ↓ move it (⇧ in bigger steps); a double click goes back to the default height. The browser remembers the height. The bar under the photo has two rows: the frame (‹ ›), the filters and **Car networks** / **Ask AI** on the first; the frame's state, the frame data and **+ Box** / **Delete** on the second. On a tablet or a phone the page scrolls instead and there is no grip.

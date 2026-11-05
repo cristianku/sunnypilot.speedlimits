@@ -1,7 +1,8 @@
 """Optional real-browser check of the review page served by the review server (skipped without a browser:
 NNSLR_TEST_CHROMIUM, and NNSLR_TEST_BROWSER_PYTHON with Playwright): the keys of an open menu stay in the menu,
 Del on a box not chosen yet, a box an AI added, the doubt filter shown under the photo, the same sign drawn twice,
-a drive with nothing left to review, the bar under the photo between 1280 and 1700 px, the phone's Confirm."""
+a drive with nothing left to review, the bar under the photo between 1280 and 1700 px, the phone's Confirm, the box
+as the classifier gets it."""
 from __future__ import annotations
 
 import json
@@ -119,6 +120,20 @@ with sync_playwright() as p:
     for _ in range(3):
         phone.keyboard.press('ArrowRight')
     assert phone.locator('#mConfirmLabel').inner_text() == 'Confirm no sign'
+
+    # Beside the zoom, the box as the classifier gets it: rounded outwards as on the car, following a corner dragged.
+    # The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks nothing.
+    square = open_page(browser, '/route/' + route + '/', 1500)
+    square.locator('#boxList .box-main').first.click()
+    caption = square.locator('#netView figcaption')
+    assert caption.inner_text() == 'Classifier · 14 × 18 px', caption.inner_text()
+    assert square.evaluate("[netViewPicture.width, netViewPicture.height]") == [160, 160]
+    corner = square.locator('#zoom .handle-hit.se').bounding_box()
+    square.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
+    square.mouse.down()
+    square.mouse.move(corner['x'] - 40, corner['y'] - 40, steps=4)
+    assert caption.inner_text() != 'Classifier · 14 × 18 px', 'the square did not follow the corner while dragging'
+    square.mouse.up()
     browser.close()
 assert not errors, errors
 '''
@@ -136,6 +151,8 @@ def test_review_page_in_a_browser(tmp_path):
     report = tmp_path / 'derived/preannotations' / ROUTE / RUN_ID / 'preannotations.jsonl'
     rows = [json.loads(line) for line in report.read_text().splitlines()]
     rows[2]['detections'].append(dict(rows[2]['detections'][0], detection_id='0/2/1', bbox_xyxy=[2, 2, 15, 20]))
+    # 0/0 has a box between the pixels, as the model's are: the classifier gets it rounded outwards.
+    rows[0]['detections'][0]['bbox_xyxy'] = [1.2, 2.5, 14.6, 19.4]
     report.write_text(''.join(json.dumps(row) + '\n' for row in rows))
     make_report(tmp_path, route=OTHER_ROUTE, count=2)
     server = RunningServer(tmp_path)
