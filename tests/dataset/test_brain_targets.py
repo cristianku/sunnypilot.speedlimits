@@ -183,11 +183,53 @@ def test_a_drive_goes_in_order_in_pieces_covering_every_frame_once():
 
 def test_a_piece_that_learns_has_only_train_frames():
     pieces = _targets().learning_pieces
-    names = ['train'] * 5 + ['test'] * 2 + ['buffer'] + ['train'] * 3
-    assert pieces(names, 4) == [(0, 4, True), (4, 5, True), (5, 8, False), (8, 11, True)]
-    assert pieces(names, 4, 2) == [(0, 2, True), (2, 5, True), (5, 8, False), (8, 10, True), (10, 11, True)]
-    assert pieces(['test'] * 3, 2) == [(0, 2, False), (2, 3, False)]
+    names = ['train'] * 5 + ['buffer'] + ['train'] * 3
+    assert pieces(names, 4) == [(0, 4, True, True), (4, 5, True, False), (5, 6, False, False), (6, 9, True, False)]
+    assert pieces(names, 4, 2) == [(0, 2, True, True), (2, 5, True, False), (5, 6, False, False), (6, 8, True, False),
+                                   (8, 9, True, False)]
     assert pieces([], 4) == []
+
+
+def test_a_held_out_frame_is_in_no_piece_and_the_memory_starts_again_after_it():
+    pieces = _targets().learning_pieces
+    names = ['train'] * 3 + ['test'] * 2 + ['buffer'] + ['validation'] + ['train'] * 2
+    assert pieces(names, 4) == [(0, 3, True, True), (5, 6, False, True), (7, 9, True, True)]
+    assert pieces(['test'] * 3, 2) == []
+
+
+def test_the_memory_starts_again_at_a_cut_inside_a_stretch():
+    pieces = _targets().learning_pieces
+    assert pieces(['train'] * 6, 4, cuts={2}) == [(0, 2, True, True), (2, 6, True, True)]
+    assert pieces(['train'] * 6, 4, cuts={4}) == [(0, 4, True, True), (4, 6, True, True)]
+
+
+def test_a_gap_in_the_frames_cuts_the_memory():
+    targets = _targets()
+    assert targets.memory_cuts(seconds(0, 1, 2, 8, 9)) == {3}
+    assert targets.memory_cuts(seconds(0, 1, 6)) == set()
+    assert targets.memory_cuts(_np().array([0, -1, -1, 9 * NS, 10 * NS])) == {3}
+
+
+def checked(**changes):
+    numpy = _np()
+    return {'route': 'r1', 'frames': [{}] * 3, 'partitions': ['train', 'validation', 'test'], 'signs_read': True,
+            'reader_current': True, 'speed_weight': numpy.ones(3, dtype=numpy.float32),
+            'works_weight': numpy.zeros(3, dtype=numpy.float32), **changes}
+
+
+def test_the_training_runs_on_drives_read_by_todays_reader():
+    _targets().check_drives([checked()])
+
+
+@pytest.mark.parametrize('change, says', [({'signs_read': False, 'reader_current': False}, 'no reading of the signs'),
+                                          ({'reader_current': False}, 'another reader'), ({'frames': []}, 'no frame'),
+                                          ({'partitions': ['train', 'test', 'test']}, 'in validation')])
+def test_the_training_refuses_what_would_go_wrong_without_a_word(change, says):
+    targets = _targets()
+    with pytest.raises(ValueError, match=says) as found:
+        targets.check_drives([checked(), checked(route='r2', **change)] if 'partitions' not in change else [checked(**change)])
+    if 'reader' in str(found.value) or 'reading' in str(found.value):
+        assert 'r2' in str(found.value) and 'r1' not in str(found.value) and targets.READ_COMMAND in str(found.value)
 
 
 def test_a_sign_read_counts_from_its_second_on_and_never_before():
@@ -321,6 +363,9 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path):
     assert found['drives'][0]['works_in'] == drive['works'][drive['works_weight'] > 0].sum()
     assert found['partitions']['buffer']['speed'] == found['drives'][0]['speed']
     assert 'signs NOT read' in targets.summary_text(found)
+    assert drive['cuts'] == set() and drive['reader'] is None
+    found['drives'][0].update(signs_read=True, reader_current=False)
+    assert 'signs read by ANOTHER reader' in targets.summary_text(found)
 
 
 def test_reading_the_labels_changes_nothing(tmp_path):

@@ -51,7 +51,12 @@ car. A network that has them can learn to follow the driver, so they stay out un
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
-gradient, and they never mix train with the rest: nnslr_tools.brain_train.
+gradient, and they never mix train with the rest: nnslr_tools.brain_train. The memory starts again after MEMORY_GAP_S
+without a frame (memory_cuts), as on the car.
+
+What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
+reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
+speed; a drive with no frame; a validation with no answer, which would keep the first epoch.
 """
 from __future__ import annotations
 
@@ -59,6 +64,7 @@ import bisect
 import json
 import math
 import sqlite3
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -66,7 +72,7 @@ import numpy as np
 from nnslr_tools import drive_logs
 from nnslr_tools.gps import load_positions
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path, speed_features
-from nnslr_tools.road_type_signs import SIGNS_RELATIVE
+from nnslr_tools.road_type_signs import fingerprint, load_signs, package_path
 from nnslr_tools.speed_review import GRID_KPH, MAX_KPH, NS, db_path
 
 SPLIT_RELATIVE = Path('splits') / 'speed-brain-split.json'
@@ -74,6 +80,8 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 SPEED_CLASSES = MAX_KPH // GRID_KPH
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
+MEMORY_GAP_S = 5
+READ_COMMAND = 'nnslr road-type-signs --device cpu --num-workers 8'
 NOT_EXAMINED, UNDETERMINED, NOT_KNOWN_YET, BOUNDARY, NO_FRAME = range(1, 6)
 OUT_REASONS = {NOT_EXAMINED: 'not_examined', UNDETERMINED: 'undetermined', NOT_KNOWN_YET: 'not_known_yet', BOUNDARY: 'boundary',
                NO_FRAME: 'no_frame'}
@@ -269,11 +277,6 @@ def sign_inputs(seconds: np.ndarray, readings: list | None) -> np.ndarray:
     return out
 
 
-def _sign_readings(root: Path, route: str) -> list | None:
-    path = Path(root) / SIGNS_RELATIVE / f'{route}.json'
-    return json.loads(path.read_text(encoding='utf-8'))['readings'] if path.is_file() else None
-
-
 def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None) -> dict[str, np.ndarray]:
     """{group: (frames, size) float32}: see the module's text. Nothing after a frame reaches it."""
     series = merged.get('series') or {}
@@ -295,11 +298,17 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
 
 
+def memory_cuts(ns: np.ndarray) -> set[int]:
+    """The frames the memory starts again at: after MEMORY_GAP_S without a frame."""
+    known = np.flatnonzero(ns >= 0)
+    return {int(at) for at in known[1:][np.diff(ns[known]) > MEMORY_GAP_S * NS]}
+
+
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict) -> dict:
-    """A drive for the training: frames, ns, partitions, cells, speed (class per frame), speed_out (why a frame is out of
-    the loss, 0 when in), speed_weight, works, works_weight, inputs, own_kph (the car's speed, NaN unknown: for the measure,
-    no input), signs_read, no_picture_s (labelled seconds without a frame at all: prepare keeps only the slow ones at the
-    start and the end of a drive)."""
+    """A drive for the training: frames, ns, partitions, cells, cuts (memory_cuts), speed (class per frame), speed_out (why a
+    frame is out of the loss, 0 when in), speed_weight, works, works_weight, inputs, own_kph (the car's speed, NaN unknown:
+    for the measure, no input), signs_read, reader (what read them), no_picture_s (labelled seconds without a frame at all:
+    prepare keeps only the slow ones at the start and the end of a drive)."""
     frames = drive_frames(root, route, merged)
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
     usable = np.array([frame['ns'] is not None and frame['present'] for frame in frames], dtype=bool)
@@ -308,14 +317,16 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     speed[~usable] = -1
     works, works_weight = works_answers(ns, labels['works'], labels['checked_ns'])
     works_weight[~usable] = 0
-    readings = _sign_readings(root, route)
+    record = load_signs(root, route)
+    readings = record['readings'] if record else None
     own = _last_at((merged.get('series') or {}).get('v_ego') or [], ns)
     return {'route': route, 'frames': frames, 'ns': ns, 'partitions': frame_partitions(route, frames, split),
             'own_kph': np.array([np.nan if kph is None else kph for kph in own], dtype=np.float32),
-            'cells': frame_cells(frames), 'speed': speed, 'speed_out': speed_out,
+            'cells': frame_cells(frames), 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'works': works, 'works_weight': works_weight,
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
             'inputs': drive_inputs(frames, ns, merged, readings), 'signs_read': readings is not None,
+            'reader': record.get('fingerprint') if record else None,
             'no_picture_s': max(round(sum(row['end_ns'] - row['start_ns'] for row in labels['stretches']) / NS) -
                                 int(sum(((ns >= row['start_ns']) & (ns < row['end_ns'])).sum() for row in labels['stretches'])), 0)}
 
@@ -339,17 +350,43 @@ def keep_sites_whole(drives: list[dict]) -> None:
                     drive['partitions'][i] = 'buffer'
 
 
-def dataset(root: Path, merged_of, routes: list[str] | None = None) -> list[dict]:
-    """Every drive with a label or a mark (or only routes), as drive_targets. merged_of(route): the drive's joined logs, None
-    before a scan. Sites stay whole only across the drives asked for."""
+def _say(text: str) -> None:
+    print(text, file=sys.stderr, flush=True)
+
+
+def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say) -> list[dict]:
+    """Every drive with a label or a mark (or only routes), as drive_targets, each with reader_current: read by the car's
+    reader of today. merged_of(route): the drive's joined logs, None before a scan. Sites stay whole only across the drives
+    asked for."""
     split = read_split(root)
+    reader = fingerprint(package_path())
     drives = []
     for route, labels in sorted(read_labels(root).items()):
-        merged = merged_of(route) if routes is None or route in routes else None
-        if merged is not None:
-            drives.append(drive_targets(root, route, labels, merged, split))
+        if routes is not None and route not in routes:
+            continue
+        merged = merged_of(route)
+        if merged is None:
+            log(f'{route}: labels and no scan, left out')
+            continue
+        drive = drive_targets(root, route, labels, merged, split)
+        drives.append({**drive, 'reader_current': drive['reader'] == reader})
     keep_sites_whole(drives)
     return drives
+
+
+def check_drives(drives: list[dict]) -> None:
+    """Raises on what would train wrong without a word: see the module's text."""
+    empty = [drive['route'] for drive in drives if not len(drive['frames'])]
+    if empty:
+        raise ValueError(f'drives with labels and no frame: {", ".join(empty)}')
+    unread = [drive['route'] for drive in drives if not drive['signs_read']]
+    if unread:
+        raise ValueError(f'drives with labels and no reading of the signs: {", ".join(unread)}. Run {READ_COMMAND}')
+    other = [drive['route'] for drive in drives if not drive['reader_current']]
+    if other:
+        raise ValueError(f"drives read by another reader than the car's of today: {', '.join(other)}. Run {READ_COMMAND}")
+    if not any(loss_weights(drive, 'validation')[0].any() for drive in drives):
+        raise ValueError('no speed labels in validation: no way to choose the epoch')
 
 
 def loss_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray]:
@@ -365,15 +402,25 @@ def drive_chunks(length: int, chunk: int, offset: int = 0) -> list[tuple[int, in
     return [(first, last) for first, last in zip(edges, edges[1:]) if first < last]
 
 
-def learning_pieces(partitions: list[str], chunk: int, offset: int = 0) -> list[tuple[int, int, bool]]:
-    """(from, to, learn) of a drive in order: pieces that never mix train with the rest, so that a held-out picture is never
-    in a piece the error goes back through."""
-    pieces, first = [], 0
+def learning_pieces(partitions: list[str], chunk: int, offset: int = 0, cuts: set[int] = frozenset()) -> list[tuple[int, int, bool, bool]]:
+    """(from, to, learn, fresh) of a drive in order, fresh: the memory starts again here. The pieces never mix train with the
+    rest, and frames of test and validation are in none: their pictures run through nothing that moves a weight, not even
+    through the memory, which starts again after them. cuts: frames it starts again at anyway."""
+    def kind(name: str) -> str:
+        return 'held' if name in HELD_OUT else name == 'train'
+
+    pieces, first, fresh = [], 0, True
     for last in range(1, len(partitions) + 1):
-        if last == len(partitions) or (partitions[last] == 'train') != (partitions[first] == 'train'):
+        if last == len(partitions) or kind(partitions[last]) != kind(partitions[first]) or last in cuts:
             learn = partitions[first] == 'train'
-            pieces += [(first + a, first + b, learn) for a, b in drive_chunks(last - first, chunk, offset if learn else 0)]
+            if kind(partitions[first]) == 'held':
+                fresh = True
+            else:
+                for a, b in drive_chunks(last - first, chunk, offset if learn else 0):
+                    pieces.append((first + a, first + b, learn, fresh))
+                    fresh = False
             first = last
+            fresh = fresh or last in cuts
     return pieces
 
 
@@ -402,7 +449,8 @@ def summary(drives: list[dict]) -> dict:
                      'out': {name: int((drive['speed_out'] == reason).sum()) for reason, name in OUT_REASONS.items()},
                      'works_in': int((drive['works_weight'] * drive['works']).sum()),
                      'works_out': int((drive['works_weight'] * (1 - drive['works'])).sum()), 'marks': len(drive['marks']),
-                     'signs_read': drive['signs_read'], 'no_picture_s': drive['no_picture_s']})
+                     'signs_read': drive['signs_read'], 'reader_current': drive.get('reader_current', False),
+                     'no_picture_s': drive['no_picture_s']})
     return {'partitions': parts, 'drives': rows}
 
 
@@ -414,7 +462,8 @@ def summary_text(found: dict) -> str:
     lines.append('Per drive:')
     for row in found['drives']:
         out = ', '.join(f'{name} {count}' for name, count in row['out'].items() if count)
+        signs = 'NOT read' if not row['signs_read'] else 'read' if row['reader_current'] else 'read by ANOTHER reader'
         lines.append(f"  {row['route']}: {row['speed']} of {row['frames']} with a speed ({out}); works {row['works_in']} in, "
-                     f"{row['works_out']} out, {row['marks']} marks; signs {'read' if row['signs_read'] else 'NOT read'}; "
+                     f"{row['works_out']} out, {row['marks']} marks; signs {signs}; "
                      f"{row['no_picture_s']} labelled seconds without a picture")
     return '\n'.join(lines)

@@ -85,18 +85,20 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'mean', works: bool 
     return BrainNet()
 
 
-def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS):
+def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
+               frames: int | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
-    A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works"."""
+    A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
+    frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one."""
     torch = _torch()
     from torch.nn import functional
 
     errors = functional.cross_entropy(speed_logits.flatten(0, 1), speed.clamp_min(0).flatten(), reduction='none')
-    total = (errors * speed_weight.flatten()).sum() / speed_weight.sum().clamp_min(1)
+    total = (errors * speed_weight.flatten()).sum() / (frames or speed_weight.sum().clamp_min(1))
     if works_logit is None:
         return total
     errors = functional.binary_cross_entropy_with_logits(works_logit, works, reduction='none')
-    return total + works_share * (errors * works_weight).sum() / works_weight.sum().clamp_min(1)
+    return total + works_share * (errors * works_weight).sum() / (frames or works_weight.sum().clamp_min(1))
 
 
 def car_weights(model) -> dict:

@@ -114,6 +114,19 @@ def test_the_works_error_is_a_share_of_the_loss():
     assert WORKS_LOSS == pytest.approx(0.3)
 
 
+def test_with_the_frames_of_a_piece_an_answer_weighs_the_same_in_a_piece_with_few():
+    from nnslr_tools.brain_net import brain_loss
+    speed_logits, works_logit, _state = net()(*batch())
+    speed, speed_weight, works, works_weight = answers(speed_on=[0, 1, 2, 3], works_on=[0])
+    alone = speed_weight.clone()
+    alone[0, 1:] = 0
+    both = brain_loss(speed_logits, None, speed, speed_weight, works, works_weight, frames=T)
+    first = brain_loss(speed_logits, None, speed, alone, works, works_weight, frames=T)
+    assert float(first) < float(both)
+    errors = torch.nn.functional.cross_entropy(speed_logits[0], speed[0], reduction='none')
+    assert float(first) == pytest.approx(float(errors[0]) / T)
+
+
 @pytest.mark.parametrize('pool', ['mean', 'grid'])
 def test_a_frame_never_sees_the_frames_after_it_also_in_training(pool):
     model = net(pool=pool)
