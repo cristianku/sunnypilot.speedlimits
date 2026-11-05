@@ -42,8 +42,8 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
-from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, learning_pieces,
-                                       loss_weights, pack_inputs, read_split)
+from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, inputs_sha256,
+                                       learning_pieces, loss_weights, pack_inputs, read_split)
 from nnslr_tools.road_type_net import (BACKBONE_LEARNING_RATE, FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY,
                                        _augment, _print, _torch)
 
@@ -270,7 +270,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
     optimizer = torch.optim.AdamW([{'params': others, 'lr': LEARNING_RATE}, {'params': backbone, 'lr': BACKBONE_LEARNING_RATE}],
                                   weight_decay=WEIGHT_DECAY)
     source = {'groups': groups, 'pool': pool, 'works': works, 'features': FEATURES, 'hidden': HIDDEN,
-              'split': read_split(root)['sha256'], 'reader': drives[0]['reader']}
+              'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     best, best_epoch, history = None, None, []
     for epoch in range(epochs):
         error = train_epoch(model, optimizer, drives, store, chunk=chunk, rng=rng, device=device,

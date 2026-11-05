@@ -45,13 +45,16 @@ before the frame:
 - pedals: gas and brake in the last second;
 - speed: the car's own speed.
 
+All but the two of the driver are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path
+(BRAIN_INPUTS): what the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
+
 pedals and speed are the driver, and they are apart for a reason: on the drives the gas is often pressed just where the
 label is above the limit the car held (he overrode it), and the car's speed is what the network itself decides on the
 car. A network that has them can learn to follow the driver, so they stay out until a comparison says otherwise.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
-gradient, and they never mix train with the rest: nnslr_tools.brain_train. The memory starts again after MEMORY_GAP_S
+gradient, and they never mix train with the rest: nnslr_tools.brain_train. The memory starts again after MEMORY_GAP_SECONDS
 without a frame (memory_cuts), as on the car.
 
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
@@ -61,8 +64,9 @@ speed; a drive with no frame; a validation with no answer, which would keep the 
 from __future__ import annotations
 
 import bisect
+import hashlib
+import importlib.util
 import json
-import math
 import sqlite3
 import sys
 from pathlib import Path
@@ -80,19 +84,29 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 SPEED_CLASSES = MAX_KPH // GRID_KPH
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
-MEMORY_GAP_S = 5
 READ_COMMAND = 'nnslr road-type-signs --device cpu --num-workers 8'
 NOT_EXAMINED, UNDETERMINED, NOT_KNOWN_YET, BOUNDARY, NO_FRAME = range(1, 6)
 OUT_REASONS = {NOT_EXAMINED: 'not_examined', UNDETERMINED: 'undetermined', NOT_KNOWN_YET: 'not_known_yet', BOUNDARY: 'boundary',
                NO_FRAME: 'no_frame'}
 HELD_OUT = ('test', 'validation')
-COUNTRIES = ('CH', 'DE', 'FR', 'IT', 'AT', 'US')
-SIGN_KPH_SCALE = 130.0
-SIGN_AGE_SCALE = math.log1p(3600.0)
-LEAD_METRES_SCALE = 100.0
-LEAD_METRES_MAX = 200.0
-INPUT_SIZES = {'signs': 6, 'lead': 3, 'country': len(COUNTRIES) + 1, 'pedals': 3, 'speed': 2}
+
+
+def _load_brain_inputs(path: Path):
+    """The car's brain_inputs.py (numpy only) as a module of its own."""
+    spec = importlib.util.spec_from_file_location('comma_brain_inputs', path)
+    if spec is None or spec.loader is None or not path.is_file():
+        raise ValueError(f"no {path}: the car's file of the brain's inputs, in the clone of the branch speed-limits")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+BRAIN_INPUTS_PATH = package_path() / 'brain_inputs.py'
+BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
+COUNTRIES = BRAIN_INPUTS.COUNTRIES
+INPUT_SIZES = {**BRAIN_INPUTS.INPUT_SIZES, 'pedals': 3, 'speed': 2}
 DRIVER_INPUTS = ('pedals', 'speed')
+pack_inputs = BRAIN_INPUTS.pack_inputs
 
 
 def speed_class(kph: int) -> int:
@@ -253,27 +267,18 @@ def _pressed(points: list, ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def sign_inputs(seconds: np.ndarray, readings: list | None) -> np.ndarray:
-    """The signs group (frames, 6) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a drive: the last
-    number read / SIGN_KPH_SCALE, known, it came from a display, its age, an end read since it, a number read in the last
-    second. Only readings at or before the frame count; None: the drive was not read, all unknown."""
+    """The signs group (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a drive, by the
+    car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
     out = np.zeros((len(seconds), INPUT_SIZES['signs']), dtype=np.float32)
     if readings is None:
         return out
     ordered = sorted(readings, key=lambda item: item[0])
-    pointer, number, display, read_at, ended = 0, None, False, None, False
+    signs, pointer = BRAIN_INPUTS.SignInputs(), 0
     for row, second in enumerate(seconds):
         while pointer < len(ordered) and ordered[pointer][0] <= second:
-            at, classes = ordered[pointer]
+            signs.add(*ordered[pointer])
             pointer += 1
-            for name, _confidence in classes:
-                kind, _, value = name.partition(':')
-                if kind in ('maximum_speed', 'variable_display') and value.isdigit():
-                    number, display, read_at, ended = int(value), kind == 'variable_display', at, False
-                elif kind == 'cancellation':
-                    ended = True
-        if number is not None:
-            out[row] = (number / SIGN_KPH_SCALE, 1.0, float(display), math.log1p(second - read_at) / SIGN_AGE_SCALE,
-                        float(ended), float(second - read_at < 1))
+        out[row] = signs.features(second)
     return out
 
 
@@ -282,26 +287,26 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     series = merged.get('series') or {}
     seconds = np.array([frame['segment'] * 60 + frame['index'] for frame in frames], dtype=np.float64)
     distance, lead_speed = _last_at(series.get('lead_d') or [], ns), _last_at(series.get('lead_v') or [], ns)
-    lead = np.zeros((len(ns), INPUT_SIZES['lead']), dtype=np.float32)
-    for row, (metres, kph) in enumerate(zip(distance, lead_speed)):
-        if metres is not None and kph is not None:
-            lead[row] = min(metres, LEAD_METRES_MAX) / LEAD_METRES_SCALE, kph / SIGN_KPH_SCALE, 1.0
+    lead = np.array([BRAIN_INPUTS.lead_row(metres, kph) for metres, kph in zip(distance, lead_speed)], dtype=np.float32)
     gas, gas_known = _pressed(series.get('gas') or [], ns)
     brake, brake_known = _pressed(series.get('brake') or [], ns)
     speed = [speed_features(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
-    country = np.zeros((len(ns), INPUT_SIZES['country']), dtype=np.float32)
-    for row, frame in enumerate(frames):
-        name = frame['country']
-        country[row, COUNTRIES.index(name) if name in COUNTRIES else len(COUNTRIES)] = 1.0
-    return {'signs': sign_inputs(seconds, readings), 'lead': lead, 'country': country,
+    country = np.array([BRAIN_INPUTS.country_row(frame['country']) for frame in frames], dtype=np.float32)
+    return {'signs': sign_inputs(seconds, readings), 'lead': lead.reshape(len(ns), INPUT_SIZES['lead']),
+            'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
 
 
+def inputs_sha256() -> str:
+    """The hash of the car's file of the inputs, for the checkpoint: the car refuses a network made with another."""
+    return hashlib.sha256(BRAIN_INPUTS_PATH.read_bytes()).hexdigest()
+
+
 def memory_cuts(ns: np.ndarray) -> set[int]:
-    """The frames the memory starts again at: after MEMORY_GAP_S without a frame."""
+    """The frames the memory starts again at: after MEMORY_GAP_SECONDS without a frame."""
     known = np.flatnonzero(ns >= 0)
-    return {int(at) for at in known[1:][np.diff(ns[known]) > MEMORY_GAP_S * NS]}
+    return {int(at) for at in known[1:][np.diff(ns[known]) > BRAIN_INPUTS.MEMORY_GAP_SECONDS * NS]}
 
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict) -> dict:
@@ -422,11 +427,6 @@ def learning_pieces(partitions: list[str], chunk: int, offset: int = 0, cuts: se
             first = last
             fresh = fresh or last in cuts
     return pieces
-
-
-def pack_inputs(inputs: dict[str, np.ndarray], groups: tuple[str, ...]) -> np.ndarray:
-    """The extra input of the network: the chosen groups side by side, in the order of INPUT_SIZES."""
-    return np.concatenate([inputs[name] for name in INPUT_SIZES if name in groups], axis=-1)
 
 
 def summary(drives: list[dict]) -> dict:
