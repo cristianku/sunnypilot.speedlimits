@@ -214,7 +214,7 @@ A comma with **Record road at full resolution** on (Developer tab) writes its `f
 
 With either switch on the road camera goes through the BPS, the comma's other image processor, and that also changes the picture the driving model sees: another debayer, no vignetting correction, about 7 ms later. Both off, everything is as before. A change applies from the next drive.
 
-The road through the BPS has not run on a comma yet: the code is read and compiled, the picture is not seen. On the first drive with a switch on, check three things: the frames of a drive look right in Sign review (colours, no seams down the picture), the kernel log has no ICP errors, and the log has no `camera 1 sync failure`, because road and cabin now share that processor.
+The road through the BPS has not run on a comma yet: the code is read and compiled, the picture is not seen. So the first time, turn a switch on with the car parked and the ignition on for a few minutes, download that drive from the **comma** pill and look at it in Sign review: right colours, no seams down the picture. Only then drive with it.
 
 ### The car's networks on a frame (T)
 
