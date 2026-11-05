@@ -191,7 +191,7 @@ It is quick and uses no GPU. **It trains nothing**: training is the next, separa
 
 On the site: **Training**. There is one tab and one button per network. **They all use the GPU**, and only one training runs at a time.
 
-- **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours).
+- **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours, chosen at first once the windows are cut; the classifier's switch starts on it too).
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
 - **Train the scene network**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.

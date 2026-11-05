@@ -1,6 +1,7 @@
 // The Mapillary switch of a training, the same for the classifier (its crops, helpers/mapillary.sh) and for the cutter
-// (its windows, helpers/mapillary_windows.sh): our signs only, with Mapillary in train, or Mapillary first then ours;
-// the places the Mapillary photos were taken (the positions of helpers/mapillary_locations.sh) and a share of them.
+// (its windows, helpers/mapillary_windows.sh): our signs only, with Mapillary in train, or Mapillary first then ours
+// (chosen at first, when its signs are ready); the places the Mapillary photos were taken (the positions of
+// helpers/mapillary_locations.sh) and a share of them.
 import {computed, ref, type Ref, type UnwrapNestedRefs} from 'vue';
 import type {ActionOptions, MapillaryRegions, PanelStatus} from '../common/panel-types';
 import {jobOf, terminalActivities} from './jobs';
@@ -16,7 +17,7 @@ export function useMapillaryChoice<State extends {available: boolean}>(status: R
   state: Readonly<Ref<State | null>>, regions: Readonly<Ref<MapillaryRegions | null>>) {
   const picked = ref<MapillaryChoice | null>(null);
   const mapillary = computed({
-    get: (): MapillaryChoice => state.value?.available ? picked.value ?? 'off' : 'off',
+    get: (): MapillaryChoice => state.value?.available ? picked.value ?? 'pretrain' : 'off',
     set: (value: MapillaryChoice) => { picked.value = value; },
   });
   const withMapillary = computed(() => mapillary.value !== 'off');
