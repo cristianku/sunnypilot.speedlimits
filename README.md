@@ -1,6 +1,6 @@
 # sunnypilot.speedlimits
 
-**A camera speed limit for sunnypilot**, an openpilot fork for driver assistance, on a comma 4. Small neural networks read the Swiss speed signs in the comma's road camera. This repository holds the website where drives are reviewed, and the tools that train those networks and send them to the car.
+**A camera speed limit for sunnypilot**, an openpilot fork for driver assistance, on a comma 4. Small neural networks read the Swiss speed signs in the comma's road camera, and a [brain](#the-brain) decides the speed to hold. This repository holds the website where drives are reviewed, and the tools that train those networks and send them to the car.
 
 <img src="docs/images/readme-review.png" alt="The review page: a country road with a round 50 km/h sign in a yellow box. On the right, the sign is confirmed as Speed limit 50 km/h, for our road. A timeline of the drive is below the picture." width="100%">
 
@@ -8,13 +8,33 @@
 
 > **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. The limit they read shows on the driving screen when sunnylink's **Show Vision Speed Limit** is on. Speed Limit Assist uses it only when the **Speed Limit Source** is **Map Data + Vision** (the vision limit first, the map when vision has none) or **Vision Only** (the vision limit alone, none without it). Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
-[Why](#why) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
+[Why](#why) · [The brain](#the-brain) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
 ## Why
 
 sunnypilot's Speed Limit Assist takes the limit from the car (when the car sends it on CAN) or from the map (OpenStreetMap). Many cars send nothing on CAN. Cristian's Peugeot 3008 is one of them, so the map is all it has.
 
 Maps lag behind the road. Roadworks, variable motorway displays and new signs are often missing or wrong on the map. The sign at the roadside is what the driver must follow. A camera can see it.
+
+## The brain
+
+**One network with memory decides the speed to hold, the way a driver does.** A sign is a strong hint, not the last word: the brain also sees the road, remembers what it has passed and knows what the car is doing. There are no hand-written rules behind it, and it never reads the map.
+
+```mermaid
+flowchart TD
+  cam["Road camera"] --> read["SignNet + classifier<br/>read the signs"]
+  cam --> brain
+  read --> brain
+  car["The car<br/>gas, brake, speed, car ahead"] --> brain
+  gps["Hour and country<br/>from GPS"] --> brain
+  brain(["The brain<br/>sees, remembers, decides"]) --> out["Speed to hold<br/>once a second"]
+  classDef hero fill:#0071e3,stroke:#0071e3,color:#ffffff
+  class brain hero
+```
+
+It learns from people, not from the map: in **Speed review** a person marks the speed really worth holding, stretch by stretch, and those speeds are its answers. The aim is what fixed rules cannot do, such as letting go of a roadworks limit that never gets an end sign.
+
+Where it stands: the first brain is in the release on Cristian's comma. On places kept out of training it gets 83-90 % of the frames right, on a small test of 438 frames, and for now it mostly says what the sign says. Roadworks need more labelled sites. [How it is built and measured](docs/NEURAL_NETWORK.md#the-brain-4-november-2026).
 
 ## How it works
 
@@ -39,6 +59,8 @@ flowchart TD
 - **Publish** puts the networks in use into sunnypilot. The comma gets them with its next software update.
 
 ### What runs on the car
+
+This is the chain of a release without a brain. With one, the [brain](#the-brain) takes the place of the scene network and of the rules below.
 
 ```mermaid
 flowchart TD
