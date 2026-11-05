@@ -214,6 +214,8 @@ A comma with **Record road at full resolution** on (Developer tab) writes its `f
 
 With either switch on the road camera goes through the BPS, the comma's other image processor, and that also changes the picture the driving model sees: another debayer, no vignetting correction, about 7 ms later. Both off, everything is as before. A change applies from the next drive.
 
+The road through the BPS has not run on a comma yet: the code is read and compiled, the picture is not seen. On the first drive with a switch on, check three things: the frames of a drive look right in Sign review (colours, no seams down the picture), the kernel log has no ICP errors, and the log has no `camera 1 sync failure`, because road and cabin now share that processor.
+
 ### The car's networks on a frame (T)
 
 In Sign review on a computer, the short bar between the photo and the bar under it is a grip: drag it up and the photo gets lower, the timeline under it gets the room; drag it down and it grows back, at most to the width of the column. With the grip focused, ↑ and ↓ move it (⇧ in bigger steps); a double click goes back to the default height. The browser remembers the height. The bar under the photo has two rows: the frame (‹ ›), the filters and **Car networks** / **Ask AI** on the first; the frame's state, the frame data and **+ Box** / **Delete** on the second. On a tablet or a phone the page scrolls instead and there is no grip.
