@@ -1656,7 +1656,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain.set_defaults(func=_cmd_brain_targets)
     p_brain_net = sub.add_parser("train-brain", help="train the brain on the labels of Speed review (GPU, .venv-gpu): the speed "
                                                      "to hold, with the roadworks as a second task of the same network, "
-                                                     "measured on sites it never learned. Writes brain-best.pt and "
+                                                     "measured on sites it never learned. Writes brain-last.pt and "
                                                      "result.json into --run-dir")
     p_brain_net.add_argument("--run-dir", required=True, help="the folder of this run")
     p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
@@ -1664,6 +1664,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="mean",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
+    p_brain_net.add_argument("--seed", type=int, default=0)
     p_brain_net.add_argument("--device", help="default: cuda; the CPU for a dry run")
     p_brain_net.add_argument("--dry-run", action="store_true", help="two steps on the CPU on a few frames: the chain works, "
                                                                     "nothing is learned, nothing written outside --run-dir")
@@ -2609,9 +2610,9 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, driver=args.driver, device=args.device, dry_run=args.dry_run,
-                                     epochs=args.epochs or brain_train.EPOCHS)
-    print(json.dumps({part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
-                      for part in ('validation', 'test')}, indent=2))
+                                     epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
+    print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
+                         for part in ('train', 'validation', 'test')}, 'test_swapped': result['test_swapped']}, indent=2))
     return 0
 
 

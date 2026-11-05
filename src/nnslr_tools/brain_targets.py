@@ -73,9 +73,19 @@ no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) 
 stays until the next sign also where the road was left, and the picture is of the day. The reader gives no plate yet, so
 today there is no copy at all: plate is unknown on every frame.
 
+The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
+speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
+every epoch half of the passages (the frames in a row with one number) whose answers all say the number go with that number
+and those answers changed to the other of its family (SWAPS): the same place with two limits, and only the sign tells which.
+A family is numbers the same kind of road can have, so that no scene turns absurd. Only answers of train count. A passage with
+an answer off the number stays as it is: the sign was wrong there, and that too is for the brain to learn. A frame with no
+number in force keeps its answer, since the road alone says it there, and an end read keeps the answer after it. Besides the
+number, the single readings equal to it change, on the frames of the passage. Nothing of this reaches a measure, but
+brain_train's test_swapped, which asks exactly this of the frames of test.
+
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
-speed; a drive with no frame; a validation with no answer, which would keep the first epoch.
+speed; a drive with no frame.
 """
 from __future__ import annotations
 
@@ -106,6 +116,7 @@ OUT_REASONS = {NOT_EXAMINED: 'not_examined', UNDETERMINED: 'undetermined', NOT_K
                NO_FRAME: 'no_frame'}
 HELD_OUT = ('test', 'validation')
 NIGHT_FROM, NIGHT_TO = 22, 6
+SWAPS = {30: 40, 40: 30, 50: 60, 60: 50, 70: 80, 80: 70, 100: 120, 120: 100}
 
 
 def _load_brain_inputs(path: Path):
@@ -436,8 +447,6 @@ def check_drives(drives: list[dict]) -> None:
     other = [drive['route'] for drive in drives if not drive['reader_current']]
     if other:
         raise ValueError(f"drives read by another reader than the car's of today: {', '.join(other)}. Run {READ_COMMAND}")
-    if not any(loss_weights(drive, 'validation')[0].any() for drive in drives):
-        raise ValueError('no speed labels in validation: no way to choose the epoch')
 
 
 def loss_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray]:
@@ -502,16 +511,50 @@ def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
             'speed_weight': answered.astype(np.float32), 'works_weight': np.zeros_like(drive['works_weight'])}
 
 
+def swap_passages(drive: dict, partition: str = 'train') -> list[np.ndarray]:
+    """The passages of a number of SWAPS with an answer of this partition, in force, and all such answers the number: see
+    the module's text."""
+    signs = drive['inputs']['signs']
+    kph, label = sign_kph(signs), class_kph(drive['speed'])
+    answers = (loss_weights(drive, partition)[0] > 0) & (signs[:, 6] == 0)
+    found = []
+    for passage in np.split(np.arange(len(kph)), np.flatnonzero(np.diff(kph) != 0) + 1):
+        asked = passage[answers[passage]]
+        if len(asked) and int(kph[passage[0]]) in SWAPS and (label[asked] == kph[asked]).all():
+            found.append(passage)
+    return found
+
+
+def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) -> dict:
+    """The drive with the number of these passages, and what says it, as the other of its family: see the module's text."""
+    signs, speed, label = drive['inputs']['signs'].copy(), drive['speed'].copy(), class_kph(drive['speed'])
+    scale = BRAIN_INPUTS.SIGN_KPH_SCALE
+    for passage in passages:
+        number = int(sign_kph(signs[passage[:1]])[0])
+        said = passage[(label[passage] == number) & (signs[passage, 6] == 0)]
+        single = passage[np.rint(signs[passage, 8] * scale) == number]
+        signs[passage, 0] = signs[single, 8] = SWAPS[number] / scale
+        speed[said] = speed_class(SWAPS[number])
+    inputs = {**drive['inputs'], 'signs': signs}
+    return {**drive, 'inputs': inputs, 'speed': speed, 'extra': pack_inputs(inputs, groups)}
+
+
+def _half_swapped(drive: dict, groups: tuple[str, ...], rng) -> dict:
+    passages = [passage for passage in swap_passages(drive) if rng.random() < .5]
+    return swapped(drive, passages, groups) if passages else drive
+
+
 def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]:
-    """What an epoch of training goes through, new every epoch: the drives with a moved clock, and the night copies. See the
-    module's text. Never for a measure: drives stays as it is."""
+    """What an epoch of training goes through, new every epoch: the drives with a moved clock and half of their numbers
+    swapped, and the night copies. See the module's text. Never for a measure: drives stays as it is."""
     found = []
     for drive in drives:
         if (_hours_plate(drive) & (np.array(drive['partitions']) == 'train')).any():
             copy = night_copy(drive, groups, rng)
-            found += [drive] if copy is None else [drive, copy]
+            seen = _half_swapped(drive, groups, rng)
+            found += [seen] if copy is None else [seen, copy]
         else:
-            found.append(_with_hour(drive, groups, rng.uniform(0, 24)))
+            found.append(_half_swapped(_with_hour(drive, groups, rng.uniform(0, 24)), groups, rng))
     return found
 
 

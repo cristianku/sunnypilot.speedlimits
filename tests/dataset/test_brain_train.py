@@ -365,6 +365,7 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
 
 
 def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
+    """Every epoch's validation scores what scores says: nothing may follow from it."""
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
     change(drive)
@@ -372,7 +373,8 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
-    monkeypatch.setattr(brain_train, 'build_brain_net', lambda *_args, **_options: tiny(torch))
+    model = tiny(torch)
+    monkeypatch.setattr(brain_train, 'build_brain_net', lambda *_args, **_options: model)
     real, left = brain_train.measure, list(scores)
 
     def scripted(drives, answers, partition):
@@ -382,15 +384,16 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
         return found
 
     monkeypatch.setattr(brain_train, 'measure', scripted)
-    result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), patience=2, chunk=4, device='cpu',
+    result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), chunk=4, device='cpu',
                                      log=lambda _text: None)
-    return result, torch.load(tmp_path / 'run' / 'brain-best.pt', weights_only=False)
+    return result, torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False), model
 
 
-def test_the_epoch_kept_is_the_best_on_validation_and_the_checkpoint_says_what_it_came_from(tmp_path, monkeypatch):
+def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_says_what_it_came_from(tmp_path, monkeypatch):
     torch = torch_or_skip()
-    result, saved = run_training(torch, tmp_path, monkeypatch, [9.0, 3.0, 5.0])
-    assert result['best_epoch'] == 1 and saved['epoch'] == 1
+    result, saved, model = run_training(torch, tmp_path, monkeypatch, [1.0, 9.0, 9.0, 9.0, 9.0])
+    assert saved['epoch'] == 4 and len(result['history']) == 5
+    assert all(torch.equal(value, saved['weights'][name]) for name, value in model.state_dict().items())
     assert saved['split'] == 'split' and saved['reader'] == {'vision': 'abc'}
     assert saved['features'] == 128 and saved['hidden'] == 128
     assert {'validation_cold', 'test_cold'} <= set(result)
@@ -438,7 +441,7 @@ def test_the_training_moves_the_clock_every_epoch_and_the_measure_has_the_real_o
     assert not numpy.allclose(trained[0][0][0], real) and not numpy.allclose(trained[0][0][0], trained[1][0][0])
     drive = fake_drive(['train'] * T)
     at_two_in_the_afternoon(drive)
-    assert len(measured) >= 4 and all(numpy.array_equal(extra, pack_inputs(drive['inputs'], GROUPS)) for extra in measured)
+    assert len(measured) >= 3 and all(numpy.array_equal(extra, pack_inputs(drive['inputs'], GROUPS)) for extra in measured)
 
 
 def test_a_night_copy_goes_through_the_training_and_not_through_the_measure(tmp_path, monkeypatch):
@@ -451,13 +454,48 @@ def test_a_night_copy_goes_through_the_training_and_not_through_the_measure(tmp_
     assert [len(epoch) for epoch in trained] == [2, 2]
     for day, night in trained:
         assert numpy.allclose(day[0], real) and not numpy.allclose(night[0], real)
-    assert len(measured) == 4
+    assert len(measured) == 3
 
 
-def test_the_training_stops_when_validation_gets_no_better(tmp_path, monkeypatch):
+def test_the_result_has_the_roads_seen_beside_those_not_seen(tmp_path, monkeypatch):
     torch = torch_or_skip()
-    result, _saved = run_training(torch, tmp_path, monkeypatch, [1.0, 2.0, 2.0, 2.0, 2.0, 2.0])
-    assert result['best_epoch'] == 0 and len(result['history']) == 3
+    result, _saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
+    assert result['train']['speed']['frames'] == 4 and result['test']['speed']['frames'] == 2
+    assert result['test_swapped']['network']['frames'] == 0
+
+
+def signed_drive():
+    """A number that its answers say, no number, and a number its answers do not say."""
+    import numpy
+    from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs, speed_class
+    drive = fake_drive(['test'] * 7)
+    kph = numpy.array([100, 100, 100, 0, 0, 60, 60])
+    drive['inputs']['signs'][:, 0], drive['inputs']['signs'][:, 1] = kph / BRAIN_INPUTS.SIGN_KPH_SCALE, kph > 0
+    drive['speed'] = numpy.array([speed_class(value) for value in [100, 100, 100, 90, 90, 70, 70]])
+    drive['extra'] = pack_inputs(drive['inputs'], GROUPS)
+    return drive
+
+
+def swapped_measure(monkeypatch, answer, drive):
+    from nnslr_tools import brain_train
+    monkeypatch.setattr(brain_train, 'predict', lambda _model, seen, _store, **_options: said(answer(seen)))
+    return brain_train._test_swapped(None, [drive], GROUPS, None, chunk=4, device='cpu')
+
+
+def test_test_swapped_asks_only_the_frames_whose_number_changed_and_the_network_must_change_with_it(monkeypatch):
+    import numpy
+    from nnslr_tools.brain_targets import sign_kph
+    follows = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), signed_drive())
+    assert follows['network'] == {'frames': 3, 'right': 1.0, 'mean_error_kph': 0.0} and follows['sign']['right'] == 1.0
+    stays = swapped_measure(monkeypatch, lambda seen: numpy.full(7, 100), signed_drive())
+    assert stays['network'] == {'frames': 3, 'right': 0.0, 'mean_error_kph': 20.0}
+
+
+def test_test_swapped_with_no_passage_to_change_has_no_frames(monkeypatch):
+    import numpy
+    drive = signed_drive()
+    drive['speed'][:] = 16
+    assert swapped_measure(monkeypatch, lambda seen: numpy.zeros(7), drive)['network']['frames'] == 0
 
 
 def test_the_network_goes_through_a_whole_drive_as_on_the_car():

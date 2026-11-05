@@ -222,12 +222,11 @@ def test_the_training_runs_on_drives_read_by_todays_reader():
 
 
 @pytest.mark.parametrize('change, says', [({'signs_read': False, 'reader_current': False}, 'no reading of the signs'),
-                                          ({'reader_current': False}, 'another reader'), ({'frames': []}, 'no frame'),
-                                          ({'partitions': ['train', 'test', 'test']}, 'in validation')])
+                                          ({'reader_current': False}, 'another reader'), ({'frames': []}, 'no frame')])
 def test_the_training_refuses_what_would_go_wrong_without_a_word(change, says):
     targets = _targets()
     with pytest.raises(ValueError, match=says) as found:
-        targets.check_drives([checked(), checked(route='r2', **change)] if 'partitions' not in change else [checked(**change)])
+        targets.check_drives([checked(), checked(route='r2', **change)])
     if 'reader' in str(found.value) or 'reading' in str(found.value):
         assert 'r2' in str(found.value) and 'r1' not in str(found.value) and targets.READ_COMMAND in str(found.value)
 
@@ -601,3 +600,103 @@ def test_a_frame_that_falls_after_the_night_has_no_answer():
     for seed in range(30):
         _day, night = in_an_epoch(plated(hours=(10.0, 19.0)), seed)
         assert list(night['speed_weight']) == [1, 0]
+
+
+def numbered(kphs, labels, *, singles=None, ended=None, partitions=None, plate=None):
+    """A drive with this number in force on each frame (0: none) and these answers."""
+    np, targets = _np(), _targets()
+    drive = plated(hours=[14.0] * len(kphs), plate=plate, partitions=partitions)
+    scale, signs = targets.BRAIN_INPUTS.SIGN_KPH_SCALE, drive['inputs']['signs']
+    signs[:, 0], signs[:, 1] = np.array(kphs) / scale, np.array(kphs) > 0
+    signs[:, 6] = ended or 0
+    signs[:, 8] = np.array(singles or [0] * len(kphs)) / scale
+    drive['speed'] = np.array([targets.speed_class(label) for label in labels])
+    drive['extra'] = targets.pack_inputs(drive['inputs'], GROUPS)
+    return drive
+
+
+def numbers(drive):
+    return _targets().sign_kph(drive['inputs']['signs']).tolist()
+
+
+def answers(drive):
+    return _targets().class_kph(drive['speed']).tolist()
+
+
+def passages(drive, partition='train'):
+    return [passage.tolist() for passage in _targets().swap_passages(drive, partition)]
+
+
+def all_swapped(drive, partition='train'):
+    return _targets().swapped(drive, _targets().swap_passages(drive, partition), GROUPS)
+
+
+def test_a_passage_that_says_its_number_changes_with_its_answers_and_the_rest_stays():
+    drive = numbered([100, 100, 0, 0], [100, 100, 90, 90])
+    seen = all_swapped(drive)
+    assert passages(drive) == [[0, 1]]
+    assert numbers(seen) == [120, 120, 0, 0] and answers(seen) == [120, 120, 90, 90]
+    assert _np().array_equal(seen['extra'], _targets().pack_inputs(seen['inputs'], GROUPS))
+    assert numbers(drive) == [100, 100, 0, 0] and answers(drive) == [100, 100, 90, 90]
+
+
+@pytest.mark.parametrize('number, other', [(30, 40), (40, 30), (50, 60), (60, 50), (70, 80), (80, 70), (100, 120), (120, 100)])
+def test_the_numbers_of_a_family_change_into_each_other(number, other):
+    seen = all_swapped(numbered([number] * 2, [number] * 2))
+    assert numbers(seen) == [other] * 2 and answers(seen) == [other] * 2
+
+
+@pytest.mark.parametrize('number', [20, 90, 110, 130])
+def test_a_number_with_no_family_stays(number):
+    assert passages(numbered([number] * 2, [number] * 2)) == []
+
+
+def test_two_numbers_are_two_passages():
+    seen = all_swapped(numbered([100, 100, 60, 60], [100, 100, 60, 60]))
+    assert numbers(seen) == [120, 120, 50, 50] and answers(seen) == [120, 120, 50, 50]
+
+
+def test_a_passage_with_one_answer_off_the_number_stays_as_a_mistake_of_the_sign():
+    assert passages(numbered([100, 100, 100], [100, 100, 120])) == []
+
+
+def test_a_passage_with_no_answer_stays():
+    drive = numbered([100, 100], [100, 100])
+    drive['speed_weight'][:] = 0
+    assert passages(drive) == []
+
+
+def test_only_the_answers_of_the_partition_count():
+    drive = numbered([100, 100, 100], [100, 100, 90], partitions=['train', 'train', 'test'])
+    assert passages(drive) == [[0, 1, 2]] and passages(drive, 'test') == []
+    assert answers(all_swapped(drive)) == [120, 120, 90]
+    assert passages(numbered([100, 100], [100, 100], partitions=['test', 'test'])) == []
+
+
+def test_an_end_read_keeps_the_answer_after_it_and_asks_nothing_of_the_passage():
+    seen = all_swapped(numbered([100, 100, 100], [100, 100, 130], ended=[0, 0, 1]))
+    assert numbers(seen) == [120, 120, 120] and answers(seen) == [120, 120, 130]
+    assert answers(all_swapped(numbered([100, 100, 100], [100, 100, 100], ended=[0, 0, 1]))) == [120, 120, 100]
+
+
+def test_a_single_reading_changes_only_where_it_says_the_number():
+    np, targets = _np(), _targets()
+    seen = all_swapped(numbered([100, 100, 100, 0], [100, 100, 100, 90], singles=[100, 80, 0, 100]))
+    assert np.rint(seen['inputs']['signs'][:, 8] * targets.BRAIN_INPUTS.SIGN_KPH_SCALE).tolist() == [120, 80, 0, 100]
+
+
+def test_an_epoch_swaps_half_of_the_passages_with_a_new_clock_and_leaves_the_drive_as_it_is():
+    drive = numbered([100, 100], [100, 100])
+    seen = [in_an_epoch(drive, seed)[0] for seed in range(200)]
+    swaps = [item for item in seen if numbers(item) == [120, 120]]
+    assert 60 < len(swaps) < 140 and all(answers(item) == [120, 120] for item in swaps)
+    assert all(answers(item) == [100, 100] for item in seen if numbers(item) == [100, 100])
+    assert all(not _np().allclose(clock_of(item), 14.0) for item in swaps[:10])
+    assert numbers(drive) == [100, 100]
+
+
+def test_the_night_copy_takes_no_swap_and_the_day_of_its_drive_does():
+    drive = numbered([30, 30, 60, 60], [50, 50, 60, 60], plate='time')
+    seen = [in_an_epoch(drive, seed) for seed in range(40)]
+    assert all(len(epoch) == 2 and numbers(epoch[1]) == [30, 30, 60, 60] for epoch in seen)
+    assert {tuple(numbers(epoch[0])) for epoch in seen} == {(30, 30, 60, 60), (30, 30, 50, 50)}

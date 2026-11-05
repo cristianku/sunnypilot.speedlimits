@@ -3,15 +3,20 @@ request (nnslr train-brain); a dry run is two steps on the CPU, nothing kept but
 
 An epoch goes drive after drive in a random order, each drive in its order with the state carried from piece to piece, so
 that approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces move their
-cuts every epoch, and the gradient stops at each of them. Every epoch the drives get another clock, and those with a plate
-of hours go through once more at night (brain_targets.epoch_drives): the measure has only the real hour.
+cuts every epoch, and the gradient stops at each of them. Every epoch the drives get another clock and half of their numbers
+swapped, and those with a plate of hours go through once more at night (brain_targets.epoch_drives): the measure has only
+the real hour and the real numbers.
+
+The last epoch is what is kept. Validation is one stretch of one drive today, with one speed: choosing on it rewards the epoch
+that remembers that road, the opposite of what the swap asks. It is shown every epoch and it chooses nothing.
 
 A picture of test or validation runs in no training step and in no memory of one: the training skips those frames, and the
 memory starts again after them (brain_targets.learning_pieces). A frame of the buffer runs under no_grad, only to keep the
 memory going. What does cross from a held-out stretch into train is the number read there, as an input, the way the car
 carries it: never its picture, never its answer.
 
-The measure (measure), on validation to choose the epoch and on test once at the end, frames with an answer only:
+The measure (measure), at the end on train, validation and test, frames with an answer only; train against test is the gap
+between roads seen and not seen:
 
 - speed: right, and the mean error in km/h, on all of them and on those without gas in the last second: the frames where
   the driver gives nothing away, so a network that follows the pedal shows here;
@@ -31,7 +36,10 @@ The measure (measure), on validation to choose the epoch and on test once at the
 
 predict goes through a whole drive as on the car, so a held-out stretch starts from the memory of the train frames before it,
 and a network that only holds its last speed scores well there. So the result has each partition twice: as on the car, and
-cold, with the memory starting again where the stretch out of train begins. The epoch is chosen as on the car.
+cold, with the memory starting again where the stretch out of train begins.
+
+test_swapped asks the network what the swap asks in training, on roads it never saw: the frames of test whose passage says its
+number, with that number changed to the other of its family. Whatever the picture shows, the network right there has read it.
 
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. The driver's
 inputs stay out unless driver=True: see brain_targets.
@@ -48,14 +56,13 @@ from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
 from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, epoch_drives,
                                        inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs, read_split,
-                                       sign_kph)
+                                       sign_kph, swap_passages, swapped)
 from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 
 EPOCHS = 40
-PATIENCE = 10
 CHUNK = 64
 CLIP = 5.0
-CHECKPOINT = 'brain-best.pt'
+CHECKPOINT = 'brain-last.pt'
 RESULT = 'result.json'
 END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
@@ -253,11 +260,23 @@ def _works_needs_both(drives: list[dict], log) -> None:
         drive['works_weight'] = drive['works_weight'] * (np.array(drive['partitions']) != 'train')
 
 
+def _test_swapped(model, drives: list[dict], groups: tuple[str, ...], store: FrameStore, *, chunk: int, device) -> dict:
+    """follow_the_sign on the frames of test whose number was swapped: see the module's text."""
+    held = []
+    for drive in drives:
+        passages = swap_passages(drive, 'test')
+        if passages:
+            inside = np.zeros_like(drive['speed_weight'])
+            inside[np.concatenate(passages)] = 1
+            held.append({**swapped(drive, passages, groups), 'speed_weight': drive['speed_weight'] * inside})
+    return measure(held, [predict(model, drive, store, chunk=chunk, device=device) for drive in held], 'test')['follow_the_sign']
+
+
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean', works: bool = True, driver: bool = False,
-                epochs: int = EPOCHS, patience: int = PATIENCE, chunk: int = CHUNK, device: str | None = None,
-                dry_run: bool = False, seed: int = 0, log=_print) -> dict:
-    """Train on train, choose the epoch on validation, measure test once. Writes brain-best.pt and result.json into run_dir;
-    the checkpoint says what it came from. Refuses what would train wrong: brain_targets.check_drives."""
+                epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None, dry_run: bool = False, seed: int = 0,
+                log=_print) -> dict:
+    """Train on train, keep the last epoch, measure once. Writes brain-last.pt and result.json into run_dir; the checkpoint
+    says what it came from. Refuses what would train wrong: brain_targets.check_drives."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -284,7 +303,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
     source = {'groups': groups, 'pool': pool, 'works': works, 'features': FEATURES, 'hidden': HIDDEN,
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
-    best, best_epoch, history = None, None, []
+    history = []
     for epoch in range(epochs):
         error = train_epoch(model, optimizer, epoch_drives(drives, groups, rng), store, chunk=chunk, rng=rng, device=device,
                             steps=DRY_STEPS if dry_run else None)
@@ -295,17 +314,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'mean'
         log(f'Epoch {epoch}: error {error:.3f}, validation {score} km/h off on {validation["speed"]["frames"]} frames '
             f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
             f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]}')
-        if best is None or (score is not None and score < best):
-            best, best_epoch = score if score is not None else float('inf'), epoch
-            torch.save({'weights': model.state_dict(), 'epoch': epoch, **source}, run_dir / CHECKPOINT)
-        elif epoch - best_epoch >= patience:
-            break
-    saved = torch.load(run_dir / CHECKPOINT, map_location=device, weights_only=False)
-    model.load_state_dict(saved['weights'])
-    answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
+    torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
-    result = {'groups': list(groups), 'pool': pool, 'works': works, 'dry_run': dry_run, 'best_epoch': best_epoch, 'history': history,
-              'validation': measure(drives, answers, 'validation'), 'test': measure(drives, answers, 'test'),
-              'validation_cold': measure(drives, cold, 'validation'), 'test_cold': measure(drives, cold, 'test')}
+    result = {'groups': list(groups), 'pool': pool, 'works': works, 'dry_run': dry_run, 'seed': seed, 'history': history,
+              'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
+              'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),
+              'test_cold': measure(drives, cold, 'test'),
+              'test_swapped': _test_swapped(model, drives, groups, store, chunk=chunk, device=device)}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result
