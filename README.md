@@ -162,7 +162,7 @@ On each picture you:
 - say whom it is for: **Ours**, **Another** road, or **Unclear**;
 - press **Confirm**.
 
-**Apply previous** (key A) copies the boxes of the picture before. **Fit box** (key C, every box of the frame but those moved by hand) snaps rough boxes onto their signs, on the server in a fraction of a second, with no AI. **Car networks** (key T) runs the car's own cutter and classifier on the frame on screen, any frame of the video: what it reads goes straight into the frame's boxes on the right, in fuchsia, with whom each is for from the applicability network, to check and confirm. It also works on a phone:
+**Apply previous** (key A) copies the boxes of the picture before and fits them onto their signs, as **Fit box** does. **Fit box** (key C, every box of the frame but those moved by hand) snaps rough boxes onto their signs, on the server in a fraction of a second, with no AI. **Car networks** (key T) runs the car's own cutter and classifier on the frame on screen, any frame of the video: what it reads goes straight into the frame's boxes on the right, in fuchsia, with whom each is for from the applicability network, to check and confirm. It also works on a phone:
 
 <img src="docs/images/readme-review-phone.png" alt="The review page on a phone: the picture with the boxed 50 sign at the top, navigation and filters below, and a Next frame button at the bottom." width="260">
 

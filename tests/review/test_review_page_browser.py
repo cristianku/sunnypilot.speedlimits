@@ -188,6 +188,21 @@ with sync_playwright() as p:
     car.locator('#reviewer').fill('Tester')
     car.locator('#confirm').click()
     until(car, "document.body.dataset.lastSaveResult === 'ok'")
+    # Apply previous fits what it carries, as C does.
+    carried = {'bbox_xyxy': [30, 22, 38, 30], 'family': 'maximum_speed', 'value_kph': 30, 'value_state': 'reviewed',
+               'score': None, 'model_label': None, 'class_id': None, 'review_state': 'pending',
+               'applicability': 'own_road', 'supplementary_panel': 'unknown', 'detection_id': 'car-1'}
+    fits = []
+    car.route('**/apply-previous', lambda route: route.fulfill(json={
+        'ok': True, 'detections': [carried], 'to_check': [], 'message': 'Boxes carried.'}))
+    car.route('**/fit', lambda route: (fits.append(route.request.post_data_json['boxes']), route.fulfill(json={
+        'ok': True, 'boxes': [[31, 22, 39, 30]], 'ms': 1})))
+    car.keyboard.press('ArrowRight')
+    car.wait_for_timeout(400)
+    car.keyboard.press('a')
+    car.wait_for_timeout(500)
+    assert fits == [[carried['bbox_xyxy']]], fits
+    assert 'Boxes carried.' in car.locator('body').inner_text()
     browser.close()
 assert not errors, errors
 '''

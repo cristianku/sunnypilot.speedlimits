@@ -2,6 +2,7 @@
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it).
+import {fitLocal} from './ai';
 import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
@@ -76,8 +77,15 @@ export async function applyPrevious(): Promise<void> {
     state.selectedByUser = first !== undefined;
     state.drawing = false;
     changed(row);
-    state.notice = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
     if (first !== undefined) void nextTick(revealEditor);
+    const carried = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
+    state.notice = carried;
+    // The carried boxes go straight onto their signs, as C does; its message after the one of the carry.
+    await fitLocal();
+    const fit = state.notice;
+    if (fit && fit !== carried && fit.key === key) {
+      state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};
+    }
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   }
