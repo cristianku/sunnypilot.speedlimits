@@ -46,6 +46,21 @@ def test_the_contract_says_what_the_car_reads(tmp_path, monkeypatch):
     assert contract['output']['kph'][:2] == [5, 10]
 
 
+def test_a_network_of_an_earlier_file_with_the_same_groups_exports_with_its_own_hash(tmp_path, monkeypatch):
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    earlier = BRAIN_INPUTS.SAME_GROUPS[0]
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, inputs_sha256=earlier)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    assert json.loads((tmp_path / 'brain.onnx.contract.json').read_text())['inputs_sha256'] == earlier
+
+
+@pytest.mark.parametrize('saved, hours', [({}, False), ({'hours': True}, True)])
+def test_the_contract_says_whether_the_car_gives_the_hours(tmp_path, monkeypatch, saved, hours):
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    assert json.loads((tmp_path / 'brain.onnx.contract.json').read_text())['step']['hours'] is hours
+
+
 @pytest.mark.parametrize('saved, plates', [({}, False), ({'plates': False}, False), ({'plates': True}, True)])
 def test_the_contract_says_whether_the_car_gives_the_plates(tmp_path, monkeypatch, saved, plates):
     path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, **saved)

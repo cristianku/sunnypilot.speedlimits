@@ -127,6 +127,23 @@ def test_the_plate_of_another_sign_never_stays():
     assert list(fed(*ended).plate_row()) == [0, 0, 0, 1]
 
 
+def test_the_hours_of_a_plate_are_those_of_the_number_confirmed():
+    brain, _ = _car()
+    read = lambda now, hours, number=30: (now, (f'maximum_speed_hours:{number}', .9, 'time', hours))  # noqa: E731
+    row = fed(read(10.0, (22, 6)), read(10.2, None)).plate_hours_row()
+    assert row[:2] == pytest.approx(brain.hour_row(22)[:2], abs=1e-6) and row[2:4] == pytest.approx(brain.hour_row(6)[:2], abs=1e-6)
+    assert row[4] == 1
+    assert not fed().plate_hours_row().any()
+    assert not fed(read(10.0, None), read(10.2, None)).plate_hours_row().any()
+    assert not fed(read(10.0, (22, 6)), read(10.2, None), read(30.0, None, 50), read(30.2, None, 50)).plate_hours_row().any()
+
+
+def test_hours_change_no_other_group():
+    read = lambda now, *said: (now, ('maximum_speed_hours:30', .9, *said))  # noqa: E731
+    plain, hours = fed(read(10.0, 'time'), read(10.2, 'time')), fed(read(10.0, 'time', (22, 6)), read(10.2, 'time', (22, 6)))
+    assert list(plain.features(11.0)) == list(hours.features(11.0)) and list(plain.plate_row()) == list(hours.plate_row())
+
+
 @pytest.mark.parametrize('country, zone', [('CH', 'Europe/Zurich'), ('DE', 'Europe/Berlin'), ('FR', 'Europe/Paris'),
                                            ('IT', 'Europe/Rome'), ('AT', 'Europe/Vienna')])
 def test_the_local_hour_is_the_one_of_the_time_zones_for_every_hour_of_these_years(country, zone):
@@ -168,7 +185,7 @@ def test_a_group_has_the_size_it_says():
     signs = fed((10.0, ('maximum_speed:80', .9)))
     rows = {'signs': signs.features(10.0), 'plate': signs.plate_row(), 'hour': brain.hour_row(12.0),
             'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH'), 'pedals': brain.PedalInputs().row(10.0),
-            'speed': brain.speed_row(20.0)}
+            'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row()}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 

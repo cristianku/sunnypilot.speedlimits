@@ -38,7 +38,7 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
+- signs, plate, plate_hours, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
   yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -61,17 +61,19 @@ nothing of the speed, unless a plate gives it a meaning. So every epoch a drive 
 hours, one for all its frames, since on the car the clock runs on. A drive with a plate of hours on frames of train keeps its
 real clock: there the hour is part of the answer. Validation and test always have the real one.
 
-The night copies (night_copy). A plate of hours read by day, with his label another speed than the number, says only that
-the number does not hold now. Nothing shows when it does, and drives after 22:00 are few. So such a drive goes through the
-epoch once more with its clock moved into the night, and on those frames the answer is the number: the same pictures, made
-only here, nothing on the car, and no answer on roadworks. Only frames of train with his speed above the number, a plate of
-hours, a number that is a class of the speed and was not ended, and a known hour by day. A label under the number has
-another reason, roadworks for one, and a copy would raise it. A label equal to the number, on one frame by day of the
-passage (the frames in a row with that number and plate), says it holds by day: such a plate is no 22-6, and the passage has
-no copy. The limits: a plate of other hours driven outside them (7-17 at 19:00) gets a night answer that is wrong, a number
-stays until the next sign also where the road was left, and the picture is of the day. The plate comes from the class the
-reader gives (vision.class_plate: maximum_speed_hours:<number>, a sign with its plate in one box), so with a classifier
-without that class there is no copy at all: plate is unknown on every frame, and the export says so (plates_in_train).
+The night copies (night_copy). A plate of hours read outside them, with his label another speed than the number, says only
+that the number does not hold now. Nothing shows when it does, and drives after 22:00 are few. So such a drive goes through
+the epoch once more with its clock moved into the plate's hours, and on those frames the answer is the number: the same
+pictures, made only here, nothing on the car, and no answer on roadworks. The plate's hours are the ones the reader read
+(plate_hours), the night (NIGHT_FROM to NIGHT_TO) when it read none. Only frames of train with his speed above the number, a
+plate of hours, a number that is a class of the speed and was not ended, and a known hour outside those hours. A label under
+the number has another reason, roadworks for one, and a copy would raise it. A label equal to the number, on one such frame
+of the passage (the frames in a row with that number and plate), says it holds then: such a plate has other hours, and the
+passage has no copy. The limits: a plate of other hours with none read, driven outside them (7-17 at 19:00), gets a night
+answer that is wrong, a number stays until the next sign also where the road was left, and the picture is of the day. The
+plate comes from the class the reader gives (vision.class_plate and class_hours: maximum_speed_hours:<number>[:<from>-<to>], a
+sign with its plate in one box), so with a classifier without that class there is no copy at all: plate is unknown on every
+frame, and the export says so (plates_in_train, hours_in_train).
 
 The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
@@ -295,20 +297,22 @@ def _pressed(points: list, ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return pressed, known
 
 
-def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray]:
-    """The signs and plate groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
+def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The signs, plate and plate_hours groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
     drive, by the car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
     signs = np.zeros((len(seconds), INPUT_SIZES['signs']), dtype=np.float32)
     plates = np.zeros((len(seconds), INPUT_SIZES['plate']), dtype=np.float32)
+    hours = np.zeros((len(seconds), INPUT_SIZES['plate_hours']), dtype=np.float32)
     ordered = sorted(readings or [], key=lambda item: item[0])
     memory, pointer = BRAIN_INPUTS.SignInputs(VISION), 0
     for row, second in enumerate(seconds):
         while pointer < len(ordered) and ordered[pointer][0] <= second:
             now, read = ordered[pointer]
-            memory.add(now, [(name, confidence, VISION.class_plate(name)) for name, confidence in read])
+            memory.add(now, [(name, confidence, VISION.class_plate(name), VISION.class_hours(name))
+                             for name, confidence in read])
             pointer += 1
-        signs[row], plates[row] = memory.features(second), memory.plate_row()
-    return signs, plates
+        signs[row], plates[row], hours[row] = memory.features(second), memory.plate_row(), memory.plate_hours_row()
+    return signs, plates, hours
 
 
 def countries_so_far(gps: list, ns: np.ndarray, root: Path | None) -> list[str | None]:
@@ -349,8 +353,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
     hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))
                      for unix, name in zip(unix_at(gps, ns), countries)], dtype=np.float32)
-    signs, plate = sign_inputs(seconds, readings)
-    return {'signs': signs, 'plate': plate, 'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
+    signs, plate, plate_hours = sign_inputs(seconds, readings)
+    return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
@@ -467,8 +471,16 @@ def _clock(hour: np.ndarray) -> np.ndarray:
     return np.arctan2(hour[:, 0], hour[:, 1]) / (2 * np.pi) * 24 % 24
 
 
-def _at_night(clock: np.ndarray) -> np.ndarray:
-    return (clock >= NIGHT_FROM) | (clock < NIGHT_TO)
+def _plate_window(drive: dict) -> tuple[np.ndarray, np.ndarray]:
+    """(from, how many hours) of the plate on each frame: the hours read, the night when none were."""
+    hours = drive['inputs']['plate_hours']
+    start = np.where(hours[:, 4] > 0, np.rint(_clock(hours[:, :2])), NIGHT_FROM)
+    end = np.where(hours[:, 4] > 0, np.rint(_clock(hours[:, 2:4])), NIGHT_TO)
+    return start % 24, (end - start) % 24
+
+
+def _inside(clock: np.ndarray, window: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    return (clock - window[0]) % 24 < window[1]
 
 
 def _hours_plate(drive: dict) -> np.ndarray:
@@ -479,6 +491,12 @@ def plates_in_train(drives: list[dict]) -> bool:
     """Whether a brain trained on these drives learnt the plate: a plate of hours on a frame of train with a speed to answer.
     The car gives a brain its plates only then (contract step.plates), since weights never trained are no reading."""
     return any(bool((_hours_plate(drive) & (loss_weights(drive, 'train')[0] > 0)).any()) for drive in drives)
+
+
+def hours_in_train(drives: list[dict]) -> bool:
+    """Whether a brain trained on these drives learnt the hours of a plate: as plates_in_train, with hours read."""
+    return any(bool(((drive['inputs']['plate_hours'][:, 4] > 0) & (loss_weights(drive, 'train')[0] > 0)).any())
+               for drive in drives)
 
 
 def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:
@@ -497,7 +515,7 @@ def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
     kph = sign_kph(signs)
     a_class = (kph >= GRID_KPH) & (kph <= MAX_KPH) & (kph % GRID_KPH == 0) & (signs[:, 6] == 0)
     plated, label = _hours_plate(drive) & a_class, class_kph(drive['speed'])
-    answers = (hour[:, 2] > 0) & ~_at_night(_clock(hour)) & (loss_weights(drive, 'train')[0] > 0)
+    answers = (hour[:, 2] > 0) & ~_inside(_clock(hour), _plate_window(drive)) & (loss_weights(drive, 'train')[0] > 0)
     frames = plated & answers & (label > kph)
     for passage in np.split(np.arange(len(kph)), np.flatnonzero((np.diff(kph) != 0) | (np.diff(plated) != 0)) + 1):
         if (answers[passage] & (label[passage] == kph[passage])).any():
@@ -506,14 +524,15 @@ def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
 
 
 def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
-    """The drive with its first frame to answer at a random hour of the night, the number the answer of the frames that fall
-    in the night: see the module's text. None with nothing to answer."""
+    """The drive with its first frame to answer at a random hour of its plate's, the number the answer of the frames that
+    fall in their plate's hours: see the module's text. None with nothing to answer."""
     frames, number = night_frames(drive)
     if not frames.any():
         return None
     clock = _clock(drive['inputs']['hour'])
-    hours = rng.uniform(NIGHT_FROM, NIGHT_TO + 24) - clock[frames][0]
-    answered = frames & _at_night((clock + hours) % 24)
+    window, first = _plate_window(drive), np.flatnonzero(frames)[0]
+    hours = window[0][first] + rng.uniform(0, window[1][first]) - clock[first]
+    answered = frames & _inside((clock + hours) % 24, window)
     return {**_with_hour(drive, groups, hours), 'speed': np.where(answered, number, drive['speed']),
             'speed_weight': answered.astype(np.float32), 'works_weight': np.zeros_like(drive['works_weight'])}
 

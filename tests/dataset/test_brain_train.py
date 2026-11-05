@@ -6,7 +6,7 @@ import pytest
 
 NS = 1_000_000_000
 T = 8
-GROUPS = ('signs', 'plate', 'hour', 'lead', 'country', 'pedals', 'speed')
+GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed')
 
 
 def fake_drive(partitions, *, speed=19, works=None, marks=(), route='00000001--abcdef0123'):
@@ -463,6 +463,20 @@ def test_a_brain_says_whether_it_learnt_the_plates(tmp_path, monkeypatch):
     assert result['plates'] is False and saved['plates'] is False
     result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], plate_of_hours)
     assert result['plates'] is True and saved['plates'] is True
+
+
+def test_a_brain_says_whether_it_learnt_the_hours(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+
+    def plate_with_hours(drive):
+        plate_of_hours(drive)
+        drive['inputs']['plate_hours'][:] = [*BRAIN_INPUTS.hour_row(22)[:2], *BRAIN_INPUTS.hour_row(6)[:2], 1]
+
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], plate_of_hours)
+    assert result['hours'] is False and saved['hours'] is False
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], plate_with_hours)
+    assert result['hours'] is True and saved['hours'] is True
 
 
 def test_the_result_has_the_roads_seen_beside_those_not_seen(tmp_path, monkeypatch):

@@ -58,8 +58,8 @@ import numpy as np
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
 from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, epoch_drives,
-                                       inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train,
-                                       read_split, sign_kph, swap_passages, swapped)
+                                       hours_in_train, inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs,
+                                       plates_in_train, read_split, sign_kph, swap_passages, swapped)
 from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 
 EPOCHS = 40
@@ -313,7 +313,9 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
                                   weight_decay=WEIGHT_DECAY)
     plates = 'plate' in groups and plates_in_train(drives)
+    hours = 'plate_hours' in groups and hours_in_train(drives)
     source = {'groups': groups, 'pool': pool, 'works': works, 'features': FEATURES, 'hidden': HIDDEN, 'plates': plates,
+              'hours': hours,
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
@@ -336,8 +338,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
-    result = {'groups': list(groups), 'pool': pool, 'works': works, 'plates': plates, 'dry_run': dry_run, 'seed': seed,
-              'history': history,
+    result = {'groups': list(groups), 'pool': pool, 'works': works, 'plates': plates, 'hours': hours, 'dry_run': dry_run,
+              'seed': seed, 'history': history,
               'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),

@@ -232,3 +232,5 @@ def test_models_say_whether_a_brain_reads_the_plates():
     assert brain_digest(result)['plates'] is False  # a brain trained before there were plates
     assert brain_digest({**result, 'plates': False})['plates'] is False
     assert brain_digest({**result, 'plates': True})['plates'] is True
+    assert brain_digest(result)['hours'] is False
+    assert brain_digest({**result, 'hours': True})['hours'] is True

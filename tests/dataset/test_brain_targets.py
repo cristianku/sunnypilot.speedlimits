@@ -236,7 +236,7 @@ def test_a_sign_read_counts_from_its_second_on_and_never_before():
     readings = [[10.0, [['maximum_speed:100', .9]]], [10.2, [['maximum_speed:100', .9]]], [20.0, [['cancellation', .9]]],
                 [20.2, [['cancellation', .9]]], [30.0, [['variable_display:80', .9]]], [30.2, [['variable_display:80', .9]]],
                 [31.0, [['other_sign:give_way', .9]]]]
-    found, plates = _targets().sign_inputs(numpy.array([9.0, 10.0, 11.0, 15.0, 21.0, 31.0, 40.0]), readings)
+    found, plates, _hours = _targets().sign_inputs(numpy.array([9.0, 10.0, 11.0, 15.0, 21.0, 31.0, 40.0]), readings)
     assert found[0].sum() == 0
     assert found[1][:2].sum() == 0 and found[1][8] == pytest.approx(100 / 130)
     assert found[2][:3] == pytest.approx([100 / 130, 1, 0])
@@ -248,7 +248,7 @@ def test_a_sign_read_counts_from_its_second_on_and_never_before():
 
 def test_a_drive_not_read_yet_has_its_signs_unknown():
     numpy = _np()
-    signs, plates = _targets().sign_inputs(numpy.array([1.0, 2.0]), None)
+    signs, plates, _hours = _targets().sign_inputs(numpy.array([1.0, 2.0]), None)
     assert signs.sum() == 0 and (plates[:, -1] == 1).all() and plates.sum() == 2
 
 
@@ -509,8 +509,8 @@ def test_a_plate_of_hours_read_by_day_goes_through_the_night_with_the_number_as_
     for seed in range(30):
         _day, night = in_an_epoch(drive, seed)
         answered = night['speed_weight'] > 0
-        assert answered[0] and targets._at_night(clock_of(night)[answered]).all()
-        assert not targets._at_night(clock_of(night)[~answered]).any()
+        assert answered[0] and targets._inside(clock_of(night), targets._plate_window(night))[answered].all()
+        assert not targets._inside(clock_of(night), targets._plate_window(night))[~answered].any()
         assert np.allclose((clock_of(night) - clock_of(night)[0]) % 24, [0, .5, 1], atol=1e-3)
         assert set(night['speed'][answered]) == {targets.speed_class(30)}
         assert not night['works_weight'].any()
@@ -706,11 +706,56 @@ def test_a_number_with_hours_gives_its_number_and_its_plate():
     numpy = _np()
     targets = _targets()
     read = [[10.0, [['maximum_speed_hours:30', .9]]], [10.2, [['maximum_speed_hours:30', .9]]]]
-    found, plates = targets.sign_inputs(numpy.array([9.0, 11.0]), read)
+    found, plates, _hours = targets.sign_inputs(numpy.array([9.0, 11.0]), read)
     time = targets.BRAIN_INPUTS.PLATES.index('time')
     assert found[1][0] == pytest.approx(30 / 130) and plates[1][time] == 1 and plates[0][time] == 0
     plain = targets.sign_inputs(numpy.array([9.0, 11.0]), [[second, [['maximum_speed:30', .9]]] for second, _ in read])
     assert (plain[0] == found).all() and plain[1][1][time] == 0
+
+
+def test_a_number_with_its_hours_gives_them_as_the_car_does():
+    numpy, targets = _np(), _targets()
+    read = [[10.0, [['maximum_speed_hours:30:22-6', .9]]], [10.2, [['maximum_speed_hours:30:22-6', .9]]]]
+    found, plates, hours = targets.sign_inputs(numpy.array([9.0, 11.0]), read)
+    row = targets.BRAIN_INPUTS.hour_row
+    assert found[1][0] == pytest.approx(30 / 130) and plates[1][targets.BRAIN_INPUTS.PLATES.index('time')] == 1
+    assert not hours[0].any() and hours[1][4] == 1
+    assert numpy.allclose(hours[1][:2], row(22)[:2]) and numpy.allclose(hours[1][2:4], row(6)[:2])
+
+
+def with_hours(drive, start, end):
+    """The drive with these hours read on the plate of every frame."""
+    row = _targets().BRAIN_INPUTS.hour_row
+    drive['inputs']['plate_hours'][:] = [*row(start)[:2], *row(end)[:2], 1]
+    return drive
+
+
+@pytest.mark.parametrize('start, end, clock, copied', [(22, 6, 14.0, True), (7, 17, 19.0, True), (7, 17, 10.0, False),
+                                                       (22, 6, 23.0, False), (13, 15, 14.0, False), (15, 13, 14.0, True)])
+def test_a_copy_needs_a_frame_outside_the_hours_read(start, end, clock, copied):
+    assert _targets().night_frames(with_hours(plated(hours=(clock, clock)), start, end))[0].all() == copied
+
+
+@pytest.mark.parametrize('seed', range(8))
+def test_the_copy_of_a_plate_goes_to_the_hours_read_with_the_number_as_the_answer(seed):
+    np, targets = _np(), _targets()
+    _day, copy = in_an_epoch(with_hours(plated(hours=(19.0, 19.0)), 7, 17), seed)
+    assert ((clock_of(copy) >= 7) & (clock_of(copy) < 17)).all()
+    assert (copy['speed'] == targets.speed_class(30)).all() and (copy['speed_weight'] == 1).all()
+
+
+def test_a_frame_in_the_hours_read_says_nothing_of_the_frames_outside_them():
+    np, targets = _np(), _targets()
+    drive = with_hours(plated(hours=(16.0, 16.5, 19.0, 19.5)), 7, 17)
+    drive['speed'][:2] = targets.speed_class(30)
+    assert list(targets.night_frames(drive)[0]) == [False, False, True, True]
+
+
+def test_a_brain_learns_the_hours_only_when_a_frame_of_train_has_them():
+    targets = _targets()
+    assert not targets.hours_in_train([plated()])
+    assert targets.hours_in_train([with_hours(plated(), 22, 6)])
+    assert not targets.hours_in_train([with_hours(plated(partitions=['validation'] * 3), 22, 6)])
 
 
 def test_a_plate_counts_for_a_brain_only_on_frames_of_train():

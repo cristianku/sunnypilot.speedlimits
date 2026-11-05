@@ -43,7 +43,7 @@ from nnslr_tools.model_roles import (
     role_of,
 )
 from nnslr_tools.runs import RUN_NAME, RunsIndex
-from nnslr_tools.sign_types import class_parts
+from nnslr_tools.sign_types import class_hours, class_parts
 from nnslr_tools.signnet import CAR_BAND, CAR_STRIDE
 
 CAR_SCRIPT = 'scripts/send_to_car.sh'
@@ -205,6 +205,9 @@ def _check_plates(runs: RunsIndex, found: dict, classifier: dict) -> None:
     if not isinstance(classes, list) or not any(class_parts(name)[2] for name in classes):
         raise ValueError(f'the brain {brain["id"]} reads the plates of hours, and the classifier {classifier["id"]} has no '
                          'class with hours: choose a classifier that has one, or a brain trained without them')
+    if brain['hours'] and not any(class_hours(name) for name in classes):
+        raise ValueError(f'the brain {brain["id"]} reads which hours a plate says, and the classifier {classifier["id"]} has no '
+                         'class that says them: choose a classifier that has one, or a brain trained without them')
 
 
 def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:
@@ -241,7 +244,7 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
     weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
     if weights is None:
         raise ValueError(f'{entry["id"]} has no weights on this server')
-    return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root, 'plates': entry['plates']}
+    return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root, 'plates': entry['plates'], 'hours': entry['hours']}
 
 
 def export_brain(chosen: dict, folder: Path) -> None:
