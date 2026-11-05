@@ -1,6 +1,7 @@
 // Data › Speed review: what the page knows of a drive (GET /api/speed-review/drives/<route>, nnslr_tools.speed_review) and
 // the rules of its commands. A stretch is on the comma's clock, in ns. A stretch not examined has no row on the server:
-// its kph is the proposal, the limit the comma's vision held. A split lives here, as a cut in the list of the page, until
+// its kph is the proposal: the nearest limit to the driver's steady speed on free road (source 'driven'), elsewhere the limit
+// the comma's vision held. A split lives here, as a cut in the list of the page, until
 // one of its halves is saved: the server then clips what stays outside, and the cut is a boundary of its own.
 import type {DriveRow} from './drive-review';
 
@@ -15,6 +16,8 @@ export interface Stretch {
   known_ns: number | null;
   note: string;
   reviewer: string | null;
+  /** On a stretch not examined: 'driven' when the proposal comes from the speed held, absent when from the vision limit. */
+  source?: 'driven';
 }
 
 /** Roadworks a person marked, two taps on the frame shown: they say nothing of the speed and cut no stretch. */

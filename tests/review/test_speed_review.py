@@ -6,6 +6,7 @@ Every drive and label here is SYNTHETIC: made up by these tests. Nothing here is
 from __future__ import annotations
 
 import inspect
+import math
 import sqlite3
 import stat
 import sys
@@ -82,6 +83,91 @@ def test_a_flicker_at_the_start_of_a_drive_joins_the_stretch_after():
     # The first message comes a moment after the start of the logs: no stretch of a tenth of a second to answer for.
     assert speed_review.proposals(merged([(at(0.1), 80.0), (at(100), 60.0)])) == [
         {'start_ns': T0, 'end_ns': at(100), 'kph': 80}, {'start_ns': at(100), 'end_ns': END, 'kph': 60}]
+
+
+def road(speeds, leads=((T0, False),), turn_from=None, vision=((T0, 120.0),)):
+    """A drive with a speed, a car ahead or not, and a GPS track a fix a second, straight until turn_from, in a tight
+    curve after it."""
+    lat, lon, heading, gps = 47.0, 8.0, 0.0, []
+    for second in range(300):
+        if turn_from is not None and second >= turn_from:
+            heading += 0.2
+        lat, lon = lat + 0.0002 * math.cos(heading), lon + 0.0003 * math.sin(heading)
+        gps.append([at(second), round(lat, 6), round(lon, 6), 0])
+    return {'t0': T0, 'span': [T0, END], 'gps': gps,
+            'series': {'vis_limit': [list(point) for point in vision], 'v_ego': [list(point) for point in speeds],
+                       'lead_present': [list(point) for point in leads]}}
+
+
+def test_a_steady_speed_on_free_road_proposes_the_nearest_limit():
+    assert speed_review.driven(road([(T0, 78.0)])) == [{'start_ns': at(2), 'end_ns': END, 'source': 'driven', 'kph': 80}]
+
+
+@pytest.mark.parametrize('kph, limit', [(25.5, 30), (54.0, 50), (85.0, 80), (86.0, 90), (127.0, 130), (160.0, 130)])
+def test_the_limit_proposed_is_the_nearest_and_a_tie_goes_down(kph, limit):
+    assert [run['kph'] for run in speed_review.driven(road([(T0, kph)]))] == [limit]
+
+
+@pytest.mark.parametrize('changes', [
+    {'speeds': [(T0, 20.0)]},
+    {'speeds': [(at(second), 80.0 + 7 * (second % 2)) for second in range(0, 300, 1)]},
+    {'speeds': [(T0, 78.0)], 'leads': [(T0, True)]},
+    {'speeds': [(T0, 78.0)], 'leads': [(T0, None)]},
+    {'speeds': [(T0, 78.0)], 'leads': []},
+    {'speeds': [(T0, 78.0)], 'turn_from': 0},
+])
+def test_no_free_road_proposes_nothing(changes):
+    assert speed_review.driven(road(**changes)) == []
+
+
+def test_a_run_too_short_proposes_nothing():
+    leads = [(T0, True), (at(50), False), (at(50 + speed_review.STEADY_SECONDS - 1), True)]
+    assert speed_review.driven(road([(T0, 78.0)], leads=leads)) == []
+
+
+def test_a_car_ahead_or_a_curve_ends_the_free_road():
+    runs = speed_review.driven(road([(T0, 78.0)], leads=[(T0, False), (at(100), True), (at(150), False)], turn_from=250))
+    assert [(run['start_ns'], run['kph']) for run in runs] == [(at(2), 80), (at(150), 80)]
+    assert runs[0]['end_ns'] == at(100) and at(245) < runs[1]['end_ns'] < at(252)
+
+
+def test_a_track_with_a_hole_says_nothing_of_the_road_in_the_hole():
+    drive = road([(T0, 78.0)])
+    drive['gps'] = [fix for fix in drive['gps'] if not at(100) <= fix[0] < at(160)]
+    assert [run['end_ns'] for run in speed_review.driven(drive)][0] <= at(104)
+
+
+def test_the_driven_proposal_goes_over_the_vision_limit_and_the_vision_limit_stays_elsewhere():
+    drive = road([(T0, 78.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
+    laid = speed_review.with_driven(speed_review.proposals(drive), speed_review.driven(drive), SPAN)
+    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [
+        (T0, at(100), 120, None), (at(100), at(200), 80, 'driven'), (at(200), END, 120, None)]
+
+
+def test_where_vision_and_the_driver_agree_it_is_one_stretch_of_vision():
+    drive = road([(T0, 118.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
+    laid = speed_review.with_driven(speed_review.proposals(drive), speed_review.driven(drive), SPAN)
+    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [(T0, END, 120, None)]
+
+
+def test_a_sliver_of_vision_between_two_runs_joins_the_stretch_before():
+    runs = [{'start_ns': at(0), 'end_ns': at(100), 'kph': 80, 'source': 'driven'},
+            {'start_ns': at(103), 'end_ns': at(300), 'kph': 80, 'source': 'driven'}]
+    laid = speed_review.with_driven(speed_review.proposals(merged([(T0, 120.0)])), runs, SPAN)
+    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [(T0, END, 80, 'driven')]
+
+
+def test_a_driven_proposal_is_shown_stored_nowhere_and_a_person_confirms_it(store):
+    drives = FakeDrives()
+    drives.merged = lambda route: road([(T0, 78.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
+    view = speed_review.drive_view(store, drives, ROUTE)
+    shown = next(item for item in view['stretches'] if item.get('source') == 'driven')
+    assert (shown['kph'], shown['state']) == (80, 'not_examined') and view['examined_s'] == 0
+    assert store.stretches(ROUTE) == [] and store.revision(ROUTE) == 0
+    body = {'start_ns': shown['start_ns'], 'end_ns': shown['end_ns'], 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
+    view = speed_review.save(store, drives, ROUTE, body, 'someone')
+    saved = next(item for item in view['stretches'] if item['start_ns'] == shown['start_ns'])
+    assert (saved['kph'], saved['state'], saved['reviewer']) == (80, 'confirmed', 'someone') and 'source' not in saved
 
 
 def test_saved_stretches_cut_the_proposals_and_the_whole_drive_stays_covered():

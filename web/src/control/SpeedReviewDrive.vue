@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Data › Speed review, a drive opened ("/speed-review?drive=<route>"): the player of Drive review (DriveReviewDrive.vue)
-// with one lane more, the speed to hold, and the commands at its side. The proposal is the limit the comma's vision held,
-// and a person says what the speed to hold really was (speed_review.py). Every command saves at once and acts on the
+// with one lane more, the speed to hold, and the commands at its side. The proposal is the limit nearest to the steady speed
+// on free road, elsewhere the limit the comma's vision held, and a person says what the speed to hold really was
+// (speed_review.py). Every command saves at once and acts on the
 // stretch under the time shown; Yes and Can't tell go on to the next stretch nobody looked at. In a stuck limit the right
 // change is inside the stretch: Split here cuts it at the time shown, and saving one half makes the cut real. Roadworks
 // are marked next to the speed, two taps on the frame shown, and cut no stretch; a third tap says that the drive was gone
@@ -193,7 +194,7 @@ function worksIn(from: number, to: number) {
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" back-label="Speed review" no-episodes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The speed to hold: dashed, what the comma's vision held, nobody looked at it yet; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks; grey line: gone through for roadworks">
+      <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from your steady speed on free road or from the comma's vision; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks; grey line: gone through for roadworks">
         <span class="dr-lane-name">To hold<small>review</small></span>
         <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
           <g v-for="run in runs(from, to)" :key="run.key">
@@ -225,7 +226,7 @@ function worksIn(from: number, to: number) {
             <span class="sr-tag" :class="'sr-tag-' + piece.state">{{ STATE_LABEL[piece.state] }}</span>
           </div>
           <p class="dr-hint">{{ clockOf(secondOf(piece.start_ns)) }}–{{ clockOf(secondOf(piece.end_ns)) }}
-            <template v-if="piece.state === 'not_examined'"> · {{ piece.kph === null ? 'the comma\'s vision held none' : 'held by the comma\'s vision' }}</template>
+            <template v-if="piece.state === 'not_examined'"> · {{ piece.source === 'driven' ? 'your steady speed on a free road' : piece.kph === null ? 'the comma\'s vision held none' : 'held by the comma\'s vision' }}</template>
             <template v-else-if="piece.reviewer"> · {{ piece.reviewer }}</template></p>
           <p class="dr-hint">The cap on a free road: queues, curves and stops stay with the planner.</p>
 

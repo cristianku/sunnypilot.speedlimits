@@ -17,8 +17,11 @@ stays the same if a new scan moves the start of the drive:
   alone never counts as approved.
 
 The proposal (proposals) is the limit the comma's vision held, in runs rounded to 5 km/h, a run under MERGE_SECONDS
-joined to the one before (the first one of a drive to the one after). It is worked out when a drive is shown and never
-stored. OpenStreetMap is never a proposal.
+joined to the one before (the first one of a drive to the one after). On free road the driver's own speed goes over it
+(driven, with_driven): no car ahead, no curve, the speed steady for STEADY_SECONDS, and the proposal is the nearest limit
+(78 km/h held proposes 80). A car ahead, a curve or a series not in the log is no free road: there the vision limit stays.
+It is worked out when a drive is shown and never stored, so a proposal is an answer only once a person says yes to it.
+OpenStreetMap is never a proposal.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
 on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI). One write (apply)
@@ -42,9 +45,12 @@ drive_review.sqlite holds what a scan can make again, this holds what only a per
 """
 from __future__ import annotations
 
+import bisect
 import contextlib
+import math
 import os
 import sqlite3
+import statistics
 import threading
 from pathlib import Path
 from typing import Iterator
@@ -57,6 +63,16 @@ NS = 1_000_000_000
 # A run of the vision limit shorter than this joins the one before, or at the start of a drive the one after: it is a
 # flicker, not a stretch of road.
 MERGE_SECONDS = 5
+# The driven proposal: how long and how steady a speed has to be, and what is still straight (the sideways acceleration
+# the GPS track gives, m/s^2). The track is read over TURN_FIXES fixes on each side, about a second apart; a gap in it
+# longer than MAX_TRACK_GAP_S says nothing of the road.
+STEADY_SECONDS = 15
+STEADY_KPH = 6
+MIN_DRIVEN_KPH = 25
+STRAIGHT_LATERAL = 1.0
+TURN_FIXES = 2
+MAX_TRACK_GAP_S = 3
+LIMITS_KPH = range(30, 140, 10)
 GRID_KPH = 5
 MAX_KPH = 200
 MAX_NOTE = 500
@@ -131,6 +147,76 @@ def proposals(merged: dict | None) -> list[dict]:
     return [{'start_ns': first, 'end_ns': stop, 'kph': kph} for first, stop, kph in joined]
 
 
+def _turn_rates(gps: list[list]) -> list[tuple[int, float]]:
+    """(t, rad/s) along the GPS track: the heading into a fix against the heading out of it."""
+    def heading(a: list, b: list) -> float:
+        return math.atan2((b[2] - a[2]) * math.cos(math.radians(a[1])), b[1] - a[1])
+
+    rates = []
+    for before, here, after in zip(gps, gps[TURN_FIXES:], gps[2 * TURN_FIXES:]):
+        seconds = (after[0] - before[0]) / NS
+        if seconds <= 2 * TURN_FIXES * MAX_TRACK_GAP_S:
+            turn = (heading(here, after) - heading(before, here) + math.pi) % (2 * math.pi) - math.pi
+            rates.append((here[0], abs(turn) / (seconds / 2)))
+    return rates
+
+
+def _steady_runs(seconds: list[tuple[int, float | None]]) -> Iterator[list[tuple[int, float]]]:
+    """The runs of (t, kph) that stay inside STEADY_KPH; a second with no speed ends one."""
+    run: list[tuple[int, float]] = []
+    low = high = 0.0
+    for t, kph in seconds:
+        if run and (kph is None or max(high, kph) - min(low, kph) > STEADY_KPH):
+            yield run
+            run = []
+        if kph is not None:
+            low, high = (min(low, kph), max(high, kph)) if run else (kph, kph)
+            run.append((t, kph))
+    if run:
+        yield run
+
+
+def driven(merged: dict | None) -> list[dict]:
+    """The stretches of free road where the driver held a steady speed, each proposing the limit nearest to it (a tie
+    goes to the lower one, kph is a cap). What the log does not say counts as not free."""
+    if merged is None or merged.get('t0') is None or merged['span'][1] is None:
+        return []
+    start, end = merged['t0'], merged['span'][1]
+    speeds, leads = merged['series'].get('v_ego') or [], merged['series'].get('lead_present') or []
+    rates = _turn_rates(merged.get('gps') or [])
+    speed_times, lead_times, rate_times = [p[0] for p in speeds], [p[0] for p in leads], [p[0] for p in rates]
+
+    def free_speed(t: int) -> float | None:
+        at_speed = bisect.bisect_right(speed_times, t) - 1
+        at_lead = bisect.bisect_right(lead_times, t) - 1
+        at_rate = bisect.bisect_right(rate_times, t) - 1
+        if min(at_speed, at_lead, at_rate) < 0 or leads[at_lead][1] is not False:
+            return None
+        kph = speeds[at_speed][1]
+        if kph is None or kph < MIN_DRIVEN_KPH or t - rate_times[at_rate] > MAX_TRACK_GAP_S * NS:
+            return None
+        return kph if kph / 3.6 * rates[at_rate][1] <= STRAIGHT_LATERAL else None
+
+    return [{'start_ns': run[0][0], 'end_ns': min(run[-1][0] + NS, end), 'source': 'driven',
+             'kph': min(LIMITS_KPH, key=lambda limit, kph=statistics.median(kph for _, kph in run): (abs(limit - kph), limit))}
+            for run in _steady_runs([(t, free_speed(t)) for t in range(start, end, NS)]) if len(run) >= STEADY_SECONDS]
+
+
+def with_driven(proposed: list[dict], runs: list[dict], span: tuple[int, int]) -> list[dict]:
+    """The proposals with the runs of driven on top: what the vision limit keeps under MERGE_SECONDS joins the stretch
+    before, neighbours of one speed are one stretch, and that one says driven only if nothing of it comes from vision."""
+    out: list[dict] = []
+    for item in partition(proposed, runs, span):
+        sliver = 'source' not in item and item['end_ns'] - item['start_ns'] < MERGE_SECONDS * NS
+        if out and (sliver or out[-1]['kph'] == item['kph']):
+            out[-1]['end_ns'] = item['end_ns']
+            if not sliver and 'source' not in item:
+                out[-1].pop('source', None)
+        else:
+            out.append(dict(item))
+    return out
+
+
 def partition(proposed: list[dict], saved: list[dict], span: tuple[int, int]) -> list[dict]:
     """The whole drive as stretches in time order: the saved ones, and in the gaps between them the proposals cut to
     the gap, not examined."""
@@ -140,8 +226,8 @@ def partition(proposed: list[dict], saved: list[dict], span: tuple[int, int]) ->
         for item in proposed:
             first, last = max(start, item['start_ns']), min(stop, item['end_ns'])
             if first < last:
-                out.append({'start_ns': first, 'end_ns': last, 'kph': item['kph'], 'state': 'not_examined',
-                            'known_ns': None, 'note': '', 'reviewer': None})
+                out.append({**item, 'start_ns': first, 'end_ns': last, 'state': 'not_examined', 'known_ns': None,
+                            'note': '', 'reviewer': None})
 
     at = span[0]
     for row in saved:
@@ -389,8 +475,10 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
         return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'works': [],
                 'works_checked_ns': None, 'examined_s': 0, 'total_s': 0}
     saved = store.stretches(route)
+    merged = drives.merged(route)
     return {'ok': True, 'route': route, 'revision': store.revision(route),
-            'stretches': partition(proposals(drives.merged(route)), saved, span), 'works': store.works(route),
+            'stretches': partition(with_driven(proposals(merged), driven(merged), span), saved, span),
+            'works': store.works(route),
             'works_checked_ns': store.works_checked(route),
             'examined_s': round(sum(row['end_ns'] - row['start_ns'] for row in saved) / NS, 1),
             'total_s': round((span[1] - span[0]) / NS, 1)}
