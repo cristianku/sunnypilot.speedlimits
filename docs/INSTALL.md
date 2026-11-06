@@ -190,7 +190,7 @@ scripts/install_review_service.sh
 
 The access token ends up in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, mode 600, ignored by git). Later updates: `helpers/update.sh`.
 
-The public page and the reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside.
+Reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh --public-hosts smartspeed.14bodhi.com` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside. The public page is not part of this site: the cluster's administrator deploys `docs/smartspeed/` from a commit.
 
 ## Reference machine
 

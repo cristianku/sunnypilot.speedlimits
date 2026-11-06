@@ -6,7 +6,7 @@
 <title>Smartspeed for sunnypilot</title>
 <meta name="description" content="Press cruise. The car works out the speed. A network with memory reads the signs, watches the road and sets the speed once a second, on a comma 4.">
 <meta name="theme-color" content="#000000">
-<link rel="icon" href="/product/icon.svg" type="image/svg+xml">
+<link rel="icon" href="product/icon.svg" type="image/svg+xml">
 <style>
 :root{
   --green:#7dcd32;--violet:#b026d4;--violet-line:#d27be8;--blue:#0071e3;--link-dark:#2997ff;
@@ -144,7 +144,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 </style>
 </head>
 <body>
-<script nonce="__NNSLR_NONCE__">document.documentElement.classList.add('js')</script>
+<script>document.documentElement.classList.add('js')</script>
 
 <nav class="bar" aria-label="Sections"><div>
   <strong>Smartspeed</strong>
@@ -161,7 +161,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <h1>Smart<span>speed</span></h1>
   <p class="lead">Press cruise. The car works out the speed.</p>
   <p class="sub">A network with memory reads the signs, watches the road and sets the speed once a second. Research build.</p>
-  <figure class="screen"><img src="/product/product-smartspeed-screen.jpg" width="1608" height="720"
+  <figure class="screen"><img src="product/product-smartspeed-screen.jpg" width="1608" height="720"
     alt="The comma 4 screen on a wet road: 48 km/h in the middle, and in the bottom right corner the word SMART in green beside a purple square with an eye and the number 50."></figure>
   <p class="note">The on-car screen, drawn to the sizes of its widgets over a real frame.</p>
   <div class="facts">
@@ -228,14 +228,14 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <p class="eyebrow rise">The portal</p>
   <h2 class="rise">Every drive, in one place.</h2>
   <p class="intro rise">Video and rlog in sync to the frame, with vision, map, resolver and openpilot state on one timeline. Disengagements and vision/map mismatches are found automatically. Labelling, training, regression and publish all run from there.</p>
-  <figure class="shot rise"><img src="/product/post-portal-timeline.png" width="1570" height="695" loading="lazy"
+  <figure class="shot rise"><img src="product/post-portal-timeline.png" width="1570" height="695" loading="lazy"
     alt="One drive on a timeline: rows for the speed to hold, vision, signs read, map, resolver, speed, openpilot state and scene, with red marks where vision and the marked speed disagree.">
     <figcaption>One drive, one timeline: the speed a person marked, what the comma read, what the map said, what the car did.</figcaption></figure>
   <div class="pair">
-    <figure class="shot rise"><img src="/product/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
+    <figure class="shot rise"><img src="product/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
       alt="Sign review: a country road with a round 60 sign in a yellow box, the crop of the sign on the right, and the drive's frames below.">
       <figcaption>Sign review. Every box a network learns from is confirmed here.</figcaption></figure>
-    <figure class="shot rise"><img src="/product/post-portal-networks.png" width="2360" height="1450" loading="lazy"
+    <figure class="shot rise"><img src="product/post-portal-networks.png" width="2360" height="1450" loading="lazy"
       alt="The Models page: a card for each network with its version, its measures and whether it is in the branch.">
       <figcaption>Models. Each network with its numbers, and what is in the branch.</figcaption></figure>
   </div>
@@ -271,7 +271,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 
 <footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>). An independent project, not made by comma.ai or sunnypilot.</p></footer>
 
-<script nonce="__NNSLR_NONCE__">
+<script>
 if (matchMedia('(prefers-reduced-motion: no-preference)').matches && 'IntersectionObserver' in window) {
   const seen = new IntersectionObserver((rows) => rows.forEach((row) => {
     if (row.isIntersecting) { row.target.classList.add('in'); seen.unobserve(row.target); }

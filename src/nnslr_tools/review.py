@@ -49,9 +49,8 @@ from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
                                        GuestAccess, guest_rule, scrubbed)
 # [guest-reviewers] - END
-from nnslr_tools.pages import (CONTROL_TABS, GUEST_HOME, OLD_ADDRESSES, PRODUCT_FILES, product_file, render_account,
-                               render_control, render_guest, render_index, render_login, render_problem, render_product,
-                               render_review)
+from nnslr_tools.pages import (CONTROL_TABS, GUEST_HOME, OLD_ADDRESSES, render_account, render_control, render_guest,
+                               render_index, render_login, render_problem, render_review)
 from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
@@ -487,8 +486,6 @@ def make_handler(app: ReviewApp):
             try:
                 # [guest-reviewers] - START
                 self.guest = None
-                if method == 'GET' and self._product():
-                    return
                 try:
                     self.guest = app.access.guest_of(self.client_address[0], self.headers)
                 except ReviewRejected as exc:
@@ -514,6 +511,9 @@ def make_handler(app: ReviewApp):
             api = path.startswith('/api/')
             # [guest-reviewers] - START
             if self.guest is not None and self._guest_refused(method, path, api):
+                return
+            if self.guest is not None and path == '/':
+                self._redirect(GUEST_HOME, None)
                 return
             # [guest-reviewers] - END
             if not app.host_allowed(self.headers.get('Host')):
@@ -542,22 +542,6 @@ def make_handler(app: ReviewApp):
                 self._get(path)
 
         # [guest-reviewers] - START
-        def _product(self):
-            """The public page of the project, before anything about who asks: /product/ on every address and / on the
-            public names of the site. It holds nothing of the server. True when answered."""
-            path = urlsplit(self.path).path
-            if path in ('/product', '/product/') or (path == '/' and app.access.public_host(self.headers)):
-                nonce = secrets.token_urlsafe(18)
-                csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; img-src 'self'; "
-                       "base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-                self._send(200, 'text/html; charset=utf-8', render_product(nonce).encode('utf-8'), csp)
-                return True
-            name = path.removeprefix('/product/')
-            if name not in PRODUCT_FILES:
-                return False
-            self._send(200, PRODUCT_FILES[name], product_file(name), cache='public, max-age=86400')
-            return True
-
         def _guest_refused(self, method, path, api):
             """A guest's request against the table of what a guest may open and the work given to them, before anything
             else reads it; True when refused (answered). Their POSTs have the protections of every save: same origin,
@@ -2198,11 +2182,11 @@ def make_handler(app: ReviewApp):
             self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
             self.send_header('Content-Security-Policy', csp)
 
-        def _send(self, status, content_type, body, csp=DEFAULT_CSP, extra=None, cache='no-store'):
+        def _send(self, status, content_type, body, csp=DEFAULT_CSP, extra=None):
             self.send_response(status)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(body)))
-            self._security_headers(csp, cache)
+            self._security_headers(csp)
             if extra is not None:
                 for name, value in extra:
                     self.send_header(name, value)

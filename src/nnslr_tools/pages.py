@@ -82,9 +82,6 @@ SECTION_ICONS = {
     'models': '<path d="M12 3.5 19.5 7.7v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.8 7.9 12 12l7.2-4.1M12 12v8.3"/>',
 }
 # Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review).
-# The files of the public page of the project (web/product) that the site serves, and their types.
-PRODUCT_FILES = {'icon.svg': 'image/svg+xml', 'post-portal-networks.png': 'image/png', 'post-portal-timeline.png': 'image/png',
-                 'product-portal-sign.jpg': 'image/jpeg', 'product-smartspeed-screen.jpg': 'image/jpeg'}
 # The home of a reviewer from outside. / cannot be: on the public names it is the page of the project, open to all, and
 # what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
 GUEST_HOME = '/reviews'
@@ -246,16 +243,6 @@ def render_control(nonce: str, tab: str) -> str:
 
 
 # [guest-reviewers] - START
-def render_product(nonce: str) -> str:
-    """The public page of the project (web/product/index.html): no frame of the site, nothing of the server."""
-    return asset('product/index.html').replace('__NNSLR_NONCE__', nonce)
-
-
-def product_file(name: str) -> bytes:
-    """A picture of the public page, by its name in PRODUCT_FILES."""
-    return files('nnslr_tools').joinpath('web').joinpath('product').joinpath(name).read_bytes()
-
-
 def render_guest(nonce: str) -> str:
     """The site of a reviewer from outside: their list and the pages of their drives, one app (web/src/control/GuestApp.vue)
     in the frame of the control pages. It holds no data: all comes from the calls the guest may make."""

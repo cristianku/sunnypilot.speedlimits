@@ -124,9 +124,9 @@ On the LAN the site asks you to sign in with a **name and password** (pages, pan
 
 ### The public page: smartspeed.14bodhi.com
 
-`https://smartspeed.14bodhi.com/` shows the project to anyone, with no sign-in. The same page is at `/product/` on every address of the site, the LAN included, so you can read it there before it goes out. It lives in `src/nnslr_tools/web/product/`, with its pictures: a new picture goes in `PRODUCT_FILES` of `pages.py` too, or the site does not serve it.
+`https://smartspeed.14bodhi.com/` shows the project to anyone, with no sign-in. It is the only address from outside, and Traefik on raspy picks the machine by path: `/` and `/product/*` go to a small static nginx container on raspy, open to all, and everything else goes through Authentik to this site. So after **Sign in** (`/reviews`) the machine changes and the address does not. A reviewer lands on **My reviews**; an account that is not in `reviewers` gets "Access denied", with the way back to the public page and Sign out.
 
-Its **Sign in** button opens `/reviews`: the proxy asks for the Authentik account and comes back to **My reviews**. An account that is not in `reviewers` gets "Access denied", with the way back to the page and Sign out. On the LAN the same button leads to your Overview. Without the proxy's proof, the public name opens the page and its pictures and answers 403 to everything else.
+The page is in `docs/smartspeed/`, the only copy: `index.html`, and its pictures in `product/`. To change it, commit there and tell the cluster's administrator the commit, who deploys it. This site does not serve it.
 
 ### People from outside: the reviewers
 
@@ -321,7 +321,7 @@ A review can be done by hand, or by an AI that sees the images, through any serv
 | Access token of the site (the place to look for it) | `.env` of the repository, line `NNSLR_REVIEW_TOKEN=` |
 | Copy of the token the service reads | `/etc/speedlimits-web.env` |
 | Reviewers from outside and their work | `web/auth/assignments.json` of the data folder, set in Data › Reviewers |
-| The public page of the project | `src/nnslr_tools/web/product/`, at `/product/` and at `/` of the public name |
+| The public page of the project | `docs/smartspeed/`, deployed by the cluster's administrator from a commit |
 | Mapillary client token, for the positions of the Mapillary photos | `.env` of the repository, line `MAPILLARY_TOKEN=` |
 | Positions of the Mapillary photos (`nnslr mapillary-locations`) | `data/external/mapillary/locations.jsonl`, with `image_ids.csv` beside it |
 | Windows of the Mapillary photos for the cutter (`nnslr mapillary-windows`) | `data/external/mapillary/windows.jsonl`, the pictures in `data/external/mapillary/windows/train/` |
