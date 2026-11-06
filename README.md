@@ -8,6 +8,8 @@
 
 > **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. **Smartspeed**, a mode in sunnylink next to the factory ones, turns them on. The brain then chooses the speed, the map fills in where vision has none, and the car's set speed is only on and off. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
+> **Reviewers wanted.** We're looking for people to help label the drives: confirming the speed signs, saying what kind of road each scene shows, and marking the speed that makes sense on a stretch. It all happens in the browser, on the drives you're given. Sign up at [smartspeed.14bodhi.com](https://smartspeed.14bodhi.com).
+
 [Why](#why) · [The brain](#the-brain) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
 ## Why
@@ -380,7 +382,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
 ### How you can help
 
 - **Drives** on new roads, in other countries, at dusk, at night, in rain, or from a comma 3X. Recordings are private, so please [open an issue](https://github.com/cristianku/sunnypilot.speedlimits/issues) first.
-- **Reviewing.** Confirmations by a person are the most valuable labels.
+- **Reviewing.** Confirmations by a person are the most valuable labels: signs, road scenes, the speed of each stretch. [Sign up here](https://smartspeed.14bodhi.com).
 - **The load on the comma 4.** Measuring how much room the networks leave next to the driving model.
 - **Country rules.** How signs are read where you drive (town entries, motorway defaults, zones).
 - **Code and ideas.** Issues and pull requests are welcome.
