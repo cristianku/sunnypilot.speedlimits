@@ -6,7 +6,7 @@
 
 <sub>The review page. You check the box around each sign, and what the sign says.</sub>
 
-> **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. One choice in sunnylink turns them on: **Smartspeed**. The brain then chooses the speed, the map fills in where vision has none, and the car's set speed is only on and off. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
+> **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. **Smartspeed**, a mode in sunnylink next to the factory ones, turns them on. The brain then chooses the speed, the map fills in where vision has none, and the car's set speed is only on and off. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
 [Why](#why) · [The brain](#the-brain) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
@@ -116,7 +116,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 
 **Speed Limit Assist** (sunnypilot's, changed on `speed-limits` for cars like the Peugeot, with openpilot longitudinal and the car's own cruise)
 
-- **Smartspeed** (sunnylink, 5 Nov 2026) is the one choice, Off or Smartspeed (`SpeedLimitMode` 3), with no separate settings: there is no more Speed Limit Source to pick, and Information and Warning are gone. It starts speedvisiond, shows the fuchsia square and uses **Map Data + Vision** (`SpeedLimitPolicy` 5): the brain's limit, or the map's when it has none. A source without the network moves to that one by itself. With Smartspeed off, **Show Vision Reading** still shows the square, for information only.
+- **Smartspeed** (sunnylink, 6 Nov 2026) is the fifth mode, after the factory Off, Information, Warning and Assist (`SpeedLimitMode` 4), which work as they did and keep their Speed Limit Source: map, car, or vision. It starts speedvisiond, shows the fuchsia square and uses **Map Data + Vision** (`SpeedLimitPolicy` 5): the brain's limit, or the map's when it has none. A source without the network moves to that one by itself, and stays there after leaving Smartspeed until another source is picked. In the factory modes **Show Vision Reading** shows the square for information only, above the factory limit.
 - Automatic on every car: the limit applies as soon as it is known. No confirmation and no set speed of 120/130 to confirm with (the Peugeot has no button for it).
 - The set speed is only on and off, never the target: the car drives to the limit, also above the set speed, keeps the last limit when it goes, and before any limit keeps the speed at engagement (40 km/h from a stop). Curves and a forced deceleration still win.
 - The driving screen shows the word **SMART**, pea green and see-through while it drives to a limit and grey without one, level with the bottom of the vision square and left of it, in the bottom right corner, and never the set speed. **+** or **-** on the car does nothing: the word blinks for a second to say so. The press that engages does not count.
