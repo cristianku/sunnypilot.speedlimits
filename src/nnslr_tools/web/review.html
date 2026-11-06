@@ -730,21 +730,19 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .page { padding-top: 0; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
   /* The photo first, edge to edge. */
   .stage { margin-left: calc(-1 * max(12px, env(safe-area-inset-left, 0px))); margin-right: calc(-1 * max(12px, env(safe-area-inset-right, 0px))); border: 0; border-radius: 0; box-shadow: none; }
-  /* Bar under the photo: nav and tools on one row, the state tag and the frame data on the next, the
-     second-reading switch (when the route has one) on a third. */
+  /* Bar under the photo: the four arrows on a row of their own, the filters, the state tag and the frame data, the
+     helpers and the tools together, the second-reading switch (when the route has one) last. */
   .stage-bar {
     display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 10px; row-gap: 8px; align-items: center;
-    grid-template-areas: "nav nav tools" "filters filters filters" "pill data data" "helpers helpers helpers" "hint hint hint";
+    grid-template-areas: "nav nav nav" "filters filters filters" "pill data data" "helpers helpers tools" "hint hint hint";
   }
-  .stage-helpers { grid-area: helpers; justify-self: start; margin-left: 0; }
-  .nav { grid-area: nav; justify-self: start; }
-  .nav .pos { min-width: 7ch; }
-  /* No room next to the tools: « » are in the bottom bar. */
-  .nav .btn.second { display: none; }
+  .stage-helpers { grid-area: helpers; justify-self: start; flex-wrap: wrap; margin-left: 0; }
+  .nav { grid-area: nav; justify-self: stretch; }
+  .nav .pos { flex: 1; min-width: 7ch; }
   /* The four arrows of the bottom bar at their touch size, Confirm the rest: its label still fits. */
   .mobile-buttons { gap: 6px; }
   .mobile-buttons .btn:not(.primary) { flex: 0 0 46px; padding: 0; }
-  .stage-tools .btn { padding-inline: 10px; }
+  .stage-helpers .btn, .stage-tools .btn { padding-inline: 10px; }
   .stage-tools { grid-area: tools; margin-left: 0; }
   #statePill { grid-area: pill; width: auto; height: 32px; }
   .stage-bar .data { grid-area: data; font-size: 13px; line-height: 1.4; }

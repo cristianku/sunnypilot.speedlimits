@@ -130,6 +130,9 @@ with sync_playwright() as p:
     for _ in range(3):
         phone.keyboard.press('ArrowRight')
     assert phone.locator('#mConfirmLabel').inner_text() == 'Confirm no sign'
+    # « » are in the box under the photo too, and the page stays as wide as the screen.
+    assert phone.locator('#prevSecond').is_visible() and phone.locator('#nextSecond').is_visible()
+    assert phone.evaluate('document.documentElement.scrollWidth - innerWidth') <= 0
 
     # Beside the zoom, the box as the classifier gets it: rounded outwards as on the car, following a corner dragged.
     # The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks nothing.
