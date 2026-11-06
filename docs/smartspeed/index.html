@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smartspeed for sunnypilot</title>
-<meta name="description" content="Press cruise. The car works out the speed. A network with memory reads the signs, watches the road and sets the speed once a second, on a comma 4.">
+<meta name="description" content="A research build of sunnypilot for the comma 4. You press cruise and the car picks its own speed: a small network with memory takes the signs the camera read, the road and the car's own signals, and says the speed to hold once a second.">
 <meta name="theme-color" content="#000000">
 <link rel="icon" href="product/icon.svg" type="image/svg+xml">
 <style>
@@ -159,109 +159,110 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 <header class="hero">
   <p class="eyebrow">For sunnypilot on the comma 4</p>
   <h1>Smart<span>speed</span></h1>
-  <p class="lead">Press cruise. The car works out the speed.</p>
-  <p class="sub">A network with memory reads the signs, watches the road and sets the speed once a second. Research build.</p>
+  <p class="lead">You press cruise and the car picks its own speed.</p>
+  <p class="sub">Two small networks read the signs. A third one, with memory, takes what they read, the road and what the car is doing, and says the speed to hold once a second. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
   <figure class="screen"><img src="product/product-smartspeed-screen.jpg" width="1608" height="720"
     alt="The comma 4 screen on a wet road: 48 km/h in the middle, and in the bottom right corner the word SMART in green beside a purple square with an eye and the number 50."></figure>
-  <p class="note">The on-car screen, drawn to the sizes of its widgets over a real frame.</p>
+  <p class="note">Mock-up, not a photo of the comma: the screen's widgets drawn at their real size over a real frame.</p>
   <div class="facts">
-    <div><b>Once a second</b><span>a new speed to hold</span></div>
-    <div><b>No speed rules</b><span>written by hand behind it</span></div>
-    <div><b>12 MB</b><span>for all three networks</span></div>
+    <div><b>1 Hz</b><span>speed out of the brain</span></div>
+    <div><b>5 Hz</b><span>sign finder and reader</span></div>
+    <div><b>12 MB</b><span>all three networks, ONNX</span></div>
   </div>
 </header>
 
 <section class="paper" id="why"><div class="wrap">
   <p class="eyebrow rise">Why</p>
-  <h2 class="rise">The limit is at the roadside. The map finds out later.</h2>
-  <p class="intro rise">Speed Limit Assist takes the limit from the car or from the map. Many cars send nothing on CAN, and maps lag behind the road: roadworks, variable motorway displays and new signs are often missing or wrong.</p>
-  <p class="intro rise">So the camera reads the signs. <b>The harder part is the road where a sign says nothing.</b></p>
+  <h2 class="rise">My car sends no limit, and the map is often out of date.</h2>
+  <p class="intro rise">sunnypilot's Speed Limit Assist takes the limit from the car or from the map. My 3008 sends nothing on CAN, like many cars, so the map is all it has, and maps miss roadworks, variable motorway signs and new signs. That's why I started reading the signs with the road camera.</p>
+  <p class="intro rise">A camera alone wasn't enough either. Signs get hidden or are meant for the exit, and on some roads no sign tells you the speed at all. These are the cases the brain has to learn, and it isn't there yet.</p>
   <div class="cards">
-    <article class="card rise"><h3>A limit with no end</h3><p>Motorway roadworks often have no end sign. Only something that sees the road can let that limit go.</p></article>
-    <article class="card rise"><h3>A ramp with nothing posted</h3><p>On the acceleration lane the ramp's limit stops counting, and no sign says so.</p></article>
-    <article class="card rise"><h3>A car park</h3><p>The limit of the road outside means nothing in there. A driver slows down without being told.</p></article>
+    <article class="card rise"><h3>A limit with no end sign</h3><p>Motorway roadworks often have none, and one missed end sign once held me at 80 for a whole stretch of motorway.</p></article>
+    <article class="card rise"><h3>After a motorway ramp</h3><p>The limit posted on the ramp stops counting on the acceleration lane, and nothing tells you so.</p></article>
+    <article class="card rise"><h3>Car parks</h3><p>The limit of the road outside doesn't apply in there, and usually no sign gives you another one.</p></article>
   </div>
 </div></section>
 
 <section class="dark" id="brain"><div class="wrap">
   <p class="eyebrow rise">The brain</p>
-  <h2 class="rise">One network decides the speed.</h2>
-  <p class="intro rise">It has memory, so it works the way a driver does. A sign is a strong hint, not the last word: it also sees the road, remembers what it has passed and knows what the car is doing. It never reads the map.</p>
+  <h2 class="rise">A small network with memory picks the speed.</h2>
+  <p class="intro rise">It's a frozen MobileNetV3-small with a GRU on top. Once a second it gets a 256×144 picture of the road, the number the sign reader confirmed, the car ahead, gas, brake, speed, the local hour and the country. It never reads the map, and what it says goes out unchanged as the vision limit.</p>
   <div class="flow rise">
     <ul class="inputs">
-      <li><b>Road camera</b><span>the picture, every second</span></li>
+      <li><b>Road camera</b><span>256×144, once a second</span></li>
       <li><b>Signs read</b><span>SignNet and the classifier</span></li>
       <li><b>The car</b><span>speed, gas, brake</span></li>
       <li><b>The car ahead</b><span>distance and speed</span></li>
       <li><b>Hour and country</b><span>from GPS</span></li>
     </ul>
     <div class="arrow"></div>
-    <div class="brain"><b>The brain</b><span>sees, remembers, decides</span></div>
+    <div class="brain"><b>The brain</b><span>MobileNetV3-small + GRU</span></div>
     <div class="arrow"></div>
     <div class="out"><div class="square">50</div><b>Speed to hold</b><span>once a second</span></div>
   </div>
-  <p class="aside rise">It is its own network. <span>openpilot's model still does the driving.</span></p>
+  <p class="aside rise">It's a separate network. <span>openpilot's model still does the driving.</span></p>
 </div></section>
 
 <section class="white" id="learn"><div class="wrap">
   <p class="eyebrow rise">How it learns</p>
-  <h2 class="rise">It learns from people, not from the map.</h2>
+  <h2 class="rise">I label the drives myself.</h2>
   <div class="cards steps">
-    <article class="card rise"><span class="num">1</span><h3>Drive</h3><p>The comma records the road and what the car does.</p></article>
-    <article class="card rise"><span class="num">2</span><h3>Mark</h3><p>In Speed review a person marks the speed really worth holding, stretch by stretch.</p></article>
-    <article class="card on rise"><span class="num">3</span><h3>Train</h3><p>The network says a speed for each moment of the drive, in order. The marked speed corrects it.</p></article>
-    <article class="card rise"><span class="num">4</span><h3>Publish</h3><p>A regression on certified drives, then the networks go into the branch the comma updates from.</p></article>
+    <article class="card rise"><span class="num">1</span><h3>Drive</h3><p>The comma records the video and the car's logs.</p></article>
+    <article class="card rise"><span class="num">2</span><h3>Mark</h3><p>In Speed review I go back through the drive and mark the speed each stretch allows, and where roadworks start and end. How fast I actually drove doesn't count.</p></article>
+    <article class="card on rise"><span class="num">3</span><h3>Train</h3><p>The network goes through each drive in order, and my marks are the answers. Each epoch half of the sign passages get number and answer swapped (50 and 60, 100 and 120), otherwise it learns the road and ignores the sign.</p></article>
+    <article class="card rise"><span class="num">4</span><h3>Publish</h3><p>Publish in the portal exports the networks to ONNX and rebuilds the branch. On the comma I check for updates and install.</p></article>
   </div>
 </div></section>
 
 <section class="paper" id="modes"><div class="wrap">
   <p class="eyebrow rise">In sunnylink</p>
-  <h2 class="rise">A fifth mode. Cruise is on and off.</h2>
-  <p class="intro rise">The factory modes stay as they are, with their choice of source: map, car or vision. Smartspeed sits next to them. In Smartspeed the set speed stops being a speed, and the cruise button only turns it on and off.</p>
+  <h2 class="rise">Smartspeed is a fifth mode.</h2>
+  <p class="intro rise">Off, Information, Warning and Assist work as before, each with its Speed Limit Source. In Smartspeed cruise only turns it on and off, + and - do nothing, and the car drives to what the brain says, even above the set speed. Curves still slow it down.</p>
   <div class="modes rise" role="img" aria-label="Speed limit modes: Off, Information, Warning, Assist, and Smartspeed selected">
     <span>Off</span><span>Information</span><span>Warning</span><span>Assist</span><span class="on">Smartspeed</span>
   </div>
-  <p class="small rise">While the brain runs, the map is not used. If the brain gives nothing, sunnypilot's resolver falls back to the map.</p>
+  <p class="small rise">The brain always gives a number, so while it runs the map isn't used. If it doesn't load, sunnypilot's resolver falls back to the map.</p>
 </div></section>
 
 <section class="dark" id="portal"><div class="wrap">
   <p class="eyebrow rise">The portal</p>
-  <h2 class="rise">Every drive, in one place.</h2>
-  <p class="intro rise">Video and rlog in sync to the frame, with vision, map, resolver and openpilot state on one timeline. Disengagements and vision/map mismatches are found automatically. Labelling, training, regression and publish all run from there.</p>
+  <h2 class="rise">I run all of it from a portal on my own server.</h2>
+  <p class="intro rise">Video and rlog play in sync, with vision, map, resolver and openpilot state on one timeline, and it finds disengagements and vision/map mismatches by itself. Labelling, training and publishing all start from there. There's also a regression tab to compare models on certified drives, but I haven't certified any drive yet.</p>
   <figure class="shot rise"><img src="product/post-portal-timeline.png" width="1570" height="695" loading="lazy"
     alt="One drive on a timeline: rows for the speed to hold, vision, signs read, map, resolver, speed, openpilot state and scene, with red marks where vision and the marked speed disagree.">
-    <figcaption>One drive, one timeline: the speed a person marked, what the comma read, what the map said, what the car did.</figcaption></figure>
+    <figcaption>A drive from before the brain: the speed I marked, what the comma read, what the map said and what the car did.</figcaption></figure>
   <div class="pair">
     <figure class="shot rise"><img src="product/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
       alt="Sign review: a country road with a round 60 sign in a yellow box, the crop of the sign on the right, and the drive's frames below.">
-      <figcaption>Sign review. Every box a network learns from is confirmed here.</figcaption></figure>
+      <figcaption>Sign review. About 15,000 frames confirmed so far, 6,000 by me and 9,000 by an AI review. SignNet and the classifier also pretrain on Mapillary.</figcaption></figure>
     <figure class="shot rise"><img src="product/post-portal-networks.png" width="2360" height="1450" loading="lazy"
       alt="The Models page: a card for each network with its version, its measures and whether it is in the branch.">
-      <figcaption>Models. Each network with its numbers, and what is in the branch.</figcaption></figure>
+      <figcaption>Models: each network with its numbers, and which run is in the branch.</figcaption></figure>
   </div>
 </div></section>
 
 <section class="white" id="specs"><div class="wrap">
-  <p class="eyebrow rise">Under the hood</p>
-  <h2 class="rise">Three small networks.</h2>
+  <p class="eyebrow rise">The networks</p>
+  <h2 class="rise">Three networks, 12 MB in total.</h2>
   <dl class="specs rise">
-    <div><dt>Sign finder</dt><dd><b>SignNet.</b> Looks at the top of the picture, where signs stand, 5 times a second, and finds up to 5 of them.</dd></div>
-    <div><dt>Sign reader</dt><dd><b>Classifier.</b> Reads each one: a speed, the end of a limit, another kind of sign, or not a sign at all. A number counts only when two pictures within 1.5 s agree.</dd></div>
-    <div><dt>Brain</dt><dd><b>A small vision network with memory.</b> A small picture, what the car is doing and what it remembers of the drive go in. One speed a second comes out.</dd></div>
-    <div><dt>Where it runs</dt><dd>On the comma 4, next to the driving model. The car never trains anything: that happens on a server.</dd></div>
-    <div><dt>Same on both sides</dt><dd>Training and car share one file that prepares the inputs. A brain trained with another version does not load.</dd></div>
+    <div><dt>Sign finder</dt><dd><b>SignNet.</b> Looks only at a band at the top of the picture, where signs stand, 5 times a second, and keeps up to 5 boxes.</dd></div>
+    <div><dt>Sign reader</dt><dd><b>Classifier.</b> Reads each box: a speed, the end of a limit, another kind of sign, or not a sign. One rule is still in code here: a number counts once two pictures within 1.5 s agree.</dd></div>
+    <div><dt>Brain</dt><dd><b>MobileNetV3-small and a GRU.</b> Its memory is 128 numbers. The sign's number also reaches the output directly, through a weight the GRU sets, because as a plain input the network ignored it. In training each drive's clock is shifted at random for now, so the hour tells it nothing yet.</dd></div>
+    <div><dt>Where it runs</dt><dd>On the comma 4's GPU, next to the driving model. Training runs on my server.</dd></div>
+    <div><dt>Same on both sides</dt><dd>Car and training load the same <code>brain_inputs.py</code>, and the car refuses a brain trained with an incompatible version.</dd></div>
   </dl>
 </div></section>
 
 <section class="paper" id="status"><div class="wrap">
   <p class="eyebrow rise">Where it stands</p>
-  <h2 class="rise">Research build. One car, one driver, one country.</h2>
+  <h2 class="rise">One car, one driver, under two hours of training data.</h2>
   <div class="numbers rise">
-    <div><b>84.6 %</b><span>of frames right on the test set, 676 frames from places kept out of training</span></div>
-    <div><b>66.6 %</b><span>on the validation set, 755 frames, also kept out</span></div>
-    <div><b>5,913</b><span>seconds of driving in training, under two hours</span></div>
+    <div><b>84.6 %</b><span>of frames match my marked speed on test: 676 frames from places kept out of training</span></div>
+    <div><b>66.6 %</b><span>on validation: 755 frames, also kept out</span></div>
+    <div><b>5,913</b><span>seconds of driving in training</span></div>
   </div>
-  <p class="intro rise">These numbers are offline, not from the road. The first brain was published on 6 November 2026. For now it mostly says what the sign says. Roadworks need more labelled sites, and that is where it has to do better than the sign.</p>
+  <p class="intro rise">These numbers are offline. On frames with a sign in force, simply copying the sign still does better: 90.8 % against 88.2 % on test, 93.1 % against 76.6 % on validation. On the training drives it gets 99.9 %, so for now it knows the roads it has seen far better than new ones. What's missing is more drives and more labelled roadworks.</p>
+  <p class="intro rise">On the road there's little so far. A first brain went on the car on 5 November and ran on one 15-minute drive. The brain these numbers come from was published on 6 November and has no drive in the portal yet.</p>
   <div class="links rise">
     <a href="https://github.com/cristianku/sunnypilot.speedlimits"><b>sunnypilot.speedlimits</b><span>The portal, the training, the tools</span></a>
     <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
