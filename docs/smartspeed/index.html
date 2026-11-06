@@ -37,7 +37,7 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:
   backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid rgba(255,255,255,.1);color:#f5f5f7}
 .bar div{max-width:var(--wide);margin:auto;padding:0 22px;height:48px;display:flex;align-items:center;gap:26px;font-size:13px}
 .bar strong{font-size:17px;font-weight:600;letter-spacing:-.01em;margin-right:auto}
-.bar a{text-decoration:none;opacity:.8}
+.bar a{text-decoration:none;opacity:.8;white-space:nowrap}
 .bar a:hover{opacity:1}
 .bar a.signin{opacity:1;background:var(--blue);color:#fff;padding:6px 14px;border-radius:999px;font-weight:500}
 .bar a.signin:hover{background:#0077ed}
@@ -129,6 +129,10 @@ h1 span{color:var(--green)}
 .links a:hover b{text-decoration:underline}
 .links b{display:block;color:var(--blue);font-weight:600;overflow-wrap:anywhere}
 .links span{display:block;color:var(--mute);font-size:15px;margin-top:4px}
+.join{display:flex;align-items:center;justify-content:space-between;gap:16px 32px;margin-top:18px;background:#fff;border-radius:20px;padding:22px 24px}
+.join p{color:var(--mute);font-size:15px}
+.join a{flex:none;background:var(--blue);color:#fff;text-decoration:none;font-weight:500;padding:8px 18px;border-radius:999px}
+.join a:hover{background:#0077ed}
 
 footer{background:var(--paper);color:var(--mute);font-size:13px;padding:0 22px 44px}
 footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padding-top:18px}
@@ -150,9 +154,13 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   .cards,.steps,.pair,.numbers,.links{grid-template-columns:minmax(0,1fr)}
   .facts{grid-template-columns:minmax(0,1fr);gap:20px;text-align:left}
   .bar .opt{display:none}
+  .join{flex-direction:column;align-items:flex-start}
   .specs div{grid-template-columns:minmax(0,1fr)}
   .inputs{grid-template-columns:minmax(0,1fr)}
   .inputs li:last-child{grid-column:auto}
+}
+@media (max-width:400px){
+  .bar div{gap:14px}
 }
 </style>
 </head>
@@ -166,7 +174,8 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <a class="opt" href="#portal">The portal</a>
   <a class="opt" href="#status">Status</a>
   <a href="https://github.com/commaai/openpilot">openpilot</a>
-  <a href="https://github.com/cristianku/sunnypilot.speedlimits">GitHub</a>
+  <a class="opt" href="https://github.com/cristianku/sunnypilot.speedlimits">GitHub</a>
+  <a href="mailto:smartspeed@14bodhi.com?subject=Sign%20up%20for%20Smartspeed&amp;body=Hi%20Cristian%2C%0A%0AI%27d%20like%20to%20help%20confirm%20the%20speed%20signs.%0A%0AName%3A%20%0AWhere%20I%20found%20this%3A%20%0A">Sign up</a>
   <a class="signin" href="/reviews">Sign in</a>
 </div></nav>
 
@@ -282,6 +291,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
     <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
     <a href="https://github.com/cristianku/openpilot/tree/psa-torque-sunny-testing"><b>openpilot, psa-torque-sunny-testing</b><span>What runs on my comma</span></a>
   </div>
+  <div class="join rise"><p>I need help confirming the speed signs. If you'd like to join, this opens a mail to me and I'll set up an account for you.</p><a href="mailto:smartspeed@14bodhi.com?subject=Sign%20up%20for%20Smartspeed&amp;body=Hi%20Cristian%2C%0A%0AI%27d%20like%20to%20help%20confirm%20the%20speed%20signs.%0A%0AName%3A%20%0AWhere%20I%20found%20this%3A%20%0A">Sign up</a></div>
 </div></section>
 
 <footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>) on top of sunnypilot and openpilot. Not made by comma.ai or the sunnypilot team.</p></footer>
