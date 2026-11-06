@@ -382,13 +382,12 @@ def brain_drive(root: Path, route: str, merged: dict) -> dict:
     import numpy as np
 
     from nnslr_tools.brain_targets import drive_frames, drive_inputs, memory_cuts
-    from nnslr_tools.drive_wipers import load_wipers
     from nnslr_tools.road_type_signs import load_signs
     frames = drive_frames(root, route, merged)
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
     record = load_signs(root, route)
     return {'route': route, 'frames': frames, 'ns': ns, 'cuts': memory_cuts(ns), 'partitions': ['train'] * len(frames),
-            'inputs': drive_inputs(frames, ns, merged, record['readings'] if record else None, root, load_wipers(root, route)),
+            'inputs': drive_inputs(frames, ns, merged, record['readings'] if record else None, root),
             'reader': record.get('fingerprint') if record else None, 'signs_read': record is not None}
 
 

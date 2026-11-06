@@ -136,11 +136,6 @@ def test_a_plate_for_wet_roads_has_a_group_of_its_own_and_leaves_the_plate_group
     assert list(fed(read(10.0, 'wet'), read(10.2, 'wet'), read(30.0, None, 50), read(30.2, None, 50)).plate_wet_row()) == [0]
 
 
-@pytest.mark.parametrize('state, row', [(None, [0, 0, 0, 0, 0]), (0, [1, 0, 0, 0, 1]), (1, [0, 1, 0, 0, 1]), (3, [0, 0, 0, 1, 1])])
-def test_the_wipers_say_their_state_or_nothing(state, row):
-    assert list(_car()[0].wipers_row(state)) == row
-
-
 def test_the_hours_of_a_plate_are_those_of_the_number_confirmed():
     brain, _ = _car()
     read = lambda now, hours, number=30: (now, (f'maximum_speed_hours:{number}', .9, 'time', hours))  # noqa: E731
@@ -199,8 +194,7 @@ def test_a_group_has_the_size_it_says():
     signs = fed((10.0, ('maximum_speed:80', .9)))
     rows = {'signs': signs.features(10.0), 'plate': signs.plate_row(), 'hour': brain.hour_row(12.0),
             'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH'), 'pedals': brain.PedalInputs().row(10.0),
-            'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row(),
-            'wipers': brain.wipers_row(0)}
+            'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row()}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 

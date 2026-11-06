@@ -1427,7 +1427,7 @@ export interface BrainNumbers {
 /** The brain of a run of nnslr train-brain: it says the speed to hold, and on the car it is the vision limit. */
 export interface BrainModel extends ModelBase {
   role: 'brain';
-  /** What it is given beside the picture (signs, plate, plate_hours, plate_wet, wipers, hour, lead, country). */
+  /** What it is given beside the picture (signs, plate, plate_hours, plate_wet, hour, lead, country). */
   groups: string[] | null;
   /** It learnt the plates of hours: frames of train with a speed to answer had one. */
   plates: boolean;

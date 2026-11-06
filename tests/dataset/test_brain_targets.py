@@ -777,20 +777,14 @@ def test_a_plate_counts_for_a_brain_only_on_frames_of_train():
     assert not targets.plates_in_train([drive(plate, ['train', 'train'], answered=(1, 0))])
 
 
-WET_GROUPS = (*GROUPS, 'plate_wet', 'wipers')
+WET_GROUPS = (*GROUPS, 'plate_wet')
 
 
-def wet_plated(wipers=0, label=100, number=80, hours=(14.0, 14.0, 14.0), **given):
-    """A drive past a plate for wet roads, the wipers in this state on every frame."""
+def wet_plated(label=100, number=80, hours=(14.0, 14.0, 14.0), **given):
+    """A drive past a plate for wet roads."""
     drive = plated(hours=hours, label=label, number=number, plate=None, **given)
     drive['inputs']['plate_wet'][:] = 1
-    drive['inputs']['wipers'][:] = _targets().BRAIN_INPUTS.wipers_row(wipers)
     return drive
-
-
-def wet_copy(drive, groups=WET_GROUPS):
-    import random
-    return _targets().wet_copy(drive, groups, random.Random(0))
 
 
 def test_a_number_for_wet_roads_gives_its_number_and_its_plate():
@@ -801,109 +795,12 @@ def test_a_number_for_wet_roads_gives_its_number_and_its_plate():
     assert list(plates[1]) == [0, 0, 0, 1]
 
 
-def test_the_wipers_of_a_frame_are_those_of_its_moment_and_nothing_carries_over_a_gap():
-    np, targets = _np(), _targets()
-    frames = [{'segment': 0, 'index': index} for index in range(5)]
-    series = [[2, 0], [3, 2], [4, None]]
-    found = targets.drive_inputs(frames, np.array([1, 2, 3, 4, 5]), {'series': {}, 'gps': []}, None, None, series)['wipers']
-    assert list(found[:, -1]) == [0, 1, 1, 0, 0]
-    assert list(found[1]) == [1, 0, 0, 0, 1] and list(found[2]) == [0, 0, 1, 0, 1]
-    assert not targets.drive_inputs(frames, np.array([1, 2, 3, 4, 5]), {'series': {}, 'gps': []}, None, None)['wipers'].any()
-
-
-def test_the_copy_of_a_wet_plate_has_the_wipers_on_and_the_number_as_the_answer():
-    targets = _targets()
-    drive = wet_plated()
-    copy = wet_copy(drive)
-    assert (copy['speed'] == targets.speed_class(80)).all() and (copy['speed_weight'] == 1).all()
-    wipers = copy['inputs']['wipers']
-    assert (wipers[:, 0] == 0).all() and (wipers[:, 1:4].sum(axis=1) == 1).all() and (wipers[:, -1] == 1).all()
-    assert (copy['extra'][:, -5:] == wipers).all()
-    assert (drive['speed'] == targets.speed_class(100)).all() and (drive['inputs']['wipers'][:, 0] == 1).all()
-
-
-def test_on_a_wet_copy_every_other_frame_keeps_its_answer_so_the_wipers_alone_teach_no_slowing():
-    targets = _targets()
-    drive = wet_plated()
-    drive['inputs']['plate_wet'][0] = 0
-    copy = wet_copy(drive)
-    assert list(copy['speed']) == [targets.speed_class(100), targets.speed_class(80), targets.speed_class(80)]
-    assert (copy['speed_weight'] == 1).all() and (copy['works_weight'] == 1).all()
-    assert (copy['inputs']['wipers'][0] == copy['inputs']['wipers'][1]).all()
-
-
-@pytest.mark.parametrize('why, drive', [
-    ('the wipers were on: his label is already the answer', lambda: wet_plated(wipers=2)),
-    ('the wipers are not known', lambda: wet_plated(wipers=None)),
-    ('his speed is under the number', lambda: wet_plated(label=60)),
-    ('his speed is the number: it holds dry too', lambda: wet_plated(label=80)),
-    ('an end was read', lambda: wet_plated(ended=1)),
-    ('no frame of train', lambda: wet_plated(partitions=['validation'] * 3)),
-    ('no such class of the speed', lambda: wet_plated(number=83))])
-def test_no_wet_copy(why, drive):
-    assert wet_copy(drive()) is None, why
-
-
-def test_a_frame_with_the_number_as_his_speed_cancels_the_wet_copy_of_its_passage():
-    targets = _targets()
-    drive = wet_plated()
-    drive['speed'][0] = targets.speed_class(80)
-    assert not targets.wet_frames(drive)[0].any()
-
-
-def test_a_brain_without_both_inputs_has_no_wet_copy():
-    assert wet_copy(wet_plated(), ('signs', 'plate_wet')) is None
-    assert wet_copy(wet_plated(), ('signs', 'wipers')) is None
-
-
 @pytest.mark.parametrize('seed', range(8))
-def test_an_epoch_goes_through_the_drive_and_its_wet_copy(seed):
+def test_a_wet_plate_has_no_copy_since_the_picture_of_one_is_of_a_dry_road(seed):
     import random
-    np, targets = _np(), _targets()
+    targets = _targets()
     seen = targets.epoch_drives([wet_plated()], WET_GROUPS, random.Random(seed))
-    assert len(seen) == 2 and (seen[0]['speed'] != targets.speed_class(80)).all()
-    assert (seen[1]['speed'] == targets.speed_class(80)).all()
-    assert np.allclose(seen[0]['inputs']['hour'], seen[1]['inputs']['hour'])
-
-
-def test_half_of_an_epoch_goes_as_on_a_car_that_does_not_say_the_wipers():
-    import random
-    targets = _targets()
-    rng = random.Random(0)
-    seen = [targets.epoch_drives([wet_plated()], WET_GROUPS, rng)[0] for _ in range(200)]
-    assert 70 < sum(not one['inputs']['wipers'].any() for one in seen) < 130
-    assert all((one['extra'][:, -5:] == one['inputs']['wipers']).all() for one in seen)
-    assert all((one['inputs']['wipers'][:, 0] == 1).all() for one in seen if one['inputs']['wipers'].any())
-
-
-def test_a_wet_copy_keeps_the_wipers_on_and_comes_from_the_real_ones_whatever_the_drive_got():
-    import random
-    targets = _targets()
-    rng = random.Random(0)
-    for _ in range(50):
-        drive = wet_plated()
-        _, copy = targets.epoch_drives([drive], WET_GROUPS, rng)
-        assert (copy['inputs']['wipers'][:, -1] == 1).all() and (copy['inputs']['wipers'][:, 0] == 0).all()
-        assert (drive['inputs']['wipers'][:, 0] == 1).all()
-
-
-def test_a_night_copy_too_goes_with_the_wipers_unknown_half_of_the_time():
-    import random
-    targets = _targets()
-    rng = random.Random(0)
-    drive = plated()
-    drive['inputs']['wipers'][:] = targets.BRAIN_INPUTS.wipers_row(0)
-    groups = (*GROUPS, 'plate', 'wipers')
-    seen = [targets.epoch_drives([drive], groups, rng)[1] for _ in range(200)]
-    assert 70 < sum(not one['inputs']['wipers'].any() for one in seen) < 130
-
-
-def test_a_brain_without_the_wipers_gets_the_drive_as_it_is_and_draws_nothing_for_them():
-    import random
-    targets = _targets()
-    rng = random.Random(0)
-    drive, before = plated(), rng.getstate()
-    assert targets._wipers_unknown(drive, GROUPS, rng) is drive and rng.getstate() == before
+    assert len(seen) == 1 and (seen[0]['speed'] == targets.speed_class(100)).all()
 
 
 def test_a_brain_learns_the_wet_plate_only_when_a_frame_of_train_has_it():

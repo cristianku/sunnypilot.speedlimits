@@ -59,7 +59,7 @@ from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
 from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, NS, check_drives, class_kph, dataset, epoch_drives,
                                        hours_in_train, inputs_sha256, learning_pieces, loss_weights, night_frames, pack_inputs,
-                                       plates_in_train, read_split, sign_kph, swap_passages, swapped, wet_frames, wet_in_train)
+                                       plates_in_train, read_split, sign_kph, swap_passages, swapped, wet_in_train)
 from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 
 EPOCHS = 40
@@ -319,7 +319,6 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'hours': hours, 'wet': wet,
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
-    log(f'Frames with a wet answer: {sum(int(wet_frames(drive)[0].sum()) for drive in drives)}')
     history = []
     name = 'dry_run' if dry_run else f'brain_s{seed}'
     for epoch in range(epochs):

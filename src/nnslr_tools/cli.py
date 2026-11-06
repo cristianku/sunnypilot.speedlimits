@@ -1865,17 +1865,6 @@ def build_parser() -> argparse.ArgumentParser:
                                    "(scripts/run_regression.sh)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
-    p_wipers = sub.add_parser("drive-wipers", help="read the front wipers of the drives of Speed review from the raw CAN of "
-                                                   "their rlogs: derived/drive_wipers/<route>.json, the wipers input of "
-                                                   "the brain. Only a Peugeot or Citroën says them; a drive already "
-                                                   "read is not read again. On the CPU, needs .venv (capnp)")
-    p_wipers.add_argument("--certified", action="store_true",
-                          help="the drives certified in Models › Regression instead: what its brains need")
-    p_wipers.add_argument("--labelled", action="store_true", help="the drives of Speed review (the default)")
-    p_wipers.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
-                          help="processes (default: all the cores)")
-    p_wipers.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_wipers.set_defaults(func=_cmd_drive_wipers)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
                                                  "positions or road types, from their rlogs (deviceMotion/livePose yaw rate, carState "
                                                  "steering angle, blinkers and vEgo): derived/car_motion/<route>.json, "
@@ -3030,24 +3019,6 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}, "
               f"green boards at {', '.join(f'{t:.0f} s' for t in board_times(record)) or 'none'}", flush=True)
-    return 0
-
-
-def _cmd_drive_wipers(args: argparse.Namespace) -> int:
-    from nnslr_tools.brain_targets import read_labels
-    from nnslr_tools.drive_wipers import build_wipers
-    from nnslr_tools.preannotate import resolve_data_root
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    if args.certified:
-        from nnslr_tools import regression
-        routes = sorted(regression.certified(root))
-    else:
-        routes = sorted(read_labels(root))
-    records = build_wipers(root, routes, workers=args.workers or None, log=lambda line: print(line, flush=True))
-    for route, record in records.items():
-        states = {state for _, state in record['series'] if state is not None}
-        print(f"{route}: {len(record['segments'])} segments, " +
-              (f"wipers states {sorted(states)}" if record['series'] else "wipers unknown"), flush=True)
     return 0
 
 
