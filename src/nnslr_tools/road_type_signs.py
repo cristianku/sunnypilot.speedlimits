@@ -43,6 +43,8 @@ import hashlib
 import json
 import os
 import subprocess
+import time
+from collections import Counter
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -58,6 +60,8 @@ NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 RELEASE_MANIFEST = 'speed_limits.json'
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
 CACHE_VERSION = 2  # 2: the boards
+PROBE_ATTEMPTS = 4
+PROBE_PAUSE_S = 10
 CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
 VIDEO_FPS = 20
 # 20 fps / 5: the 4 frames a second of speedvisiond. Its PERIOD is 0.2 s, but it waits from a frame for the next one on the
@@ -187,11 +191,17 @@ def _worker_start(package: str, gpu: bool = False, classifier: str | None = None
 
 
 def _video_size(video: Path) -> tuple[int, int]:
-    output = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries',
-                             'stream=width,height', '-of', 'csv=p=0', str(video)],
-                            capture_output=True, text=True, check=True).stdout.strip()
-    width, height = (int(value) for value in output.split(',')[:2])
-    return width, height
+    """The size of a video. The videos are on the NAS, on a soft NFS mount: a read that fails there is tried again."""
+    command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of',
+               'csv=p=0', str(video)]
+    for attempt in range(PROBE_ATTEMPTS):
+        done = subprocess.run(command, capture_output=True, text=True)
+        if done.returncode == 0:
+            width, height = (int(value) for value in done.stdout.strip().split(',')[:2])
+            return width, height
+        if attempt + 1 < PROBE_ATTEMPTS:
+            time.sleep(PROBE_PAUSE_S)
+    raise RuntimeError(f'ffprobe cannot read {video}: {done.stderr.strip()}')
 
 
 def read_segment(task: tuple[str, int]) -> dict:
@@ -309,6 +319,27 @@ def load_signs(root: Path, route: str) -> dict | None:
     return json.loads(path.read_text(encoding='utf-8'))
 
 
+def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: list, classifier: Path | None,
+                package: Path) -> dict:
+    """The record of a drive read to the end, written to its cache."""
+    vision = load_vision(package)
+    segments.sort(key=lambda item: item['segment'])
+    readings = [(item['segment'] * SEGMENT_SECONDS + seconds, signs)
+                for item in segments for seconds, signs in item['signs']]
+    record = {'route': route, 'fingerprint': stamp, 'videos': videos,
+              'frames': {str(item['segment']): item['frames'] for item in segments},
+              'readings': [[round(t, 3), signs] for t, signs in readings],
+              'confirmed': confirmations(vision, readings),
+              'boards': board_confirmations(vision, readings),
+              'classifier': str(classifier) if classifier is not None else None}
+    path = cache_path(root, route)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix('.json.tmp')
+    temporary.write_text(json.dumps(record, separators=(',', ':')), encoding='utf-8')
+    temporary.replace(path)
+    return record
+
+
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
                 device: str = 'auto', classifier: Path | None = None, log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
@@ -333,6 +364,7 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
             f'SignNet and {which}, 4 frames a second, {workers} processes')
         results: dict[str, list] = {}
+        left = Counter(task[0] for task in tasks)
         gpu = device != 'cpu'
         with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start,
                                  initargs=(str(package), gpu, str(onnx) if onnx else None)) as pool:
@@ -340,28 +372,15 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
             for (route, _, _), result in zip(tasks, pool.map(read_segment, [(v, s) for _, s, v in tasks])):
                 results.setdefault(route, []).append(result)
                 done += 1
+                left[route] -= 1
+                # A drive is kept as soon as it is read: a failure further on does not cost it again.
+                if not left[route]:
+                    records[route] = _save_signs(root, route, results.pop(route), stamp, stamps[route], classifier, package)
                 if done == 1:
                     log('road-type signs: the networks on the ' + ('GPU' if result['gpu'] else 'CPU') + ', the video decoded'
                         ' on the ' + ('GPU (NVDEC)' if result['nvdec'] else 'CPU'))
                 if done % 25 == 0 or done == len(tasks):
                     log(f'road-type signs: {done}/{len(tasks)} segments')
-        vision = load_vision(package)
-        for route, segments in results.items():
-            segments.sort(key=lambda item: item['segment'])
-            readings = [(item['segment'] * SEGMENT_SECONDS + seconds, signs)
-                        for item in segments for seconds, signs in item['signs']]
-            record = {'route': route, 'fingerprint': stamp, 'videos': stamps[route],
-                      'frames': {str(item['segment']): item['frames'] for item in segments},
-                      'readings': [[round(t, 3), signs] for t, signs in readings],
-                      'confirmed': confirmations(vision, readings),
-                      'boards': board_confirmations(vision, readings),
-                      'classifier': str(classifier) if classifier is not None else None}
-            path = cache_path(root, route)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix('.json.tmp')
-            temporary.write_text(json.dumps(record, separators=(',', ':')), encoding='utf-8')
-            temporary.replace(path)
-            records[route] = record
     return records
 
 

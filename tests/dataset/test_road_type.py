@@ -4,6 +4,7 @@ are imported inside the tests: collecting the tests must leave numpy out (tests/
 import json
 from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1157,3 +1158,42 @@ def test_a_30_zone_is_in_town():
     assert transition_kind(zone, rural, classes) == 'town_exit'
     assert junction_area(zone, -1, {town, zone}) == 'town'
     assert junction_area(-1, rural, {town, zone}) == 'outside'
+
+
+def test_a_video_probe_that_fails_is_tried_again(monkeypatch):
+    from nnslr_tools import road_type_signs as signs
+    answers = [SimpleNamespace(returncode=1, stdout='', stderr='Input/output error'),
+               SimpleNamespace(returncode=0, stdout='1344,760\n', stderr='')]
+    monkeypatch.setattr(signs.subprocess, 'run', lambda *args, **kwargs: answers.pop(0))
+    monkeypatch.setattr(signs.time, 'sleep', lambda seconds: None)
+    assert signs._video_size(Path('fcamera.hevc')) == (1344, 760)
+    monkeypatch.setattr(signs.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(
+        returncode=1, stdout='', stderr='Input/output error'))
+    with pytest.raises(RuntimeError, match='Input/output error'):
+        signs._video_size(Path('fcamera.hevc'))
+
+
+def test_a_drive_read_to_the_end_is_kept_when_a_later_one_fails(tmp_path, monkeypatch):
+    from nnslr_tools import road_type_signs as signs
+
+    class Pool:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *error): return False
+        def map(self, function, tasks):
+            yield from ({'segment': segment, 'frames': 1, 'signs': [], 'gpu': False, 'nvdec': False}
+                        for _, segment in tasks[:1])
+            raise RuntimeError('the NAS went away')
+
+    video = tmp_path / 'fcamera.hevc'
+    video.write_bytes(b'x')
+    monkeypatch.setattr(signs, 'ProcessPoolExecutor', Pool)
+    monkeypatch.setattr(signs, '_videos', lambda root, route: {0: video})
+    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx: 'stamp')
+    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, 'confirmations', lambda vision, readings: [])
+    monkeypatch.setattr(signs, 'board_confirmations', lambda vision, readings: [])
+    with pytest.raises(RuntimeError):
+        signs.build_signs(tmp_path, ['first', 'second'], package=tmp_path, workers=1, log=lambda line: None)
+    assert signs.load_signs(tmp_path, 'first')['fingerprint'] == 'stamp'
+    assert signs.load_signs(tmp_path, 'second') is None
