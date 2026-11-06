@@ -18,7 +18,7 @@ from nnslr_tools.gps import positions_path
 from nnslr_tools.pages import CONTROL_TABS
 from nnslr_tools.review_access import (PROXY_SECRET_HEADER, Assignments, GuestAccess, guest_rule, scrubbed)
 from nnslr_tools.review_db import ReviewRejected
-from review_helpers import OTHER_ROUTE, ROUTE, TOKEN, RunningServer, json_of, make_report, page_body, sign_in
+from review_helpers import OTHER_ROUTE, ROUTE, TOKEN, RunningServer, json_of, make_report, page_body, real_previews, sign_in
 
 SECRET = 'proxy-secret-0123456789'
 PUBLIC_HOST = 'reviews.example'
@@ -322,6 +322,7 @@ def test_only_the_drives_and_the_kinds_given(outside):
     server, _ = outside
     assert server.request('GET', f'/route/{ROUTE}/', headers=proof())[0] == 200
     assert server.request('GET', f'/route/{ROUTE}/images/00000000.jpg', headers=proof())[0] == 200
+    assert server.request('GET', f'/route/{ROUTE}/small/images/00000000.jpg', headers=proof())[0] == 403
     assert server.request('GET', f'/route/{OTHER_ROUTE}/', headers=proof())[0] == 403
     assert server.request('GET', f'/route/{OTHER_ROUTE}/images/00000000.jpg', headers=proof())[0] == 403
     assert server.request('GET', f'/api/route/{OTHER_ROUTE}/reviews', headers=proof())[0] == 403
@@ -343,9 +344,11 @@ def test_work_taken_back_closes_at_once_and_a_person_removed_has_nothing(outside
     assert json_of(server.request('GET', '/api/reviewer/work', headers=proof())[2])['drives'] == []
 
 
-def test_my_list_holds_my_drives_by_date_with_their_pages(outside):
+def test_my_list_holds_my_drives_by_date_with_their_pages(outside, tmp_path):
     server, _ = outside
+    real_previews(tmp_path)
     server.app.assignments.set_work('ana', ROUTE, 'roads', True)
+    assert server.request('GET', f'/route/{ROUTE}/small/images/00000000.jpg', headers=proof())[0] == 200
     answer = json_of(server.request('GET', '/api/reviewer/work', headers=proof())[2])
     assert answer['user'] == 'ana' and [item['route'] for item in answer['drives']] == [ROUTE]
     assert [item['kind'] for item in answer['drives'][0]['work']] == ['signs', 'roads']

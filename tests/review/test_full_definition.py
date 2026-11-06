@@ -2,6 +2,7 @@
 ones: rows, pictures and boxes stay 1344 x 760, the frame as recorded stays beside each picture."""
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import subprocess
@@ -13,8 +14,8 @@ from PIL import Image
 
 from nnslr_tools import drives, video_frames
 from nnslr_tools.crop_cache import EXACT, WINDOW, build_crop_cache
-from nnslr_tools.media import (FRAME_SIZE, FULL_SIZE, extract_frames, extracted_frame_rows, full_picture,
-                               remove_picture, save_preview)
+from nnslr_tools.media import (FRAME_SIZE, FULL_SIZE, SMALL_WIDTH, extract_frames, extracted_frame_rows, full_picture,
+                               remove_picture, save_preview, small_jpeg)
 from review_helpers import ROUTE
 
 X265 = 'pools=1:frame-threads=1:log-level=error:bframes=0:keyint=20:min-keyint=20'
@@ -102,6 +103,17 @@ def test_nv12_comes_at_the_size_the_cutter_reads_or_as_recorded(segment):
     assert (width, height) == FRAME_SIZE and len(data) == width * height * 3 // 2
     data, width, height = video_frames.nv12_frame(video, 5, native=True)
     assert (width, height) == FULL_SIZE and len(data) == width * height * 3 // 2
+
+
+def test_a_small_picture_is_narrower_and_a_narrow_one_stays_as_wide(tmp_path):
+    Image.effect_noise(FULL_SIZE, 60).convert('RGB').save(tmp_path / 'full.jpg', quality=92)
+    small = small_jpeg(tmp_path / 'full.jpg')
+    with Image.open(io.BytesIO(small)) as picture:
+        assert picture.size == (SMALL_WIDTH, round(FULL_SIZE[1] * SMALL_WIDTH / FULL_SIZE[0]))
+    assert len(small) < (tmp_path / 'full.jpg').stat().st_size / 3
+    Image.new('RGB', (640, 360)).save(tmp_path / 'narrow.jpg')
+    with Image.open(io.BytesIO(small_jpeg(tmp_path / 'narrow.jpg'))) as picture:
+        assert picture.size == (640, 360)
 
 
 def test_the_preview_is_the_full_frame_when_there_is_one(tmp_path, full_video):

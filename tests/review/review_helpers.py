@@ -35,6 +35,13 @@ def proposal(index: int, segment: int = 0) -> dict:
             'applicability': 'unresolved', 'supplementary_panel': 'unknown', 'detection_id': f'{segment}/{index}/0'}
 
 
+def real_previews(root: Path, route: str = ROUTE) -> None:
+    """make_report's previews as real pictures, for what opens them."""
+    from PIL import Image
+    for preview in (root / 'derived/preannotations' / route).glob('*/images/*.jpg'):
+        Image.new('RGB', (64, 36)).save(preview, 'JPEG')
+
+
 def make_report(root: Path, route: str = ROUTE, run_id: str = RUN_ID, count: int = 3, keys=None) -> list[dict]:
     """Frames 0 and 2 have one speed proposal, frame 1 none. Returns the report rows.
 

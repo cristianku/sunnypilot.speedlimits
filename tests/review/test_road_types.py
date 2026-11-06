@@ -406,10 +406,11 @@ def test_a_correction_names_frames_of_the_drive_and_a_type(tmp_path):
 
 
 def test_the_drive_over_http(tmp_path):
-    from review_helpers import TOKEN, RunningServer, json_of, make_report, sign_in
+    from review_helpers import TOKEN, RunningServer, json_of, make_report, real_previews, sign_in
 
     from nnslr_tools.road_types import corrections_path
     make_report(tmp_path, ROUTE, count=6)
+    real_previews(tmp_path, ROUTE)
     _drive_of(tmp_path)
     server = RunningServer(tmp_path, token=TOKEN, require_token=True)
     address = f'/api/panel/road-types/{ROUTE}'
@@ -426,7 +427,7 @@ def test_the_drive_over_http(tmp_path):
         assert status == 200 and drive['route'] == ROUTE and drive['corrections'] == 0
         # The picture of each frame: the preview of its row in the report, by frame key.
         assert [(frame['key'], frame['image']) for frame in drive['frames'][:2]] == [
-            ('0/0', f'/route/{ROUTE}/images/00000000.jpg'), ('0/1', f'/route/{ROUTE}/images/00000001.jpg')]
+            ('0/0', f'/route/{ROUTE}/small/images/00000000.jpg'), ('0/1', f'/route/{ROUTE}/small/images/00000001.jpg')]
         assert server.request('GET', drive['frames'][1]['image'], headers=cookie)[0] == 200
         assert [frame['road_type'] for frame in drive['frames']] == ['motorway'] * 4 + [None] * 2
         assert drive['frames'][4]['basis'] == 'no gps' and not drive['frames'][4]['sure']

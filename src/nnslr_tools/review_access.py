@@ -79,6 +79,7 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     # Sign review.
     ('GET', r'/route/' + DRIVE + r'(/(index\.html)?)?', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/images/[0-9]{8}\.jpg', ('signs', 'roads')),
+    ('GET', r'/route/' + DRIVE + r'/small/images/[0-9]{8}\.jpg', ('roads',)),
     ('GET', r'/route/' + DRIVE + r'/video/' + FRAME + r'\.jpg', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/(reviews|live|busy(/[0-9]{1,7})?)', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/video/' + FRAME, ('signs',)),

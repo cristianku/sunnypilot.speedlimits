@@ -940,6 +940,10 @@ def make_handler(app: ReviewApp):
             if match:
                 self._send_image(match.group(1), match.group(2))
                 return
+            match = re.fullmatch(r'/route/([^/]+)/small(/images/[0-9]{8}\.jpg)', path)
+            if match:
+                self._send_small_image(match.group(1), match.group(2))
+                return
             match = re.fullmatch(r'/route/([^/]+)/video/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
             if match:
                 self._send_video_frame(match.group(1), int(match.group(2)), int(match.group(3)))
@@ -1227,15 +1231,39 @@ def make_handler(app: ReviewApp):
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
 
-        def _send_image(self, route, name):
+        def _image_file(self, route, name):
+            """The picture of a frame of this drive; None when there is none, answered."""
             try:
                 directory = app.view(route)[0]
             except (PreannotationError, ValueError, OSError):
                 self._problem(404, 'unknown_route', 'Unknown route, or route without a pre-annotation report.', False)
-                return
+                return None
             path = public_file(directory, name)
             if path is None:
                 self._problem(404, 'not_found', 'Image not found.', False)
+            return path
+
+        def _send_small_image(self, route, name):
+            """The picture of a frame made smaller, for Roads: the kind of road needs no signs, and a line may be slow."""
+            from nnslr_tools.media import small_jpeg
+            path = self._image_file(route, name)
+            if path is None:
+                return
+            try:
+                data = small_jpeg(path)
+            except OSError:
+                self._problem(404, 'not_found', 'Image not found.', False)
+                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/jpeg')
+            self.send_header('Content-Length', str(len(data)))
+            self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _send_image(self, route, name):
+            path = self._image_file(route, name)
+            if path is None:
                 return
             self.send_response(200)
             self.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')

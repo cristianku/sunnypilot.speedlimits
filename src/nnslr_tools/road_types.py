@@ -127,7 +127,8 @@ US_TOWN_MPH = 45
 TOWN_KPH = 50
 MPH = re.compile(r'([0-9]+) ?mph')
 TOWN_HIGHWAYS = ('residential', 'living_street')
-# The picture of a frame in its pre-annotation report (preview_path), served at /route/<route>/images/<8 digits>.jpg.
+# The picture of a frame in its pre-annotation report (preview_path), served at /route/<route>/images/<8 digits>.jpg, and
+# smaller at /route/<route>/small/images/<8 digits>.jpg, the one Roads shows: the kind of road needs no signs.
 PREVIEW = re.compile(r'images/[0-9]{8}\.jpg')
 # The drives of Data › Roads (summary) by data root: (every road-types file with its time and the time of its
 # corrections, the drives read from them). About 20,000 lines for 11 drives take a fifth of a second: read again only
@@ -565,7 +566,7 @@ def drive_view(root: Path, route: str, by_key: dict) -> dict:
     'types', 'reviewed', 'usable', 'cant_tell', 'to_review' (review_counts), 'corrections': how many, 'junctions': the intersections of the drive, the map's with a person's
     corrections over them (junctions.drive_marks: {'found', 'corrections', 'marks'})}; frames [] before nnslr road-types
     ran for it. by_key: the rows of the drive's pre-annotation report by frame key, whose preview_path names the picture
-    of the frame on the site (/route/<route>/images/<8 digits>.jpg)."""
+    of the frame on the site (/route/<route>/small/images/<8 digits>.jpg)."""
     from nnslr_tools.drives import drive_of
     from nnslr_tools.junctions import drive_marks
     lines = map_road_types(root, route)
@@ -575,7 +576,7 @@ def drive_view(root: Path, route: str, by_key: dict) -> dict:
     for line in lines:
         preview = (by_key.get(line['frame_key']) or {}).get('preview_path')
         frames.append({'key': line['frame_key'],
-                       'image': f'/route/{route}/{preview}' if isinstance(preview, str) and PREVIEW.fullmatch(preview)
+                       'image': f'/route/{route}/small/{preview}' if isinstance(preview, str) and PREVIEW.fullmatch(preview)
                        else None,
                        'road_type': line.get('road_type'), 'basis': line.get('basis'), 'sure': bool(line.get('sure')),
                        'reviewed': bool(line.get('reviewed'))})

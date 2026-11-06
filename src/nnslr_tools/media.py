@@ -17,6 +17,7 @@ import shutil
 import subprocess
 # [frame-provenance] - START
 import hashlib
+import io
 import struct
 import tempfile
 import zlib
@@ -32,6 +33,7 @@ from typing import Any, Sequence
 # as it was recorded stays beside each one (full_picture). Videos of any other size are never reduced.
 FRAME_SIZE = (1344, 760)
 FULL_SIZE = (2688, 1520)
+SMALL_WIDTH, SMALL_QUALITY = 960, 70  # small_jpeg: a fifth of the bytes of a full frame
 REDUCE_FILTER = f"scale={FRAME_SIZE[0]}:{FRAME_SIZE[1]}:flags=area"
 FULL_SUFFIX = ".full.jpg"
 # ffmpeg's JPEG quality (2 best .. 31): about the quality 92 of the report's previews.
@@ -393,6 +395,20 @@ def save_preview(image: Any, source: Path | str, path: Path) -> None:
         shutil.copyfile(full, path)
     else:
         image.save(path, quality=92)
+
+
+def small_jpeg(path: Path) -> bytes:
+    """A picture SMALL_WIDTH wide as JPEG bytes, for a page that looks at the scene and not at its signs. Made on every
+    request: a frame takes about 50 ms, and the browser keeps it."""
+    from PIL import Image
+    with Image.open(path) as image:
+        image.draft('RGB', (SMALL_WIDTH, 1))  # the JPEG decoded at half its size when that is still wide enough
+        picture = image.convert('RGB')
+    if picture.width > SMALL_WIDTH:
+        picture = picture.resize((SMALL_WIDTH, round(picture.height * SMALL_WIDTH / picture.width)), Image.BILINEAR)
+    found = io.BytesIO()
+    picture.save(found, 'JPEG', quality=SMALL_QUALITY)
+    return found.getvalue()
 
 
 def extract_frames(
