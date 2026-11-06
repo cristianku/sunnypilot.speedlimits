@@ -32,8 +32,9 @@ CANCELLATION = "cancellation"
 SHARE = 0.25
 # Below this side (frame pixels) a sign is left as it is: its stripes would not show.
 MIN_SIDE = 9
-# What each family becomes; the other families are never replaced, and neither is a box around a disc and its plate of
-# hours: the classifier's maximum_speed_hours:<number> has no style here, and a frame says its boxes (plate_boxes).
+# What each family becomes; the other families are never replaced, and neither is a box around a disc and its plate: the
+# classifier's maximum_speed_hours:<number> and maximum_speed_wet:<number> have no style here, and a frame says its boxes
+# (plate_boxes).
 STYLE_OF_FAMILY = {"maximum_speed": "fixed", "variable_display": "led"}
 # Of the round signs replaced, this share becomes the end of all restrictions (no number).
 ALL_RESTRICTIONS_SHARE = 0.15

@@ -82,7 +82,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - **Altro valore**, per i numeri che non ci sono tra quelli rapidi. Compare solo quando il tipo ammette un numero;
   - **Tipo**: Limite massimo, Fine limitazione, Illeggibile, Segnale variabile, Zona; più in piccolo Numero a terra, Altro cartello, Non è un cartello;
   - **Strada**: La nostra, Un'altra, Da chiarire;
-  - **Panel below**, always open: None, Hours (a limit valid only at some hours, such as the German 22-6), Other. With None and Other the box stays on the disc; with Hours it takes the disc and the plate, one box for both, and the page says so under the row. Under it **From** and **to** take the hours written on the plate, whole hours (22 and 6 for "22-6"): leave them empty when they cannot be read, or the plate has days, minutes or two ranges. Fit box (C, ⇧C) leaves such a box as it is;
+  - **Panel below**, always open: None, Hours (a limit valid only at some hours, such as the German 22-6), Wet (a limit valid only on a wet road, such as the German "bei Nässe"), Other. With None and Other the box stays on the disc; with Hours and Wet it takes the disc and the plate, one box for both, and the page says so under the row. Under it **From** and **to** take the hours written on the plate, whole hours (22 and 6 for "22-6"): leave them empty when they cannot be read, or the plate has days, minutes or two ranges. Fit box (C, ⇧C) leaves such a box as it is;
   - **Dettagli del cartello**, chiuso: visibilità, occlusione, pannello sotto, temporaneo, display variabile, note.
 - **Seconda lettura**: c'è solo sui fotogrammi che ne hanno una. Ogni voce indica tipo, valore, sicurezza, letture (A, B) e lato, con il pulsante **Usa**, che diventa **Già usato** quando quel cartello c'è già.
 - **Altro**, chiuso: sito fisico, incontro, esportazione JSONL, scorciatoie.
@@ -270,7 +270,7 @@ Più indicazioni:
   | `applicability` | `own_road`, `other_road`, `unresolved` |
   | `visibility` | `unknown`, `clear`, `partial`, `poor` |
   | `occlusion` | `unknown`, `none`, `partial`, `heavy` |
-  | `supplementary_panel` | `unknown`, `none`, `time` (hours, e.g. 22-6: one box around disc and plate), `present` (another panel: the box stays on the disc), `unresolved` |
+  | `supplementary_panel` | `unknown`, `none`, `time` (hours, e.g. 22-6: one box around disc and plate), `wet` (only on a wet road, e.g. "bei Nässe": one box around disc and plate), `present` (another panel: the box stays on the disc), `unresolved` |
   | `plate_hours` | with family `maximum_speed` and panel `time`: the hours on the plate, `22-6` (from-to, whole hours 0-23, no leading zero); null when they cannot be read, or the plate has days, minutes or two ranges |
   | `temporary`, `variable_display` | `true`, `false` oppure `null` |
   | `notes` | testo, anche vuoto; mai `null` |

@@ -234,7 +234,7 @@ On the review page a rough box is fitted to the sign under it in two ways:
 - **Fit box** (key **C**, and the chip under the sharp crop of the selected box; **Apply previous** does it by itself on the boxes it carries): **C** fits every box of the frame, whichever is selected (after **Apply previous**, after **Apply** of the AI, a box just drawn), except the boxes you moved or resized by hand since a fit last moved them, which stay where you put them; the chip fits only its own box, by hand or not. The server's CPU fits them in one request and well under a second, with no AI provider (`nnslr_tools.box_fit`: colour masks and grabCut ranked by a small tree model, edge and MSER candidates ranked by three tiny networks, their mean pulled back toward your box as far as it already agrees with it). On drives left out of the training of its weights it takes a rough box from a mean IoU of about 0.64 with the box a person drew to about 0.78 (the two constants of the mean and the pull-back were chosen once on boxes from the same drives, so the figure is a little optimistic). When it finds no better box (no sign there, or your box already right) or moves no side by a pixel, it says "No better box found: kept as it was" and leaves the box, and the frame, as they are. A fitted box is an unsaved change, saved only by your **Confirm**.
 - **Fit with AI** (**Shift+C**, the chip beside it): the AI reviewer of Settings fits the selected box, or every box of the frame when none is selected, one at a time. It is slower and needs a provider that passed its Test; use it when **Fit box** misses.
 
-Neither moves a box with **Panel below** on **Hours**: it holds the disc and the plate, and both fits look for the disc. The page says "The box takes the disc and the plate: kept as it is."
+Neither moves a box with **Panel below** on **Hours** or **Wet**: it holds the disc and the plate, and both fits look for the disc. The page says "The box takes the disc and the plate: kept as it is."
 
 Both work only for a browser that has signed in, or the site on 127.0.0.1; the token alone cannot fit boxes. At most two fits run at a time. The models are `src/nnslr_tools/box_fit/colour.npz` and `edges.npz`: `scripts/train_box_fit.sh` trains them again on every box people drew (CPU only, about 15 minutes), and the site uses them after its next restart.
 
@@ -257,6 +257,12 @@ To reach the car, in this order:
 7. Choose a seed on **Models** and **Publish** again.
 
 With no Hours label nothing changes: no such class, and the same classes as today.
+
+### A limit for wet roads (Panel below: Wet)
+
+An 80 with a plate saying it holds only on a wet road (the German "bei Nässe", or a cloud with rain) is another sign for the classifier: "Speed limit 80, when wet", the class `maximum_speed_wet:80`. In **Sign review** choose **Speed limit**, its number and **Panel below › Wet**, and draw one box around the disc and the plate, as for hours. The way to the car is the one of the hours, steps 1 to 5.
+
+With no Wet label nothing changes: no such class, and the same classes as today.
 
 ### Drives at full definition
 

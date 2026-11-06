@@ -512,8 +512,8 @@ def to_suggestion(answer: dict, boxes: list[dict], width: int, height: int) -> d
             elif _small(corrected):
                 warnings.append(f'{label}: the corrected box is smaller than 2 px: the old box stays')
             elif holds_plate(box):
-                # Rule 11 asks for the sign face: a box around a disc and its plate of hours would lose the plate.
-                warnings.append(f'{label}: the box holds a sign and its plate of hours: the old box stays')
+                # Rule 11 asks for the sign face: a box around a disc and its plate would lose the plate.
+                warnings.append(f'{label}: the box holds a sign and its plate: the old box stays')
             else:
                 pixels = corrected
         labels = _labels(item, box, label, warnings, keep_value=verdict == 'keep')

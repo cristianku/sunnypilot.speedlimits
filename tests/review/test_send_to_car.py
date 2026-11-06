@@ -409,6 +409,18 @@ def test_a_brain_that_reads_the_plates_goes_only_with_a_classifier_that_has_a_cl
     assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b1/brain'
 
 
+def test_a_class_for_wet_roads_is_no_class_with_hours(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    use_brain(data, brain_run(data, 'b1', result={'groups': ['signs', 'plate'], 'seed': 1, 'plates': True, 'history': [{}],
+                                                  'test': {}, 'validation': {}}))
+    classes = data / 'runs/r1/reader/result.json'
+    result = json.loads(classes.read_text()) if classes.is_file() else {}
+    write(classes, {**result, 'classes': ['maximum_speed:30', 'maximum_speed_wet:80']})
+    with pytest.raises(ValueError, match='reads the plates of hours, and the classifier .* has no class with hours'):
+        car_release.choose(data, 's1')
+
+
 def test_a_brain_that_reads_the_hours_goes_only_with_a_classifier_that_says_them(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)

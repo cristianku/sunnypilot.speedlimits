@@ -55,7 +55,7 @@ from nnslr_tools.car_release import (
 )
 from nnslr_tools import car_settings
 from nnslr_tools.model_roles import _sha256
-from nnslr_tools.sign_types import HOURS_CLASS
+from nnslr_tools.sign_types import HOURS_CLASS, WET_CLASS
 
 TRY_SCRIPT = 'scripts/try_on_comma.sh'
 TRIAL_FILE = 'models/on-comma-trial.json'
@@ -77,8 +77,8 @@ WAIT_SECONDS = 360
 FRAMES = 5
 FRAMES_READ = 3
 # The classes that give a speed, as the dataset names them (annotations.py: the families with a value, and a number with
-# hours): the family, then the km/h; the end of a limit is 0.
-SPEED_FAMILIES = ('maximum_speed', HOURS_CLASS, 'variable_display', 'zone', 'road_marking')
+# a plate): the family, then the km/h; the end of a limit is 0.
+SPEED_FAMILIES = ('maximum_speed', HOURS_CLASS, WET_CLASS, 'variable_display', 'zone', 'road_marking')
 CANCELLATION = 'cancellation'
 VISION_NAMES = ('SIGNNET_WIDTH', 'SIGNNET_HEIGHT', 'SIGNNET_STRIDE', 'CLASSIFIER_SIZE', 'CLASSIFIER_MEAN',
                 'CLASSIFIER_STD', 'SignNetInput', 'read_signs', 'class_speed')

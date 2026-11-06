@@ -202,7 +202,7 @@ def _check_plates(runs: RunsIndex, found: dict, classifier: dict) -> None:
     if not brain or not brain['plates']:
         return
     classes = _classes(runs, classifier)
-    if not isinstance(classes, list) or not any(class_parts(name)[2] for name in classes):
+    if not isinstance(classes, list) or not any(class_parts(name)[2] == 'time' for name in classes):
         raise ValueError(f'the brain {brain["id"]} reads the plates of hours, and the classifier {classifier["id"]} has no '
                          'class with hours: choose a classifier that has one, or a brain trained without them')
     if brain['hours'] and not any(class_hours(name) for name in classes):

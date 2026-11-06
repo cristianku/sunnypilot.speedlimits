@@ -47,7 +47,7 @@ export function limitOf(label: string | null | undefined): Limit {
   if (!label || label === NOT_A_SIGN) return null;
   const [family = '', value = ''] = label.split(':');
   if (family === 'cancellation') return 'end';
-  if (family !== 'maximum_speed' && family !== 'maximum_speed_hours' && family !== 'zone'
+  if (family !== 'maximum_speed' && family !== 'maximum_speed_hours' && family !== 'maximum_speed_wet' && family !== 'zone'
     && family !== 'variable_display') return null;
   const number = Number(value);
   return Number.isInteger(number) && number > 0 ? number : null;

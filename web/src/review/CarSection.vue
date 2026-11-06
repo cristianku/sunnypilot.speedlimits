@@ -40,7 +40,7 @@ const rows = computed(() => {
     const sure = Math.round(sign.confidence * 100);
     return [{
       index: i, what: describe({...d, value_kph: null}) + (d.value_kph === null ? '' : ' · ' + d.value_kph)
-        + (holdsPlate(d) ? ', with hours' : ''),
+        + (d.supplementary_panel === 'wet' ? ', when wet' : holdsPlate(d) ? ', with hours' : ''),
       sure: sure + '%', sureKind: sign.confidence >= 0.9 ? 'high' : sign.confidence >= value.release.min_confidence ? 'medium' : 'low',
       use, kind, sub: 'box ' + Math.round(sign.score * 100) + '%' + (i === value.surest ? ' · the frame’s reading' : '')
         + roadText(sign),

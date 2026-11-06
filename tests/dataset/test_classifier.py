@@ -1044,6 +1044,22 @@ def test_a_number_with_a_plate_of_hours_is_a_sign_of_its_own():
     assert family_label("maximum_speed_hours:30") == "maximum_speed:30"
 
 
+def test_a_number_with_a_plate_for_wet_roads_is_a_sign_of_its_own():
+    wet = {**_row("maximum_speed", 80), "supplementary_panel": "wet"}
+    assert _classifier_label(wet) == "maximum_speed_wet:80"
+    assert _reader_label(wet) == "maximum_speed:80"
+    assert _classifier_label({**_row("maximum_speed"), "supplementary_panel": "wet"}) == "maximum_speed:unknown"
+    assert _classifier_label({**_row("zone", 30), "supplementary_panel": "wet"}) == "zone:30"
+    assert family_label("maximum_speed_wet:80") == "maximum_speed:80"
+    assert class_parts("maximum_speed_wet:80") == ("maximum_speed", "80", "wet")
+    assert class_hours("maximum_speed_wet:80") is None and without_hours("maximum_speed_wet:80") == "maximum_speed_wet:80"
+    assert value_of("maximum_speed_wet:80") == 80 and speed_of("maximum_speed_wet:80") == 80
+
+
+def test_a_plate_for_wet_roads_says_no_hours():
+    assert "only for" in plate_hours_problem({"family": "maximum_speed", "supplementary_panel": "wet", "plate_hours": "22-6"})
+
+
 def test_a_plate_with_its_hours_read_says_them_in_the_class():
     read = {**_row("maximum_speed", 30), "supplementary_panel": "time", "plate_hours": "22-6"}
     assert _classifier_label(read) == "maximum_speed_hours:30:22-6"

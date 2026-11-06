@@ -292,6 +292,7 @@ export function readText(signClass: Value | undefined, speed: Value | undefined)
   const [family = '', kind = '', hours = ''] = signClass.split(':');
   if (family === 'maximum_speed') return typeof speed === 'number' && speed > 0 ? String(Math.round(speed)) : kind || '?';
   if (family === 'maximum_speed_hours') return kind + (hours ? ', hours ' + hours : ' with hours');
+  if (family === 'maximum_speed_wet') return kind + ' when wet';
   return (kind || family).replaceAll('_', ' ');
 }
 

@@ -26,7 +26,7 @@ def proposal_of(label: str) -> tuple[str, int | None] | None:
 
 
 def proposal_panel(label: str) -> str:
-    """The supplementary_panel of a proposal: "time" for a number with hours, else "unknown"."""
+    """The supplementary_panel of a proposal: "time" for a number with hours, "wet" for one on wet roads, else "unknown"."""
     return class_parts(label)[2] or 'unknown'
 
 

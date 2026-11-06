@@ -302,6 +302,23 @@ def disc_of(box):
     return [box[0], box[1], box[2], box[1] + box[2] - box[0]]
 
 
+def test_a_plate_for_wet_roads_goes_down_as_a_plate_of_hours_does_and_stays_wet():
+    tall = tall_at(1000, 330, 40)
+    old = confirmed(tall, family='maximum_speed', value=80, supplementary_panel='wet')
+    now = tall_closer(tall, 1.15)
+    disc = proposal(disc_of(now), 'p', 'maximum_speed', 80)
+    (carried,) = carry_over([old], [disc], width=W, height=H, source_key='1/2', proposals=[disc])['detections']
+    assert carried['supplementary_panel'] == 'wet' and carried['bbox_xyxy'] == pytest.approx(now, abs=0.1)
+
+
+def test_a_wet_plate_read_here_stays_when_the_sign_before_was_a_plain_number():
+    box = box_at(900, 315, 30)
+    old = confirmed(box, family='maximum_speed', value=80, supplementary_panel='none')
+    here = {**proposal(box, 'p', 'maximum_speed', 80), 'supplementary_panel': 'wet'}
+    (carried,) = carry_over([old], [here], width=W, height=H, source_key='1/2', proposals=[here])['detections']
+    assert carried['supplementary_panel'] == 'wet'
+
+
 @pytest.mark.parametrize('cx, cy, scale', [(680, 350, 1.1), (1000, 330, 1.15), (1000, 330, 1.3), (800, 330, 1.3),
                                            (720, 330, 1.2)])
 def test_a_disc_alone_goes_down_over_the_plate_of_a_box_with_hours_and_is_one_box(cx, cy, scale):

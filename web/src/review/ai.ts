@@ -185,13 +185,13 @@ function meanwhile(count: Record<FitOutcome, number>): string {
 /** The box being fitted (Fit with AI), by frame key and index; null when none. */
 export const fitting = reactive<{key: string | null; index: number}>({key: null, index: -1});
 
-/** The words for a box a fit leaves alone because it holds a plate of hours (holdsPlate): a fit looks for the disc. */
+/** The words for a box a fit leaves alone because it holds a plate (holdsPlate): a fit looks for the disc. */
 const PLATE_KEPT = 'The box takes the disc and the plate: kept as it is.';
 
 /** Fit with AI (Shift+C): the box the reviewer picked (``selected``: the one selected, as the button of its
  * editor), else every box of the frame (the page selects the first one by itself), sent with only the picture
  * around it (…/ai-fit, ai_review.fit_box), one after the other; each comes back tight, as an unsaved change to
- * confirm. A box moved or removed meanwhile is left as it is, and so is one that holds a plate of hours. */
+ * confirm. A box moved or removed meanwhile is left as it is, and so is one that holds a plate. */
 export async function fitBox(selected = false): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;

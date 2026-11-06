@@ -25,7 +25,7 @@ from __future__ import annotations
 import copy
 import math
 
-from nnslr_tools.sign_types import holds_plate
+from nnslr_tools.sign_types import holds_hours, holds_plate
 
 # Where the road runs to, as a fraction of width and height: signs move away from it as they come
 # closer (median of the confirmed pairs: x 0.52, y 0.53).
@@ -114,7 +114,7 @@ def _same_shape(old: list[float], new: list[float], width: float) -> bool:
 
 
 def _with_plate(old: dict, new: list[float]) -> list[float] | None:
-    """``new``, or when it holds only the disc of ``old``, a box with a plate of hours (PLATE_SHAPE): taken down to the
+    """``new``, or when it holds only the disc of ``old``, a box with a plate (PLATE_SHAPE): taken down to the
     shape of ``old``, its top and its width staying. None when it is flatter than a disc too: that is no part of ``old``."""
     box = _box(old)
     tall = (box[3] - box[1]) / (box[2] - box[0])
@@ -344,8 +344,8 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
                     and old.get('family') in VALUE_FAMILIES + ('unreadable',)
                     and target.get('family') in VALUE_FAMILIES)
     reading = (target.get('family'), read_here)
-    # So may a plate: far away the sign read as a plain number. Hours read here is kept, with the box around disc and plate.
-    plate_here = holds_plate(target)
+    # So may a plate: far away the sign read as a plain number. A plate read here is kept, with the box around disc and plate.
+    plate_here = target.get('supplementary_panel') if holds_plate(target) else None
     original_reading = {k: target[k] for k in ('sign_value','sign_unit') if k in target}
     for key in CARRIED_KEYS:
         if key in old:
@@ -358,8 +358,8 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
         target['value_kph'] = reading[1]
         target.update(original_reading)
     if plate_here and target.get('family') == 'maximum_speed':
-        target['supplementary_panel'] = 'time'
-    if target.get('family') != 'maximum_speed' or not holds_plate(target):
+        target['supplementary_panel'] = plate_here
+    if target.get('family') != 'maximum_speed' or not holds_hours(target):
         target.pop('plate_hours', None)
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'
     target.pop(CHECK_FIELD, None)

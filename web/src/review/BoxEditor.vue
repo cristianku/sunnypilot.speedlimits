@@ -84,7 +84,7 @@ const evidence = computed(() => {
 const SELECT_CHOICES: Record<SelectField, [string, string][]> = {
   visibility: [['unknown', 'To assess'], ['clear', 'Clear'], ['partial', 'Partial'], ['poor', 'Poor']],
   occlusion: [['unknown', 'To assess'], ['none', 'None'], ['partial', 'Partial'], ['heavy', 'Heavy']],
-  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['time', 'Hours'], ['present', 'Other'],
+  supplementary_panel: [['unknown', 'To assess'], ['none', 'None'], ['time', 'Hours'], ['wet', 'Wet'], ['present', 'Other'],
     ['unresolved', 'Unresolved']],
 };
 const SELECT_LABELS: Record<SelectField, string> = {
@@ -198,7 +198,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <button v-for="item in PANELS" :key="item.id" type="button" :aria-pressed="panel === item.id" :data-panel="item.id"
               @click="setField('supplementary_panel', panel === item.id ? 'unknown' : item.id); releaseFocus($event)">{{ item.label }}</button>
     </div>
-    <p v-if="panel === 'time'" class="effect-note" id="plateNote">The box takes the disc and the plate.</p>
+    <p v-if="panel === 'time' || panel === 'wet'" class="effect-note" id="plateNote">The box takes the disc and the plate.</p>
     <!-- The hours written on the plate; empty when they cannot be read, or the plate has days or two ranges. -->
     <div v-if="asksHours" id="plateHours" class="value-line plate-hours">
       <label for="hoursFrom">From</label>

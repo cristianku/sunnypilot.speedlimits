@@ -1056,6 +1056,8 @@ def review_schema() -> dict:
             'overexposed: value_kph null and a note.',
             'applicability: own_road for our road, other_road for e.g. a side access, unresolved only when it '
             'cannot be decided.',
+            'A limit with a plate saying it holds only on a wet road under it (the German "bei Nässe", or a cloud with '
+            'rain): supplementary_panel "wet" and one box around the disc and the plate.',
             'A limit with a plate of hours under it (22-6...): supplementary_panel "time" and one box around the disc '
             'and the plate, never the disc alone: with its number it is a class of its own. With any other panel the '
             'box stays on the disc. plate_hours says the hours when the plate can be read in this frame.',

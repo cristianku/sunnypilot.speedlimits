@@ -164,6 +164,7 @@ export function shortLabel(label: string | null | undefined): string {
   switch (family) {
     case 'maximum_speed': return value === 'unknown' ? 'speed ?' : shown || 'speed';
     case 'maximum_speed_hours': return shown + (hours ? ', hours ' + hours : ' with hours');
+    case 'maximum_speed_wet': return shown + ' when wet';
     case 'cancellation': return 'end' + (shown ? ' ' + shown : '');
     case 'zone': return 'zone' + (shown ? ' ' + shown : '');
     case 'variable_display': return 'variable' + (shown ? ' ' + shown : '');

@@ -44,8 +44,8 @@ from nnslr_tools.checkpoints import (DEFAULT_DETECTOR_ANCHOR_MIN_RATIO, DEFAULT_
 from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
-from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, class_hours, class_parts, holds_plate,
-                                     without_hours)
+from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, WET_CLASS, class_hours, class_parts, holds_hours,
+                                     holds_plate, without_hours)
 
 # The kind of a "not a sign" box on a vehicle.
 ON_VEHICLE = NOT_A_SIGN_TYPES[0]
@@ -176,9 +176,11 @@ def _classifier_label(row: dict[str, Any]) -> str | None:
         return f"{OTHER_SIGN}:{kind}" if isinstance(kind, str) and kind in SIGN_TYPES else OTHER_SIGN
     label = _reader_label(row)
     number = (label or "").partition(":")[2]
-    if family == "maximum_speed" and number.isdigit() and holds_plate(row):
+    if family == "maximum_speed" and number.isdigit() and holds_hours(row):
         hours = row.get("plate_hours")
         return f"{HOURS_CLASS}:{number}:{hours}" if hours else f"{HOURS_CLASS}:{number}"
+    if family == "maximum_speed" and number.isdigit() and holds_plate(row):
+        return f"{WET_CLASS}:{number}"
     return label
 
 
@@ -191,7 +193,7 @@ def scheme_label(row: dict[str, Any], class_scheme: str) -> str | None:
 
 def family_label(label: str) -> str:
     """A label as the v1 reader names it: the kind of an other sign dropped (``other_sign:give_way`` ->
-    ``other_sign``), a number with hours as its number (``maximum_speed_hours:30`` -> ``maximum_speed:30``), every other
+    ``other_sign``), a number with a plate as its number (``maximum_speed_hours:30`` -> ``maximum_speed:30``), every other
     label unchanged. Compares the classifier with the old reader."""
     family, value, panel = class_parts(label)
     if panel is not None:
@@ -557,7 +559,7 @@ def _record(row: dict[str, Any], split: str, label: str, source: str, **extra: A
         "decoded_frame_index": row.get("decoded_frame_index"),
         "label_basis": _label_basis(row),
         "source": source,
-        # Never drawn as an end of limit (synthetic_signs): only a box with a plate of hours says so.
+        # Never drawn as an end of limit (synthetic_signs): only a box with a plate says so.
         **({"holds_plate": True} if holds_plate(row) else {}),
         **extra,
     }

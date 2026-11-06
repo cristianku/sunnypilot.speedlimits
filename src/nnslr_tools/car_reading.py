@@ -140,7 +140,8 @@ def use_of(vision, sign: dict) -> str:
 def review_box(name: str) -> dict:
     """A class of the classifier as a box of the review: its family, value, kind and panel ("other_sign:give_way" is an
     other sign of the kind give_way; "road_marking:30" a road marking of 30; "maximum_speed:unknown" a speed limit without
-    its number; "maximum_speed_hours:30" a speed limit of 30 with a plate of hours, "maximum_speed_hours:30:22-6" says them)."""
+    its number; "maximum_speed_hours:30" a speed limit of 30 with a plate of hours, "maximum_speed_hours:30:22-6" says them;
+    "maximum_speed_wet:80" a speed limit of 80 with a plate for wet roads)."""
     family, value, panel = class_parts(name)
     if family == 'road_marking':
         family = 'road_marking_candidate'

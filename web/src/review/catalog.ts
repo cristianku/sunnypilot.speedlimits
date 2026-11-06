@@ -33,7 +33,7 @@ export const ON_VEHICLE = 'on_vehicle';
  * typed, which made it a speed limit. The server refuses such a box, so it goes before every save too. */
 export function dropStaleKind(d: Detection): void {
   if (d.family !== 'other_sign') delete d.painted;
-  if (d.family !== 'maximum_speed' || !holdsPlate(d)) delete d.plate_hours;
+  if (d.family !== 'maximum_speed' || d.supplementary_panel !== 'time') delete d.plate_hours;
   if (d.sign_type == null) return;
   if (d.family === 'other_sign' || (d.family === 'not_a_sign' && d.sign_type === ON_VEHICLE)) return;
   delete d.sign_type;
@@ -117,16 +117,19 @@ export const ROADS: readonly {id: string; label: string}[] = [
   {id: 'unresolved', label: 'Unclear'},
 ];
 
-// The panel under the sign, in one tap. Hours: a limit valid only at some hours, such as the German 22-6.
+// The panel under the sign, in one tap. Hours: a limit valid only at some hours, such as the German 22-6. Wet: a limit
+// valid only on a wet road, such as the German "bei Nässe".
 export const PANELS: readonly {id: string; label: string}[] = [
   {id: 'none', label: 'None'},
   {id: 'time', label: 'Hours'},
+  {id: 'wet', label: 'Wet'},
   {id: 'present', label: 'Other'},
 ];
 
-/** A box around a sign and its plate of hours: taller than the sign on purpose, so no fit may bring it to the disc. */
+/** A box around a sign and its plate (of hours, or for wet roads): taller than the sign on purpose, so no fit may bring it
+ * to the disc. */
 export function holdsPlate(d: Detection): boolean {
-  return d.supplementary_panel === 'time';
+  return d.supplementary_panel === 'time' || d.supplementary_panel === 'wet';
 }
 
 /** The whole hours a plate can say, from and to (0 is also the 24 of "20-24"). */
@@ -183,6 +186,7 @@ export function describe(d: Detection): string {
   let text = family ? family.brief ?? family.label : String(d.family || 'No type');
   if (hasValue(d)) text += ' · ' + d.value_kph + (d.sign_unit === 'mph' || d.sign_unit === 'km/h' ? ' ' + d.sign_unit : ' (unit not recorded)');
   if (d.plate_hours) text += ' · hours ' + d.plate_hours;
+  if (d.supplementary_panel === 'wet') text += ' · when wet';
   return text;
 }
 

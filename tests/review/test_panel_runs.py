@@ -584,6 +584,7 @@ def test_names_of_the_labels_of_the_classifier():
     assert runs_module.label_name('maximum_speed:60') == 'Speed limit 60'
     assert runs_module.label_name('maximum_speed_hours:30') == 'Speed limit 30, with hours'
     assert runs_module.label_name('maximum_speed_hours:30:22-6') == 'Speed limit 30, hours 22-6'
+    assert runs_module.label_name('maximum_speed_wet:80') == 'Speed limit 80, when wet'
     assert runs_module.label_name('variable_display:unknown') == 'Variable speed limit, value unknown'
 
 
