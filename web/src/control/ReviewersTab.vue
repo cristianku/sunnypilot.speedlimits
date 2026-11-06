@@ -95,8 +95,9 @@ function toggle(drive: AssignableDrive, key: string): void {
         <h2 id="rw-people-title">People</h2>
         <span class="ds-when">{{ plural(view.people.length, 'person', 'people') }}</span>
       </div>
-      <p class="note">People from outside work only on what you give them here, and never see the place of a drive, the
-        training or the car. What they save goes into the dataset under their name, as a person's review.</p>
+      <p class="note">People from outside work only on what you give them here, and never see the training or the car. Place
+        names, positions and paths are taken out, but the video, town signs and old notes can still show where a drive was.
+        What they save goes into the dataset under their name, as a person's review.</p>
       <p v-if="!view.people.length" class="empty">Nobody yet: add the user name of their account.</p>
       <div v-else class="rw-names" role="radiogroup" aria-label="The person shown">
         <button v-for="item in view.people" :key="item.name" type="button" role="radio" class="rw-name" :aria-checked="item.name === shown"
