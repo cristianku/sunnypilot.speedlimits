@@ -129,10 +129,17 @@ h1 span{color:var(--green)}
 .links a:hover b{text-decoration:underline}
 .links b{display:block;color:var(--blue);font-weight:600;overflow-wrap:anywhere}
 .links span{display:block;color:var(--mute);font-size:15px;margin-top:4px}
-.join{display:flex;align-items:center;justify-content:space-between;gap:16px 32px;margin-top:18px;background:#fff;border-radius:20px;padding:22px 24px}
+.join{margin-top:18px;background:#fff;border-radius:20px;padding:22px 24px;scroll-margin-top:64px}
 .join p{color:var(--mute);font-size:15px}
-.join a{flex:none;background:var(--blue);color:#fff;text-decoration:none;font-weight:500;padding:8px 18px;border-radius:999px}
-.join a:hover{background:#0077ed}
+.join form{display:grid;gap:12px;max-width:560px;margin-top:14px}
+.join label{display:grid;gap:4px;font-size:15px;font-weight:500}
+.join input,.join textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:inherit;font:inherit;font-size:16px;font-weight:400}
+.join textarea{min-height:96px;resize:vertical}
+.join button{justify-self:start;border:0;border-radius:999px;background:var(--blue);color:#fff;padding:8px 18px;font:inherit;font-weight:500;cursor:pointer}
+.join button:hover{background:#0077ed}
+.join .trap{position:absolute;left:-9999px}
+.join .done{display:none;margin-top:14px;color:var(--ink);font-weight:500;scroll-margin-top:64px}
+.join .done:target{display:block}
 
 footer{background:var(--paper);color:var(--mute);font-size:13px;padding:0 22px 44px}
 footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padding-top:18px}
@@ -154,7 +161,6 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   .cards,.steps,.pair,.numbers,.links{grid-template-columns:minmax(0,1fr)}
   .facts{grid-template-columns:minmax(0,1fr);gap:20px;text-align:left}
   .bar .opt{display:none}
-  .join{flex-direction:column;align-items:flex-start}
   .specs div{grid-template-columns:minmax(0,1fr)}
   .inputs{grid-template-columns:minmax(0,1fr)}
   .inputs li:last-child{grid-column:auto}
@@ -175,7 +181,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <a class="opt" href="#status">Status</a>
   <a href="https://github.com/commaai/openpilot">openpilot</a>
   <a class="opt" href="https://github.com/cristianku/sunnypilot.speedlimits">GitHub</a>
-  <a href="mailto:smartspeed@14bodhi.com?subject=Sign%20up%20for%20Smartspeed&amp;body=Hi%20Cristian%2C%0A%0AI%27d%20like%20to%20help%20confirm%20the%20speed%20signs.%0A%0AName%3A%20%0AWhere%20I%20found%20this%3A%20%0A">Sign up</a>
+  <a href="#join">Sign up</a>
   <a class="signin" href="/reviews">Sign in</a>
 </div></nav>
 
@@ -291,7 +297,17 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
     <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
     <a href="https://github.com/cristianku/openpilot/tree/psa-torque-sunny-testing"><b>openpilot, psa-torque-sunny-testing</b><span>What runs on my comma</span></a>
   </div>
-  <div class="join rise"><p>I need help confirming the speed signs. If you'd like to join, this opens a mail to me and I'll set up an account for you.</p><a href="mailto:smartspeed@14bodhi.com?subject=Sign%20up%20for%20Smartspeed&amp;body=Hi%20Cristian%2C%0A%0AI%27d%20like%20to%20help%20confirm%20the%20speed%20signs.%0A%0AName%3A%20%0AWhere%20I%20found%20this%3A%20%0A">Sign up</a></div>
+  <div class="join rise" id="join">
+    <p>I need help confirming the speed signs. If you'd like to join, leave your email and a line about yourself, and I'll set up an account for you. I only use your address to answer you.</p>
+    <p class="done" id="sent">Thanks, your message reached me. I'll answer by email.</p>
+    <p class="done" id="not-sent">That didn't go through. Please try again later.</p>
+    <form action="/contact" method="post">
+      <label>Your email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
+      <label>Your message<textarea name="message" required maxlength="2000"></textarea></label>
+      <label class="trap" aria-hidden="true">Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+      <button type="submit">Sign up</button>
+    </form>
+  </div>
 </div></section>
 
 <footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>) on top of sunnypilot and openpilot. Not made by comma.ai or the sunnypilot team.</p></footer>
