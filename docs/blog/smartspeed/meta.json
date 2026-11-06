@@ -1,0 +1,8 @@
+{
+  "title": "Smartspeed: teaching my car to pick its own speed (sign reviewers wanted)",
+  "slug": "smartspeed",
+  "excerpt": "Smartspeed is a research build of sunnypilot for the comma 4: you press cruise and the car picks its own speed. It still has a lot to learn, and I'm looking for people to help confirm the speed signs.",
+  "category": "Innovation in Engineering",
+  "section": "Tinker Lab",
+  "cover": "docs/smartspeed/product/share.jpg"
+}

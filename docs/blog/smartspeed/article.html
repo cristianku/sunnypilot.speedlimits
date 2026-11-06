@@ -1,0 +1,55 @@
+<p class="has-medium-font-size">I've been building <strong>Smartspeed</strong>, a research build of sunnypilot for the comma 4: you press cruise and the car picks its own speed. It runs on my own comma 4, in a Peugeot 3008, it still has a lot to learn, and I'm looking for people to help confirm the speed signs.</p>
+
+<figure><img src="https://smartspeed.14bodhi.com/product/product-smartspeed-screen.jpg" alt="A wet road with a 50 sign ahead, with Smartspeed's widgets on top: 48 km/h, SMART and a 50 read by the camera" /><figcaption>Mock-up, not a photo of the comma: the screen's widgets drawn at their real size over a real frame.</figcaption></figure>
+
+<h2>Why not just use the map?</h2>
+
+<p>sunnypilot's Speed Limit Assist takes the limit from the car or from the map. Many cars send none, so it often comes down to the map, and a map misses a lot: temporary and variable limits, limits nobody has mapped, roadworks. Without a good GPS fix it doesn't even know which road you're on. That's why I started reading the signs with the road camera.</p>
+
+<p>A camera alone wasn't enough either. Signs get hidden or are meant for the exit, and on some roads no sign tells you the speed at all:</p>
+
+<ul>
+<li><strong>A limit with no end sign.</strong> Motorway roadworks often have none, and one missed end sign once held me at 80 for a whole stretch of motorway.</li>
+<li><strong>After a motorway ramp.</strong> The limit posted on the ramp stops counting on the acceleration lane, and nothing tells you so.</li>
+<li><strong>Car parks.</strong> The limit of the road outside doesn't apply in there, and usually no sign gives you another one.</li>
+</ul>
+
+<p>These are the cases Smartspeed has to learn, and it isn't there yet.</p>
+
+<h2>How it works</h2>
+
+<p>There are three small networks, 12 MB in total, running on the comma 4's GPU next to the driving model. openpilot's model still does the driving.</p>
+
+<ul>
+<li><strong>The sign finder</strong> looks at a band at the top of the picture, 5 times a second.</li>
+<li><strong>The sign reader</strong> reads what it finds: a speed, the end of a limit, another kind of sign, or not a sign.</li>
+<li><strong>The brain</strong> is a small network with memory. Once a second it gets a small picture of the road, the number the sign reader confirmed, the car ahead, gas, brake and speed, and it says the speed to hold. It never reads the map.</li>
+</ul>
+
+<p>In sunnylink, Smartspeed is a fifth mode next to Off, Information, Warning and Assist. Cruise only turns it on and off, + and - do nothing, and the car drives to what the brain says, even above the set speed. Curves still slow it down. If the brain doesn't load, sunnypilot falls back to the map.</p>
+
+<h2>How it learns</h2>
+
+<p>I label the drives myself. I go back through each drive and mark the speed each stretch allows, and where roadworks start and end. How fast I actually drove doesn't count. Those marks are the answers the network trains on. During training, half of the sign passages get number and answer swapped (50 and 60, 100 and 120), otherwise it learns the road and ignores the sign.</p>
+
+<figure><img src="https://smartspeed.14bodhi.com/product/post-portal-timeline.png" alt="The portal's timeline for one drive, with the marked speed, the speed the comma read, the map's limit and the car's speed" /><figcaption>A drive from before the brain: the speed I marked, what the comma read, what the map said and what the car did.</figcaption></figure>
+
+<h2>Where it stands</h2>
+
+<p>One car, one driver, under two hours of training data. These numbers are offline:</p>
+
+<ul>
+<li><strong>84.6 %</strong> of frames match my marked speed on test: 676 frames from places kept out of training.</li>
+<li><strong>66.6 %</strong> on validation: 755 frames, also kept out.</li>
+<li><strong>99.9 %</strong> on the training drives, so for now it knows the roads it has seen far better than new ones.</li>
+</ul>
+
+<p>On frames with a sign in force, simply copying the sign still does better: 90.8 % against 88.2 % on test, 93.1 % against 76.6 % on validation. What's missing is more drives and more labelled roadworks.</p>
+
+<p>On the road there's little so far. A first brain went on the car on 5 November and ran on one 15-minute drive. The brain these numbers come from was published on 6 November and has no drive yet.</p>
+
+<h2>Want to help?</h2>
+
+<p>I need help confirming the speed signs. If you'd like to join, leave your email and a line about yourself on the <a href="https://smartspeed.14bodhi.com/">Smartspeed page</a>, and I'll set up an account for you. The page also has the whole story, and the code is on GitHub: <a href="https://github.com/cristianku/sunnypilot.speedlimits">the portal, the training and the tools</a>, and <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits">the code on the car</a>.</p>
+
+<p class="has-small-font-size">Smartspeed is built on top of sunnypilot and openpilot. It's not made by comma.ai or the sunnypilot team.</p>
