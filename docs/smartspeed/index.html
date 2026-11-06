@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smartspeed for sunnypilot</title>
+<meta name="description" content="Press cruise. The car works out the speed. A network with memory reads the signs, watches the road and sets the speed once a second, on a comma 4.">
+<meta name="theme-color" content="#000000">
+<style>
+:root{
+  --green:#7dcd32;--violet:#b026d4;--violet-line:#d27be8;--blue:#0071e3;--link-dark:#2997ff;
+  --ink:#1d1d1f;--mute:#6e6e73;--paper:#f5f5f7;--line:#d2d2d7;
+  --mute-dark:#a1a1a6;--panel:#161617;--line-dark:#2c2c2e;
+  --wide:1120px;
+}
+*{box-sizing:border-box;margin:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text",Inter,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:#000;font-size:17px;line-height:1.47;-webkit-font-smoothing:antialiased}
+img{display:block;max-width:100%;height:auto}
+a{color:inherit}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+
+.bar{position:sticky;top:0;z-index:10;background:rgba(0,0,0,.72);-webkit-backdrop-filter:saturate(180%) blur(20px);
+  backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid rgba(255,255,255,.1);color:#f5f5f7}
+.bar div{max-width:var(--wide);margin:auto;padding:0 22px;height:48px;display:flex;align-items:center;gap:26px;font-size:13px}
+.bar strong{font-size:17px;font-weight:600;letter-spacing:-.01em;margin-right:auto}
+.bar a{text-decoration:none;opacity:.8}
+.bar a:hover{opacity:1}
+
+section{padding:clamp(72px,11vw,136px) 22px}
+.wrap{max-width:var(--wide);margin:auto}
+.dark{background:#000;color:#f5f5f7}
+.paper{background:var(--paper)}
+.white{background:#fff}
+.eyebrow{font-size:clamp(17px,2vw,21px);font-weight:600;color:var(--mute);margin-bottom:10px}
+.dark .eyebrow{color:var(--mute-dark)}
+h2{font-size:clamp(36px,6.4vw,64px);line-height:1.06;font-weight:700;letter-spacing:-.022em;max-width:17em}
+.intro{font-size:clamp(19px,2.3vw,24px);line-height:1.38;color:var(--mute);max-width:33em;margin-top:22px;font-weight:500}
+.intro+.intro{margin-top:14px}
+.dark .intro{color:var(--mute-dark)}
+.intro b{color:var(--ink);font-weight:600}
+.dark .intro b{color:#f5f5f7}
+
+.hero{padding:clamp(56px,9vw,104px) 22px 0;text-align:center;overflow:hidden;
+  background:radial-gradient(60% 46% at 50% 74%,rgba(176,38,212,.26),transparent 72%),#000;color:#f5f5f7}
+.hero .eyebrow{color:var(--mute-dark);margin-bottom:6px}
+h1{font-size:clamp(62px,14vw,136px);line-height:1;font-weight:700;letter-spacing:-.035em}
+h1 span{color:var(--green)}
+.hero .lead{font-size:clamp(23px,3.6vw,38px);line-height:1.16;font-weight:600;letter-spacing:-.012em;margin-top:18px}
+.hero .sub{font-size:clamp(17px,2vw,21px);color:var(--mute-dark);max-width:32em;margin:16px auto 0;font-weight:500}
+.screen{max-width:980px;margin:clamp(40px,6vw,64px) auto 0;padding:clamp(6px,1vw,11px);background:#0c0c0d;border:1px solid var(--line-dark);
+  border-radius:clamp(18px,3vw,34px);box-shadow:0 30px 90px rgba(176,38,212,.25)}
+.screen img{width:100%;border-radius:clamp(13px,2.2vw,25px)}
+.note{font-size:13px;color:#86868b;padding:14px 0 0}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;max-width:980px;margin:clamp(44px,6vw,72px) auto 0;
+  padding:clamp(28px,4vw,40px) 0 clamp(56px,7vw,84px);border-top:1px solid var(--line-dark)}
+.facts b{display:block;font-size:clamp(30px,4.6vw,48px);line-height:1.08;font-weight:700;letter-spacing:-.02em}
+.facts span{display:block;color:var(--mute-dark);font-size:clamp(15px,1.6vw,17px);margin-top:6px}
+
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:clamp(40px,6vw,64px)}
+.card{background:#fff;border-radius:24px;padding:clamp(26px,3vw,36px)}
+.card h3{font-size:clamp(23px,2.6vw,28px);line-height:1.12;font-weight:700;letter-spacing:-.015em;margin-bottom:12px}
+.card p{color:var(--mute);font-size:17px}
+.white .card{background:var(--paper)}
+.card .num{display:block;font-size:17px;font-weight:600;color:var(--blue);margin-bottom:10px}
+.steps{grid-template-columns:repeat(4,1fr)}
+.steps .card.on{background:var(--blue);color:#fff}
+.steps .card.on p,.steps .card.on .num{color:#ffffffd9}
+
+.flow{display:grid;grid-template-columns:minmax(0,1fr) 72px minmax(0,300px) 72px minmax(0,220px);align-items:center;margin-top:clamp(44px,6vw,72px)}
+.inputs{display:grid;gap:10px;list-style:none;padding:0}
+.inputs li{background:var(--panel);border:1px solid var(--line-dark);border-radius:16px;padding:13px 18px}
+.inputs b{display:block;font-weight:600}
+.inputs span{color:var(--mute-dark);font-size:15px}
+.arrow{height:2px;background:linear-gradient(90deg,#3a3a3c,var(--violet-line));position:relative;margin:0 10px}
+.arrow::after{content:"";position:absolute;right:-1px;top:-4px;border-left:8px solid var(--violet-line);border-top:5px solid transparent;border-bottom:5px solid transparent}
+.brain{aspect-ratio:1;display:grid;place-content:center;text-align:center;padding:22px;border-radius:44px;
+  background:radial-gradient(90% 90% at 30% 20%,#c23ce6,#6c1a8a);box-shadow:0 0 90px rgba(176,38,212,.45)}
+.brain b{font-size:clamp(30px,3.6vw,40px);line-height:1.05;letter-spacing:-.02em}
+.brain span{font-size:16px;color:#ffffffd9;margin-top:8px}
+.out{text-align:center}
+.square{width:112px;height:112px;margin:0 auto 14px;border-radius:18px;background:rgba(176,38,212,.45);border:4px solid var(--violet-line);
+  display:grid;place-content:center;font-size:50px;font-weight:700;letter-spacing:-.02em}
+.out b{display:block;font-size:21px;line-height:1.18;font-weight:600}
+.out span{color:var(--mute-dark);font-size:15px}
+.aside{margin-top:clamp(40px,5vw,56px);font-size:clamp(19px,2.3vw,24px);font-weight:600;letter-spacing:-.01em}
+.aside span{color:var(--mute-dark)}
+
+.modes{display:flex;flex-wrap:wrap;gap:8px;margin-top:clamp(36px,5vw,52px)}
+.modes span{background:#fff;border-radius:999px;padding:11px 20px;font-weight:500;color:var(--mute)}
+.modes .on{background:#000;color:var(--green);font-weight:700}
+.small{color:var(--mute);margin-top:22px;max-width:40em}
+
+.shot{margin-top:clamp(40px,6vw,64px)}
+.shot img{border-radius:clamp(14px,2vw,22px);border:1px solid var(--line-dark);width:100%}
+.shot figcaption{color:var(--mute-dark);font-size:15px;margin-top:12px;max-width:44em}
+.pair{display:grid;grid-template-columns:repeat(2,1fr);gap:22px;align-items:start}
+.pair .shot{margin-top:clamp(22px,3vw,32px)}
+
+.specs{margin-top:clamp(36px,5vw,56px);border-top:1px solid var(--line)}
+.specs div{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:8px 30px;padding:20px 0;border-bottom:1px solid var(--line)}
+.specs dt{font-weight:600}
+.specs dd{margin:0;color:var(--mute)}
+.specs dd b{color:var(--ink);font-weight:600}
+
+.numbers{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:clamp(36px,5vw,56px)}
+.numbers b{display:block;font-size:clamp(44px,6.6vw,72px);line-height:1;font-weight:700;letter-spacing:-.03em}
+.numbers span{display:block;color:var(--mute);margin-top:10px}
+
+.links{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:clamp(40px,5vw,56px)}
+.links a{display:block;text-decoration:none;background:#fff;border-radius:20px;padding:22px 24px}
+.links a:hover b{text-decoration:underline}
+.links b{display:block;color:var(--blue);font-weight:600;overflow-wrap:anywhere}
+.links span{display:block;color:var(--mute);font-size:15px;margin-top:4px}
+
+footer{background:var(--paper);color:var(--mute);font-size:13px;padding:0 22px 44px}
+footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padding-top:18px}
+
+.js .rise{opacity:0;transform:translateY(22px);transition:opacity .7s ease,transform .7s cubic-bezier(.2,.8,.2,1)}
+.js .rise.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.js .rise{opacity:1;transform:none;transition:none}}
+
+@media (max-width:1000px){
+  .steps{grid-template-columns:repeat(2,1fr)}
+  .flow{grid-template-columns:minmax(0,1fr);justify-items:center;gap:0}
+  .inputs{grid-template-columns:repeat(2,1fr);width:100%}
+  .inputs li:last-child{grid-column:1/-1}
+  .arrow{width:2px;height:44px;margin:10px 0;background:linear-gradient(180deg,#3a3a3c,var(--violet-line))}
+  .arrow::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid var(--violet-line);border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}
+  .brain{width:260px}
+}
+@media (max-width:760px){
+  .cards,.steps,.pair,.numbers,.links{grid-template-columns:minmax(0,1fr)}
+  .facts{grid-template-columns:minmax(0,1fr);gap:20px;text-align:left}
+  .bar .opt{display:none}
+  .specs div{grid-template-columns:minmax(0,1fr)}
+  .inputs{grid-template-columns:minmax(0,1fr)}
+  .inputs li:last-child{grid-column:auto}
+}
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add('js')</script>
+
+<nav class="bar" aria-label="Sections"><div>
+  <strong>Smartspeed</strong>
+  <a class="opt" href="#why">Why</a>
+  <a class="opt" href="#brain">The brain</a>
+  <a class="opt" href="#portal">The portal</a>
+  <a class="opt" href="#status">Status</a>
+  <a href="https://github.com/cristianku/sunnypilot.speedlimits">GitHub</a>
+</div></nav>
+
+<header class="hero">
+  <p class="eyebrow">For sunnypilot on the comma 4</p>
+  <h1>Smart<span>speed</span></h1>
+  <p class="lead">Press cruise. The car works out the speed.</p>
+  <p class="sub">A network with memory reads the signs, watches the road and sets the speed once a second. Research build.</p>
+  <figure class="screen"><img src="../images/product-smartspeed-screen.jpg" width="1608" height="720"
+    alt="The comma 4 screen on a wet road: 48 km/h in the middle, and in the bottom right corner the word SMART in green beside a purple square with an eye and the number 50."></figure>
+  <p class="note">The on-car screen, drawn to the sizes of its widgets over a real frame.</p>
+  <div class="facts">
+    <div><b>Once a second</b><span>a new speed to hold</span></div>
+    <div><b>No speed rules</b><span>written by hand behind it</span></div>
+    <div><b>12 MB</b><span>for all three networks</span></div>
+  </div>
+</header>
+
+<section class="paper" id="why"><div class="wrap">
+  <p class="eyebrow rise">Why</p>
+  <h2 class="rise">The limit is at the roadside. The map finds out later.</h2>
+  <p class="intro rise">Speed Limit Assist takes the limit from the car or from the map. Many cars send nothing on CAN, and maps lag behind the road: roadworks, variable motorway displays and new signs are often missing or wrong.</p>
+  <p class="intro rise">So the camera reads the signs. <b>The harder part is the road where a sign says nothing.</b></p>
+  <div class="cards">
+    <article class="card rise"><h3>A limit with no end</h3><p>Motorway roadworks often have no end sign. Only something that sees the road can let that limit go.</p></article>
+    <article class="card rise"><h3>A ramp with nothing posted</h3><p>On the acceleration lane the ramp's limit stops counting, and no sign says so.</p></article>
+    <article class="card rise"><h3>A car park</h3><p>The limit of the road outside means nothing in there. A driver slows down without being told.</p></article>
+  </div>
+</div></section>
+
+<section class="dark" id="brain"><div class="wrap">
+  <p class="eyebrow rise">The brain</p>
+  <h2 class="rise">One network decides the speed.</h2>
+  <p class="intro rise">It has memory, so it works the way a driver does. A sign is a strong hint, not the last word: it also sees the road, remembers what it has passed and knows what the car is doing. It never reads the map.</p>
+  <div class="flow rise">
+    <ul class="inputs">
+      <li><b>Road camera</b><span>the picture, every second</span></li>
+      <li><b>Signs read</b><span>SignNet and the classifier</span></li>
+      <li><b>The car</b><span>speed, gas, brake</span></li>
+      <li><b>The car ahead</b><span>distance and speed</span></li>
+      <li><b>Hour and country</b><span>from GPS</span></li>
+    </ul>
+    <div class="arrow"></div>
+    <div class="brain"><b>The brain</b><span>sees, remembers, decides</span></div>
+    <div class="arrow"></div>
+    <div class="out"><div class="square">50</div><b>Speed to hold</b><span>once a second</span></div>
+  </div>
+  <p class="aside rise">It is its own network. <span>openpilot's model still does the driving.</span></p>
+</div></section>
+
+<section class="white" id="learn"><div class="wrap">
+  <p class="eyebrow rise">How it learns</p>
+  <h2 class="rise">It learns from people, not from the map.</h2>
+  <div class="cards steps">
+    <article class="card rise"><span class="num">1</span><h3>Drive</h3><p>The comma records the road and what the car does.</p></article>
+    <article class="card rise"><span class="num">2</span><h3>Mark</h3><p>In Speed review a person marks the speed really worth holding, stretch by stretch.</p></article>
+    <article class="card on rise"><span class="num">3</span><h3>Train</h3><p>The network says a speed for each moment of the drive, in order. The marked speed corrects it.</p></article>
+    <article class="card rise"><span class="num">4</span><h3>Publish</h3><p>A regression on certified drives, then the networks go into the branch the comma updates from.</p></article>
+  </div>
+</div></section>
+
+<section class="paper" id="modes"><div class="wrap">
+  <p class="eyebrow rise">In sunnylink</p>
+  <h2 class="rise">A fifth mode. Cruise is on and off.</h2>
+  <p class="intro rise">The factory modes stay as they are, with their choice of source: map, car or vision. Smartspeed sits next to them. In Smartspeed the set speed stops being a speed, and the cruise button only turns it on and off.</p>
+  <div class="modes rise" role="img" aria-label="Speed limit modes: Off, Information, Warning, Assist, and Smartspeed selected">
+    <span>Off</span><span>Information</span><span>Warning</span><span>Assist</span><span class="on">Smartspeed</span>
+  </div>
+  <p class="small rise">While the brain runs, the map is not used. If the brain gives nothing, sunnypilot's resolver falls back to the map.</p>
+</div></section>
+
+<section class="dark" id="portal"><div class="wrap">
+  <p class="eyebrow rise">The portal</p>
+  <h2 class="rise">Every drive, in one place.</h2>
+  <p class="intro rise">Video and rlog in sync to the frame, with vision, map, resolver and openpilot state on one timeline. Disengagements and vision/map mismatches are found automatically. Labelling, training, regression and publish all run from there.</p>
+  <figure class="shot rise"><img src="../images/post-portal-timeline.png" width="1570" height="695" loading="lazy"
+    alt="One drive on a timeline: rows for the speed to hold, vision, signs read, map, resolver, speed, openpilot state and scene, with red marks where vision and the marked speed disagree.">
+    <figcaption>One drive, one timeline: the speed a person marked, what the comma read, what the map said, what the car did.</figcaption></figure>
+  <div class="pair">
+    <figure class="shot rise"><img src="../images/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
+      alt="Sign review: a country road with a round 60 sign in a yellow box, the crop of the sign on the right, and the drive's frames below.">
+      <figcaption>Sign review. Every box a network learns from is confirmed here.</figcaption></figure>
+    <figure class="shot rise"><img src="../images/post-portal-networks.png" width="2360" height="1450" loading="lazy"
+      alt="The Models page: a card for each network with its version, its measures and whether it is in the branch.">
+      <figcaption>Models. Each network with its numbers, and what is in the branch.</figcaption></figure>
+  </div>
+</div></section>
+
+<section class="white" id="specs"><div class="wrap">
+  <p class="eyebrow rise">Under the hood</p>
+  <h2 class="rise">Three small networks.</h2>
+  <dl class="specs rise">
+    <div><dt>Sign finder</dt><dd><b>SignNet.</b> Looks at the top of the picture, where signs stand, 5 times a second, and finds up to 5 of them.</dd></div>
+    <div><dt>Sign reader</dt><dd><b>Classifier.</b> Reads each one: a speed, the end of a limit, another kind of sign, or not a sign at all. A number counts only when two pictures within 1.5 s agree.</dd></div>
+    <div><dt>Brain</dt><dd><b>A small vision network with memory.</b> A small picture, what the car is doing and what it remembers of the drive go in. One speed a second comes out.</dd></div>
+    <div><dt>Where it runs</dt><dd>On the comma 4, next to the driving model. The car never trains anything: that happens on a server.</dd></div>
+    <div><dt>Same on both sides</dt><dd>Training and car share one file that prepares the inputs. A brain trained with another version does not load.</dd></div>
+  </dl>
+</div></section>
+
+<section class="paper" id="status"><div class="wrap">
+  <p class="eyebrow rise">Where it stands</p>
+  <h2 class="rise">Research build. One car, one driver, one country.</h2>
+  <div class="numbers rise">
+    <div><b>84.6 %</b><span>of frames right on the test set, 676 frames from places kept out of training</span></div>
+    <div><b>66.6 %</b><span>on the validation set, 755 frames, also kept out</span></div>
+    <div><b>5,913</b><span>seconds of driving in training, under two hours</span></div>
+  </div>
+  <p class="intro rise">These numbers are offline, not from the road. The first brain was published on 6 November 2026. For now it mostly says what the sign says. Roadworks need more labelled sites, and that is where it has to do better than the sign.</p>
+  <div class="links rise">
+    <a href="https://github.com/cristianku/sunnypilot.speedlimits"><b>sunnypilot.speedlimits</b><span>The portal, the training, the tools</span></a>
+    <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
+    <a href="https://github.com/cristianku/openpilot/tree/psa-torque-sunny-testing"><b>openpilot, psa-torque-sunny-testing</b><span>What runs on my comma</span></a>
+  </div>
+</div></section>
+
+<footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>). An independent project, not made by comma.ai or sunnypilot.</p></footer>
+
+<script>
+if (matchMedia('(prefers-reduced-motion: no-preference)').matches && 'IntersectionObserver' in window) {
+  const seen = new IntersectionObserver((rows) => rows.forEach((row) => {
+    if (row.isIntersecting) { row.target.classList.add('in'); seen.unobserve(row.target); }
+  }), {rootMargin: '0px 0px -8% 0px'});
+  document.querySelectorAll('.rise').forEach((node) => seen.observe(node));
+} else {
+  document.querySelectorAll('.rise').forEach((node) => node.classList.add('in'));
+}
+</script>
+</body>
+</html>
