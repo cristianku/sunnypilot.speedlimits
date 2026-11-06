@@ -289,10 +289,10 @@ const numbers = computed(() => {
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
-    <!-- The slot of the work: the training running (or failed) in place of its button, first: what runs and what to start come before the versions. -->
+    <!-- The slot of the work: the training running in place of its button, a failed one above it (it can start again): what runs and what to start come before the versions. -->
     <div class="train-slot">
-      <template v-if="bigJob || sectionActivities.length">
-        <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+      <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+      <template v-if="bigJob?.state === 'running' || sectionActivities.length">
         <TerminalActivity v-for="activity in sectionActivities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
       </template>
       <template v-else-if="section === 'cutter'">
