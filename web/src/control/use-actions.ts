@@ -57,6 +57,11 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Trains the scene network on the GPU twice, with memory and without, compares them and exports the one '
         + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.' + signs};
   }
+  if (name === 'regression') {
+    return {title: 'Run the regression?', action: 'Run',
+      text: 'Runs the chosen models along the certified drives, only what is missing, on the GPU: a few minutes per model and '
+        + 'drive. It trains nothing and changes nothing on the car.'};
+  }
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
     const driver = options?.driver === 'off' ? ' Without the driver’s inputs.' : '';

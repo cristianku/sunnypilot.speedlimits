@@ -1655,6 +1655,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain.add_argument("--json", action="store_true", help="the same as JSON")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
+    p_regression_plan = sub.add_parser("regression-plan", help="what a run of Models › Regression still has to compute: a "
+                                                               "line per certified drive, its route and the driving "
+                                                               "models missing there. Reads only")
+    p_regression_plan.add_argument("--openpilot", default="", help="the specs chosen, separated by commas")
+    p_regression_plan.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_regression_plan.set_defaults(func=_cmd_regression_plan)
+    p_regression_brain = sub.add_parser("regression-brain", help="the brains chosen along the certified drives that are "
+                                                                 "prepared, as on the car, where they have no result of "
+                                                                 "today's reader of the signs (GPU, .venv-gpu)")
+    p_regression_brain.add_argument("--brains", required=True, help="the runs of the brains, separated by commas")
+    p_regression_brain.add_argument("--device", default="cuda", help="cuda or cpu")
+    p_regression_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_regression_brain.set_defaults(func=_cmd_regression_brain)
     p_brain_net = sub.add_parser("train-brain", help="train the brain on the labels of Speed review (GPU, .venv-gpu): the speed "
                                                      "to hold, with the roadworks as a second task of the same network, "
                                                      "measured on sites it never learned. Writes brain-last.pt and "
@@ -1834,6 +1847,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--labelled", action="store_true",
                               help="the drives of Speed review instead of those with road types: what the brain needs "
                                    "(scripts/run_brain.sh)")
+    p_road_signs.add_argument("--certified", action="store_true",
+                              help="the drives certified in Models › Regression, those prepared: what its brains need "
+                                   "(scripts/run_regression.sh)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -2614,6 +2630,30 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_regression_plan(args: argparse.Namespace) -> int:
+    from nnslr_tools import drive_logs, regression
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    specs = [spec for spec in args.openpilot.split(",") if spec]
+    for route, wanted in regression.missing_driving(root, drive_logs.videos_dir(), specs):
+        print(route, *wanted)
+    return 0
+
+
+def _cmd_regression_brain(args: argparse.Namespace) -> int:
+    import torch
+
+    from nnslr_tools import regression
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    failed = regression.run_brains(root, [run for run in args.brains.split(",") if run],
+                                   lambda route: store.merged(route, keep=False), device=torch.device(args.device),
+                                   log=lambda line: print(line, flush=True))
+    return 1 if failed else 0
+
+
 def _cmd_train_brain(args: argparse.Namespace) -> int:
     from nnslr_tools import brain_train
     from nnslr_tools.drive_review import DriveReviewStore
@@ -2919,7 +2959,14 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     if args.classifier and not Path(args.classifier).is_file():
         raise ValueError(f"--classifier is not a file: {args.classifier}")
-    routes = sorted(read_labels(root)) if args.labelled else road_type_routes(root)
+    if args.certified:
+        from nnslr_tools import regression
+        routes = [route for route in sorted(regression.certified(root)) if regression.frames_ready(root, route)]
+        if not routes:
+            print("nnslr road-type-signs: no certified drive is prepared", flush=True)
+            return 0
+    else:
+        routes = sorted(read_labels(root)) if args.labelled else road_type_routes(root)
     if not routes:
         print("nnslr road-type-signs: " + ("no drive with labels (Speed review)" if args.labelled
                                            else "no drive with road types (nnslr road-types)"), file=sys.stderr)

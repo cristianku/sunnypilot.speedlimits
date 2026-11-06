@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'train_brain' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -80,6 +80,9 @@ export interface ActionOptions {
   works?: 'on' | 'off';
   driver?: 'on' | 'off';
   pool?: 'mean' | 'grid';
+  /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
+  openpilot?: string;
+  brains?: string;
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
 export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type' | 'train_brain';

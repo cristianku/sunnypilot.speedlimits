@@ -1549,6 +1549,45 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
    filled unlike the hatch of what the log does not have. Under 860 px the commands come right under the picture and its
    Play: one screen to watch a stretch and answer. */
 .sr-drives{display:flex;flex-direction:column;gap:12px}
+/* Models › Regression: one line per model, the same colour on its row of the side. */
+:root{--rg-1:#3987e5;--rg-2:#d95926;--rg-3:#199e70;--rg-4:#9085e9;--rg-5:#d55181;--rg-6:#008300;--rg-7:#c98500}
+:root[data-theme="light"]{--rg-1:#2a78d6;--rg-2:#eb6834;--rg-3:#1baf7a;--rg-4:#6250d6;--rg-5:#e87ba4;--rg-6:#008300;--rg-7:#eda100}
+@media (prefers-color-scheme:light){:root[data-theme="auto"]{--rg-1:#2a78d6;--rg-2:#eb6834;--rg-3:#1baf7a;--rg-4:#6250d6;--rg-5:#e87ba4;--rg-6:#008300;--rg-7:#eda100}}
+.rg-switches{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.rg-group{margin:14px 0 0;font-size:12.5px;font-weight:600;color:var(--muted)}
+.rg-run{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:16px}
+.rg-run p{margin:0;flex:1 1 220px}
+.rg-add{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.rg-add .rt-name{min-width:0}
+.rg-more{margin-top:12px}
+.rg-lane{position:relative}
+.rg-lane svg{touch-action:none}
+.rg-grid{stroke:var(--line);stroke-width:1}
+.rg-tick{fill:var(--muted);font-size:10px}
+.rg-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.rg-own{stroke:var(--fg)}
+.rg-hover{stroke:var(--muted);stroke-width:1}
+.rg-tip{position:absolute;top:4px;z-index:3;min-width:170px;max-width:240px;padding:8px 10px;border-radius:12px;background:var(--surface);
+border:1px solid var(--line-strong);box-shadow:0 6px 20px rgba(0,0,0,.22);font-size:12px;pointer-events:none}
+.rg-tip b{display:block;margin-bottom:4px;font-weight:600;color:var(--muted)}
+.rg-tip div{display:flex;align-items:center;gap:6px}
+.rg-tip span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rg-tip em{font-style:normal;font-variant-numeric:tabular-nums}
+.rg-card h3{margin:0}
+.rg-rows{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column}
+.rg-rows li+li{border-top:1px solid var(--line)}
+.rg-row{display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:0 8px;width:100%;min-height:44px;padding:7px 0;border:0;
+background:none;color:var(--fg);font:inherit;text-align:left}
+button.rg-row{cursor:pointer}
+.rg-row[aria-pressed="false"]{color:var(--muted)}
+.rg-row[aria-pressed="false"] .rg-key{opacity:.25}
+.rg-row strong{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rg-row em{font-style:normal;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.rg-row small{grid-column:2/4;font-size:11.5px;color:var(--muted)}
+.rg-key{width:22px;height:4px;overflow:visible}
+.rg-horizon{margin-top:12px}
+.rg-horizon p{margin:6px 0 0}
+.rg-out{margin-top:12px}
 .sr-bar{height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
 .sr-bar i{display:block;height:100%;border-radius:2px;background:var(--ok)}
 .dr-rate button{padding-left:10px;padding-right:10px}

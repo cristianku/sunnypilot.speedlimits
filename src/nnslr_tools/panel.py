@@ -101,6 +101,8 @@ BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_DRIVER = {'on': '1', 'off': '0'}
 BRAIN_POOLS = ('grid', 'mean')
+# Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
+REGRESSION_SCRIPT = 'scripts/run_regression.sh'
 # The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
@@ -150,6 +152,7 @@ MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_road_type': ('start', 'classifier', 'boards'), 'train_brain': ('works', 'driver', 'pool'),
+                  'regression': ('openpilot', 'brains'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
@@ -365,6 +368,7 @@ ACTIONS = {
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_road_type': {'label': 'Train the scene network', 'group': 'train', 'command': [ROAD_TYPE_SCRIPT]},
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
+    'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -415,6 +419,7 @@ ACTIVITIES = (
     ('train', 'scene training', 'run_road_type.sh'),
     ('train', 'brain training', 'run_brain.sh'),
     ('train', 'brain training', 'nnslr train-brain'),
+    ('train', 'regression', 'run_regression.sh'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -438,7 +443,8 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
-                 'train_road_type': 'a scene training', 'train_brain': 'a brain training', 'update': 'a code update',
+                 'train_road_type': 'a scene training', 'train_brain': 'a brain training', 'regression': 'a regression run',
+                 'update': 'a code update',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -450,7 +456,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
-                  'scene training': 'a scene training', 'brain training': 'a brain training',
+                  'scene training': 'a scene training', 'brain training': 'a brain training', 'regression': 'a regression run',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -1018,6 +1024,13 @@ class Panel:
             elif name == 'train_brain':
                 # Its labels are the speeds of Speed review: it needs no confirmed sign.
                 pass
+            elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
+                reason = REGRESSION_SCRIPT + ' is missing in this installation'
+            elif name == 'regression' and gpu is not None and gpu['processes']:
+                reason = 'the GPU is busy with another process'
+            elif name == 'regression':
+                # What it needs (a certified drive, a model chosen) is checked by Models › Regression and by start().
+                pass
             elif name in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
                 reason = NETWORKS_SCRIPT + ' is missing in this installation'
             elif name == 'networks_prepare':
@@ -1572,6 +1585,60 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The weights of that classifier are missing on this server.') from None
         return {'NNSLR_CLASSIFIER_INIT_FROM': str(weights)}
 
+    def _regression_models(self) -> tuple[list[dict], list[dict]]:
+        """The driving models and the brains Models › Regression offers."""
+        from nnslr_tools import regression
+        from nnslr_tools.localized import distill_root
+        active, _problem = self.models_index.read_active()
+        chosen = (active.get('brain') or {}).get('id')
+        versions = [{**entry, 'in_use': entry['id'] == chosen} for entry in self.models_index.artifacts(('brain',))['brain']]
+        return regression.driving_models(distill_root()), regression.brain_models(versions)
+
+    def _regression_choices(self, options: dict) -> dict:
+        """The variables of scripts/run_regression.sh: what he chose, each of them known; a run needs a drive and a model."""
+        from nnslr_tools import regression
+        if not regression.certified(self.root):
+            raise PanelError(409, 'not_available', 'Certify a drive first.')
+        models, brains = self._regression_models()
+        try:
+            driving = regression.checked_choice(options.get('openpilot', ''), {model['key'] for model in models}, 'driving model')
+            chosen = regression.checked_choice(options.get('brains', ''), {brain['key'] for brain in brains}, 'brain')
+        except regression.RegressionError as problem:
+            raise PanelError(problem.status, problem.reason, problem.message) from problem
+        if not driving and not chosen:
+            raise PanelError(400, 'bad_option', 'Choose a model first.')
+        return {'NNSLR_REGRESSION_OPENPILOT': ','.join(driving), 'NNSLR_REGRESSION_BRAINS': ','.join(chosen)}
+
+    def regression(self) -> dict:
+        """GET /api/regression/routes: every drive, the certified ones with their state, and the models to choose."""
+        from nnslr_tools import drive_logs, drive_review, regression, speed_review
+        from nnslr_tools.localized import distill_root
+        store, drives = speed_review.store_for(self.root), drive_review.store_for(self.root)
+        models, brains = self._regression_models()
+        rows = regression.route_rows(
+            self.root, speed_review.drives_list(store, drives), drive_logs.videos_dir(), distill_root(),
+            [model['key'] for model in models], [brain['key'] for brain in brains], regression.frozen_split(self.root),
+            store.stretches, lambda route: (drives.summary(route) or {}).get('t0_ns'))
+        return {'ok': True, 'routes': rows, 'models': models, 'brains': brains, 'horizons': list(regression.HORIZONS_S),
+                'horizon': regression.DEFAULT_HORIZON_S}
+
+    def regression_route(self, route: str, horizon: int, brain: str | None) -> dict:
+        """GET /api/regression/routes/<route>: the curves of a drive."""
+        from nnslr_tools import drive_review, regression
+        models, brains = self._regression_models()
+        return {**regression.route_view(self.root, route, drive_review.store_for(self.root).merged(route), models, brains,
+                                        horizon=horizon, brain=brain),
+                'certified': regression.certified(self.root).get(route)}
+
+    def regression_certify(self, route: str, on: bool, who: str) -> dict:
+        """POST /api/regression/routes/<route>/certify: a drive in or out of the certified ones."""
+        from nnslr_tools import drive_review, regression
+        if on:
+            regression.certify(self.root, route, who, drive_review.all_routes(self.root))
+        else:
+            regression.uncertify(self.root, route)
+        return self.regression()
+
     def _brain_choices(self, options: dict) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'driver', 'pool'}), the usual
         ones when not given."""
@@ -1732,6 +1799,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':
             start_env.update(self._brain_choices(options or {}))
+        for key in ('openpilot', 'brains'):
+            if (options or {}).get(key) is not None and action != 'regression':
+                raise PanelError(400, 'bad_option', 'Only "Run the regression" takes ' + key + '.')
+        if action == 'regression':
+            start_env.update(self._regression_choices(options or {}))
         cutter_choice = (options or {}).get('cutter')
         if cutter_choice is not None and action != 'train_classifier':
             raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')
@@ -1836,6 +1908,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', ROAD_TYPE_SCRIPT + ' is missing in this installation.')
         if action == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', BRAIN_SCRIPT + ' is missing in this installation.')
+        if action == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', REGRESSION_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', NETWORKS_SCRIPT + ' is missing in this installation.')
         if action == 'road_types' and not (self.repo / ROAD_TYPES_SCRIPT).is_file():

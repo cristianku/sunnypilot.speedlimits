@@ -210,6 +210,8 @@ On the site: **Models › Versions**. Every version has its test numbers. **Use 
 
 <sub>The networks in use, each with its main test numbers.</sub>
 
+Before it goes to the car, **Models › Regression** tests it on the drives you certified: under the video, your speed, the speed the driving models (small, big, distilled) would want and the speed Smartspeed says. A run computes only the models still missing, so after a training only the new one runs. It is open loop: the car drove as you drove, the curves say what each model would have said, not what the car would have done.
+
 To the car:
 
 - **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the scene network or the brain in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
@@ -244,6 +246,7 @@ Without drives of your own the site is empty. [docs/INSTALL.md](docs/INSTALL.md)
 Day-to-day work happens on the site, whose buttons run a few helper scripts and the `nnslr` command-line tool. [docs/COMMANDS.md](docs/COMMANDS.md) lists them all: what each one does, what it writes, and which ones use the GPU, install packages or publish anything.
 
 - `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
+- `scripts/run_regression.sh`: the Run button of Models › Regression (GPU).
 - `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_brain.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.

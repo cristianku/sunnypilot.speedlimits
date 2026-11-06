@@ -58,7 +58,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|publish|panoramica|prepara|allena|pannello|stato|account|'
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|regression|publish|panoramica|prepara|allena|pannello|stato|account|'
                      r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # A drive page whose route has no report (or an id that is no route), in words.
@@ -665,6 +665,12 @@ def make_handler(app: ReviewApp):
                 self._speed_review_get(path)
                 return
             # [speed-review] - END
+            # [regression] - START
+            # Models › Regression (nnslr_tools.regression): the drives and the models, a drive's curves.
+            if path.startswith('/api/regression/'):
+                self._regression_get(path, urlsplit(self.path).query)
+                return
+            # [regression] - END
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
@@ -1378,6 +1384,55 @@ def make_handler(app: ReviewApp):
                 return
             self._problem(404, 'not_found', 'Not found.', True)
 
+        # [regression] - START
+        def _regression_get(self, path, query):
+            """Models › Regression, reading only: the drives with the models to choose, a drive's curves
+            (?horizon=<seconds>&brain=<run>)."""
+            from nnslr_tools import regression
+            if path == '/api/regression/routes':
+                self._json(200, app.panel.regression())
+                return
+            match = re.fullmatch(r'/api/regression/routes/([0-9a-f]{8}--[0-9a-f]{10})', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            asked = parse_qs(query)
+            horizon = asked.get('horizon', [str(regression.DEFAULT_HORIZON_S)])[0]
+            try:
+                self._json(200, app.panel.regression_route(match.group(1), int(horizon) if horizon.isdigit() else 0,
+                                                           asked.get('brain', [None])[0]))
+            except regression.RegressionError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+
+        def _regression_post(self, path):
+            """A drive certified or not ({"certified": true|false}): same origin, JSON, a person on the site and a panel
+            that is not read-only."""
+            from nnslr_tools import regression
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return
+            self._require_ai_session()
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            match = re.fullmatch(r'/api/regression/routes/([0-9a-f]{8}--[0-9a-f]{10})/certify', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            body = self._read_json()
+            if not isinstance(body, dict) or not isinstance(body.get('certified'), bool):
+                self._problem(400, 'bad_request', 'Say {"certified": true} or false.', True)
+                return
+            who, _via = self._who()
+            try:
+                self._json(200, app.panel.regression_certify(match.group(1), body['certified'], who or 'local'))
+            except regression.RegressionError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+        # [regression] - END
+
         def _speed_review_post(self, path):
             """A person's speed on a stretch of a drive (/stretches: {"start_ns", "end_ns", "kph", "state", "known_ns",
             "note", "base_revision"}; state null clears it) or a tap on its roadworks (/works: {"tap", "at_ns",
@@ -1501,6 +1556,11 @@ def make_handler(app: ReviewApp):
                 self._speed_review_post(path)
                 return
             # [speed-review] - END
+            # [regression] - START
+            if path.startswith('/api/regression/'):
+                self._regression_post(path)
+                return
+            # [regression] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
@@ -1538,11 +1598,13 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}, {"rebuild": "on"}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), what the brain learns ({"works", "driver", "pool"}), the route, provider,
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "driver", "pool"}), the models of a
+                    # regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
-                                                          'classifier', 'boards', 'works', 'driver', 'pool', 'rebuild')
+                                                          'classifier', 'boards', 'works', 'driver', 'pool', 'rebuild', 'openpilot',
+                                                          'brains')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit

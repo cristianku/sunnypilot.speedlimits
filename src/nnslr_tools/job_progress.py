@@ -96,6 +96,10 @@ BRAIN_STEPS = (
     ('brain_s2', 'Seed 2', 24),
 )
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
+# scripts/run_regression.sh: each step goes drive by drive ("regression item openpilot 2/7 <route>"), the driving models
+# also segment by segment ("SEGMENT 3/33 <folder>", evaluation/route_speed.py of openpilot.distill).
+REGRESSION_STEPS = (('openpilot', 'Run the driving models', 70), ('signs', 'Read the signs of the drives', 15),
+                    ('brains', 'Run the brains', 15))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
                           ('decider', 'Export applicability', 30), ('package', 'Model card and checks', 10))
@@ -131,13 +135,13 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'train_road_type': ROAD_TYPE_STEPS,
-         'train_brain': BRAIN_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-            'train_road_type', 'train_brain', 'dataset', 'ai_review',
+            'train_road_type', 'train_brain', 'regression', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore')
 
@@ -160,6 +164,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'train_road_type': (8, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'signs', 5: 'road_type_gru',
                                     6: 'road_type_gru_nomotion', 7: 'road_type_frame', 8: 'export'}),
             'train_brain': (6, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}),
+            'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
@@ -189,6 +194,8 @@ MARKERS = (
     (re.compile(r'^== [def]\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
+REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
+REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
                    r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame|brain_s[0-2]) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
@@ -315,6 +322,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     segments: tuple[int, int] = (0, 0)
     # A proposer measured: the frames proposed so far and all of them.
     proposed: tuple[int, int] | None = None
+    # Regression: the step, the drives done of those to do and the drive at work; how far that drive is.
+    item: tuple[str, int, int, str] | None = None
+    item_share = 0.0
     # The curves of the training: per network, one point per epoch.
     curves: dict[str, dict] = {}
     for raw in text.splitlines():
@@ -382,6 +392,13 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = PREANNOTATING.match(line)
         if match and int(match.group(2)):
             proposed = (int(match.group(1)), int(match.group(2)))
+        match = REGRESSION_ITEM.match(line) if action == 'regression' else None
+        if match:
+            item = (match.group(1), int(match.group(2)), int(match.group(3)), match.group(4) or '')
+            item_share = 0.0
+        match = REGRESSION_SEGMENT.match(line) if action == 'regression' else None
+        if match:
+            item_share = (int(match.group(1)) - 1) / max(int(match.group(2)), 1)
     # Step 4 of two stages is the pretraining until the script starts the second ("-- the second stage").
     if two_stages and current == 'classifier' and not SECOND_STAGE.search(text):
         current = 'pretrain'
@@ -395,6 +412,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         done.update(keys)
 
     inside = _inside_step(current, epoch, substep, pipeline, stopped) if current in keys and not complete else None
+    if item is not None and item[0] == current and item[2]:
+        done_share = min(item[1] + item_share, item[2])
+        inside = {'done': done_share, 'total': item[2], 'percent': round(done_share * 100 / item[2], 1),
+                  'text': f'drive {min(item[1] + 1, item[2])} of {item[2]}'}
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
