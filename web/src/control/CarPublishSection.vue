@@ -34,8 +34,8 @@ const rows = computed(() => CAR_ROLES.map((role) => {
     : role === 'road_type' ? (inUseOf('brain') ? 'Does not go: the brain takes its place' : 'None in use: the comma reads the signs alone')
     : role === 'brain' ? 'None in use: the comma runs the rules of the signs' : 'None in use';
   const older = car !== null && used?.trained_at && car.trained_at && Date.parse(car.trained_at) < Date.parse(used.trained_at);
-  const carText = same ? 'On the car: this one' : car ? 'On the car: ' + (older ? 'an older one, ' : 'another one, ') + whenOf(car)
-    : used ? 'Not on the car yet' : 'None on the car either';
+  const carText = same ? 'In the branch: this one' : car ? 'In the branch: ' + (older ? 'an older one, ' : 'another one, ') + whenOf(car)
+    : used ? 'Not in the branch yet' : 'None in the branch either';
   const differs = !same && (used !== null || car !== null);
   return {role, label, usedText, carText, tone: same ? 'same' : differs ? 'other' : 'none', differs};
 }));

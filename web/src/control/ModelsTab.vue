@@ -129,14 +129,14 @@ function carLine(role: RoleModels): CarLine | null {
   if (tried) return used?.run === tried ? {tone: 'same', text: 'On the comma: this one, as a trial'}
     : {tone: 'other', text: 'On the comma: a trial of ' + tried};
   const more = 'Publish, on the Publish tab, puts it there.';
-  if (car === null) return used ? {tone: 'other', text: 'On the car: none yet', more} : {tone: 'none', text: 'On the car: none'};
+  if (car === null) return used ? {tone: 'other', text: 'In the branch: none yet', more} : {tone: 'none', text: 'In the branch: none'};
   const when = car.trained_at ? isoWhen(car.trained_at) : car.run;
-  if (used === null) return {tone: 'none', text: 'On the car: ' + car.label + ', ' + when};
+  if (used === null) return {tone: 'none', text: 'In the branch: ' + car.label + ', ' + when};
   if (car.id === used.id) return payload.value?.car_build_pending
-    ? {tone: 'other', text: 'On the car: this one, once its build is finished'} : {tone: 'same', text: 'On the car: this one'};
+    ? {tone: 'other', text: 'In the branch: this one, once its build is finished'} : {tone: 'same', text: 'In the branch: this one'};
   const age = car.trained_at && used.trained_at ? (Date.parse(car.trained_at) < Date.parse(used.trained_at) ? 'an older one' : 'a newer one')
     : 'another one';
-  return {tone: 'other', text: 'On the car: ' + age + ', ' + when, more};
+  return {tone: 'other', text: 'In the branch: ' + age + ', ' + when, more};
 }
 const carLines = computed(() => Object.fromEntries(roles.value.map((role) => [role.role, carLine(role)])) as Record<ModelRole, CarLine | null>);
 /** The published models on the car, in a few words: "speed-limits-models 62dca08, 28 Oct". */
@@ -328,7 +328,7 @@ async function choose(version: ModelVersion): Promise<void> {
       <p class="note models-foot">The numbers compare only on the same test: the older versions were measured on fewer signs (the count
         under each number). The choice is kept in <code>{{ payload.active_file }}</code> of the data root; it copies, exports and
         deploys nothing: nothing on the comma changes. Only Publish, on the Publish tab, changes what the comma
-        downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> On the car: the networks published in {{ carText }}.</template></p>
+        downloads; Try on the comma now copies a SignNet onto it until its next software update.<template v-if="carText"> In the branch: the networks published in {{ carText }}.</template></p>
       <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>
 

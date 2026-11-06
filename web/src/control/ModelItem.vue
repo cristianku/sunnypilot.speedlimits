@@ -150,7 +150,7 @@ const hourly = (value: number | null): string => value === null ? '–' : value 
       <span v-if="version.in_use || version.on_car || onTrial || !version.finished" class="model-pills">
         <span v-if="version.in_use" class="pill ok">In use</span>
         <span v-else-if="!version.finished" class="pill warn">Not finished</span>
-        <span v-if="version.on_car" class="pill car">On the car</span>
+        <span v-if="version.on_car" class="pill car">In the branch</span>
         <span v-if="onTrial" class="pill trial">Trying on the comma</span>
       </span>
     </div>
