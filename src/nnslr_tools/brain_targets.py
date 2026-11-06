@@ -38,8 +38,8 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, plate_hours, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
-  yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
+- signs, plate, plate_hours, plate_wet, wipers, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
+  yet has its signs unknown throughout, and its wipers (drive_wipers: from the raw CAN of the rlogs). The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
   The pedals are in the last second, from the same carState (_pressed, as brain_inputs.PedalInputs does on the car).
@@ -75,6 +75,18 @@ plate comes from the class the reader gives (vision.class_plate and class_hours:
 sign with its plate in one box), so with a classifier without that class there is no copy at all: plate is unknown on every
 frame, and the export says so (plates_in_train, hours_in_train).
 
+The wet copies (wet_copy). A plate for wet roads passed with the wipers off, with his label above the number, says only that
+the number does not hold now, as a plate of hours outside them, and rain on that very road is rarer than the night. So such a
+drive goes through the epoch once more with the wipers on from start to end, at a random speed of theirs, and on those frames
+the answer is the number. Every other frame keeps its real answer and weight, unlike a night copy: with the wipers on and no
+plate the speed stays his, so the wipers alone teach no slowing. Only frames of train with his speed above the number, a plate
+for wet roads, a number that is a class of the speed and was not ended, and the wipers known to be off: on, the road was wet
+and his label is already the answer. A label equal to the number, on one such frame of the passage, says it holds on a dry
+road too, and the passage has no copy. The limits: the wipers stay off on a road still wet after the rain and go on for a
+drizzle, and the picture of a copy is of a dry road. The plate comes from the class the reader gives (vision.class_plate:
+maximum_speed_wet:<number>, a sign with its plate in one box), so with a classifier without that class there is no copy at
+all, and the export says so (wet_in_train).
+
 The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
 every epoch half of the passages (the frames in a row with one number) whose answers all say the number go with that number
@@ -102,6 +114,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import drive_logs
+from nnslr_tools.drive_wipers import load_wipers
 from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_type_signs import fingerprint, load_signs, load_vision, package_path
@@ -297,12 +310,13 @@ def _pressed(points: list, ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return pressed, known
 
 
-def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The signs, plate and plate_hours groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
+def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """The signs, plate, plate_hours and plate_wet groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
     drive, by the car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
     signs = np.zeros((len(seconds), INPUT_SIZES['signs']), dtype=np.float32)
     plates = np.zeros((len(seconds), INPUT_SIZES['plate']), dtype=np.float32)
     hours = np.zeros((len(seconds), INPUT_SIZES['plate_hours']), dtype=np.float32)
+    wet = np.zeros((len(seconds), INPUT_SIZES['plate_wet']), dtype=np.float32)
     ordered = sorted(readings or [], key=lambda item: item[0])
     memory, pointer = BRAIN_INPUTS.SignInputs(VISION), 0
     for row, second in enumerate(seconds):
@@ -312,7 +326,8 @@ def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray,
                              for name, confidence in read])
             pointer += 1
         signs[row], plates[row], hours[row] = memory.features(second), memory.plate_row(), memory.plate_hours_row()
-    return signs, plates, hours
+        wet[row] = memory.plate_wet_row()
+    return signs, plates, hours, wet
 
 
 def countries_so_far(gps: list, ns: np.ndarray, root: Path | None) -> list[str | None]:
@@ -340,8 +355,8 @@ def unix_at(gps: list, ns: np.ndarray) -> list[float | None]:
 
 
 def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: list | None,
-                 root: Path | None) -> dict[str, np.ndarray]:
-    """{group: (frames, size) float32}: see the module's text. Nothing after a frame reaches it."""
+                 root: Path | None, wipers: list = ()) -> dict[str, np.ndarray]:
+    """{group: (frames, size) float32}: see the module's text. Nothing after a frame reaches it. wipers: load_wipers."""
     series, gps = merged.get('series') or {}, merged.get('gps') or []
     seconds = np.array([frame['segment'] * 60 + frame['index'] for frame in frames], dtype=np.float64)
     distance, lead_speed = _last_at(series.get('lead_d') or [], ns), _last_at(series.get('lead_v') or [], ns)
@@ -353,8 +368,11 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
     hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))
                      for unix, name in zip(unix_at(gps, ns), countries)], dtype=np.float32)
-    signs, plate, plate_hours = sign_inputs(seconds, readings)
-    return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
+    signs, plate, plate_hours, plate_wet = sign_inputs(seconds, readings)
+    wiper_rows = [BRAIN_INPUTS.wipers_row(state) for state in _last_at(list(wipers), ns)]
+    return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'plate_wet': plate_wet,
+            'wipers': np.array(wiper_rows, dtype=np.float32).reshape(len(ns), INPUT_SIZES['wipers']),
+            'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
@@ -392,7 +410,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'cells': frame_cells(frames), 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'works': works, 'works_weight': works_weight,
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
-            'inputs': drive_inputs(frames, ns, merged, readings, root), 'signs_read': readings is not None,
+            'inputs': drive_inputs(frames, ns, merged, readings, root, load_wipers(root, route)),
+            'signs_read': readings is not None,
             'reader': record.get('fingerprint') if record else None,
             'no_picture_s': max(round(sum(row['end_ns'] - row['start_ns'] for row in labels['stretches']) / NS) -
                                 int(sum(((ns >= row['start_ns']) & (ns < row['end_ns'])).sum() for row in labels['stretches'])), 0)}
@@ -487,6 +506,10 @@ def _hours_plate(drive: dict) -> np.ndarray:
     return drive['inputs']['plate'][:, BRAIN_INPUTS.PLATES.index('time')] > 0
 
 
+def _wet_plate(drive: dict) -> np.ndarray:
+    return drive['inputs']['plate_wet'][:, 0] > 0
+
+
 def plates_in_train(drives: list[dict]) -> bool:
     """Whether a brain trained on these drives learnt the plate: a plate of hours on a frame of train with a speed to answer.
     The car gives a brain its plates only then (contract step.plates), since weights never trained are no reading."""
@@ -499,6 +522,11 @@ def hours_in_train(drives: list[dict]) -> bool:
                for drive in drives)
 
 
+def wet_in_train(drives: list[dict]) -> bool:
+    """Whether a brain trained on these drives learnt the plate for wet roads: as plates_in_train."""
+    return any(bool((_wet_plate(drive) & (loss_weights(drive, 'train')[0] > 0)).any()) for drive in drives)
+
+
 def _with_hour(drive: dict, groups: tuple[str, ...], hours: float) -> dict:
     inputs = {**drive['inputs'], 'hour': other_hour(drive['inputs']['hour'], hours)}
     return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
@@ -509,18 +537,30 @@ def sign_kph(signs: np.ndarray) -> np.ndarray:
     return np.rint(signs[:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE).astype(np.int64)
 
 
-def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
-    """(the frames a night copy can answer, the class of the number on each): see the module's text."""
-    signs, hour = drive['inputs']['signs'], drive['inputs']['hour']
+def _copy_frames(drive: dict, plate: np.ndarray, doubtful: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(the frames with this plate that a copy can answer, the class of the number on each): doubtful are the frames where
+    the plate does not hold, so where his label says nothing of when it does. See the module's text."""
+    signs = drive['inputs']['signs']
     kph = sign_kph(signs)
     a_class = (kph >= GRID_KPH) & (kph <= MAX_KPH) & (kph % GRID_KPH == 0) & (signs[:, 6] == 0)
-    plated, label = _hours_plate(drive) & a_class, class_kph(drive['speed'])
-    answers = (hour[:, 2] > 0) & ~_inside(_clock(hour), _plate_window(drive)) & (loss_weights(drive, 'train')[0] > 0)
+    plated, label = plate & a_class, class_kph(drive['speed'])
+    answers = doubtful & (loss_weights(drive, 'train')[0] > 0)
     frames = plated & answers & (label > kph)
     for passage in np.split(np.arange(len(kph)), np.flatnonzero((np.diff(kph) != 0) | (np.diff(plated) != 0)) + 1):
         if (answers[passage] & (label[passage] == kph[passage])).any():
             frames[passage] = False
     return frames, speed_class(kph)
+
+
+def night_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
+    """(the frames a night copy can answer, the class of the number on each): see the module's text."""
+    hour = drive['inputs']['hour']
+    return _copy_frames(drive, _hours_plate(drive), (hour[:, 2] > 0) & ~_inside(_clock(hour), _plate_window(drive)))
+
+
+def wet_frames(drive: dict) -> tuple[np.ndarray, np.ndarray]:
+    """(the frames a wet copy can answer, the class of the number on each): see the module's text."""
+    return _copy_frames(drive, _wet_plate(drive), drive['inputs']['wipers'][:, 0] > 0)
 
 
 def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
@@ -535,6 +575,20 @@ def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
     answered = frames & _inside((clock + hours) % 24, window)
     return {**_with_hour(drive, groups, hours), 'speed': np.where(answered, number, drive['speed']),
             'speed_weight': answered.astype(np.float32), 'works_weight': np.zeros_like(drive['works_weight'])}
+
+
+def wet_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
+    """The drive with the wipers on throughout, the number the answer of its frames of a plate for wet roads and his answer
+    all the rest: see the module's text. None with nothing to answer, or for a brain without both inputs."""
+    if not {'plate_wet', 'wipers'} <= set(groups):
+        return None
+    frames, number = wet_frames(drive)
+    if not frames.any():
+        return None
+    wipers = np.zeros_like(drive['inputs']['wipers'])
+    wipers[:, [rng.randrange(1, len(BRAIN_INPUTS.WIPERS)), -1]] = 1.0
+    inputs = {**drive['inputs'], 'wipers': wipers}
+    return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups), 'speed': np.where(frames, number, drive['speed'])}
 
 
 def swap_passages(drive: dict, partition: str = 'train') -> list[np.ndarray]:
@@ -572,15 +626,20 @@ def _half_swapped(drive: dict, groups: tuple[str, ...], rng) -> dict:
 
 def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]:
     """What an epoch of training goes through, new every epoch: the drives with a moved clock and half of their numbers
-    swapped, and the night copies. See the module's text. Never for a measure: drives stays as it is."""
+    swapped, the night copies and the wet copies. See the module's text. Never for a measure: drives stays as it is."""
     found = []
     for drive in drives:
+        clocked = drive
         if (_hours_plate(drive) & (np.array(drive['partitions']) == 'train')).any():
             copy = night_copy(drive, groups, rng)
             seen = _half_swapped(drive, groups, rng)
             found += [seen] if copy is None else [seen, copy]
         else:
-            found.append(_half_swapped(_with_hour(drive, groups, rng.uniform(0, 24)), groups, rng))
+            clocked = _with_hour(drive, groups, rng.uniform(0, 24))
+            found.append(_half_swapped(clocked, groups, rng))
+        wet = wet_copy(clocked, groups, rng)
+        if wet is not None:
+            found.append(wet)
     return found
 
 

@@ -131,7 +131,7 @@ def test_a_box_with_its_plate_of_hours_keeps_its_place():
                                  'value_kph': 30}]}, held)
     assert result['detections'][0]['bbox_xyxy'] == held[0]['bbox_xyxy']
     assert result['detections'][0]['supplementary_panel'] == 'time'
-    assert any('plate of hours' in warning for warning in result['warnings'])
+    assert any('its plate' in warning for warning in result['warnings'])
 
 
 def test_scale_of_the_coordinates_is_detected():

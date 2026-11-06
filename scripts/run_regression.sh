@@ -6,12 +6,12 @@ set -euo pipefail
 #
 #   1. the driving models, drive by drive (helpers/route_speed.sh of openpilot.distill, one decoding of the video for all);
 #   2. the signs of the certified drives as the car reads them today (nnslr road-type-signs --certified; a drive already
-#      read by today's reader is not read again);
+#      read by today's reader is not read again) and their front wipers from the rlogs (nnslr drive-wipers --certified);
 #   3. the brains, along the whole drive as on the car (nnslr regression-brain).
 #
 # usage: NNSLR_REGRESSION_OPENPILOT=stock,teacher NNSLR_REGRESSION_BRAINS=<run>,<run> scripts/run_regression.sh
 #
-# Writes only into $DATA_ROOT/regression/results/<route>/, the sign readings and the frame cache. It trains nothing and never
+# Writes only into $DATA_ROOT/regression/results/<route>/, the sign readings, the wipers and the frame cache. It trains nothing and never
 # changes a label, the model in use or the car. A drive that fails stops only itself: the others go on and the job ends
 # failed; running it again computes what is missing.
 #
@@ -109,6 +109,7 @@ done
 if [[ -n "$BRAINS" ]]; then
   echo "== 2/3 Read the signs of the certified drives as the car does today =="
   "$NN" road-type-signs --certified --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
+  "$NN" drive-wipers --certified --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
   echo "== 3/3 Run the brains along the certified drives =="
   "$VENV/bin/nnslr" regression-brain --brains "$BRAINS" --data-root "$DATA_ROOT" || failed=1
 else

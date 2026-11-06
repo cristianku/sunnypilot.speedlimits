@@ -8,14 +8,15 @@ set -euo pipefail
 #   2. a CUDA smoke test;
 #   3. reads the signs of the drives of Speed review as the car does today (nnslr road-type-signs --labelled; a drive
 #      already read by the car's reader of today is not read again: a new vision.py or a new network reads them all
-#      again, and the training refuses anything else), then says what the labels give (nnslr brain-targets);
+#      again, and the training refuses anything else) and their front wipers from the rlogs (nnslr drive-wipers), then says
+#      what the labels give (nnslr brain-targets);
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
 #      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart.
 #
 # usage: scripts/run_brain.sh NAME
 #
 # Writes only into $DATA_ROOT/runs/NAME/ (brain.log, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
-# the sign readings and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
+# the sign readings, the wipers and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
 # exports nothing: Publish exports the brain chosen in Models and checks it along a real drive. Run it again with the same
 # NAME to finish: a finished seed is not repeated, the signs already read are not read again.
 #
@@ -147,6 +148,7 @@ echo "== 3/6 Read the signs of the labelled drives as the car does today =="
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
 "$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
+"$SIGNS_NN" drive-wipers --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
 "$NN" brain-targets --data-root "$DATA_ROOT"
 
 step=4

@@ -264,6 +264,13 @@ An 80 with a plate saying it holds only on a wet road (the German "bei Nässe", 
 
 With no Wet label nothing changes: no such class, and the same classes as today.
 
+The brain learns it from two more inputs: the plate, and the **front wipers** as the car says them, off, on, low or high. It has to be told, since a picture rarely shows a wet road. On the car they come from `carStateSP.frontWipers`, for the training from the raw CAN of the rlogs (`nnslr drive-wipers`, in the step that reads the signs of **Train the brain**; only a Peugeot or Citroën says them, on another car they stay unknown).
+
+- Pass the plate in the rain, with the wipers on, and your speed in Speed review teaches it directly.
+- Pass it dry, with your speed above the number, and the training adds a copy of that drive with the wipers on and the number as the answer. So one dry pass is enough. Every other frame of the copy keeps your speed, so the wipers alone slow nothing.
+
+Models › Brain then says **Reads them** under **Wet plates**. Publish refuses such a brain with a classifier that has no wet class, and any brain with the wipers among its inputs while opendbc does not give them to the car. The limits: the wipers stay off on a road still wet after the rain, and go on for a drizzle.
+
 ### Drives at full definition
 
 A comma with **Record road at full resolution** on (Developer tab) writes its `fcamera.hevc` at 2688 × 1520 instead of 1344 × 760. The server tells them apart by the size of the video when it extracts the frames, drive by drive, with no setting; old and new drives live side by side. Such a drive says **HD** beside its date.
