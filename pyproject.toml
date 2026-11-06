@@ -66,7 +66,7 @@ where = ["src"]
 # (fixtures/t2/) are iterated by the manifest/align command and the T2 tests.
 # [nnslr-t2] - END
 [tool.setuptools.package-data]
-"nnslr_tools" = ["fixtures/*.json", "fixtures/t2/*.json", "web/*.html", "web/*.css", "web/js/*.js", "data/*.json.gz", "box_fit/*.npz"]
+"nnslr_tools" = ["fixtures/*.json", "fixtures/t2/*.json", "web/*.html", "web/*.css", "web/js/*.js", "web/product/*", "data/*.json.gz", "box_fit/*.npz"]
 "speed_vision_core" = ["py.typed"]
 
 [tool.pytest.ini_options]

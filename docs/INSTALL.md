@@ -190,7 +190,7 @@ scripts/install_review_service.sh
 
 The access token ends up in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, mode 600, ignored by git). Later updates: `helpers/update.sh`.
 
-Reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside.
+The public page and the reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside.
 
 ## Reference machine
 

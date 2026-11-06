@@ -10,7 +10,9 @@ sign-in, the access token of the agents), with those headers ignored. Without bo
 The way in from outside never gives more than a reviewer's work, whatever the groups say: the administrator signs in
 from the LAN only. On that way the administrator's cookie and the access token count for nothing, /api/v1 and /mcp are
 closed, and a request the proxy sends with no valid reviewer is refused, never shown the local sign-in. NNSLR_PUBLIC_HOSTS
-names the addresses of that way, so a proxy that lost its settings refuses instead of opening the local site.
+names the addresses of that way, so a proxy that lost its settings refuses instead of opening the local site. Their / is
+the public page of the project (review.py _product), open to all and with nobody's name on it, so a guest's home is
+/reviews.
 
 What a guest may open is the table GUEST_ROUTES, and nothing else: a page added to the site tomorrow stays closed until
 someone adds it here. A row with kinds holds a drive: the server checks, on every request, that this work on this drive
@@ -65,7 +67,7 @@ SAVED_FRAME = r'[0-9]{1,9}/[0-9]{1,9}'
 # every reviewer. The first group of a row with kinds is the drive.
 GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, kinds in (
     # The pages of the guest's app (pages.render_guest), which hold no data, and their own list.
-    ('GET', r'/(speed-review|sign-distance|roads)?', None),
+    ('GET', r'/(reviews|speed-review|sign-distance|roads)', None),
     ('GET', r'/api/auth/state', None),
     ('GET', r'/api/reviewer/work', None),
     # The list behind "Next drive" of Sign distance: the server keeps only the guest's drives.
@@ -155,11 +157,15 @@ class GuestAccess:
         sent = headers.get_all(PROXY_SECRET_HEADER, [])
         return len(sent) == 1 and hmac.compare_digest(sent[0].encode('utf-8'), self.secret.encode('utf-8'))
 
+    def public_host(self, headers) -> bool:
+        """A request to one of the public names of the site."""
+        return host_name(headers.get('Host')) in self.public_hosts
+
     def guest_of(self, peer: str, headers) -> str | None:
         """The reviewer behind a request; None for a request that did not come the outside way. Raises for one that
         came that way, or to its address, without a reviewer: it must not fall through to the local site."""
         if not self._through_proxy(peer, headers):
-            if host_name(headers.get('Host')) in self.public_hosts:
+            if self.public_host(headers):
                 raise ReviewRejected(403, 'not_through_proxy', NOT_THROUGH_PROXY)
             return None
         names = headers.get_all(USERNAME_HEADER, [])

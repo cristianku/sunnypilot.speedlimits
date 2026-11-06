@@ -4,7 +4,7 @@
 // review, Speed review, Sign distance, Roads, Training dataset, Reviewers), Training, Models (Versions, Results, Regression, Publish); the
 // section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
-// normal links. A drive opened on Roads, Drive review, Speed review, Sign distance or Regression is "/roads?drive=<route>"
+// normal links. A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Roads, Drive review, Speed review, Sign distance or Regression is "/roads?drive=<route>"
 // ("/drive-review?drive=<route>&episode=<id>", "/speed-review?drive=<route>", "/sign-distance?drive=<route>&sign=<key>"):
 // an address of its own, Back returns to the list.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
@@ -15,7 +15,7 @@ export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'roads' | 'drivere
 export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
-  overview: '/', prepare: '/prepare', dataset: '/dataset', roads: '/roads', drivereview: '/drive-review',
+  overview: isGuest() ? '/reviews' : '/', prepare: '/prepare', dataset: '/dataset', roads: '/roads', drivereview: '/drive-review',
   speedreview: '/speed-review', signdistance: '/sign-distance', reviewers: '/reviewers', train: '/train', evaluate: '/evaluate', models: '/models',
   regression: '/regression', publish: '/publish',
 };

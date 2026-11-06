@@ -25,6 +25,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from nnslr_tools.gps import country_names
+from nnslr_tools.review_access import SIGN_OUT_ADDRESS
 from nnslr_tools.review_hints import empty_stats
 
 # The logo: a Swiss 50 sign in the yellow corners of the box the review selects (the model reading a sign), on
@@ -81,7 +82,13 @@ SECTION_ICONS = {
     'models': '<path d="M12 3.5 19.5 7.7v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.8 7.9 12 12l7.2-4.1M12 12v8.3"/>',
 }
 # Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review).
-OLD_ADDRESSES = {'/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
+# The files of the public page of the project (web/product) that the site serves, and their types.
+PRODUCT_FILES = {'icon.svg': 'image/svg+xml', 'post-portal-networks.png': 'image/png', 'post-portal-timeline.png': 'image/png',
+                 'product-portal-sign.jpg': 'image/jpeg', 'product-smartspeed-screen.jpg': 'image/jpeg'}
+# The home of a reviewer from outside. / cannot be: on the public names it is the page of the project, open to all, and
+# what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
+GUEST_HOME = '/reviews'
+OLD_ADDRESSES = {GUEST_HOME: '/', '/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
                  '/settings': '/account', '/review': '/routes'}
 # The name of each page in the window title.
 TAB_TITLES = {key: label for key, _, label in SITE_TABS}
@@ -136,8 +143,9 @@ def guest_bar(current: str = '') -> str:
     """The top bar of a reviewer from outside: the brand, their list and the Account menu, nothing of the server.
     data-guest tells the page scripts (web/src/common/guest.ts) to leave out what only the administrator can use."""
     return ('<header class="topbar" data-guest="true"><div class="topbar-inner site-bar">'
-            '<a class="brand" href="/" title="My reviews">' + BRAND_MARK + '<span class="brand-name">Speed limits</span></a>'
-            '<nav class="tabs" aria-label="Sections"><a href="/" data-section="overview">My reviews</a></nav>'
+            '<a class="brand" href="' + GUEST_HOME + '" title="My reviews">' + BRAND_MARK
+            + '<span class="brand-name">Speed limits</span></a>'
+            '<nav class="tabs" aria-label="Sections"><a href="' + GUEST_HOME + '" data-section="overview">My reviews</a></nav>'
             '<div class="bar-end">' + bar_end(current) + '</div></div></header>')
 # [guest-reviewers] - END
 
@@ -238,6 +246,16 @@ def render_control(nonce: str, tab: str) -> str:
 
 
 # [guest-reviewers] - START
+def render_product(nonce: str) -> str:
+    """The public page of the project (web/product/index.html): no frame of the site, nothing of the server."""
+    return asset('product/index.html').replace('__NNSLR_NONCE__', nonce)
+
+
+def product_file(name: str) -> bytes:
+    """A picture of the public page, by its name in PRODUCT_FILES."""
+    return files('nnslr_tools').joinpath('web').joinpath('product').joinpath(name).read_bytes()
+
+
 def render_guest(nonce: str) -> str:
     """The site of a reviewer from outside: their list and the pages of their drives, one app (web/src/control/GuestApp.vue)
     in the frame of the control pages. It holds no data: all comes from the calls the guest may make."""
@@ -435,9 +453,11 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     return simple_page('Sign review', 'review', nonce, '\n'.join(main))
 
 
-def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False, guest: bool = False) -> str:
+def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False, guest: bool = False,
+                   uninvited: bool = False) -> str:
     """An error page (404, 403, ...): a title and one sentence in words, no code, and the way back: Review for a
-    drive that is not there (drive), else Overview; My reviews for a guest."""
+    drive that is not there (drive), else Overview; My reviews for a guest. Someone signed in with an account that has no
+    access (uninvited) gets the public page and the sign-out of the proxy, to come back with another account."""
     title = ({404: 'Drive not found' if drive else 'Page not found', 403: 'Access denied'}.get(status)
              or 'Something went wrong')
     main = ['<main class="page"><div class="card state-box center">',
@@ -446,8 +466,10 @@ def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = 
     if message.rstrip('.') != title:
         main.append('<p>' + html.escape(message) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
+    if uninvited:
+        main.append('<a class="btn back" href="/">← Smartspeed</a> <a class="btn back" href="' + SIGN_OUT_ADDRESS + '">Sign out</a>')
     if status != 403:
-        main.append('<a class="btn back" href="/">← My reviews</a>' if guest
+        main.append('<a class="btn back" href="' + GUEST_HOME + '">← My reviews</a>' if guest
                     else '<a class="btn back" href="/routes">← Sign review</a>' if drive
                     else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')

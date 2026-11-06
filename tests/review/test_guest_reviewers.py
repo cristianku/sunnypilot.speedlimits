@@ -15,7 +15,7 @@ import pytest
 
 from nnslr_tools import review, review_auth, sign_distance, speed_review
 from nnslr_tools.gps import positions_path
-from nnslr_tools.pages import CONTROL_TABS
+from nnslr_tools.pages import CONTROL_TABS, PRODUCT_FILES
 from nnslr_tools.review_access import (PROXY_SECRET_HEADER, Assignments, GuestAccess, guest_rule, scrubbed)
 from nnslr_tools.review_db import ReviewRejected
 from review_helpers import OTHER_ROUTE, ROUTE, TOKEN, RunningServer, json_of, make_report, page_body, sign_in
@@ -121,8 +121,65 @@ def test_never_a_guest_on_the_site_of_this_computer(tmp_path, proxied):
 @pytest.mark.parametrize('host', [PUBLIC_HOST, PUBLIC_HOST + ':443', PUBLIC_HOST.upper()])
 def test_the_public_address_without_the_proxy_shows_no_local_sign_in(outside, host):
     server, _ = outside
-    for path in ('/', '/api/auth/state', '/api/v1/routes'):
+    for path in ('/reviews', '/api/auth/state', '/api/v1/routes'):
         assert server.request('GET', path, headers={'Host': host})[0] == 403
+
+
+@pytest.mark.parametrize('host', [PUBLIC_HOST, PUBLIC_HOST + ':443', PUBLIC_HOST.upper()])
+def test_the_public_name_opens_the_page_of_the_project_and_nothing_else(outside, host):
+    server, _ = outside
+    for path in ('/', '/?from=a-link', '/product', '/product/'):
+        status, _, data = server.request('GET', path, headers={'Host': host})
+        assert status == 200 and b'Press cruise' in data and b'href="/reviews"' in data
+    for name, kind in PRODUCT_FILES.items():
+        status, response, data = server.request('GET', '/product/' + name, headers={'Host': host})
+        assert status == 200 and response.getheader('Content-Type') == kind and data
+    for path in ('/routes', '/favicon.ico', '/product/index.html', '/product/nothing.png', '/product/../shared.css',
+                 '/product/%2e%2e/shared.css', '/product/icon.svg/'):
+        assert server.request('GET', path, headers={'Host': host})[0] == 403, path
+
+
+def test_the_page_of_the_project_is_whole_under_its_policy(outside):
+    server, _ = outside
+    _, response, data = server.request('GET', '/', headers={'Host': PUBLIC_HOST})
+    text = data.decode()
+    nonce = re.search(r"'nonce-([^']+)'", response.getheader('Content-Security-Policy')).group(1)
+    assert text.count('<script') == text.count(f'<script nonce="{nonce}">') == 2 and '__NNSLR' not in text
+    pictures = re.findall(r'(?:src|href)="/product/([^"]+)"', text)
+    assert set(pictures) == set(PRODUCT_FILES)
+    assert server.request('GET', '/product/' + pictures[0])[1].getheader('Cache-Control').startswith('public')
+
+
+def test_the_page_of_the_project_opens_on_the_lan_and_leaves_the_rest_as_it_was(outside):
+    server, _ = outside
+    assert server.request('GET', '/product/')[0] == 200
+    status, _, data = server.request('GET', '/')
+    assert status == 200 and b'Press cruise' not in data and b'login' in data
+    assert server.request('GET', '/reviews')[0] == 401
+    status, response, _ = server.request('GET', '/reviews', headers=sign_in(server))
+    assert status == 303 and response.getheader('Location') == '/'
+
+
+def test_on_the_open_way_a_made_up_name_is_nobody(outside):
+    server, _ = outside
+    forged = {'Host': PUBLIC_HOST, 'X-authentik-username': 'ana', 'X-authentik-groups': 'reviewers'}
+    assert server.request('GET', '/reviews', headers=forged)[0] == 403
+    assert server.request('GET', f'/api/route/{ROUTE}/reviews', headers=forged)[0] == 403
+    assert b'ana' not in server.request('GET', '/', headers=forged)[2]
+
+
+def test_a_reviewer_on_the_public_name_has_their_list_at_their_own_address(outside):
+    server, _ = outside
+    with_proof = {'Host': PUBLIC_HOST, **proof()}
+    assert b'Press cruise' in server.request('GET', '/', headers=with_proof)[2]
+    status, _, data = server.request('GET', '/reviews', headers=with_proof)
+    assert status == 200 and b'data-guest="true"' in data and b'href="/reviews"' in data and b'href="/"' not in data
+
+
+def test_an_account_with_no_access_can_go_back_and_sign_out(outside):
+    server, _ = outside
+    status, _, data = server.request('GET', '/reviews', headers={'Host': PUBLIC_HOST, **proof(groups='farm')})
+    assert status == 403 and b'href="/">' in data and b'href="/outpost.goauthentik.io/sign_out"' in data
 
 
 @pytest.mark.parametrize('headers', [
@@ -138,7 +195,7 @@ def test_the_public_address_without_the_proxy_shows_no_local_sign_in(outside, ho
 ])
 def test_through_the_proxy_without_a_reviewer_is_refused_never_the_local_site(outside, headers):
     server, _ = outside
-    for path in ('/', '/api/auth/state', '/account'):
+    for path in ('/reviews', '/api/auth/state', '/account'):
         status, _, data = server.request('GET', path, headers=headers)
         assert status == 403 and b'/api/auth/login' not in data and b'href="/prepare"' not in data
 
@@ -218,7 +275,7 @@ def addresses_of_the_site() -> set[str]:
     found = set(re.findall(r"'(/api/[a-z0-9_/.-]+)'", source))
     found.update(re.findall(r"r'(/api/[a-z0-9_/-]+)[/(']", source))
     found.update(CONTROL_TABS)
-    found.update({'/routes', '/account', '/index.html', '/prepare', '/panoramica', '/pannello'})
+    found.update({'/', '/reviews', '/routes', '/account', '/index.html', '/prepare', '/panoramica', '/pannello'})
     drive = ('', '/segments', '/scan', '/logs', '/episodes', '/queue')
     for route in (ROUTE, OTHER_ROUTE):
         found.update(f'/route/{route}/{tail}' for tail in ('summary', 'car', 'report.jsonl', 'reviews.jsonl', 'run.json',
@@ -244,7 +301,7 @@ def test_a_walk_of_the_site_finds_only_what_the_table_opens(outside):
                 assert status == 403, (method, path, status)
             else:
                 opened.append((method, path))
-    assert ('GET', '/api/auth/state') in opened and ('GET', '/') in opened
+    assert ('GET', '/api/auth/state') in opened and ('GET', '/reviews') in opened
     assert all(not path.startswith(('/api/ai', '/api/settings', '/api/regression')) for _, path in opened)
     assert all('/scan' not in path and '/logs' not in path for _, path in opened)
 
@@ -420,7 +477,7 @@ def test_the_json_of_a_guest_is_scrubbed(outside, monkeypatch):
     assert json_of(server.request('GET', f'/api/sign-distance/drives/{ROUTE}', headers=proof())[2]) == {'route': ROUTE}
 
 
-@pytest.mark.parametrize('path', sorted(['/', '/roads', '/speed-review', '/sign-distance']))
+@pytest.mark.parametrize('path', sorted(['/reviews', '/roads', '/speed-review', '/sign-distance']))
 def test_the_pages_of_a_guest_show_their_bar_and_no_tab_of_the_administrator(outside, path):
     server, _ = outside
     status, _, data = server.request('GET', path, headers=proof())
@@ -547,7 +604,7 @@ def test_a_person_joins_at_the_first_visit_and_is_written_at_most_hourly(tmp_pat
 
 def test_a_first_visit_needs_nobody_to_have_added_the_person(outside):
     server, _ = outside
-    assert server.request('GET', '/', headers=proof('new.person'))[0] == 200
+    assert server.request('GET', '/reviews', headers=proof('new.person'))[0] == 200
     assert [person['name'] for person in server.app.assignments.view()['people']] == ['ana', 'new.person']
     assert json_of(server.request('GET', '/api/reviewer/work', headers=proof('new.person'))[2])['drives'] == []
 # [guest-reviewers] - END

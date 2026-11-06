@@ -122,6 +122,12 @@ On the LAN the site asks you to sign in with a **name and password** (pages, pan
 - Old links with `?token=...` no longer open the site: they lead to the sign-in page.
 - Started by hand only on `127.0.0.1` (without `--host 0.0.0.0`), the site stays open to this computer without signing in, as before.
 
+### The public page: smartspeed.14bodhi.com
+
+`https://smartspeed.14bodhi.com/` shows the project to anyone, with no sign-in. The same page is at `/product/` on every address of the site, the LAN included, so you can read it there before it goes out. It lives in `src/nnslr_tools/web/product/`, with its pictures: a new picture goes in `PRODUCT_FILES` of `pages.py` too, or the site does not serve it.
+
+Its **Sign in** button opens `/reviews`: the proxy asks for the Authentik account and comes back to **My reviews**. An account that is not in `reviewers` gets "Access denied", with the way back to the page and Sign out. On the LAN the same button leads to your Overview. Without the proxy's proof, the public name opens the page and its pictures and answers 403 to everything else.
+
 ### People from outside: the reviewers
 
 Other people can do review work on the drives you give them, and nothing else: no training, no import from the comma, no panel, no Settings, no API. Nobody from outside is ever an administrator.
@@ -137,8 +143,8 @@ Other people can do review work on the drives you give them, and nothing else: n
 **Turning it on** (once, when the proxy is ready):
 
 ```sh
-scripts/setup_guest_access.sh --proxy-ips <proxy address> --public-hosts <public name> --dry-run
-scripts/setup_guest_access.sh --proxy-ips <proxy address> --public-hosts <public name>
+scripts/setup_guest_access.sh --proxy-ips 192.168.200.161 --public-hosts smartspeed.14bodhi.com --dry-run
+scripts/setup_guest_access.sh --proxy-ips 192.168.200.161 --public-hosts smartspeed.14bodhi.com
 ```
 
 It writes the three settings in `/etc/speedlimits-web.env`. The secret is made there and never printed: the cluster's administrator reads it from that file and sets it in the proxy. The service reads the file when it starts, so it needs a restart. `--new-secret` changes the secret, `--off` closes the way in. Until then Data › Reviewers says that the sign-in from outside is not on: you can prepare people and work, nobody can come in.
@@ -315,6 +321,7 @@ A review can be done by hand, or by an AI that sees the images, through any serv
 | Access token of the site (the place to look for it) | `.env` of the repository, line `NNSLR_REVIEW_TOKEN=` |
 | Copy of the token the service reads | `/etc/speedlimits-web.env` |
 | Reviewers from outside and their work | `web/auth/assignments.json` of the data folder, set in Data › Reviewers |
+| The public page of the project | `src/nnslr_tools/web/product/`, at `/product/` and at `/` of the public name |
 | Mapillary client token, for the positions of the Mapillary photos | `.env` of the repository, line `MAPILLARY_TOKEN=` |
 | Positions of the Mapillary photos (`nnslr mapillary-locations`) | `data/external/mapillary/locations.jsonl`, with `image_ids.csv` beside it |
 | Windows of the Mapillary photos for the cutter (`nnslr mapillary-windows`) | `data/external/mapillary/windows.jsonl`, the pictures in `data/external/mapillary/windows/train/` |
