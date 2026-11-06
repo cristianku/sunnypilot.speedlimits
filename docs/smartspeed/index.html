@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smartspeed for sunnypilot</title>
-<meta name="description" content="A research build of sunnypilot for the comma 4. You press cruise and the car picks its own speed: a small network with memory takes the signs the camera read, the road and the car's own signals, and says the speed to hold once a second.">
+<meta name="description" content="A research build of sunnypilot, the openpilot fork, for the comma 4. You press cruise and the car picks its own speed: a small network with memory takes the signs the camera read, the road and the car's own signals, and says the speed to hold once a second.">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Smartspeed">
 <meta property="og:title" content="Smartspeed for sunnypilot">
-<meta property="og:description" content="A research build of sunnypilot for the comma 4. You press cruise and the car picks its own speed.">
+<meta property="og:description" content="A research build of sunnypilot, the openpilot fork, for the comma 4. You press cruise and the car picks its own speed.">
 <meta property="og:url" content="https://smartspeed.14bodhi.com/">
 <meta property="og:image" content="https://smartspeed.14bodhi.com/product/share.jpg">
 <meta property="og:image:type" content="image/jpeg">
@@ -59,6 +59,8 @@ h2{font-size:clamp(36px,6.4vw,64px);line-height:1.06;font-weight:700;letter-spac
 .hero{padding:clamp(56px,9vw,104px) 22px 0;text-align:center;overflow:hidden;
   background:radial-gradient(60% 46% at 50% 74%,rgba(176,38,212,.26),transparent 72%),#000;color:#f5f5f7}
 .hero .eyebrow{color:var(--mute-dark);margin-bottom:6px}
+.hero .eyebrow a{color:var(--link-dark);text-decoration:none}
+.hero .eyebrow a:hover{text-decoration:underline}
 h1{font-size:clamp(62px,14vw,136px);line-height:1;font-weight:700;letter-spacing:-.035em}
 h1 span{color:var(--green)}
 .hero .lead{font-size:clamp(23px,3.6vw,38px);line-height:1.16;font-weight:600;letter-spacing:-.012em;margin-top:18px}
@@ -163,12 +165,13 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <a class="opt" href="#brain">The brain</a>
   <a class="opt" href="#portal">The portal</a>
   <a class="opt" href="#status">Status</a>
+  <a href="https://github.com/commaai/openpilot">openpilot</a>
   <a href="https://github.com/cristianku/sunnypilot.speedlimits">GitHub</a>
   <a class="signin" href="/reviews">Sign in</a>
 </div></nav>
 
 <header class="hero">
-  <p class="eyebrow">For sunnypilot on the comma 4</p>
+  <p class="eyebrow">Built into <a href="https://github.com/sunnypilot/sunnypilot">sunnypilot</a>, the <a href="https://github.com/commaai/openpilot">openpilot</a> fork, for the comma 4</p>
   <h1>Smart<span>speed</span></h1>
   <p class="lead">You press cruise and the car picks its own speed.</p>
   <p class="sub">Two small networks read the signs. A third one, with memory, takes what they read, the road and what the car is doing, and says the speed to hold once a second. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
@@ -281,7 +284,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   </div>
 </div></section>
 
-<footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>). An independent project, not made by comma.ai or sunnypilot.</p></footer>
+<footer><p>Built by Cristian (<a href="https://github.com/cristianku">cristianku</a>) on top of sunnypilot and openpilot. Not made by comma.ai or the sunnypilot team.</p></footer>
 
 <script>
 if (matchMedia('(prefers-reduced-motion: no-preference)').matches && 'IntersectionObserver' in window) {
