@@ -423,21 +423,6 @@ def test_a_brain_that_reads_the_wet_plates_goes_only_with_a_classifier_that_has_
     assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b1/brain'
 
 
-def test_a_brain_that_reads_the_wipers_goes_only_on_a_car_that_gives_them(tmp_path, monkeypatch):
-    data = tmp_path / 'data'
-    servers_runs(data)
-    use_brain(data, brain_run(data, 'b1', result={'groups': ['signs', 'wipers'], 'seed': 1, 'history': [{}], 'test': {},
-                                                  'validation': {}}))
-    carstate = tmp_path / 'opendbc/opendbc/car/psa/carstate.py'
-    carstate.parent.mkdir(parents=True)
-    carstate.write_text('ret_sp = structs.CarStateSP()\n')
-    monkeypatch.setenv('NNSLR_OPENDBC_CLONE', str(tmp_path / 'opendbc'))
-    with pytest.raises(ValueError, match='reads the wipers, and opendbc does not give them yet'):
-        car_release.choose(data, 's1')
-    carstate.write_text('ret_sp.frontWipers = 1\n')
-    assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b1/brain'
-
-
 def test_a_class_for_wet_roads_is_no_class_with_hours(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)

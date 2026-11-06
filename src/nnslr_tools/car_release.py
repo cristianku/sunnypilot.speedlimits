@@ -50,7 +50,6 @@ CAR_SCRIPT = 'scripts/send_to_car.sh'
 # The clones and the build, as scripts/send_to_car.sh finds them (the same variables, the same defaults).
 MODELS_CLONE_ENV, MODELS_CLONE = 'NNSLR_MODELS_CLONE', '/root/speed-limits-models'
 SUNNYPILOT_CLONE_ENV, SUNNYPILOT_CLONE = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'
-OPENDBC_CLONE_ENV, OPENDBC_CLONE = 'NNSLR_OPENDBC_CLONE', '/root/work/opendbc'
 OPENPILOT_SCRIPTS_ENV, OPENPILOT_SCRIPTS = 'NNSLR_OPENPILOT_SCRIPTS', '/root/openpilot_scripts'
 GPU_VENV_ENV = 'NNSLR_GPU_VENV'
 BUILD_SCRIPT = 'OP-setup-psa-torque-testing/scripts/setup_psa_torque.sh'
@@ -161,7 +160,6 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
     found['road_type'] = None if found['brain'] else _road_type(runs, index)
     _check_boards(runs, found, chosen)
     _check_plates(runs, found, chosen)
-    _check_wipers(found)
     return found
 
 
@@ -217,18 +215,6 @@ def _check_plates(runs: RunsIndex, found: dict, classifier: dict) -> None:
                          'class that says them: choose a classifier that has one, or a brain trained without them')
 
 
-def _check_wipers(found: dict) -> None:
-    """A brain with the wipers among its inputs only on a car that gives them: every frame of its training said them, and
-    "unknown" on all of them it has never seen. A check of the code that reads them in the opendbc clone."""
-    brain = found.get('brain')
-    if not brain or 'wipers' not in (brain['groups'] or []):
-        return
-    carstate = Path(os.environ.get(OPENDBC_CLONE_ENV) or OPENDBC_CLONE) / 'opendbc' / 'car' / 'psa' / 'carstate.py'
-    if not carstate.is_file() or 'frontWipers' not in carstate.read_text(encoding='utf-8'):
-        raise ValueError(f'the brain {brain["id"]} reads the wipers, and opendbc does not give them yet ({carstate}): '
-                         'choose a brain trained without them')
-
-
 def _road_type(runs: RunsIndex, index: ModelIndex) -> dict | None:
     active, problem = index.read_active()
     if problem is not None or active.get('road_type') is None:
@@ -264,7 +250,7 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
     if weights is None:
         raise ValueError(f'{entry["id"]} has no weights on this server')
     return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root, 'plates': entry['plates'], 'hours': entry['hours'],
-            'wet': entry['wet'], 'groups': entry['groups']}
+            'wet': entry['wet']}
 
 
 def export_brain(chosen: dict, folder: Path) -> None:

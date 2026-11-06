@@ -264,12 +264,12 @@ An 80 with a plate saying it holds only on a wet road (the German "bei Nässe", 
 
 With no Wet label nothing changes: no such class, and the same classes as today.
 
-The brain learns it from two more inputs: the plate, and the **front wipers** as the car says them, off, on, low or high. It has to be told, since a picture rarely shows a wet road. On the car they come from `carStateSP.frontWipers`, for the training from the raw CAN of the rlogs (`nnslr drive-wipers`, in the step that reads the signs of **Train the brain**; only a Peugeot or Citroën says them, on another car they stay unknown).
+The brain learns it from the plate and the picture: whether the road is wet is for the picture to say. The **front wipers** as the car says them, off, on, low or high, are an extra clue, and the training hides them on half of the drives, so that the brain learns to do without them on a car that does not say them. On the car they come from `carStateSP.frontWipers`, read in opendbc for the Peugeot, for the training from the raw CAN of the rlogs (`nnslr drive-wipers`, in the step that reads the signs of **Train the brain**; only a Peugeot or Citroën says them, on another car they stay unknown).
 
-- Pass the plate in the rain, with the wipers on, and your speed in Speed review teaches it directly.
-- Pass it dry, with your speed above the number, and the training adds a copy of that drive with the wipers on and the number as the answer. So one dry pass is enough. Every other frame of the copy keeps your speed, so the wipers alone slow nothing.
+- Pass the plate in the rain and your speed in Speed review teaches it directly. With the wipers hidden, only the picture says the road is wet: these drives are what teaches the picture.
+- Pass it dry, with your speed above the number, and the training adds a copy of that drive with the wipers on and the number as the answer. So one dry pass teaches the wipers, not the picture. Every other frame of the copy keeps your speed, so the wipers alone slow nothing.
 
-Models › Brain then says **Reads them** under **Wet plates**. Publish refuses such a brain with a classifier that has no wet class, and any brain with the wipers among its inputs while opendbc does not give them to the car. The limits: the wipers stay off on a road still wet after the rain, and go on for a drizzle.
+Models › Brain then says **Reads them** under **Wet plates**. Publish refuses such a brain with a classifier that has no wet class. The limits: the picture knows a wet road only after drives in the rain, and the wipers stay off on a road still wet after the rain, and go on for a drizzle.
 
 ### Drives at full definition
 

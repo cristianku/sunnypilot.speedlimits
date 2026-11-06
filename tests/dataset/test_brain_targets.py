@@ -866,6 +866,46 @@ def test_an_epoch_goes_through_the_drive_and_its_wet_copy(seed):
     assert np.allclose(seen[0]['inputs']['hour'], seen[1]['inputs']['hour'])
 
 
+def test_half_of_an_epoch_goes_as_on_a_car_that_does_not_say_the_wipers():
+    import random
+    targets = _targets()
+    rng = random.Random(0)
+    seen = [targets.epoch_drives([wet_plated()], WET_GROUPS, rng)[0] for _ in range(200)]
+    assert 70 < sum(not one['inputs']['wipers'].any() for one in seen) < 130
+    assert all((one['extra'][:, -5:] == one['inputs']['wipers']).all() for one in seen)
+    assert all((one['inputs']['wipers'][:, 0] == 1).all() for one in seen if one['inputs']['wipers'].any())
+
+
+def test_a_wet_copy_keeps_the_wipers_on_and_comes_from_the_real_ones_whatever_the_drive_got():
+    import random
+    targets = _targets()
+    rng = random.Random(0)
+    for _ in range(50):
+        drive = wet_plated()
+        _, copy = targets.epoch_drives([drive], WET_GROUPS, rng)
+        assert (copy['inputs']['wipers'][:, -1] == 1).all() and (copy['inputs']['wipers'][:, 0] == 0).all()
+        assert (drive['inputs']['wipers'][:, 0] == 1).all()
+
+
+def test_a_night_copy_too_goes_with_the_wipers_unknown_half_of_the_time():
+    import random
+    targets = _targets()
+    rng = random.Random(0)
+    drive = plated()
+    drive['inputs']['wipers'][:] = targets.BRAIN_INPUTS.wipers_row(0)
+    groups = (*GROUPS, 'plate', 'wipers')
+    seen = [targets.epoch_drives([drive], groups, rng)[1] for _ in range(200)]
+    assert 70 < sum(not one['inputs']['wipers'].any() for one in seen) < 130
+
+
+def test_a_brain_without_the_wipers_gets_the_drive_as_it_is_and_draws_nothing_for_them():
+    import random
+    targets = _targets()
+    rng = random.Random(0)
+    drive, before = plated(), rng.getstate()
+    assert targets._wipers_unknown(drive, GROUPS, rng) is drive and rng.getstate() == before
+
+
 def test_a_brain_learns_the_wet_plate_only_when_a_frame_of_train_has_it():
     targets = _targets()
     assert targets.wet_in_train([wet_plated()])

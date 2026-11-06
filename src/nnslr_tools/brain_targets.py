@@ -87,6 +87,12 @@ drizzle, and the picture of a copy is of a dry road. The plate comes from the cl
 maximum_speed_wet:<number>, a sign with its plate in one box), so with a classifier without that class there is no copy at
 all, and the export says so (wet_in_train).
 
+The wipers are a clue (_wipers_unknown). The road being wet is for the picture to say: the wipers only help, not every car says
+them, and they stay off on a road still wet after the rain. So every epoch half of the drives and of the night copies go with
+the wipers unknown, as on a car that does not say them: on a drive in the rain only the picture then gives the answer, and a
+brain does not lean on them. A wet copy keeps them on, since its picture is of a dry road: unknown, it would teach the number
+on every dry road. A wet copy is made from the real wipers, and nothing of this reaches a measure.
+
 The numbers swapped (swap_passages, swapped). On a few drives the picture tells the road and a road seen in training tells its
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
 every epoch half of the passages (the frames in a row with one number) whose answers all say the number go with that number
@@ -624,19 +630,28 @@ def _half_swapped(drive: dict, groups: tuple[str, ...], rng) -> dict:
     return swapped(drive, passages, groups) if passages else drive
 
 
+def _wipers_unknown(drive: dict, groups: tuple[str, ...], rng) -> dict:
+    """Half of the time the drive as on a car that does not say its wipers: see the module's text."""
+    if 'wipers' not in groups or rng.random() < .5:
+        return drive
+    inputs = {**drive['inputs'], 'wipers': np.zeros_like(drive['inputs']['wipers'])}
+    return {**drive, 'inputs': inputs, 'extra': pack_inputs(inputs, groups)}
+
+
 def epoch_drives(drives: list[dict], groups: tuple[str, ...], rng) -> list[dict]:
     """What an epoch of training goes through, new every epoch: the drives with a moved clock and half of their numbers
-    swapped, the night copies and the wet copies. See the module's text. Never for a measure: drives stays as it is."""
+    swapped, the night copies, half of these with the wipers unknown, and the wet copies. See the module's text. Never for a
+    measure: drives stays as it is."""
     found = []
     for drive in drives:
         clocked = drive
         if (_hours_plate(drive) & (np.array(drive['partitions']) == 'train')).any():
             copy = night_copy(drive, groups, rng)
-            seen = _half_swapped(drive, groups, rng)
-            found += [seen] if copy is None else [seen, copy]
+            seen = [_half_swapped(drive, groups, rng)] + ([] if copy is None else [copy])
         else:
             clocked = _with_hour(drive, groups, rng.uniform(0, 24))
-            found.append(_half_swapped(clocked, groups, rng))
+            seen = [_half_swapped(clocked, groups, rng)]
+        found += [_wipers_unknown(one, groups, rng) for one in seen]
         wet = wet_copy(clocked, groups, rng)
         if wet is not None:
             found.append(wet)
