@@ -146,7 +146,7 @@ function car(status: PanelStatus): Omit<LoopRow, 'primary'> {
     return networkText(role, used) + (there ? ' (the car has ' + networkText(role, there).split(', ').pop() + ')' : '');
   });
   return {...base, big: summary.on_car ? plural(differ.length, 'network') + ' to publish' : 'Not published yet',
-    note: 'Not on the car yet: ' + words.join(' · ') + '.', warn: '', waiting: true, ok: false, action: publish};
+    note: 'Not in the branch yet: ' + words.join(' · ') + '.', warn: '', waiting: true, ok: false, action: publish};
 }
 
 /** The four rows; null before the first status. */
