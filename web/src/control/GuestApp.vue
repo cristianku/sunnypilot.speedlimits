@@ -4,9 +4,11 @@
 // own page (/route/<id>/). No status of the server here, no tab of the administrator: every address without a drive shows
 // the list, and the server answers only for the work given.
 import {computed, onMounted, ref, shallowRef} from 'vue';
-import {api, messageOf} from '../common/api';
+import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
-import type {MyWork} from './reviewers';
+import {askConfirm} from '../composables/confirm';
+import {toast} from '../composables/toast';
+import type {GivenDrive, MyWork} from './reviewers';
 import RoadDrive from './RoadDrive.vue';
 import SignDistanceDrive from './SignDistanceDrive.vue';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
@@ -25,6 +27,16 @@ onMounted(async () => {
 /** Until the list is in nothing can be saved: a drive opened from a link waits for it. */
 const readOnly = computed(() => mine.value?.read_only ?? true);
 const minutesOf = (minutes: number | null): string => minutes === null ? '' : plural(minutes, 'minute');
+async function complete(drive: GivenDrive): Promise<void> {
+  const ok = await askConfirm({title: 'Review completed?', action: 'Completed',
+    text: 'Your work on this drive is collected and the drive leaves your list within a few minutes.'});
+  if (!ok) return;
+  try {
+    mine.value = await post<MyWork>('/api/reviewer/done', {route: drive.route});
+  } catch (problem) {
+    toast(messageOf(problem), true);
+  }
+}
 </script>
 
 <template>
@@ -47,6 +59,9 @@ const minutesOf = (minutes: number | null): string => minutes === null ? '' : pl
             </div>
             <div class="gr-links">
               <a v-for="item in drive.work" :key="item.kind" class="btn small" :href="item.href">{{ item.label }}</a>
+              <span v-if="drive.completed" class="gr-done">Completed</span>
+              <button v-else-if="mine.can_complete" type="button" class="btn small primary" @click="complete(drive)">Review
+                completed</button>
             </div>
           </li>
         </ul>

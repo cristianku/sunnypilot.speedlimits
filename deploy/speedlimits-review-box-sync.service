@@ -1,0 +1,11 @@
+# One round with the machine of the outside reviewers, from this server (helpers/review_box.sh). Installed by
+# scripts/install_review_box_sync.sh with its timer.
+
+[Unit]
+Description=Speed limits web: copy with the review machine
+
+[Service]
+Type=oneshot
+WorkingDirectory=__NNSLR_REPO__
+EnvironmentFile=-__NNSLR_ENV_FILE__
+ExecStart=__NNSLR_REPO__/helpers/review_box.sh

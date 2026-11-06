@@ -1,0 +1,24 @@
+# systemd unit of the site on the machine of the outside reviewers ("nnslr review", the pages of the drives given to them).
+#
+# Do not copy this file by hand: scripts/install_review_box.sh fills in the placeholders and installs it as
+# /etc/systemd/system/speedlimits-reviews.service. It runs as the copy account: the files that account receives over
+# rsync are the files of the site.
+
+[Unit]
+Description=Speed limits web: the machine of the outside reviewers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__NNSLR_USER__
+Group=__NNSLR_USER__
+WorkingDirectory=__NNSLR_REPO__
+EnvironmentFile=__NNSLR_ENV_FILE__
+ExecStart=__NNSLR_REPO__/.venv/bin/nnslr review --host 0.0.0.0 --port 8765
+Restart=on-failure
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

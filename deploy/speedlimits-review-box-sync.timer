@@ -1,0 +1,11 @@
+# Every 5 minutes: the results of the outside reviewers come here, the drives given go there.
+
+[Unit]
+Description=Speed limits web: copy with the review machine, every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

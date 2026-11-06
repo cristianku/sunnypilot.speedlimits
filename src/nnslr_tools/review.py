@@ -46,7 +46,8 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
 # [guest-reviewers] - START
-from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
+from nnslr_tools import review_box
+from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, REVIEW_BOX_ENV, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
                                        GuestAccess, guest_rule, scrubbed)
 # [guest-reviewers] - END
 from nnslr_tools.pages import (CONTROL_TABS, GUEST_HOME, OLD_ADDRESSES, render_account, render_control, render_guest,
@@ -97,6 +98,7 @@ HF_POSTS = ('/api/settings/huggingface', '/api/settings/huggingface/remove')
 # [guest-reviewers] - START
 # Data › Reviewers: who works from outside and on what; only a signed-in browser changes them.
 REVIEWER_POSTS = ('/api/reviewers/people', '/api/reviewers/people/remove', '/api/reviewers/assign')
+REVIEWER_DONE = '/api/reviewer/done'
 # [guest-reviewers] - END
 
 
@@ -363,14 +365,17 @@ class ReviewApp(ReviewService):
     def guest_work(self, name: str) -> dict:
         """The list of a reviewer: their drives, the latest first, each with the pages of the work given on it."""
         drives = []
+        done = self.assignments.done_of(name)
         for route, kinds in self.assignments.work_of(name).items():
             drive = drive_of(self.root, route)
             labels = dict(WORK_KINDS)
             drives.append({'route': route, 'when': drive['when'], 'start': drive['start'], 'minutes': drive['minutes'],
+                           'completed': all(kind in done.get(route, {}) for kind in kinds),
                            'work': [{'kind': kind, 'label': labels[kind], 'href': WORK_LINKS[kind].format(route=route)}
                                     for kind in kinds]})
         drives.sort(key=lambda item: (item['start'] or '', item['route']), reverse=True)
-        return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives}
+        return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives,
+                'can_complete': os.environ.get(REVIEW_BOX_ENV) == '1'}
 
     def assignable_drives(self) -> list[dict]:
         """Every drive with the work it can give today, the latest first: Sign review and Roads need its report, Sign
@@ -730,7 +735,8 @@ def make_handler(app: ReviewApp):
             if path == '/api/reviewers':
                 self._json(200, {'ok': True, 'open': app.access.enabled, 'can_edit': self._can_use_ai(),
                                  'kinds': [{'key': key, 'label': label} for key, label in WORK_KINDS],
-                                 **app.assignments.view(), 'drives': app.assignable_drives()})
+                                 **app.assignments.view(), 'drives': app.assignable_drives(),
+                                 'box': review_box.view(app.root)})
                 return
             if path in REVIEWER_POSTS:
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
@@ -1671,6 +1677,11 @@ def make_handler(app: ReviewApp):
                 return
             # [ai-reviewer] - END
             # [guest-reviewers] - START
+            if path == REVIEWER_DONE and self.guest is not None:
+                body = self._read_json()
+                app.assignments.complete(self.guest, body.get('route') if isinstance(body, dict) else None)
+                self._json(200, app.guest_work(self.guest))
+                return
             if path in REVIEWER_POSTS:
                 # The same protections as the AI settings: same origin, JSON, a signed-in browser.
                 if self._ai_post_refused():

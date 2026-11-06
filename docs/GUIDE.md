@@ -140,6 +140,14 @@ Other people can do review work on the drives you give them, and nothing else: n
 
 **What they save.** It goes in as a person's review signed `guest/<name>`, whatever the page sends, and enters the dataset at the next import like yours, speeds included. On the drives you give them they can change labels already there: Sign review keeps the history, and the Undo of Roads drops the last correction, whoever made it. So give a person only the work you want from them.
 
+**Where they work.** On a machine of their own, the review box (`speedlimits-reviews`, on serverone2), kept apart from this server: it holds only the drives given to someone, with no training, no models and no key towards here. You keep working on `limits.farm.14bodhi.com`. A drive you give in **Data › Reviewers** goes there at the next copy; every 5 minutes, or with **Update now**, what people saved comes back and goes in as if saved here. The card at the top of the tab shows the machine, its drives, the last copy and anything refused.
+
+What goes: the frames, the road and wide videos, the report and the reduced logs. What stays here: the raw logs, the GPS positions, the names of the roads and the map's ids of the roads. A reduced log travels with its track moved around 0, 0, because Speed review reads its turns, and of the positions only the country of each frame goes, so Sign review still proposes it. A saved review takes its position back when it returns. The video can still show where a drive was.
+
+What comes back is read as a stranger's: only the drives and the work given, only under the names of those who hold them. A frame changed on both sides keeps yours; the other is saved in `web/review_box/aside/` of the data folder, and the card counts it.
+
+**Review completed** on their list ends that work: the next copy takes the results and the work back, and when nobody holds work on the drive any more it leaves the machine a few minutes later.
+
 **Turning it on** (once, when the proxy is ready):
 
 ```sh
@@ -321,6 +329,8 @@ A review can be done by hand, or by an AI that sees the images, through any serv
 | Access token of the site (the place to look for it) | `.env` of the repository, line `NNSLR_REVIEW_TOKEN=` |
 | Copy of the token the service reads | `/etc/speedlimits-web.env` |
 | Reviewers from outside and their work | `web/auth/assignments.json` of the data folder, set in Data › Reviewers |
+| The copy with the review box: its link, what was sent, what was set aside | `web/review_box/` of the data folder |
+| The review box: its data, and the packages that come and go | `/srv/reviews/` on `speedlimits-reviews` (`data/`, `inbox/`, `outbox/`) |
 | The public page of the project | `docs/smartspeed/`, deployed by the cluster's administrator from a commit |
 | Mapillary client token, for the positions of the Mapillary photos | `.env` of the repository, line `MAPILLARY_TOKEN=` |
 | Positions of the Mapillary photos (`nnslr mapillary-locations`) | `data/external/mapillary/locations.jsonl`, with `image_ids.csv` beside it |
@@ -356,6 +366,9 @@ To change a page: edit `web/src` (or the template), run `helpers/build_web.sh`, 
 | `helpers/road_types.sh [--again]` | the road type of every frame of the prepared drives, from the map and the GPS: a. `nnslr localize --all` (the precise position of the road camera's frames from openpilot.distill's localizer, about 20 s of a core per new segment, 6 side by side; without distill's `.venv` the frames keep the GPS position) then `nnslr gps --all --missing`, b. `scripts/osm_maps.py` (the Geofabrik extracts the drives need and the server lacks, downloaded: at most 5 GB a run; a download that fails leaves the maps there and the job goes on), c. `nnslr car-motion --all` (the car's speed, cached: a stretch without GPS where it is slow is a garage), d. `scripts/osm_roads.py` when there is a new drive or a new map (`--again`: always), and `scripts/osm_places.py` with a new map, e. `nnslr road-types --all`, f. `nnslr junctions --all` (the intersections every drive passed, the labels of the junction head). It is the **Find the road types** button of Data › Roads | writes in `data/raw/osm/` (the maps downloaded) and `data/derived/`, CPU for a few minutes when it reads the map, and for the localizer's new segments; network for the maps the drives miss (download.geofabrik.de only, no position leaves the server) and the GNSS orbits of a new day for the localizer |
 | `helpers/build_web.sh` | checks the types of the pages (Vue 3 and TypeScript in `web/src`, with `vue-tsc`) and builds them with Vite into `src/nnslr_tools/web/js`; `--check` only says whether the built files are up to date | the first time, it installs Vue, Vite and TypeScript in `web/node_modules` (Node from PyPI with `uvx`, nothing in the system) |
 | `scripts/install_review_service.sh` | installs, updates or removes the `speedlimits-web` service | systemd, `/etc/speedlimits-web.env`, `.env` |
+| `helpers/review_box.sh` | one copy with the review box: sends the drives given, takes the results, the same as **Update now** in Data › Reviewers |
+| `scripts/install_review_box_sync.sh` | installs the 5-minute copy on this server (`--uninstall` removes it) |
+| `scripts/install_review_box.sh` | on the review box: installs the site, its timer and its settings (see [INSTALL](INSTALL.md)) |
 | `scripts/setup_guest_access.sh` | opens or closes the portal to reviewers from outside: the proxy's address, the public name and a secret that is never printed | `/etc/speedlimits-web.env`, the service needs a restart |
 | `scripts/setup_v100_training_env.sh` | creates `.venv-gpu` (`helpers/3_train.sh` runs it too) | installs packages |
 | `scripts/setup_vlm.sh [--no-test]` | installs Qwen3-VL-8B-Instruct (it sees images, Apache-2.0, ~17.5 GB) in `data/models/vlm/`, and `transformers`, `accelerate`, `qwen-vl-utils` in `.venv-gpu` (no package already there changes version), then tries it on the GPU on one frame; nothing uses it for now ([INSTALL.md](INSTALL.md)) | installs packages, downloads 17.5 GB, GPU |

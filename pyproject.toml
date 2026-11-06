@@ -32,6 +32,8 @@ cpu-test = []
 log-reader = ["pycapnp>=2.0,<3", "zstandard>=0.22,<1"]
 # [preannotation] - START
 preannotate = ["onnxruntime>=1.20,<2", "Pillow>=11,<13", "numpy>=1.26,<3", "rapidocr==3.4.0"]
+# The site on the machine of the outside reviewers: the pages only (nnslr_tools.review_box).
+review-box = ["Pillow>=11,<13", "numpy>=1.26,<3", "opencv-python-headless>=4.10,<6"]
 # The same on a machine with an NVIDIA GPU (the V100 LXC): the models run on the GPU
 # (nnslr_tools.onnx_device). [cuda,cudnn] brings the CUDA/cuDNN libraries as nvidia-* wheels.
 # Never together with "preannotate": both install the "onnxruntime" module (helpers/update.sh

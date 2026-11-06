@@ -3,14 +3,20 @@
 // (they join this list by themselves at their first visit, or are added here first); a tap on a kind of work of a drive
 // gives it to the person shown, a second tap takes it back, at once. A person sees only what is given here: the server
 // checks it on every request (nnslr_tools.review_access).
-import {computed, onMounted, ref, shallowRef} from 'vue';
+import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
-import {plural} from '../common/format';
+import {isoWhen, plural} from '../common/format';
+import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
-import type {AssignableDrive, Person, ReviewersView} from './reviewers';
+import JobProgress from './JobProgress.vue';
+import {JOB_STATE, jobOf, startedWhen} from './jobs';
+import type {AssignableDrive, BoxDrive, Person, ReviewersView} from './reviewers';
 import SectionHead from './SectionHead.vue';
 import Segmented from './Segmented.vue';
+
+const props = defineProps<{status: PanelStatus | null}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
 const view = shallowRef<ReviewersView | null>(null);
 const error = ref('');
@@ -33,6 +39,34 @@ async function load(): Promise<void> {
   }
 }
 onMounted(load);
+
+/** The machine of the outside reviewers: the job of its button, read again when a copy ends. */
+const job = computed(() => jobOf(props.status, ['review_box']));
+const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
+const boxState = computed(() => props.status?.actions.review_box ?? null);
+watch(() => job.value?.state, (now, before) => {
+  if (before === 'running' && now !== 'running') void load();
+});
+const box = computed(() => view.value?.box ?? null);
+const lastCopy = computed(() => {
+  const last = box.value?.last;
+  if (!last) return 'No copy yet';
+  return (last.ok ? 'Last copy ' : 'Last copy failed ') + isoWhen(last.at);
+});
+const boxTitle = (route: string): string => view.value?.drives.find((drive) => drive.route === route)?.title ?? route;
+/** A drive of the machine in one line: where it stands and what came back. */
+function boxLine(drive: BoxDrive): string {
+  const saved = drive.saved;
+  const parts = [drive.left_at ? 'Left ' + isoWhen(drive.left_at) : drive.removing ? 'Leaving now'
+    : drive.leaving_at ? 'Nobody holds it: leaving' : drive.sent_at ? 'Sent ' + isoWhen(drive.sent_at) : ''];
+  if (saved?.frames) parts.push(plural(saved.frames, 'frame') + ' back');
+  if (saved?.stores) parts.push(plural(saved.stores, 'other review') + ' back');
+  if (saved?.conflicts) parts.push(plural(saved.conflicts, 'change') + ' kept aside: also changed here');
+  if (saved?.refused) parts.push(plural(saved.refused, 'change') + ' refused');
+  for (const item of drive.completed ?? []) parts.push(item.person + ' completed ' + item.kind);
+  if (drive.problem) parts.push(drive.problem);
+  return parts.filter(Boolean).join(' · ');
+}
 
 const canEdit = computed(() => view.value?.can_edit === true);
 const given = computed(() => shown.value === null ? {} : view.value?.work[shown.value] ?? {});
@@ -108,6 +142,41 @@ function toggle(drive: AssignableDrive, key: string): void {
                placeholder="User name" aria-label="User name of the new person">
         <button type="submit" class="btn" :disabled="saving || !newName.trim()">Add</button>
       </form>
+    </section>
+
+    <section class="card rw-box" aria-labelledby="rw-box-title">
+      <div class="ds-head">
+        <h2 id="rw-box-title">Review machine</h2>
+        <span class="ds-when" id="rw-box-last">{{ lastCopy }}</span>
+      </div>
+      <p class="note">People from outside work on a separate machine. The drives you give them are copied there with their frames
+        and video, without the raw logs, the positions and the road names, and what they save comes back here on its own every 5
+        minutes. When nobody holds a drive any more, it leaves that machine.</p>
+      <p v-if="!box?.linked" class="empty" id="rw-box-unlinked">Not linked yet: the work given here stays on this server.</p>
+      <template v-else>
+        <p v-for="problem in box.last?.problems ?? []" :key="problem" class="banner">{{ problem }}</p>
+        <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
+        <div v-if="!bigJob" class="rw-box-run">
+          <button type="button" class="btn" id="rw-box-update" :disabled="!boxState?.allowed"
+                  @click="boxState && emit('run', 'review_box', boxState)">Update now</button>
+          <button v-if="job" type="button" class="link-button" @click="emit('details', job)">{{ startedWhen(job) }} ·
+            {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }}</button>
+        </div>
+        <p v-if="!box.drives.length" class="empty">No drive there now.</p>
+        <ul v-else class="rw-list" id="rw-box-drives">
+          <li v-for="drive in box.drives" :key="drive.route" class="rw-drive">
+            <div class="rw-drive-name"><strong>{{ boxTitle(drive.route) }}</strong><span>{{ boxLine(drive) }}</span></div>
+          </li>
+        </ul>
+        <details v-if="box.finished.length" class="rw-box-done">
+          <summary>{{ plural(box.finished.length, 'drive') }} back from there</summary>
+          <ul class="rw-list">
+            <li v-for="drive in box.finished" :key="drive.route + drive.left_at" class="rw-drive">
+              <div class="rw-drive-name"><strong>{{ boxTitle(drive.route) }}</strong><span>{{ boxLine(drive) }}</span></div>
+            </li>
+          </ul>
+        </details>
+      </template>
     </section>
 
     <section v-if="shown !== null" class="card rw-work" aria-labelledby="rw-work-title">

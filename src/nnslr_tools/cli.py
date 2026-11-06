@@ -1603,6 +1603,19 @@ def build_parser() -> argparse.ArgumentParser:
                                "access token (NNSLR_REVIEW_TOKEN or a random one, printed at start)")
     p_review.add_argument("--port", type=int, default=8765)
     p_review.set_defaults(func=_cmd_review)
+    p_box = sub.add_parser("review-box", help="the machine of the outside reviewers: drives go there without their places, "
+                                              "what people do comes back (nnslr_tools.review_box)")
+    box_sub = p_box.add_subparsers(dest="box_command", required=True)
+    p_box_link = box_sub.add_parser("link", help="on this server: remember the machine and its host key")
+    p_box_link.add_argument("remote", help="account@address of the copy account")
+    p_box_link.add_argument("fingerprint", help="SHA256:... of its ed25519 host key, from its administrator")
+    p_box_sync = box_sub.add_parser("sync", help="on this server: results here, then the drives and the work it should hold")
+    p_box_tick = box_sub.add_parser("tick", help="on the machine: install what arrived, write what people did; a timer runs it")
+    p_box_tick.add_argument("--box", required=True, help="the folder of the copy account, with inbox/ and outbox/")
+    p_box_status = box_sub.add_parser("status", help="what is on the machine, as Data › Reviewers shows it")
+    for item in (p_box_link, p_box_sync, p_box_tick, p_box_status):
+        item.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+        item.set_defaults(func=_cmd_review_box)
     p_reclassify = sub.add_parser(
         "review-reclassify-ai",
         help="mark the reviews saved by the named reviewers (AI agents that used the review page, e.g. Codex) "
@@ -2532,6 +2545,33 @@ def _cmd_preannotate(args: argparse.Namespace) -> int:
     result = run_preannotation(args.route, data_root=Path(args.data_root) if args.data_root else None,
                                confidence=args.confidence, proposer=args.proposer, keep_reviews=args.keep_reviews)
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _cmd_review_box(args: argparse.Namespace) -> int:
+    from nnslr_tools import review_box
+
+    root = _resolve_data_root(args.data_root)
+
+    def say(line: str) -> None:
+        print(line, flush=True)
+
+    try:
+        if args.box_command == "link":
+            review_box.link(root, args.remote, args.fingerprint)
+            say(f"Linked to {args.remote}.")
+        elif args.box_command == "tick":
+            review_box.tick(root, Path(args.box), log=say)
+        elif args.box_command == "sync":
+            state = review_box.sync(root, log=say)
+            say(f"{len(state['drives'])} drives on the review machine.")
+        else:
+            say(json.dumps(review_box.view(root), indent=1, ensure_ascii=False))
+    except review_box.Busy as exc:
+        say(str(exc))
+    except review_box.BoxError as exc:
+        print(str(exc), file=sys.stderr, flush=True)
+        return 1
     return 0
 
 

@@ -192,6 +192,29 @@ The access token ends up in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, m
 
 Reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh --public-hosts smartspeed.14bodhi.com` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside. The public page is not part of this site: the cluster's administrator deploys `docs/smartspeed/` from a commit.
 
+### The machine of the outside reviewers
+
+The people from outside work on a machine of their own, so that nothing they reach can touch this server. Everything moves from this side: this server sends the drives given in Data › Reviewers and reads what people did, over an account of the machine that can only copy files inside one folder (rrsync, no shell). That machine holds no key towards this server.
+
+On the machine, as root, once the copy account and its folder exist:
+
+```sh
+apt-get install -y git python3-venv rsync ffmpeg
+git clone https://github.com/cristianku/sunnypilot.speedlimits /opt/speedlimits
+/opt/speedlimits/scripts/install_review_box.sh --proxy-ips <proxy> --public-hosts <public address>
+```
+
+The site runs as the copy account, and the env file `/etc/speedlimits-reviews.env` holds a new access token and a new proxy secret. They are never printed: the proxy secret goes to the proxy from file to file.
+
+On this server:
+
+```sh
+.venv/bin/nnslr review-box link reviewsync@<machine> SHA256:<its ed25519 host key>
+sudo scripts/install_review_box_sync.sh
+```
+
+Then **Data › Reviewers** shows the machine, its drives and the last copy. Half an hour of driving takes about 5 GB there: its frames, its road video and the reduced logs of the pages, with the track moved away from where it was and without road names. Its raw logs and `derived/gps` stay here. The video can still show where a drive was. What comes back is checked as a stranger's work: only the drives there, only the kinds given, only under the names of the people who held them. If something changed on both sides, this server's version stays and the other is kept in `data/web/review_box/aside/`.
+
 ## Reference machine
 
 The maintainer's setup, for comparison: Debian 13 LXC on Proxmox with one Tesla V100 32 GB (NVIDIA driver 580.178.04), `ffmpeg` 7.1.5, `zstd` 1.5.7, `jq` 1.7, `uv`, and a `.venv` on Python 3.13 with the `preannotate` extra and `pytest`.

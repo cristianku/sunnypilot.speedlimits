@@ -1,0 +1,12 @@
+# Every minute: nnslr review-box tick on the machine of the outside reviewers.
+
+[Unit]
+Description=Speed limits web: review machine pass, every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

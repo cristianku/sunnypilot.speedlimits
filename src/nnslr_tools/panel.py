@@ -346,6 +346,8 @@ ACTIONS = {
     # The road type of every frame of the prepared drives (town, rural, expressway, motorway) from their GPS and the
     # map, read offline (Data › Roads); in the prepare group: it reads the reports a preparation writes.
     'road_types': {'label': 'Find the road types', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
+    # One round with the machine of the outside reviewers (nnslr_tools.review_box); a timer does the same every 5 minutes.
+    'review_box': {'label': 'Update the review machine', 'group': 'review_box', 'command': ['helpers/review_box.sh']},
     # Where each Mapillary photo was taken, for the region of "Train the classifier": network only, a few minutes.
     'mapillary_locations': {'label': 'Locate the Mapillary photos', 'group': 'mapillary', 'command': [LOCATIONS_SCRIPT]},
     # The Mapillary photos cut into windows for "Train the cutter": the CPU for a while, the share read once; the
@@ -444,7 +446,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_road_type': 'a scene training', 'train_brain': 'a brain training', 'regression': 'a regression run',
-                 'update': 'a code update',
+                 'update': 'a code update', 'review_box': 'a copy with the review machine',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
                  'comma_restore': "a return to the build's networks",
@@ -468,8 +470,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
 # and restarts this server; a preparation replaces the report an AI review is working on. The search for the
 # Mapillary positions writes a file of its own only (a classifier started meanwhile records the positions it read).
 CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary'), 'ai': ('prepare', 'update'),
-             'publish': ('update',), 'mapillary': ('update',)}
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box'), 'ai': ('prepare', 'update'),
+             'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',)}
 # The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'

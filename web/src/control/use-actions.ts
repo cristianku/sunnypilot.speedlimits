@@ -14,7 +14,7 @@ export const RESUME_JOB: InjectionKey<(job: Job) => Promise<void>> = Symbol('res
 export const RETRY_JOB: InjectionKey<{can: (job: Job) => boolean; run: (job: Job) => void}> = Symbol('retry-job');
 /** The actions whose failed job can simply run again: no option but the proposer (a training has Resume). */
 export const RETRY_ACTIONS: ActionName[] = ['fetch', 'prepare', 'prepare_again', 'setup_vlm', 'dataset', 'measure_proposer',
-  'networks_prepare', 'road_types', 'mapillary_locations', 'mapillary_windows'];
+  'networks_prepare', 'road_types', 'mapillary_locations', 'mapillary_windows', 'review_box'];
 
 /** The question before an action; null: it starts at the click (preparing, importing the reviews, the road types). */
 /** The proposer as the Prepare tab names it. */

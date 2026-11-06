@@ -70,7 +70,7 @@ watch(busyPaths, markBusy);
     <RegressionTab v-else-if="currentTab === 'regression'" :status="status" @run="run" @stop="stop" @details="details"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <ReviewersTab v-else-if="currentTab === 'reviewers'"/>
+    <ReviewersTab v-else-if="currentTab === 'reviewers'" :status="status" @run="run" @stop="stop" @details="details"/>
     <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>

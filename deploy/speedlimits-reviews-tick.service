@@ -1,0 +1,13 @@
+# One pass on the machine of the outside reviewers: installs what arrived in inbox/, writes in outbox/ what people did
+# (nnslr review-box tick). Installed by scripts/install_review_box.sh with its timer.
+
+[Unit]
+Description=Speed limits web: what arrived and what people did on the review machine
+
+[Service]
+Type=oneshot
+User=__NNSLR_USER__
+Group=__NNSLR_USER__
+WorkingDirectory=__NNSLR_REPO__
+EnvironmentFile=__NNSLR_ENV_FILE__
+ExecStart=__NNSLR_REPO__/.venv/bin/nnslr review-box tick --box __NNSLR_BOX__

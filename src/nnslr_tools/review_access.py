@@ -39,6 +39,8 @@ from nnslr_tools.review_db import ReviewRejected
 PROXY_IPS_ENV = 'NNSLR_PROXY_IPS'
 PROXY_SECRET_ENV = 'NNSLR_PROXY_SECRET'
 PUBLIC_HOSTS_ENV = 'NNSLR_PUBLIC_HOSTS'
+# Set on the machine of the outside reviewers: only there a person can say a review is completed.
+REVIEW_BOX_ENV = 'NNSLR_REVIEW_BOX'
 REVIEWER_GROUP_ENV = 'NNSLR_REVIEWER_GROUP'
 DEFAULT_REVIEWER_GROUP = 'reviewers'
 PROXY_SECRET_HEADER = 'X-Speedlimits-Proxy-Secret'
@@ -70,6 +72,8 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('GET', r'/(reviews|speed-review|sign-distance|roads)?', None),
     ('GET', r'/api/auth/state', None),
     ('GET', r'/api/reviewer/work', None),
+    # "Review completed" of the list: a drive of the guest's, checked on their work (Assignments.complete).
+    ('POST', r'/api/reviewer/done', None),
     # The list behind "Next drive" of Sign distance: the server keeps only the guest's drives.
     ('GET', r'/api/sign-distance/drives', None),
     # Sign review.
@@ -96,7 +100,7 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
 ))
 
 # What a guest never receives, at any depth of an answer: where the drive was.
-PLACE_FIELDS = frozenset({'gps', 'latitude', 'longitude', 'lat', 'lon', 'lng', 'road_name', 'title'})
+PLACE_FIELDS = frozenset({'gps', 'latitude', 'longitude', 'lat', 'lon', 'lng', 'road_name', 'title', 'way_id'})
 # The last time a person was seen is written at most this often.
 SEEN_SAVE_SECONDS = 3600
 
@@ -247,6 +251,61 @@ class Assignments:
             else:
                 drives.pop(route, None)
             self._write(data)
+
+    def complete(self, name, route) -> None:
+        """A person says their work on a drive is finished. It stays theirs until a copy from the review box has taken the
+        results (nnslr_tools.review_box), which then takes it back."""
+        with self._lock:
+            data = self._read()
+            kinds = data['work'].get(name, {}).get(route) if isinstance(route, str) else None
+            if not kinds:
+                raise ReviewRejected(403, 'not_assigned', NOT_ASSIGNED)
+            done = data.setdefault('done', {}).setdefault(name, {}).setdefault(route, {})
+            for kind in kinds:
+                done.setdefault(kind, _now())
+            self._write(data)
+
+    def done_of(self, name: str) -> dict:
+        """By drive, by kind, when a person called it finished."""
+        return self._read().get('done', {}).get(name, {})
+
+    def visits(self) -> dict:
+        """What the review box tells this server: who came, when, and what they called finished."""
+        data = self._read()
+        return {'people': data['people'], 'done': data.get('done', {})}
+
+    def replace_work(self, names: list[str], work: dict) -> None:
+        """On the review box: the people and the work this server gives. A visit keeps its time, and a finished work
+        stays said only while it is still given."""
+        with self._lock:
+            data = self._read()
+            people = data['people']
+            data['people'] = {name: people.get(name, {'added': _now(), 'last_seen': None}) for name in names}
+            data['work'] = work
+            data['done'] = {name: {route: {kind: at for kind, at in kinds.items() if kind in work.get(name, {}).get(route, ())}
+                                   for route, kinds in drives.items()}
+                            for name, drives in data.get('done', {}).items()}
+            self._write(data)
+
+    def take_visits(self, visits: dict, known: list[str]) -> None:
+        """On this server: the last visits seen on the review box, and the people new there. Known: the people the box
+        was last told, so that someone removed here is not brought back by the box."""
+        with self._lock:
+            data = self._read()
+            changed = False
+            for name, item in visits.items():
+                last = item.get('last_seen') if isinstance(item, dict) else None
+                if not isinstance(last, str) or not re.fullmatch(r'[0-9TZ:+.-]{10,35}', last):
+                    last = None
+                if name in data['people']:
+                    if last and last > (data['people'][name].get('last_seen') or ''):
+                        data['people'][name]['last_seen'] = last
+                        changed = True
+                elif name not in known and USERNAME_RE.fullmatch(name):
+                    data['people'][name] = {'added': _now(), 'last_seen': last}
+                    changed = True
+            if changed:
+                self._write(data)
 
     def work_of(self, name: str) -> dict:
         """The drives of a person, with the kinds of each."""
