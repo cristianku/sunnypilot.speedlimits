@@ -1730,6 +1730,27 @@ color:inherit;opacity:.85}
   .sd-keys,.sd-kbd{display:none}
 }
 @media (pointer:coarse){.sd-keys,.sd-kbd{display:none}}
+/* My reviews, the list of a reviewer from outside (GuestApp.vue), and Data › Reviewers, who works on what (ReviewersTab.vue). */
+.gr-list,.rw-list{list-style:none;margin:0;padding:0}
+.gr-drive,.rw-drive{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:12px 0}
+.gr-drive+.gr-drive,.rw-drive+.rw-drive{border-top:.5px solid var(--line-strong)}
+.gr-name,.rw-drive-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.gr-name span,.rw-drive-name span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.gr-links,.rw-kinds{display:flex;flex-wrap:wrap;gap:6px}
+.rw-names{display:flex;flex-wrap:wrap;gap:8px}
+.rw-name{display:inline-flex;align-items:baseline;gap:8px;padding:7px 14px;border:0;border-radius:999px;background:var(--surface-2);color:var(--fg);
+font:inherit;font-size:14px;cursor:pointer}
+.rw-name small{font-size:12px;color:var(--muted)}
+.rw-name[aria-checked="true"]{background:var(--accent);color:#fff}
+.rw-name[aria-checked="true"] small{color:rgba(255,255,255,.8)}
+.rw-add{display:flex;gap:8px;max-width:420px;margin-top:12px}
+.rw-add input{flex:1 1 auto;min-width:0;min-height:36px;padding:6px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface-2);
+color:var(--fg);font:inherit;font-size:16px}
+.rw-tools{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;margin-top:10px}
+.rw-kind{padding:6px 12px;border:1px solid var(--line-strong);border-radius:999px;background:transparent;color:var(--fg);font:inherit;font-size:13px;cursor:pointer}
+.rw-kind[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.rw-kind:disabled{opacity:.4;cursor:default}
+@media (pointer:coarse){.rw-kind,.rw-name{min-height:40px}}
 </style>
 </head>
 <body>

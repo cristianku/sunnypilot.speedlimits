@@ -1,27 +1,28 @@
 // Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
 // ("/", "/prepare", "/dataset", "/roads", "/drive-review", "/speed-review", "/sign-distance", "/train", "/evaluate",
-// "/models", "/regression", "/publish"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives, Review, Drive
-// review, Speed review, Sign distance, Roads, Training dataset), Training, Models (Versions, Results, Regression, Publish); the
+// "/models", "/regression", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives, Review, Drive
+// review, Speed review, Sign distance, Roads, Training dataset, Reviewers), Training, Models (Versions, Results, Regression, Publish); the
 // section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
 // normal links. A drive opened on Roads, Drive review, Speed review, Sign distance or Regression is "/roads?drive=<route>"
 // ("/drive-review?drive=<route>&episode=<id>", "/speed-review?drive=<route>", "/sign-distance?drive=<route>&sign=<key>"):
 // an address of its own, Back returns to the list.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
+import {isGuest} from '../common/guest';
 
 export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'roads' | 'drivereview' | 'speedreview' | 'signdistance'
-  | 'train' | 'evaluate' | 'models' | 'regression' | 'publish';
+  | 'reviewers' | 'train' | 'evaluate' | 'models' | 'regression' | 'publish';
 export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
   overview: '/', prepare: '/prepare', dataset: '/dataset', roads: '/roads', drivereview: '/drive-review',
-  speedreview: '/speed-review', signdistance: '/sign-distance', train: '/train', evaluate: '/evaluate', models: '/models',
+  speedreview: '/speed-review', signdistance: '/sign-distance', reviewers: '/reviewers', train: '/train', evaluate: '/evaluate', models: '/models',
   regression: '/regression', publish: '/publish',
 };
 /** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
   overview: 'Overview', prepare: 'Drives', dataset: 'Training dataset', roads: 'Roads', drivereview: 'Drive review',
-  speedreview: 'Speed review', signdistance: 'Sign distance', train: 'Training', evaluate: 'Results', models: 'Versions',
+  speedreview: 'Speed review', signdistance: 'Sign distance', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
   regression: 'Regression', publish: 'Publish',
 };
 /** A page of a section: its address and name; the route list (/routes) is Data's, outside this app. */
@@ -36,7 +37,7 @@ export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = 
   data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Sign review'},
     {key: 'drivereview', href: '/drive-review', label: 'Drive review'}, {key: 'speedreview', href: '/speed-review', label: 'Speed review'},
     {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'}, {key: 'roads', href: '/roads', label: 'Roads'},
-    {key: 'dataset', href: '/dataset', label: 'Training dataset'}]},
+    {key: 'dataset', href: '/dataset', label: 'Training dataset'}, {key: 'reviewers', href: '/reviewers', label: 'Reviewers'}]},
   train: {title: 'Training', pages: []},
   models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'evaluate', href: '/evaluate', label: 'Results'},
     {key: 'regression', href: '/regression', label: 'Regression'}, {key: 'publish', href: '/publish', label: 'Publish'}]},
@@ -97,13 +98,15 @@ function markCurrent(tab: ControlTab): void {
     if (link.dataset['section'] === section) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
-  document.title = 'Speed limits · ' + TAB_TITLE[tab];
+  document.title = 'Speed limits · ' + (isGuest() && tab === 'overview' ? 'My reviews' : TAB_TITLE[tab]);
 }
 
 /** Shows a tab and puts its address in the history; with a hash ("#dataset"), scrolls to it once the tab is drawn; with
  * a drive, that drive of Roads, Drive review, Speed review or Sign distance (and an episode of it on Drive review, a sign
  * of it on Sign distance). */
-export function goTo(tab: ControlTab, hash = '', drive: string | null = null, item: string | null = null): void {
+export function goTo(wanted: ControlTab, hash = '', drive: string | null = null, item: string | null = null): void {
+  // A reviewer from outside has one list, their own.
+  const tab = isGuest() && drive === null ? 'overview' : wanted;
   const nextItem = drive === null || ITEM_KEY[tab] === undefined ? null : item;
   if (tab === currentTab.value && !hash && drive === tabDrive.value && nextItem === tabItem.value) return;
   // A drive opened from its list: its Back control goes back in the history, to the list as it was.

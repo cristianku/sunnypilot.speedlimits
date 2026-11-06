@@ -10,6 +10,7 @@ import {position, selectedBox, status} from './current';
 import {releaseFocus} from './dom';
 import {removeSelected, toggleDrawing, toggleHints} from './edits';
 import {thousands} from '../common/format';
+import {isGuest} from '../common/guest';
 import {aiConfirmed, framePlace, isBetweenFrame, proposalsOf, reasonsOf, statusLabel} from './frames';
 import {stepSecond} from './navigation';
 import {frameOfSecond} from './seconds';
@@ -19,6 +20,7 @@ import ReviewFilters from './ReviewFilters.vue';
 import type {FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow}>();
+const guest = isGuest();
 
 const pillClass = computed(() => {
   const key = props.row.frame_key;
@@ -78,7 +80,7 @@ function hintsSwitched(event: Event): void {
     <ReviewFilters/>
     <span id="statePill" :class="pillClass">{{ statusLabel(row.frame_key) }}</span>
     <span class="data" id="frameData" :title="frameTitle">{{ frameData }}</span>
-    <div v-if="report.apiBase" class="stage-helpers">
+    <div v-if="report.apiBase && !guest" class="stage-helpers">
       <button v-if="carAvailable()" type="button" class="btn car-ask" id="carToggle" :aria-pressed="car.shown"
               title="What the car's cutter and classifier read on this frame (T). Nothing is saved."
               @click="toggleCar(); releaseFocus($event)">Car networks<kbd class="keycap" aria-hidden="true">T</kbd></button>

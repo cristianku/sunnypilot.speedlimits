@@ -7,6 +7,9 @@ export interface AuthState {
   local: boolean;
   user?: string;
   sessions?: number;
+  /** A reviewer from outside has no account here: they sign out at this address of the sign-in in front of the site. */
+  role?: 'admin' | 'reviewer';
+  sign_out?: string;
 }
 
 export interface AuthAnswer {

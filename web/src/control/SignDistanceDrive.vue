@@ -12,6 +12,7 @@
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
+import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {API, classText, type DriveView, type Drive, frameIndex, frameUrl, lateSentence, type MarkName,
   markLabel, nearestFrame, screenText, type Sign, signedMetres, type SignView, statusTone, timeText, toMark,
@@ -21,6 +22,7 @@ import {goTo, showSign, tabSign} from './tabs';
 
 /** readOnly is null until the server's status is in (no buttons and no note yet). */
 const props = defineProps<{route: string; readOnly: boolean | null}>();
+const guest = isGuest();
 
 // -- the drive and its signs ---------------------------------------------------------------------------------------------
 const drive = shallowRef<DriveView | null>(null);
@@ -500,9 +502,9 @@ const visionAtMark = computed(() => {
 <template>
   <section class="card rt-view sd-view">
     <div class="rt-view-head">
-      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> Sign distance</button>
+      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ guest ? 'My reviews' : 'Sign distance' }}</button>
       <div class="rt-view-name">
-        <h2>{{ drive?.title ?? (drive ? 'Places unknown' : 'Loading…') }}</h2>
+        <h2>{{ drive?.title ?? (!drive ? 'Loading…' : guest ? 'Drive' : 'Places unknown') }}</h2>
         <span v-if="facts">{{ facts }}</span>
       </div>
     </div>
@@ -514,7 +516,7 @@ const visionAtMark = computed(() => {
         <li v-for="file in drive.unreadable_files" :key="file.segment + file.kind">minute {{ file.segment }} {{ file.kind }}: {{ file.error }}</li>
         <li class="sd-files-note">Their permissions are fixed on the server; this page never changes them.</li>
       </ul>
-      <div class="dr-banner-actions">
+      <div v-if="!guest" class="dr-banner-actions">
         <a v-if="drive.status === 'unread' || drive.status === 'unreadable'" class="btn small" :href="'/drive-review?drive=' + encodeURIComponent(route)">Drive review</a>
         <a v-if="drive.status === 'no_video'" class="btn small" href="/prepare">Drives</a>
       </div>
@@ -644,7 +646,7 @@ const visionAtMark = computed(() => {
             <button type="button" class="btn" :disabled="nextDriveBusy" @click="nextDrive">Next drive ›</button>
           </template>
           <span v-else class="dr-hint">{{ remaining }} to mark</span>
-          <a class="link-button sd-car" :href="'/drive-review?drive=' + encodeURIComponent(route)">What the car did here ›</a>
+          <a v-if="!guest" class="link-button sd-car" :href="'/drive-review?drive=' + encodeURIComponent(route)">What the car did here ›</a>
         </div>
         <p class="dr-hint sd-keys">Keys: ← → one frame, , . five, Shift+← → the sign before or after;<template
           v-if="writable && sign.included"> Z zero here, C can't tell,</template><template v-if="writable && (sign.included

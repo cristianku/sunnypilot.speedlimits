@@ -9,6 +9,7 @@
 // through up to the frame shown, so that no mark there means no works.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
+import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
@@ -191,7 +192,7 @@ function worksIn(from: number, to: number) {
 </script>
 
 <template>
-  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" back-label="Speed review" no-episodes
+  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" no-episodes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
       <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from your steady speed on free road or from the comma's vision; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks; grey line: gone through for roadworks">

@@ -40,6 +40,7 @@ Claude Code (stdio, anche via ssh) → helpers/mcp.sh → SDK MCP ────�
 - Sul sito in sola LAN locale (127.0.0.1) resta anche il controllo dell'header `Host`.
 - Corpo massimo 512 KiB (413), solo JSON (415), al massimo 100 riquadri per fotogramma.
 - Le immagini: l'anteprima è solo `images/NNNNNNNN.jpg` del report corrente; l'originale è solo il PNG estratto sotto `data/derived/frames/<route>/`, mai un link simbolico, mai un percorso con `..`, e con lo SHA-256 del report (409 `image_changed` se il file è cambiato).
+- Reviewers from outside ([GUIDE.md](GUIDE.md), "People from outside") never reach `/api/v1` or `/mcp`: through the proxy both answer 403, with or without the token.
 - Il server non scrive mai il token nei suoi messaggi. Non mettere il token in file versionati, resoconti o log: negli esempi sotto è sempre la variabile d'ambiente `NNSLR_REVIEW_TOKEN`.
 
 ## 3. Provenienza: revisori umani e AI

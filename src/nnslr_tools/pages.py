@@ -58,7 +58,7 @@ SECTIONS = (
                                   ('drivereview', '/drive-review', 'Drive review'),
                                   ('speedreview', '/speed-review', 'Speed review'),
                                   ('signdistance', '/sign-distance', 'Sign distance'), ('roads', '/roads', 'Roads'),
-                                  ('dataset', '/dataset', 'Training dataset'))),
+                                  ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
                                      ('regression', '/regression', 'Regression'), ('publish', '/publish', 'Publish'))),
@@ -71,7 +71,7 @@ SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages o
 # route list (/routes) is a page of its own.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads',
                 '/drive-review': 'drivereview', '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
-                '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
+                '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
     'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
@@ -131,6 +131,17 @@ def section_paths(pages: tuple, href: str) -> str:
     return ' '.join(page[1] for page in pages) or href
 
 
+# [guest-reviewers] - START
+def guest_bar(current: str = '') -> str:
+    """The top bar of a reviewer from outside: the brand, their list and the Account menu, nothing of the server.
+    data-guest tells the page scripts (web/src/common/guest.ts) to leave out what only the administrator can use."""
+    return ('<header class="topbar" data-guest="true"><div class="topbar-inner site-bar">'
+            '<a class="brand" href="/" title="My reviews">' + BRAND_MARK + '<span class="brand-name">Speed limits</span></a>'
+            '<nav class="tabs" aria-label="Sections"><a href="/" data-section="overview">My reviews</a></nav>'
+            '<div class="bar-end">' + bar_end(current) + '</div></div></header>')
+# [guest-reviewers] - END
+
+
 def top_bar(current: str = '', *, live: bool = False, signed_in: bool = True, tab_bar: bool = True) -> str:
     """Brand, the four sections, then the comma and server pills, the live state and the Account menu, in one row
     (the sections in a second one on a narrow screen). On a phone the sections are a tab bar at the bottom instead
@@ -171,14 +182,15 @@ def sub_nav(current: str) -> str:
 
 
 def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool = False,
-         signed_in: bool = True, data: str = '', title: str = '') -> str:
+         signed_in: bool = True, data: str = '', title: str = '', guest: bool = False) -> str:
     """A template with its placeholders replaced (see the module docstring)."""
     values = {
         '__NNSLR_THEME__': THEME_HEAD.format(nonce=nonce),
         '__NNSLR_TITLE__': html.escape('Speed limits · ' + title if title else 'Speed limits'),
         '__NNSLR_SHARED_CSS__': asset('shared.css'),
         '__NNSLR_SITE_CSS__': asset('site.css'),
-        '__NNSLR_TOPBAR__': top_bar(current, live=live, signed_in=signed_in, tab_bar=page != 'review'),
+        '__NNSLR_TOPBAR__': guest_bar(current) if guest else top_bar(current, live=live, signed_in=signed_in,
+                                                                     tab_bar=page != 'review'),
         '__NNSLR_BAR_END__': bar_end(current),
         '__NNSLR_SCRIPT__': page_script(page, nonce),
         '__NNSLR_NONCE__': nonce,
@@ -194,12 +206,13 @@ def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool 
 def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
                   nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
                   suspicious: dict | None = None, routes: list[dict] | None = None,
-                  proposer: str | None = None, busy: dict | None = None, videos: dict | None = None) -> str:
+                  proposer: str | None = None, busy: dict | None = None, videos: dict | None = None,
+                  guest: bool = False) -> str:
     """The review page with its data embedded. Hints and suspicious flags travel apart from the
     frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
     signs of the report (vietnam, ours, qwen; None when not known), for the page's "More". busy: the drive is read
     only, Propose again works on it (nnslr_tools.reproposing.public), else None. videos: the segments with their road
-    video on the server (ReviewService.videos), None offline."""
+    video on the server (ReviewService.videos), None offline. guest: for a reviewer from outside (guest_bar)."""
     data = {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
             'busy': busy, 'videos': videos,
             'hints': hints if hints is not None else {},
@@ -213,7 +226,7 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
     # The window title names the drive ("Herznach → Zürich"), as the route list does; Review without a name.
     drive = next((link.get('title') for link in (routes or []) if link.get('route_id') == route_id), None)
     return fill(asset('review.html'), nonce, 'review', 'review', signed_in=server, data=payload,
-                title=drive or 'Sign review')
+                title=drive or 'Sign review', guest=guest)
 
 
 # [control-panel] - START
@@ -222,6 +235,14 @@ def render_control(nonce: str, tab: str) -> str:
     bar; data from /api/panel/status (and /api/panel/runs for Evaluate, /api/panel/models for Models)."""
     return fill(asset('control.html'), nonce, 'control', tab, live=True, title=TAB_TITLES.get(tab, ''))
 # [control-panel] - END
+
+
+# [guest-reviewers] - START
+def render_guest(nonce: str) -> str:
+    """The site of a reviewer from outside: their list and the pages of their drives, one app (web/src/control/GuestApp.vue)
+    in the frame of the control pages. It holds no data: all comes from the calls the guest may make."""
+    return fill(asset('control.html'), nonce, 'guest', title='My reviews', guest=True)
+# [guest-reviewers] - END
 
 
 # [site-login] - START
@@ -237,8 +258,9 @@ def render_account(nonce: str) -> str:
 # [site-login] - END
 
 
-def simple_page(title: str, current: str, nonce: str, main: str) -> str:
-    """A page without a template of its own: the frame, the content, the script of the Account menu."""
+def simple_page(title: str, current: str, nonce: str, main: str, *, guest: bool = False) -> str:
+    """A page without a template of its own: the frame, the content, the script of the Account menu; for a guest
+    only the brand and no script, as someone refused may be nobody the site knows."""
     return '\n'.join([
         '<!doctype html><html lang="en"><head><meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
@@ -246,9 +268,9 @@ def simple_page(title: str, current: str, nonce: str, main: str) -> str:
         THEME_HEAD.format(nonce=nonce),
         '<title>Speed limits · ' + html.escape(title) + '</title>',
         '<style>' + asset('shared.css') + asset('site.css') + '</style></head><body>',
-        top_bar(current),
+        top_bar(current, signed_in=not guest),
         main,
-        page_script('site', nonce),
+        '' if guest else page_script('site', nonce),
         '</body></html>',
     ])
 
@@ -413,9 +435,9 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     return simple_page('Sign review', 'review', nonce, '\n'.join(main))
 
 
-def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False) -> str:
+def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False, guest: bool = False) -> str:
     """An error page (404, 403, ...): a title and one sentence in words, no code, and the way back: Review for a
-    drive that is not there (drive), else Overview."""
+    drive that is not there (drive), else Overview; My reviews for a guest."""
     title = ({404: 'Drive not found' if drive else 'Page not found', 403: 'Access denied'}.get(status)
              or 'Something went wrong')
     main = ['<main class="page"><div class="card state-box center">',
@@ -425,7 +447,8 @@ def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = 
         main.append('<p>' + html.escape(message) + '</p>')
     # Every 403 page (token missing or wrong, host not allowed) would come back here from the list.
     if status != 403:
-        main.append('<a class="btn back" href="/routes">← Sign review</a>' if drive
+        main.append('<a class="btn back" href="/">← My reviews</a>' if guest
+                    else '<a class="btn back" href="/routes">← Sign review</a>' if drive
                     else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')
-    return simple_page(title, 'review' if drive else '', nonce, '\n'.join(main))
+    return simple_page(title, 'review' if drive else '', nonce, '\n'.join(main), guest=guest)

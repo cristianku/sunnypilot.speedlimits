@@ -190,6 +190,8 @@ scripts/install_review_service.sh
 
 The access token ends up in the `.env` of the clone (`NNSLR_REVIEW_TOKEN=...`, mode 600, ignored by git). Later updates: `helpers/update.sh`.
 
+Reviewers from outside need a proxy with Authentik in front of the site, then `scripts/setup_guest_access.sh` ([GUIDE.md](GUIDE.md), "People from outside"). Without it nobody comes in from outside.
+
 ## Reference machine
 
 The maintainer's setup, for comparison: Debian 13 LXC on Proxmox with one Tesla V100 32 GB (NVIDIA driver 580.178.04), `ffmpeg` 7.1.5, `zstd` 1.5.7, `jq` 1.7, `uv`, and a `.venv` on Python 3.13 with the `preannotate` extra and `pytest`.

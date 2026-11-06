@@ -3,6 +3,7 @@
 // frame, the second reading, the editor of the selected one, "More", the confirm block. What the car's networks read
 // and the AI reviewer are under the photo (StageBar.vue), so the editor comes right under the boxes.
 import {computed} from 'vue';
+import {isGuest} from '../common/guest';
 import BoxEditor from './BoxEditor.vue';
 import BoxList from './BoxList.vue';
 import AiLiveBanner from './AiLiveBanner.vue';
@@ -28,7 +29,7 @@ const carry = computed(() => carryState(props.row));
 const carryHint = computed(() => carry.value.enabled
   && reasons.value.some((reason) => reason.rule === 'd' && reason.text.startsWith('the previous frame')));
 // On the server: what the car did at this moment (its limit, the map's, the vision's), in Drive review.
-const driveHref = computed(() => report.apiBase === null ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
+const driveHref = computed(() => report.apiBase === null || isGuest() ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
 </script>
 

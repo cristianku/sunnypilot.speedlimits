@@ -6,6 +6,7 @@
 // confirmed frame they are only drawn, and listed in CarSection.vue. Nothing is saved: Confirm saves the frame as
 // always, and a frame only passed over stays to review. Hidden offline.
 import {reactive, watch} from 'vue';
+import {isGuest} from '../common/guest';
 import {familyHasValue, signKindOf} from './catalog';
 import {readLocal, writeLocal} from './dom';
 import {pushBox} from './edits';
@@ -77,7 +78,7 @@ export const car = reactive({shown: false, asks: {} as Record<string, CarAsk>});
 const placed = new Set<string>();
 
 export function carAvailable(): boolean {
-  return Boolean(report.apiBase);
+  return Boolean(report.apiBase) && !isGuest();
 }
 
 async function readCar(key: string): Promise<void> {

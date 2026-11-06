@@ -5,6 +5,7 @@
 // export). The state lives in store.ts; the plain modules of web/src/review change it (navigation, edits,
 // confirm, server, export) and the components below draw it.
 import {computed, nextTick, onBeforeUnmount, onMounted, watchEffect} from 'vue';
+import {isGuest} from '../common/guest';
 import {aiPhase, loadAiState} from './ai';
 import AiSection from './AiSection.vue';
 import {watchAiLive} from './ai-live';
@@ -77,8 +78,10 @@ onMounted(() => {
   void nextTick(scrollTimelineToCurrent);
   if (!report.apiBase) return;
   watchBusy();
-  void loadAiState();
-  void loadCarLogs();
+  if (!isGuest()) {
+    void loadAiState();
+    void loadCarLogs();
+  }
   // A confirmed frame gets its boxes from the server: then its first box is selected too.
   void loadServer().then(() => {
     startAtWork();

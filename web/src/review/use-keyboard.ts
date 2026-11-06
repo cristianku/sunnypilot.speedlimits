@@ -7,6 +7,7 @@
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
 // first), Esc cancel, ? shows or hides the list of the keys. While a menu or panel of the site's top bar is open, the keys are its own.
 import {onBeforeUnmount, onMounted} from 'vue';
+import {isGuest} from '../common/guest';
 import {askAi, fitBox, fitLocal} from './ai';
 import {toggleCar} from './car';
 import {applyPrevious} from './carry';
@@ -233,14 +234,14 @@ export function useKeyboard(): void {
         break;
       case 'i':
       case 'I':
-        if (report.apiBase) {
+        if (report.apiBase && !isGuest()) {
           event.preventDefault();
           void askAi();
         }
         break;
       case 't':
       case 'T':
-        if (report.apiBase) {
+        if (report.apiBase && !isGuest()) {
           event.preventDefault();
           toggleCar();
         }

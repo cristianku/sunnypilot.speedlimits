@@ -122,6 +122,27 @@ On the LAN the site asks you to sign in with a **name and password** (pages, pan
 - Old links with `?token=...` no longer open the site: they lead to the sign-in page.
 - Started by hand only on `127.0.0.1` (without `--host 0.0.0.0`), the site stays open to this computer without signing in, as before.
 
+### People from outside: the reviewers
+
+Other people can do review work on the drives you give them, and nothing else: no training, no import from the comma, no panel, no Settings, no API. Nobody from outside is ever an administrator.
+
+**Who they are.** Accounts live in Authentik (`auth.14bodhi.com`, group `reviewers`), created and removed by the cluster's administrator, with two-factor sign-in. A request counts as a reviewer only when it arrives from the proxy (`NNSLR_PROXY_IPS`) and carries the proxy's secret (`NNSLR_PROXY_SECRET`, header `X-Speedlimits-Proxy-Secret`); a request with neither is the normal site, a public name (`NNSLR_PUBLIC_HOSTS`) without them is refused. The cookie and the token of the administrator count for nothing on that way in, and `/api/v1` and `/mcp` are closed there.
+
+**What they do.** In **Data › Reviewers** add the user name of the Authentik account, then click the work on each drive: Sign review, Sign distance, Speed review, Roads. The person sees **My reviews**, with the day and length of those drives and a button for each kind of work. The site checks the assignment on every request, so taking the work back counts at once. The list is in `web/auth/assignments.json` of the data folder.
+
+**What they see.** Pictures and video of those drives. The names of the places, the GPS positions and the paths on the server are taken out of every page and answer. The notes of earlier reviews stay, and they can name a town; so does a town sign in the picture: the video always shows where the car was.
+
+**What they save.** It goes in as a person's review signed `guest/<name>`, whatever the page sends, and enters the dataset at the next import like yours, speeds included. On the drives you give them they can change labels already there: Sign review keeps the history, and the Undo of Roads drops the last correction, whoever made it. So give a person only the work you want from them.
+
+**Turning it on** (once, when the proxy is ready):
+
+```sh
+scripts/setup_guest_access.sh --proxy-ips <proxy address> --public-hosts <public name> --dry-run
+scripts/setup_guest_access.sh --proxy-ips <proxy address> --public-hosts <public name>
+```
+
+It writes the three settings in `/etc/speedlimits-web.env`. The secret is made there and never printed: the cluster's administrator reads it from that file and sets it in the proxy. The service reads the file when it starts, so it needs a restart. `--new-secret` changes the secret, `--off` closes the way in. Until then Data › Reviewers says that the sign-in from outside is not on: you can prepare people and work, nobody can come in.
+
 ### The token (setup code and API key)
 
 The place to look for it is the **`.env` file of the repository** (`~/sunnypilot.speedlimits/.env`), the line `NNSLR_REVIEW_TOKEN=...`:
@@ -293,6 +314,7 @@ A review can be done by hand, or by an AI that sees the images, through any serv
 | Measures of the AI reviewers | `data/evaluations/ai_reviewers/` |
 | Access token of the site (the place to look for it) | `.env` of the repository, line `NNSLR_REVIEW_TOKEN=` |
 | Copy of the token the service reads | `/etc/speedlimits-web.env` |
+| Reviewers from outside and their work | `web/auth/assignments.json` of the data folder, set in Data › Reviewers |
 | Mapillary client token, for the positions of the Mapillary photos | `.env` of the repository, line `MAPILLARY_TOKEN=` |
 | Positions of the Mapillary photos (`nnslr mapillary-locations`) | `data/external/mapillary/locations.jsonl`, with `image_ids.csv` beside it |
 | Windows of the Mapillary photos for the cutter (`nnslr mapillary-windows`) | `data/external/mapillary/windows.jsonl`, the pictures in `data/external/mapillary/windows/train/` |
@@ -327,6 +349,7 @@ To change a page: edit `web/src` (or the template), run `helpers/build_web.sh`, 
 | `helpers/road_types.sh [--again]` | the road type of every frame of the prepared drives, from the map and the GPS: a. `nnslr localize --all` (the precise position of the road camera's frames from openpilot.distill's localizer, about 20 s of a core per new segment, 6 side by side; without distill's `.venv` the frames keep the GPS position) then `nnslr gps --all --missing`, b. `scripts/osm_maps.py` (the Geofabrik extracts the drives need and the server lacks, downloaded: at most 5 GB a run; a download that fails leaves the maps there and the job goes on), c. `nnslr car-motion --all` (the car's speed, cached: a stretch without GPS where it is slow is a garage), d. `scripts/osm_roads.py` when there is a new drive or a new map (`--again`: always), and `scripts/osm_places.py` with a new map, e. `nnslr road-types --all`, f. `nnslr junctions --all` (the intersections every drive passed, the labels of the junction head). It is the **Find the road types** button of Data › Roads | writes in `data/raw/osm/` (the maps downloaded) and `data/derived/`, CPU for a few minutes when it reads the map, and for the localizer's new segments; network for the maps the drives miss (download.geofabrik.de only, no position leaves the server) and the GNSS orbits of a new day for the localizer |
 | `helpers/build_web.sh` | checks the types of the pages (Vue 3 and TypeScript in `web/src`, with `vue-tsc`) and builds them with Vite into `src/nnslr_tools/web/js`; `--check` only says whether the built files are up to date | the first time, it installs Vue, Vite and TypeScript in `web/node_modules` (Node from PyPI with `uvx`, nothing in the system) |
 | `scripts/install_review_service.sh` | installs, updates or removes the `speedlimits-web` service | systemd, `/etc/speedlimits-web.env`, `.env` |
+| `scripts/setup_guest_access.sh` | opens or closes the portal to reviewers from outside: the proxy's address, the public name and a secret that is never printed | `/etc/speedlimits-web.env`, the service needs a restart |
 | `scripts/setup_v100_training_env.sh` | creates `.venv-gpu` (`helpers/3_train.sh` runs it too) | installs packages |
 | `scripts/setup_vlm.sh [--no-test]` | installs Qwen3-VL-8B-Instruct (it sees images, Apache-2.0, ~17.5 GB) in `data/models/vlm/`, and `transformers`, `accelerate`, `qwen-vl-utils` in `.venv-gpu` (no package already there changes version), then tries it on the GPU on one frame; nothing uses it for now ([INSTALL.md](INSTALL.md)) | installs packages, downloads 17.5 GB, GPU |
 | `uv run --no-project --with osmium python scripts/osm_places.py` | extracts the names of the towns, villages, districts and hamlets of every OpenStreetMap extract of `data/raw/osm/` into `data/derived/osm/places.jsonl`, a place in two extracts kept once: the Review list names every drive with the day, the time and where it went from and to ("Herznach → Zürich", "Effingham → Mattoon"). `helpers/road_types.sh` runs it again with a new map | writes data, no network |

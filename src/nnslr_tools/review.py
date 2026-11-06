@@ -21,6 +21,9 @@ token only reads. No answer or log line ever holds a provider's key.
 "Fit box" of the page (``/frame/<key>/fit``) fits the reviewer's boxes to the signs under them on
 this server's CPU (:mod:`nnslr_tools.box_fit`), with no AI provider; like the AI it needs a
 signed-in browser or the site on 127.0.0.1, and nothing is saved.
+
+A reviewer from outside (:mod:`nnslr_tools.review_access`) comes through the proxy with no account here: _handle checks
+every one of their requests against a table of what a guest may open, and the work given to that person.
 """
 from __future__ import annotations
 
@@ -42,8 +45,12 @@ from nnslr_tools.preannotate import PreannotationError, _inside, resolve_data_ro
 # [site-login] - START
 from nnslr_tools.review_auth import SESSION_MAX_SECONDS, AdminAuth, auth_dir
 # [site-login] - END
-from nnslr_tools.pages import (CONTROL_TABS, OLD_ADDRESSES, render_account, render_control, render_index, render_login,
-                               render_problem, render_review)
+# [guest-reviewers] - START
+from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, SIGN_OUT_ADDRESS, WORK_KINDS, WORK_LINKS, Assignments,
+                                       GuestAccess, guest_rule, scrubbed)
+# [guest-reviewers] - END
+from nnslr_tools.pages import (CONTROL_TABS, OLD_ADDRESSES, render_account, render_control, render_guest, render_index,
+                               render_login, render_problem, render_review)
 from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
@@ -58,7 +65,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|regression|publish|panoramica|prepara|allena|pannello|stato|account|'
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|regression|publish|reviewers|panoramica|prepara|allena|pannello|stato|account|'
                      r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # A drive page whose route has no report (or an id that is no route), in words.
@@ -87,6 +94,10 @@ AI_DELETE_RE = re.compile(r'/api/settings/ai/providers/([a-z][a-z0-9-]{0,31})/de
 # Settings > Hugging Face: the token the networks are published with (nnslr_tools.hf_account).
 HF_POSTS = ('/api/settings/huggingface', '/api/settings/huggingface/remove')
 # [ai-reviewer] - END
+# [guest-reviewers] - START
+# Data › Reviewers: who works from outside and on what; only a signed-in browser changes them.
+REVIEWER_POSTS = ('/api/reviewers/people', '/api/reviewers/people/remove', '/api/reviewers/assign')
+# [guest-reviewers] - END
 
 
 def write_review(directory: Path, rows: list[dict], run_id: str) -> None:
@@ -237,6 +248,11 @@ class ReviewApp(ReviewService):
         # On the LAN a browser signs in; the access token is the setup code of the first visit.
         self.auth = AdminAuth(auth_dir(root), token) if require_token else None
         # [site-login] - END
+        # [guest-reviewers] - START
+        # On 127.0.0.1 there is no proxy and no outside.
+        self.access = GuestAccess.from_env() if require_token else GuestAccess()
+        self.assignments = Assignments(auth_dir(root))
+        # [guest-reviewers] - END
         self._mcp = None
         self._mcp_failed = False
         self._mcp_lock = threading.Lock()
@@ -337,6 +353,50 @@ class ReviewApp(ReviewService):
                           'full_definition': drive['full_definition']})
         return links
 
+    # [guest-reviewers] - START
+    def guest_links(self, name: str) -> list[dict]:
+        """The route menu of the review page for a reviewer: the drives of their Sign review, by date, no place."""
+        work = self.assignments.work_of(name)
+        return [dict(link, name=link['when'] or link['route_id'], title=None) for link in self.route_links()
+                if 'signs' in work.get(link['route_id'], ())]
+
+    def guest_work(self, name: str) -> dict:
+        """The list of a reviewer: their drives, the latest first, each with the pages of the work given on it."""
+        drives = []
+        for route, kinds in self.assignments.work_of(name).items():
+            drive = drive_of(self.root, route)
+            labels = dict(WORK_KINDS)
+            drives.append({'route': route, 'when': drive['when'], 'start': drive['start'], 'minutes': drive['minutes'],
+                           'work': [{'kind': kind, 'label': labels[kind], 'href': WORK_LINKS[kind].format(route=route)}
+                                    for kind in kinds]})
+        drives.sort(key=lambda item: (item['start'] or '', item['route']), reverse=True)
+        return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives}
+
+    def assignable_drives(self) -> list[dict]:
+        """Every drive with the work it can give today, the latest first: Sign review and Roads need its report, Sign
+        distance signs to mark, Speed review its video."""
+        from nnslr_tools import drive_review, road_types, sign_distance, speed_review
+        store = drive_review.store_for(self.root)
+        kinds: dict[str, set[str]] = {}
+        for link in self.route_links():
+            kinds.setdefault(link['route_id'], set()).add('signs')
+        for item in road_types.summary(self.root)['routes']:
+            kinds.setdefault(item['route'], set()).add('roads')
+        for item in sign_distance.overview(store)['drives']:
+            if item['status'] == 'signs':
+                kinds.setdefault(item['route'], set()).add('distance')
+        for item in speed_review.drives_list(speed_review.store_for(self.root), store):
+            if item.get('video_segments'):
+                kinds.setdefault(item['route'], set()).add('speed')
+        drives = []
+        for route, found in kinds.items():
+            drive = drive_of(self.root, route)
+            drives.append({'route': route, 'title': drive['title'], 'when': drive['when'], 'start': drive['start'],
+                           'minutes': drive['minutes'], 'kinds': [key for key in KIND_KEYS if key in found]})
+        drives.sort(key=lambda item: (item['start'] or '', item['route']), reverse=True)
+        return drives
+    # [guest-reviewers] - END
+
     def route_summaries(self) -> list[dict]:
         summaries = []
         for route, directory in list_reports(self.root):
@@ -401,6 +461,11 @@ def make_handler(app: ReviewApp):
         sys_version = ''
         # Socket timeout: a client that stops sending is disconnected, even before the token check.
         timeout = REQUEST_TIMEOUT_SECONDS
+        # [guest-reviewers] - START
+        # The reviewer from outside of this request, None for anyone else. Set on every request: the proxy reuses a
+        # connection for different people.
+        guest = None
+        # [guest-reviewers] - END
 
         def do_GET(self):
             self._dispatch('GET')
@@ -419,6 +484,16 @@ def make_handler(app: ReviewApp):
 
         def _dispatch(self, method):
             try:
+                # [guest-reviewers] - START
+                self.guest = None
+                try:
+                    self.guest = app.access.guest_of(self.client_address[0], self.headers)
+                except ReviewRejected as exc:
+                    # '': from outside, nobody we know. Their error page holds nothing of the site.
+                    self.guest = ''
+                    self._problem(exc.status, exc.reason, exc.message, self.path.startswith('/api/'))
+                    return
+                # [guest-reviewers] - END
                 self._handle(method)
             except (BrokenPipeError, ConnectionResetError, TimeoutError):
                 self.close_connection = True
@@ -434,6 +509,10 @@ def make_handler(app: ReviewApp):
             parts = urlsplit(self.path)
             path = unquote(parts.path)
             api = path.startswith('/api/')
+            # [guest-reviewers] - START
+            if self.guest is not None and self._guest_refused(method, path, api):
+                return
+            # [guest-reviewers] - END
             if not app.host_allowed(self.headers.get('Host')):
                 self._problem(403, 'host_not_allowed', 'Host name not allowed for this server.', api)
                 return
@@ -459,6 +538,26 @@ def make_handler(app: ReviewApp):
             else:
                 self._get(path)
 
+        # [guest-reviewers] - START
+        def _guest_refused(self, method, path, api):
+            """A guest's request against the table of what a guest may open and the work given to them, before anything
+            else reads it; True when refused (answered). Their POSTs have the protections of every save: same origin,
+            JSON only."""
+            rule = guest_rule(method, path)
+            if rule is None or (rule[0] is not None and not app.assignments.may(self.guest, *rule)):
+                self._problem(403, 'not_assigned', NOT_ASSIGNED, api)
+                return True
+            if method == 'POST':
+                if not self._same_origin():
+                    self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                    return True
+                if self.headers.get('Content-Type', '').split(';')[0].strip().lower() != 'application/json':
+                    self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                    return True
+            app.assignments.seen(self.guest)
+            return False
+        # [guest-reviewers] - END
+
         # [site-login] - START
         @staticmethod
         def _clean_target(path):
@@ -469,8 +568,9 @@ def make_handler(app: ReviewApp):
 
         def _authorized(self):
             """A browser signed in as the administrator, or an agent with the access token in a header
-            (X-Review-Token, as for /api/v1: a page cannot make another site send it)."""
-            if not app.require_token:
+            (X-Review-Token, as for /api/v1: a page cannot make another site send it). A guest got here through
+            _guest_refused; the token and the cookie count for nothing on their way in."""
+            if not app.require_token or self.guest is not None:
                 return True
             if app.token_matches(self.headers.get('X-Review-Token')):
                 return True
@@ -478,7 +578,7 @@ def make_handler(app: ReviewApp):
 
         def _session(self):
             """The session token of this request when it is signed in, otherwise None."""
-            if app.auth is None:
+            if app.auth is None or self.guest is not None:
                 return None
             # Plain "name=value; name=value" split: the browser also sends the
             # cookies of other web apps on this host (any port), and a value our
@@ -504,6 +604,8 @@ def make_handler(app: ReviewApp):
 
         def _who(self):
             """Who makes this request, for the record of a choice: (name, how it was recognised)."""
+            if self.guest is not None:
+                return GUEST_PREFIX + self.guest, 'reviewer'
             if app.auth is None:
                 return None, 'local'
             if self._session() is not None:
@@ -511,6 +613,9 @@ def make_handler(app: ReviewApp):
             return None, 'token'
 
         def _auth_state(self):
+            if self.guest is not None:
+                return {'configured': True, 'signed_in': True, 'local': False, 'user': self.guest, 'role': 'reviewer',
+                        'sign_out': SIGN_OUT_ADDRESS}
             if app.auth is None:
                 return {'configured': False, 'signed_in': True, 'local': True}
             signed_in = self._session() is not None
@@ -518,6 +623,7 @@ def make_handler(app: ReviewApp):
             if signed_in:
                 state['user'] = app.auth.username()
                 state['sessions'] = app.auth.sessions_count()
+                state['role'] = 'admin'
             return state
 
         def _public(self, method, path, api):
@@ -606,12 +712,27 @@ def make_handler(app: ReviewApp):
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                        "img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
                        "frame-ancestors 'none'")
-                self._send(200, 'text/html; charset=utf-8', render_control(nonce, CONTROL_TABS[path]).encode('utf-8'),
-                           csp)
+                page = render_guest(nonce) if self.guest is not None else render_control(nonce, CONTROL_TABS[path])
+                self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
                 return
             if path in OLD_ADDRESSES:
                 self._redirect(OLD_ADDRESSES[path], None)
                 return
+            # [guest-reviewers] - START
+            if path == '/api/reviewer/work':
+                self._json(200, app.guest_work(self.guest) if self.guest is not None
+                           else {'ok': True, 'user': None, 'read_only': False, 'drives': []})
+                return
+            # Data › Reviewers: the people, their work, and the drives with the work each can give.
+            if path == '/api/reviewers':
+                self._json(200, {'ok': True, 'open': app.access.enabled, 'can_edit': self._can_use_ai(),
+                                 'kinds': [{'key': key, 'label': label} for key, label in WORK_KINDS],
+                                 **app.assignments.view(), 'drives': app.assignable_drives()})
+                return
+            if path in REVIEWER_POSTS:
+                self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                return
+            # [guest-reviewers] - END
             if path == '/api/panel/status':
                 self._json(200, app.panel.status())
                 return
@@ -1087,10 +1208,12 @@ def make_handler(app: ReviewApp):
             hints_by_frame, hint_stats = app.hints(route, rows)
             suspicious = app.suspicious(route, run_id, rows, hints_by_frame)
             nonce = secrets.token_urlsafe(18)
-            page = render_review(rows, run_id, route_id=route, server=True, nonce=nonce,
-                                 hints=hints_by_frame, hint_stats=hint_stats, suspicious=suspicious,
-                                 routes=app.route_links(), proposer=proposer, busy=busy,
-                                 videos=app.videos(route, rows))
+            guest = self.guest is not None
+            clean = scrubbed if guest else (lambda value: value)
+            page = render_review(clean(rows), run_id, route_id=route, server=True, nonce=nonce,
+                                 hints=clean(hints_by_frame), hint_stats=hint_stats, suspicious=clean(suspicious),
+                                 routes=app.guest_links(self.guest) if guest else app.route_links(), proposer=proposer,
+                                 busy=busy, videos=clean(app.videos(route, rows)), guest=guest)
             csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
@@ -1292,7 +1415,10 @@ def make_handler(app: ReviewApp):
             drive = r'/api/sign-distance/drives/([0-9a-f]{8}--[0-9a-f]{10})'
             try:
                 if path == '/api/sign-distance/drives':
-                    self._json(200, {'ok': True, 'drives': sign_distance.overview(store)['drives']})
+                    drives = sign_distance.overview(store)['drives']
+                    if self.guest is not None:
+                        drives = [item for item in drives if app.assignments.may(self.guest, item['route'], ('distance',))]
+                    self._json(200, {'ok': True, 'drives': drives})
                     return
                 if path == '/api/sign-distance/summary':
                     self._json(200, {'ok': True, 'summary': sign_distance.overview(store)['summary']})
@@ -1337,7 +1463,7 @@ def make_handler(app: ReviewApp):
             if content_type.split(';')[0].strip().lower() != 'application/json':
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
-            self._require_ai_session()
+            self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
             match = re.fullmatch(r'/api/sign-distance/drives/([0-9a-f]{8}--[0-9a-f]{10})/(marks|undo)', path)
@@ -1446,7 +1572,7 @@ def make_handler(app: ReviewApp):
             if content_type.split(';')[0].strip().lower() != 'application/json':
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
-            self._require_ai_session()
+            self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
             match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(stretches|works)', path)
@@ -1541,6 +1667,14 @@ def make_handler(app: ReviewApp):
                 self._hf_post(path, self._read_json())
                 return
             # [ai-reviewer] - END
+            # [guest-reviewers] - START
+            if path in REVIEWER_POSTS:
+                # The same protections as the AI settings: same origin, JSON, a signed-in browser.
+                if self._ai_post_refused():
+                    return
+                self._reviewers_post(path, self._read_json())
+                return
+            # [guest-reviewers] - END
             # [drive-review] - START
             if path.startswith('/api/drive-review/'):
                 self._drive_review_post(path)
@@ -1660,10 +1794,16 @@ def make_handler(app: ReviewApp):
                 self._require_ai_session()
             # [ai-reviewer] - END
             # [box-fit] - START
-            if match.group(4) == '/fit' and not self._can_use_ai():
+            if match.group(4) == '/fit' and not self._is_person():
                 raise ReviewRejected(403, 'session_required', FIT_SESSION_MESSAGE)
             # [box-fit] - END
             body = self._read_json()
+            # [guest-reviewers] - START
+            if self.guest is not None and isinstance(body, dict):
+                # The server says who saved it and that a person did, whatever the page sends.
+                body = {key: value for key, value in body.items() if key not in ('reviewer_kind', 'override_human_review')}
+                body['reviewer'] = self._who()[0]
+            # [guest-reviewers] - END
             route = match.group(1)
             frame_key = str(int(match.group(2))) + '/' + str(int(match.group(3)))
             # [ai-reviewer] - START
@@ -1729,6 +1869,30 @@ def make_handler(app: ReviewApp):
         def _require_ai_session(self):
             if not self._can_use_ai():
                 raise ReviewRejected(403, 'session_required', SESSION_REQUIRED_MESSAGE)
+
+        # [guest-reviewers] - START
+        def _is_person(self):
+            """Someone the site knows by name: as _can_use_ai, or a reviewer from outside. They mark and fit boxes as
+            the administrator does, and never reach the AI."""
+            return self._who()[1] in ('sign-in', 'local', 'reviewer')
+
+        def _require_person(self):
+            if not self._is_person():
+                raise ReviewRejected(403, 'session_required', SESSION_REQUIRED_MESSAGE)
+
+        def _reviewers_post(self, path, body):
+            """Data › Reviewers: {"name"} to add or remove a person, {"user", "route", "kind", "on"} to give or take back a
+            kind of work on a drive; the people and their work again."""
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
+            if path == REVIEWER_POSTS[0]:
+                app.assignments.add_person(body.get('name'))
+            elif path == REVIEWER_POSTS[1]:
+                app.assignments.remove_person(body.get('name'))
+            else:
+                app.assignments.set_work(body.get('user'), body.get('route'), body.get('kind'), body.get('on'))
+            self._json(200, {'ok': True, **app.assignments.view()})
+        # [guest-reviewers] - END
 
         def _ai_post_refused(self):
             """The protections of every AI POST: same origin, JSON only, a session. True when refused (answered)."""
@@ -2027,6 +2191,10 @@ def make_handler(app: ReviewApp):
             self.wfile.write(body)
 
         def _json(self, status, payload, extra=None):
+            # [guest-reviewers] - START
+            if self.guest is not None:
+                payload = scrubbed(payload)
+            # [guest-reviewers] - END
             body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode('utf-8')
             self._send(status, 'application/json; charset=utf-8', body, DEFAULT_CSP, extra)
 
@@ -2035,7 +2203,7 @@ def make_handler(app: ReviewApp):
                 self._json(status, {'ok': False, 'error': reason, 'message': message})
             else:
                 nonce = secrets.token_urlsafe(18)
-                page = render_problem(status, message, nonce, drive=reason == 'unknown_route')
+                page = render_problem(status, message, nonce, drive=reason == 'unknown_route', guest=self.guest is not None)
                 self._send(status, 'text/html; charset=utf-8', page.encode('utf-8'),
                            "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                            "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")

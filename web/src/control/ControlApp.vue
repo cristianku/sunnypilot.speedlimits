@@ -20,6 +20,7 @@ import PublishTab from './PublishTab.vue';
 import RoadsTab from './RoadsTab.vue';
 import SignDistanceTab from './SignDistanceTab.vue';
 import RegressionTab from './RegressionTab.vue';
+import ReviewersTab from './ReviewersTab.vue';
 import SpeedReviewTab from './SpeedReviewTab.vue';
 import {currentTab, useTabRouting} from './tabs';
 import TrainTab from './TrainTab.vue';
@@ -69,6 +70,7 @@ watch(busyPaths, markBusy);
     <RegressionTab v-else-if="currentTab === 'regression'" :status="status" @run="run" @stop="stop" @details="details"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
+    <ReviewersTab v-else-if="currentTab === 'reviewers'"/>
     <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
   </main>
   <LogSheet :job="shownJob" @close="shownId = null" @stop="stop"/>

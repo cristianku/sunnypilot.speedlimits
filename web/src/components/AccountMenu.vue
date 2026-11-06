@@ -6,11 +6,13 @@
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AuthState} from '../common/auth-types';
+import {isGuest} from '../common/guest';
 import {onThemeChange, setTheme, storedTheme, type Theme} from '../common/theme';
 import {busyPaths, linkBusy} from '../composables/busy';
 import {askConfirm} from '../composables/confirm';
 
 const props = defineProps<{current?: boolean}>();
+const guest = isGuest();
 const THEMES: [Theme, string][] = [['dark', 'Dark'], ['light', 'Light'], ['auto', 'Automatic']];
 
 /** The links of the tab row of this page (pages.SITE_TABS), for the phone menu. */
@@ -143,7 +145,7 @@ const sessionsText = (value: AuthState): string =>
           <strong>This computer</strong><span>Site on 127.0.0.1, no sign-in</span>
         </template>
         <template v-else>
-          <strong>{{ state.user }}</strong><span>{{ sessionsText(state) }}</span>
+          <strong>{{ state.user }}</strong><span>{{ state.role === 'reviewer' ? 'Reviewer' : sessionsText(state) }}</span>
         </template>
       </div>
     </div>
@@ -155,8 +157,9 @@ const sessionsText = (value: AuthState): string =>
       </div>
     </div>
     <div class="pop-section pop-items">
-      <a class="pop-item" href="/account" id="account-settings">Settings</a>
-      <template v-if="state !== null && !state.local">
+      <a v-if="!guest" class="pop-item" href="/account" id="account-settings">Settings</a>
+      <a v-if="state?.sign_out" class="pop-item" :href="state.sign_out">Sign out</a>
+      <template v-else-if="state !== null && !state.local">
         <button class="pop-item" type="button" @click="signOut(false)">Sign out</button>
         <button class="pop-item danger" type="button" @click="signOut(true)">Sign out everywhere</button>
       </template>

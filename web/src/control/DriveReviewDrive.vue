@@ -15,6 +15,7 @@
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
+import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, readText, REASON_LABEL,
   type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState} from './drive-review';
@@ -26,6 +27,7 @@ import {type ControlTab, goTo, showEpisode, tabEpisode} from './tabs';
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab?: ControlTab; backLabel?: string; noEpisodes?: boolean;
   rates?: readonly number[]; startZoom?: Zoom}>(), {tab: 'drivereview', backLabel: 'Drive review', noEpisodes: false, rates: () => [],
   startZoom: 'episode'});
+const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
 
 const MARKS = {
@@ -441,7 +443,7 @@ watch(() => props.route, () => {
     <div class="rt-view-head">
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
       <div class="rt-view-name">
-        <h2 id="dr-view-title">{{ view?.title ?? 'Places unknown' }}</h2>
+        <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }}</h2>
         <span>{{ facts }}</span>
         <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
       </div>
@@ -451,7 +453,7 @@ watch(() => props.route, () => {
     <template v-else>
       <div v-if="scan && scan.state !== 'done' && scan.state !== 'no_episodes'" class="dr-banner" :class="'dr-' + scanText(scan).tone" id="dr-scan-state">
         <p>{{ scanText(scan).text }}<template v-if="scan.state === 'no_logs' || scan.state === 'unreadable_logs'"> The video below plays all the same.</template></p>
-        <div class="dr-banner-actions">
+        <div v-if="!guest" class="dr-banner-actions">
           <button v-if="scan.state !== 'queued' && scan.state !== 'scanning'" type="button" class="btn small" :class="{primary: scan.state !== 'no_logs'}"
                   :disabled="readOnly" @click="search">{{ scan.state === 'no_logs' || scan.state === 'unreadable_logs' ? 'Look on the server' : 'Search the logs' }}</button>
           <button type="button" class="btn small" :disabled="readOnly || sending !== null" @click="folderInput?.click()">Send a folder of logs</button>
@@ -572,7 +574,7 @@ watch(() => props.route, () => {
             </dl>
           </section>
 
-          <section class="dr-signs" aria-labelledby="dr-signs-title">
+          <section v-if="!guest" class="dr-signs" aria-labelledby="dr-signs-title">
             <h3 id="dr-signs-title">The signs at {{ clockOf(cursor) }}</h3>
             <template v-if="view.sign_review">
               <p class="dr-hint">Sign review opens on the frame of this moment: confirm or correct the signs there.</p>

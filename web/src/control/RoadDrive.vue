@@ -17,6 +17,7 @@
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural, thousands} from '../common/format';
+import {isGuest} from '../common/guest';
 import type {RoadDriveView, RoadJunction, RoadType} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
@@ -26,6 +27,7 @@ import {goTo} from './tabs';
 import {SPEEDS, type Speed} from './watch';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
+const guest = isGuest();
 
 const MARKS = {
   play: 'M8 5.6v12.8a.8.8 0 0 0 1.2.7l10.3-6.4a.8.8 0 0 0 0-1.4L9.2 4.9A.8.8 0 0 0 8 5.6z',
@@ -465,9 +467,9 @@ async function undo(what: '/undo' | '/junction/undo' = '/undo'): Promise<void> {
 <template>
   <section ref="root" class="card rt-view" aria-labelledby="rt-view-title">
     <div class="rt-view-head">
-      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> Roads</button>
+      <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ guest ? 'My reviews' : 'Roads' }}</button>
       <div class="rt-view-name">
-        <h2 id="rt-view-title">{{ payload ? payload.title ?? 'Places unknown' : 'Drive' }}</h2>
+        <h2 id="rt-view-title">{{ payload ? payload.title ?? (guest ? 'Drive' : 'Places unknown') : 'Drive' }}</h2>
         <span>{{ facts }}</span>
       </div>
     </div>
