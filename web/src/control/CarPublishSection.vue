@@ -62,9 +62,9 @@ const headline = computed((): {tone: 'ok' | 'warn' | ''; text: string} => {
   if (models.on_car_problem) return {tone: 'warn', text: 'What is on the car cannot be read: ' + models.on_car_problem + '.'};
   if (signnet.value === null) return {tone: 'warn', text: 'The cutter in use is not a finished SignNet the comma can run: choose one in Versions.'};
   if (pending.value) return {tone: 'warn', text: 'The last publication did not finish building psa-torque-sunny-testing: the comma finds nothing new yet.'};
-  if (differing.value === 0) return {tone: 'ok', text: '✓ The comma’s software has the networks in use.'};
-  return {tone: 'warn', text: differing.value === rows.value.length ? 'The comma’s software has none of the networks in use.'
-    : 'The comma’s software does not have ' + (differing.value === 1 ? 'one' : differing.value) + ' of the networks in use yet.'};
+  if (differing.value === 0) return {tone: 'ok', text: '✓ The branch has the networks in use.'};
+  return {tone: 'warn', text: differing.value === rows.value.length ? 'The branch has none of the networks in use.'
+    : 'The branch does not have ' + (differing.value === 1 ? 'one' : differing.value) + ' of the networks in use yet.'};
 });
 /** Where the comma's networks come from: "speed-limits-models f2ea8f5, 2026-10-29". */
 const published = computed((): string => {
@@ -118,13 +118,13 @@ async function publish(): Promise<void> {
         <p v-if="blocked" class="act-reason" id="car-publish-reason">{{ blocked }}</p>
       </div>
       <p v-if="job && !bigJob" class="last-line" :class="{'pub-done': job.state === 'ok'}" id="car-last"><template
-        v-if="job.state === 'ok'">✓ Published to the car, {{ job.ended_at ? isoWhen(job.ended_at) : startedWhen(job) }}: on
-        the comma, Check for updates</template><template
+        v-if="job.state === 'ok'">✓ Branch psa-torque-sunny-testing ready, {{ job.ended_at ? isoWhen(job.ended_at) : startedWhen(job) }}: on
+        the comma, Check for updates and install</template><template
         v-else>Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : job.state === 'failed' ? 'failed, finished later' : JOB_STATE[job.state][0] }}</template> ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
     <p v-if="models?.comma_trial" class="note warn-text" id="car-trial">A trial is on the comma now (SignNet
       {{ models.comma_trial.signnet.run }}): its next software update replaces it.</p>
-    <p v-if="published" class="note" id="car-published">The comma’s software has the networks of {{ published }}.</p>
+    <p v-if="published" class="note" id="car-published">The branch has the networks of {{ published }}.</p>
   </section>
 </template>

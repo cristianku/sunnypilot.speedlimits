@@ -134,8 +134,8 @@ function car(status: PanelStatus): Omit<LoopRow, 'primary'> {
       warn: '', waiting: true, ok: false, action: publish};
   }
   if (!differ.length) {
-    return {...base, big: summary.on_car ? 'On the car' : 'Nothing in use',
-      note: inUse.length ? 'The comma’s software has the networks in use: ' + inUse.join(' · ') + '.' : '', warn: '',
+    return {...base, big: summary.on_car ? 'Branch ready' : 'Nothing in use',
+      note: inUse.length ? 'The branch has the networks in use: ' + inUse.join(' · ') + '.' : '', warn: '',
       waiting: false, ok: summary.on_car !== null, action: null};
   }
   // "classifier, 30 Oct 11:22 (the car has 29 Oct 09:00)"; a network the car has and none in use: "scene: none in use".
