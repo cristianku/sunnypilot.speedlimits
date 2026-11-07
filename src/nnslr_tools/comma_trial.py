@@ -2,8 +2,7 @@
 
 A SignNet of this server and the classifier in use copied straight onto the comma over ssh, into the models folder of
 the build it runs (the submodule openpilot/sunnypilot/speed_limits/models): no publication, no build. The comma's
-speed_limits_warmup (offroad, while Show Vision Speed Limit is on or Speed Limit Source is Map Data + Vision or Vision
-Only) compiles every network whose compiled file is missing, and speedvisiond loads them when a drive starts: copying is
+speed_limits_warmup (offroad, while Show Vision Speed Limit is on or Speed Limit Source is Smartspeed) compiles every network whose compiled file is missing, and speedvisiond loads them when a drive starts: copying is
 enough. The trial lasts until the comma's next software update, which puts back the build's networks; --restore does it
 now.
 
@@ -70,8 +69,8 @@ HARDWARE = 'openpilot/common/hardware/hw.py'
 SSH_OPTIONS = ('-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10')
 SSH_TIMEOUT = 120
 # The comma's params: the Speed Limit Sources that use the networks, by their SpeedLimitPolicy (speed_limit/common.py
-# Policy.map_data_vision and Policy.vision_only).
-VISION_POLICIES = {'5': 'Map Data + Vision', '6': 'Vision Only'}
+# Policy.vision_only, Smartspeed; a 5, the old Map Data + Vision, still on a comma not updated yet).
+VISION_POLICIES = {'5': 'Map Data + Vision', '6': 'Smartspeed'}
 POLL_SECONDS = 15
 WAIT_SECONDS = 360
 FRAMES = 5
@@ -83,7 +82,7 @@ CANCELLATION = 'cancellation'
 VISION_NAMES = ('SIGNNET_WIDTH', 'SIGNNET_HEIGHT', 'SIGNNET_STRIDE', 'CLASSIFIER_SIZE', 'CLASSIFIER_MEAN',
                 'CLASSIFIER_STD', 'SignNetInput', 'read_signs', 'class_speed')
 BUILD_NEEDED = 'a build is needed: use Publish'
-NOT_PREPARED = ("turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data + Vision or Vision Only, on "
+NOT_PREPARED = ("turn on Show Vision Speed Limit, or choose Speed Limit Source Smartspeed, on "
                 "the comma: it prepares the networks only then")
 
 

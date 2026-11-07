@@ -368,8 +368,8 @@ def test_refused_without_the_models_folder(comma):
 
 def test_refused_while_the_comma_does_not_prepare_them(comma):
     (comma['params'] / 'SpeedLimitVisionDisplay').write_text('0')
-    refused(comma, 'turn on Show Vision Speed Limit, or choose Speed Limit Source Map Data \\+ Vision')
-    # Map Data + Vision or Vision Only alone is enough.
+    refused(comma, 'turn on Show Vision Speed Limit, or choose Speed Limit Source Smartspeed')
+    # Smartspeed alone is enough, and a 5 (the old Map Data + Vision) on a comma not updated yet.
     for policy in ('5', '6'):
         (comma['params'] / 'SpeedLimitPolicy').write_text(policy)
         assert run_trial(comma, dry_run=True)['outcome'] == 'dry_run'

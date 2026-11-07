@@ -35,8 +35,8 @@ SETTINGS = (
              'once seen this long.', 'default': 10.0,
      'min': 2.0, 'max': 60.0, 'step': 1.0, 'unit': 's', 'group': 'road'},
     {'key': 'zone_confidence', 'constant': 'ZONE_CONFIDENCE', 'label': 'A 30 zone when the network is',
-     'help': 'The scene network says "30 zone" only this sure, else town: with Map Data + Vision or Vision Only '
-             'the car takes vision first, and a wrong 30 on a 50 street brakes for nothing.', 'default': 0.9, 'min': 0.5,
+     'help': 'The scene network says "30 zone" only this sure, else town: with Smartspeed '
+             'the car takes only vision, and a wrong 30 on a 50 street brakes for nothing.', 'default': 0.9, 'min': 0.5,
      'max': 0.999, 'step': 0.01, 'unit': 'sure', 'group': 'road'},
     {'key': 'parking_seconds', 'constant': 'PARKING_SECONDS', 'label': 'A car park after',
      'help': 'A car park gives its limit once the network has seen it this long, the car slow.', 'default': 5.0,

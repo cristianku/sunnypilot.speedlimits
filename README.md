@@ -72,7 +72,7 @@ flowchart TD
   cam --> br
   sig["Car signals<br/>speed, gas, brake, openpilot on"] --> br
   br --> lim["Vision limit"]
-  lim --> res["sunnypilot resolver<br/>Map Data + Vision<br/>or Vision Only"]
+  lim --> res["sunnypilot resolver<br/>Smartspeed: the vision limit alone"]
   osm["Map<br/>OpenStreetMap"] --> res
 ```
 
@@ -81,13 +81,13 @@ flowchart TD
 - The **brain** says the speed itself, once a second, from the picture, the signs read and the car's own signals ([the brain](#the-brain)).
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **Full definition, for far signs and plates.** Two Developer switches, both off by default. **Record road at full resolution** writes `fcamera.hevc` at 2688 × 1520, and the server then keeps that frame beside each picture for Sign review and the classifier's training ([the guide](docs/GUIDE.md#drives-at-full-definition)). **Read signs at full resolution** has the cutter search the 1344 × 760 frame as always and cuts the classifier's crop from the 2688 × 1520 one. With either one on, the road camera goes through the BPS: the driving model then reads that picture too.
-- **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, with **Smartspeed** (Map Data + Vision); the old Vision Only takes the vision limit alone.
+- **The vision side never reads the map.** It uses only the camera and the car's own signals. With **Smartspeed** (Speed Limit Source 6) sunnypilot's resolver takes the vision limit alone, never the map; the map stays only for the factory sources. Map Data + Vision (5) is gone since 7 Nov 2026: a stored 5 becomes 6.
 
 ### The rules on the car
 
 How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
 
-**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). "Map Data + Vision" stays the one choice in sunnylink and the resolver does not change. The brain always says a number, so while it runs the map is not used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, and by default gas, brake, the car's speed and whether openpilot is engaged (how long ago it went off, and whether the brake, the gas or something else turned it off: a driver who brakes once and then lets the car roll still shows); never the map. It gets the plates of hours only if its training had them (`plates` in its contract, shown in Models › Brain). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
+**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). Smartspeed is the one choice in sunnylink and the resolver does not change; the map is never used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, and by default gas, brake, the car's speed and whether openpilot is engaged (how long ago it went off, and whether the brake, the gas or something else turned it off: a driver who brakes once and then lets the car roll still shows); never the map. It gets the plates of hours only if its training had them (`plates` in its contract, shown in Models › Brain). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
 
 **Signs**
 
@@ -119,7 +119,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 
 **Speed Limit Assist** (sunnypilot's, changed on `speed-limits` for cars like the Peugeot, with openpilot longitudinal and the car's own cruise)
 
-- **Smartspeed** (sunnylink, 6 Nov 2026) is the fifth mode, after the factory Off, Information, Warning and Assist (`SpeedLimitMode` 4), which work as they did and keep their Speed Limit Source: map, car, or vision. It starts speedvisiond, shows the fuchsia square and uses **Map Data + Vision** (`SpeedLimitPolicy` 5): the brain's limit, or the map's when it has none. A source without the network moves to that one by itself, and stays there after leaving Smartspeed until another source is picked. In the factory modes **Show Vision Reading** shows the square for information only, above the factory limit.
+- **Smartspeed** (sunnylink, 6 Nov 2026) is the fifth mode, after the factory Off, Information, Warning and Assist (`SpeedLimitMode` 4), which work as they did and keep their Speed Limit Source: map, car, or vision. It starts speedvisiond, shows the fuchsia square and uses the Speed Limit Source **Smartspeed** (`SpeedLimitPolicy` 6, called Vision Only until 7 Nov 2026): the brain's limit alone, never the map. Map Data + Vision (5) is no longer offered, and a stored 5 becomes 6. A source without the network moves to Smartspeed by itself, and stays there after leaving Smartspeed until another source is picked. In the factory modes **Show Vision Reading** shows the square for information only, above the factory limit.
 - Automatic on every car: the limit applies as soon as it is known. No confirmation and no set speed of 120/130 to confirm with (the Peugeot has no button for it).
 - The set speed is only on and off, never the target: the car drives to the limit, also above the set speed, keeps the last limit when it goes, and before any limit keeps the speed at engagement (40 km/h from a stop). Curves and a forced deceleration still win.
 - A limit is a speed on the dashboard, held as a set speed of the same number is (7 Nov 2026): the car's dashboard adds `vCruiseCluster - vCruise` to the speed it holds (3 km/h on the Peugeot), so a limit of 50 is held at 47 and the dashboard shows 50. The offset is read from the car's set speed, the last one kept while it is unset; it is 0 where openpilot keeps the set speed itself, as in factory openpilot. This holds for Assist too.
