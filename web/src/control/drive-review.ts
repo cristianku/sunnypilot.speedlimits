@@ -353,6 +353,95 @@ export function previousChange(series: Series | undefined, s: number): {at: numb
   return null;
 }
 
+// -- the vision limit from its sign on ----------------------------------------------------------------------------------
+
+/** Metres a distance of the sign may come out farther than the count and still correct it (vision.LIMIT_AHEAD_SLACK). */
+const AHEAD_SLACK = 5;
+
+/** A vision limit waiting for its sign: from `at` on, `kph` begins in `metres`, the car driving `mps` (kph 0: none). */
+export interface AheadPoint {at: number; kph: number; metres: number; mps: number}
+
+export interface VisionAtSign {
+  /** The vision limit (vis_limit) with each new limit of the brain starting at its sign. */
+  limit: Series;
+  /** The limit waiting for its sign, and the metres left. */
+  ahead: AheadPoint[];
+}
+
+const atSignOf = new WeakMap<Record<string, Series>, VisionAtSign>();
+
+/** The comma's vision limit from its sign on. The brain (speedLimitReason "brain") gives a new limit as soon as it reads
+ * the sign, tens of metres before it: here that limit starts at the sign, as the map's does and as the memory's did on
+ * the car (vision.LimitAhead), and until then it is the limit ahead. The metres to the sign when the limit changed
+ * (signDistance) count down with the car's speed; a distance of the sign nearer than the count, or at most AHEAD_SLACK
+ * farther, corrects it, a farther one is the next sign; a limit that changes again before the sign takes the place of
+ * the one ahead. The memory's limits, a change with no sign ahead and the first limit stay where the log has them. */
+export function visionAtSign(series: Record<string, Series>): VisionAtSign {
+  const cached = atSignOf.get(series);
+  if (cached) return cached;
+  const vision = series['vis_limit'] ?? [];
+  const reason = series['vis_reason'];
+  const distance = series['vis_sign_dist'];
+  const speed = series['v_ego'];
+  const limit: Series = [];
+  const ahead: AheadPoint[] = [];
+  const first = vision.length ? vision[0]![0] : Infinity;
+  const times = [...new Set([vision, distance ?? [], speed ?? []].flatMap((list) => list.map((point) => point[0])))]
+    .filter((time) => time >= first).sort((a, b) => a - b);
+  let held: Value | undefined;  // the limit shown
+  let target: Value | undefined;  // the log's
+  let metres = 0;  // to the sign of target, 0 when none waits
+  let mps = 0;
+  let last = first;
+  const show = (time: number): void => {
+    if (target !== held || !limit.length) limit.push([time, target ?? null]);
+    held = target;
+    if (ahead.length && ahead[ahead.length - 1]!.kph > 0) ahead.push({at: time, kph: 0, metres: 0, mps: 0});
+  };
+  for (const time of times) {
+    if (metres > 0) {
+      const driven = mps * (time - last);
+      if (driven >= metres) {
+        const reached = last + metres / mps;
+        metres = 0;
+        show(reached);
+      } else metres -= driven;
+    }
+    last = time;
+    const now = valueAt(speed, time);
+    mps = typeof now === 'number' ? Math.max(0, now) / 3.6 : 0;
+    const value = valueAt(vision, time);
+    const sign = valueAt(distance, time);
+    const metresToSign = typeof sign === 'number' ? sign : 0;
+    if (value !== target) {
+      target = value;
+      const from = limitOf(held);
+      const to = limitOf(value);
+      metres = valueAt(reason, time) === 'brain' && typeof from === 'number' && typeof to === 'number' && from !== to
+        ? metresToSign : 0;
+    } else if (metres > 0 && metresToSign <= metres + AHEAD_SLACK) metres = metresToSign;
+    if (metres > 0) ahead.push({at: time, kph: limitOf(target) as number, metres, mps});
+    else show(time);
+  }
+  const out = {limit, ahead};
+  atSignOf.set(series, out);
+  return out;
+}
+
+/** The vision limit waiting for its sign at s, with the metres left; null when none waits. */
+export function aheadAt(ahead: readonly AheadPoint[], s: number): {kph: number; metres: number} | null {
+  let low = 0;
+  let high = ahead.length - 1;
+  if (high < 0 || ahead[0]!.at > s) return null;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (ahead[middle]!.at <= s) low = middle;
+    else high = middle - 1;
+  }
+  const point = ahead[low]!;
+  return point.kph > 0 ? {kph: point.kph, metres: Math.max(0, point.metres - point.mps * (s - point.at))} : null;
+}
+
 // -- the video -------------------------------------------------------------------------------------------------------------
 
 const FPS = 20;

@@ -8,7 +8,7 @@
 // keeps only the vision's limit, the map's and the car's speed under it: what a speed to hold is judged on.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {combine, type Episode, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
-  type Value} from './drive-review';
+  type Value, visionAtSign} from './drive-review';
 
 const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; episode: Episode | null; simple?: boolean}>();
 const emit = defineEmits<{seek: [seconds: number]}>();
@@ -43,7 +43,8 @@ const limitStep = (value: Value): [string, string] => {
   return limit === undefined ? ['dr-gap', ''] : limit === null ? ['dr-none', '–'] : ['dr-known', String(limit)];
 };
 
-const vision = computed(() => steps(series('vis_limit'), limitStep));
+// A new limit of the brain from its sign on, as the map's (visionAtSign): the tick on top is where it was read.
+const vision = computed(() => steps(visionAtSign(props.view.series).limit, limitStep));
 const signs = computed(() => props.view.events.filter((event) => event[1] === 'sign' && event[0] >= props.from && event[0] <= props.to)
   .map((event) => ({at: event[0], text: typeof event[2] === 'number' && event[2] > 0 ? String(Math.round(event[2])) : '–'})));
 // What the vision read and why it holds its limit: every sign read (solid: the limit was set from it, hollow: dropped,
@@ -220,7 +221,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         <rect width="6" height="6" class="dr-hatch-back"/><line x1="1.5" y1="0" x2="1.5" y2="6" class="dr-hatch-line"/></pattern></defs></svg>
     <div class="dr-lane-ruler"><span class="dr-lane-name"></span><div ref="ruler"></div></div>
     <slot name="top" :x="x" :w="w" :width="width" :from="from" :to="to" :fits="textFits"></slot>
-    <div class="dr-lane" title="The limit the comma's vision held (speedVisionSP); – none held; hatched: not in the log">
+    <div class="dr-lane" title="The limit the comma's vision held (speedVisionSP), a new one of the brain from its sign on (the tick: where it was read); – none held; hatched: not in the log">
       <span class="dr-lane-name">Vision<small>comma</small></span>
       <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
         <g v-for="(run, index) in vision" :key="index">
