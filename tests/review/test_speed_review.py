@@ -172,6 +172,38 @@ def test_the_signs_and_the_map_differ_only_both_known_and_for_long():
         {'start_ns': at(200), 'end_ns': at(250), 'map_kph': 120, 'sign_kph': 100}]
 
 
+def test_a_sign_is_passed_half_a_second_after_its_last_read():
+    reads = [10, 10.4, 11, 12.5, 30, 30.3]
+    drive = {'t0': T0, 'span': [T0, END], 'series': {}, 'events': [[at(seconds), 'sign', 80.0] for seconds in reads]}
+    assert speed_review.sign_passages(drive) == [(at(10), at(13)), (at(30), at(30.8))]
+    assert speed_review.sign_passages(merged([])) == [] and speed_review.sign_passages(None) == []
+
+
+def test_every_change_of_the_proposal_moves_to_its_sign():
+    proposal = [run(0, 100, 80), run(100, 200, 120), run(200, 230, 100), run(230, None, 60)]
+    passages = [(at(96), at(104.5)), (at(160), at(162)), (at(239), at(241))]
+    # The map's 120 starts 4.5 s before the car passes its sign; the 100 has no sign within 10 s and stays; the 60 moves
+    # 11 s on, as the reads of its sign began 9 s after it.
+    assert speed_review.at_the_signs(proposal, passages) == [
+        run(0, 104.5, 80), run(104.5, 200, 120), run(200, 241, 100), run(241, None, 60)]
+    # A move that would leave a stretch less than a second is not made.
+    short = [run(0, 100, 80), run(100, None, 120)]
+    assert speed_review.at_the_signs(short, [(at(99), at(299.5))]) == short
+    assert speed_review.at_the_signs(proposal, []) == proposal
+
+
+def test_the_drive_proposes_its_changes_at_the_signs_and_never_moves_a_saved_cut(store):
+    drives = FakeDrives()
+    drives.merged = lambda route: {**merged([(T0, 80.0), (at(100), 120.0)]),
+                                   'events': [[at(seconds), 'sign', 120.0] for seconds in (100, 100.3, 101)]}
+    view = speed_review.drive_view(store, drives, ROUTE)
+    assert [(item['start_ns'], item['kph']) for item in view['stretches']] == [(T0, 80), (at(101.5), 120)]
+    body = {'start_ns': T0, 'end_ns': at(100), 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
+    view = speed_review.save(store, drives, ROUTE, body, 'someone')
+    assert [(item['start_ns'], item['end_ns'], item['state']) for item in view['stretches']] == [
+        (T0, at(100), 'confirmed'), (at(100), at(101.5), 'not_examined'), (at(101.5), END, 'not_examined')]
+
+
 def test_a_map_proposal_is_shown_stored_nowhere_and_a_person_confirms_it(store):
     path = store.root / 'derived' / 'road_types' / (ROUTE + '.jsonl')
     path.parent.mkdir(parents=True)

@@ -9,7 +9,8 @@ The label. kph is the cap on a free road, on a grid of 5 km/h: queues, curves an
 slows down further on its own. A label holds on a stretch [start_ns, end_ns) of logMonoTime, the comma's clock, which
 stays the same if a new scan moves the start of the drive:
 
-- start_ns: where the car should begin to obey it: for a drop when the sign can be read, for a raise at the sign.
+- start_ns: where the car should begin to obey it: at the sign, for a drop as for a raise, the first frame where the
+  sign is no longer in the picture. The brain says a drop ahead with its metres, and the car slows down for it before.
 - known_ns (optional): from when the past is enough to work the limit out. A missed end of a limit starts at the sign
   nobody saw, and is known only further on, where the scene and the traffic tell it.
 - state: 'confirmed' (the proposal stands), 'corrected' (another value) or 'undetermined' (a person looked and cannot
@@ -20,7 +21,9 @@ The proposal (proposed) is the OpenStreetMap limit of the drive's frames, as nns
 (map_runs, "Read the map" on Speed review), in runs rounded to 5 km/h, a run under MERGE_SECONDS joined to the one
 before (the first one of a drive to the one after). Where the map has no number (no way found, "none", a general limit
 like "FR:urban"), the limit of the signs the comma read stands in (sign_runs), and every stretch says which of the two it
-comes from. The map is wrong in places, so it is only ever a proposal: it is worked out when a drive is shown and never
+comes from. The map's ways and the comma's reads change some way before the sign, so every change of the proposal moves
+to the sign the comma read nearby, where the car passes it (at_the_signs). The map is wrong in places, so it is only
+ever a proposal: it is worked out when a drive is shown and never
 stored, and it is an answer only once a person says yes to it. Next to it the page shows the limit of the signs read
 and marks red where the two differ (differences): there the map may be wrong. The signs are the numbers the comma
 confirmed reading, not its vision limit: on a drive with the brain that is the brain's own answer, never a proposal.
@@ -72,6 +75,12 @@ MPH_KPH = 1.609344
 SIGN_HOLD_SECONDS = 60
 # A number read once, with no second read of it this close, is a misreading, not a sign (sign_runs).
 READ_AGAIN_SECONDS = 2
+# The reads of one sign as the car comes to it are never further apart than this (sign_passages).
+PASSAGE_GAP_SECONDS = 3
+# After its last read a sign leaves the picture: the car is at it this much later (sign_passages).
+PASSAGE_SECONDS = 0.5
+# A change of the proposal this close to the reads of a sign moves to where the car passes it (at_the_signs).
+SNAP_SECONDS = 10
 # The classes of a sign that sets a limit, and of one that ends it: a minimum speed or a limit at some hours sets none.
 LIMIT_CLASSES = ('maximum_speed:', 'variable_display:')
 ENDS_OF_LIMIT = ('cancellation', 'end_of_limit')
@@ -226,6 +235,41 @@ def map_runs(merged: dict | None, rows: list[dict]) -> list[dict]:
         if index + 1 == len(points) or points[index + 1][0] - t > FRAME_GAP_S * NS:
             held.append((t + NS, None))
     return _runs(held, merged['t0'], merged['span'][1])
+
+
+def sign_passages(merged: dict | None) -> list[tuple[int, int]]:
+    """The signs the comma read on the drive, as (first read, passed): a sign is read again and again as the car comes to
+    it, reads at most PASSAGE_GAP_SECONDS apart, and the car is at it PASSAGE_SECONDS after the last read, when the sign has
+    left the picture. Every confirmed read counts, whatever it says: the proposal only needs where the signs stand."""
+    if not _has_span(merged):
+        return []
+    reads = sorted(event[0] for event in merged.get('events') or () if event[1] == 'sign')
+    gap = PASSAGE_GAP_SECONDS * NS
+    out = []
+    for index, t in enumerate(reads):
+        if index == 0 or t - reads[index - 1] > gap:
+            first = t
+        if index + 1 == len(reads) or reads[index + 1] - t > gap:
+            out.append((first, t + round(PASSAGE_SECONDS * NS)))
+    return out
+
+
+def at_the_signs(proposal: list[dict], passages: list[tuple[int, int]]) -> list[dict]:
+    """The proposal with every change at its sign, as a person cuts it: a change within SNAP_SECONDS of the reads of a
+    sign (sign_passages) moves to where the car passes the nearest one. A change with no sign near stays where it is, and
+    a move that would leave less than a second to a stretch is not made."""
+    out = [dict(item) for item in proposal]
+    snap = SNAP_SECONDS * NS
+    for index in range(1, len(out)):
+        cut = out[index]['start_ns']
+        near = [(max(first - cut, cut - passed, 0), passed) for first, passed in passages
+                if first - snap <= cut <= passed + snap]
+        if not near:
+            continue
+        passed = min(near)[1]
+        if out[index - 1]['start_ns'] + NS <= passed <= out[index]['end_ns'] - NS:
+            out[index - 1]['end_ns'] = out[index]['start_ns'] = passed
+    return out
 
 
 def proposed(signs: list[dict], mapped: list[dict], span: tuple[int, int]) -> list[dict]:
@@ -525,7 +569,7 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
     rows = map_road_types(store.root, route)
     signs, mapped = sign_runs(merged), map_runs(merged, rows)
     return {'ok': True, 'route': route, 'revision': store.revision(route),
-            'stretches': partition(proposed(signs, mapped, span), saved, span),
+            'stretches': partition(at_the_signs(proposed(signs, mapped, span), sign_passages(merged)), saved, span),
             'map_read': bool(rows), 'map': mapped, 'signs': signs, 'differ': differences(signs, mapped),
             'works': store.works(route),
             'works_checked_ns': store.works_checked(route),
