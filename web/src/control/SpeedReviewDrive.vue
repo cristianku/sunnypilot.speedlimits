@@ -214,7 +214,7 @@ function worksIn(from: number, to: number) {
 </script>
 
 <template>
-  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" no-episodes
+  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" no-episodes simple-lanes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
       <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from the map, or from the signs read where the map has no number; green confirmed; blue corrected; ? nobody can tell; red line: the sign read differs from the map; orange bar: roadworks; grey line: gone through for roadworks">

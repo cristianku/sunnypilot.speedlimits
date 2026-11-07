@@ -4,12 +4,13 @@
 // the interventions, the kind of road its vision saw), what the server finds today (our networks' signs on its frames,
 // the map as it is now), and the episodes found in the logs. A stretch the log does not have is
 // hatched: missing data is never a value. A tap or a drag goes to that time. The slot "top" is a lane of the page that
-// shows them (Speed review's speed to hold), first of all, drawn with the scale of the others.
+// shows them (Speed review's speed to hold), first of all, drawn with the scale of the others. Simple (Speed review)
+// keeps only the vision's limit, the map's and the car's speed under it: what a speed to hold is judged on.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {combine, type Episode, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value} from './drive-review';
 
-const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; episode: Episode | null}>();
+const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; episode: Episode | null; simple?: boolean}>();
 const emit = defineEmits<{seek: [seconds: number]}>();
 
 const ruler = useTemplateRef<HTMLDivElement>('ruler');
@@ -229,7 +230,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         <path v-for="(sign, index) in signs" :key="'s' + index" :d="`M${x(sign.at) - 3.5} 0h7l-3.5 4.5z`" class="dr-sign-tick"><title>Sign read: {{ sign.text }}</title></path>
       </svg>
     </div>
-    <div class="dr-lane" title="The signs the comma's vision read (solid: the limit was set from it; hollow: dropped, too unsure or overruled), over the reason its limit is what it is (speedVisionSP)">
+    <div v-if="!simple" class="dr-lane" title="The signs the comma's vision read (solid: the limit was set from it; hollow: dropped, too unsure or overruled), over the reason its limit is what it is (speedVisionSP)">
       <span class="dr-lane-name">Reads<small>comma</small></span>
       <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
         <g v-for="(read, index) in reads" :key="'r' + index" :class="['dr-read', {dropped: !read.taken}]">
@@ -252,7 +253,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="The limit the resolver chose and its source (longitudinalPlanSP)">
+    <div v-if="!simple" class="dr-lane" title="The limit the resolver chose and its source (longitudinalPlanSP)">
       <span class="dr-lane-name">Resolver<small>comma</small></span>
       <svg :width="width" height="20" :viewBox="`0 0 ${width} 20`" aria-hidden="true">
         <g v-for="(run, index) in resolver" :key="index">
@@ -261,16 +262,18 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="Speed: the car's (solid), the set speed (dashed), openpilot's target (dotted)">
+    <div class="dr-lane" :title="simple ? 'The car\'s speed' : 'Speed: the car\'s (solid), the set speed (dashed), openpilot\'s target (dotted)'">
       <span class="dr-lane-name">Speed<small>0–{{ speedTop }}</small></span>
       <svg :width="width" :height="SPEED_HEIGHT" :viewBox="`0 0 ${width} ${SPEED_HEIGHT}`" aria-hidden="true">
         <line x1="0" :x2="width" :y1="y(0)" :y2="y(0)" class="dr-axis"/>
-        <path :d="targetPath" class="dr-target"/>
-        <path :d="setPath" class="dr-set-speed"/>
+        <template v-if="!simple">
+          <path :d="targetPath" class="dr-target"/>
+          <path :d="setPath" class="dr-set-speed"/>
+        </template>
         <path :d="egoPath" class="dr-ego"/>
       </svg>
     </div>
-    <div class="dr-lane" title="openpilot: green speed and steering, blue steering only; the marks are the interventions (G accelerator, B brake, S wheel held, D disengaged, ± set speed)">
+    <div v-if="!simple" class="dr-lane" title="openpilot: green speed and steering, blue steering only; the marks are the interventions (G accelerator, B brake, S wheel held, D disengaged, ± set speed)">
       <span class="dr-lane-name">openpilot<small>comma</small></span>
       <svg :width="width" height="26" :viewBox="`0 0 ${width} 26`" aria-hidden="true">
         <rect v-for="(run, index) in openpilot" :key="index" :x="x(run.from)" y="15" :width="w(run.from, run.to)" height="9" rx="2" :class="run.cls">
@@ -281,14 +284,14 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="The kind of road the comma's vision saw (speedVisionSP.roadType)">
+    <div v-if="!simple" class="dr-lane" title="The kind of road the comma's vision saw (speedVisionSP.roadType)">
       <span class="dr-lane-name">Scene<small>comma</small></span>
       <svg :width="width" height="12" :viewBox="`0 0 ${width} 12`" aria-hidden="true">
         <rect v-for="(run, index) in scene" :key="index" :x="x(run.from)" y="2" :width="w(run.from, run.to)" height="9" rx="2" :class="run.cls">
           <title>{{ run.text }}</title></rect>
       </svg>
     </div>
-    <div class="dr-lane dr-lane-server" title="Found on the server today, not what the comma knew: our networks' signs on its frames (ticks), the map as it is now (strip, with its limit)">
+    <div v-if="!simple" class="dr-lane dr-lane-server" title="Found on the server today, not what the comma knew: our networks' signs on its frames (ticks), the map as it is now (strip, with its limit)">
       <span class="dr-lane-name">Server<small>today</small></span>
       <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
         <g v-for="(sign, index) in inferred" :key="'i' + index" class="dr-inferred">
@@ -301,7 +304,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="The episodes found in the logs (orange: the vision disagreed with the map, blue: the driver intervened, red: both at once)">
+    <div v-if="!simple" class="dr-lane" title="The episodes found in the logs (orange: the vision disagreed with the map, blue: the driver intervened, red: both at once)">
       <span class="dr-lane-name">Episodes</span>
       <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
         <rect v-for="item in episodes" :key="item.id" :x="x(item.from)" y="8" :width="Math.max(3, w(item.from, item.to))" height="14" rx="2"

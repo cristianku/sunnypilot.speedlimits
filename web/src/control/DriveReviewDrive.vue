@@ -10,7 +10,8 @@
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
 // or rlog/qlog files named with their drive and segment). Speed review shows a drive with this same player
 // (SpeedReviewDrive.vue): its own tab and back label (tab, backLabel), no episodes (noEpisodes), a choice of playback
-// speed (rates), a lane of its own over the others (slot "lane") and its controls at the top of the side (slot "side");
+// speed (rates), a lane of its own over the others (slot "lane"), only the lanes a speed is judged on (simpleLanes) and
+// its controls at the top of the side (slot "side");
 // it follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
@@ -25,11 +26,20 @@ import Segmented from './Segmented.vue';
 import {type ControlTab, goTo, showEpisode, tabEpisode} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab?: ControlTab; backLabel?: string; noEpisodes?: boolean;
-  rates?: readonly number[]; startZoom?: Zoom}>(), {tab: 'drivereview', backLabel: 'Drive review', noEpisodes: false, rates: () => [],
+  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom}>(), {tab: 'drivereview', backLabel: 'Drive review', noEpisodes: false,
+  simpleLanes: false, rates: () => [],
   startZoom: 'episode'});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
 
+// The squares on the picture, as on the comma: an eye for the vision's limit, a car for the car's speed.
+const HUD_ICONS = {
+  eye: 'M12 1C6.6 1 2.4 4.4 1 8.5 2.4 12.6 6.6 16 12 16s9.6-3.4 11-7.5C21.6 4.4 17.4 1 12 1ZM12 4.3a4.2 4.2 0 1 0 0 8.4a4.2 4.2 0 1 0 0-8.4Z'
+    + 'M12 6.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4Z',
+  car: 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1'
+    + 'c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5'
+    + 's.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z',
+};
 const MARKS = {
   play: 'M8 5.6v12.8a.8.8 0 0 0 1.2.7l10.3-6.4a.8.8 0 0 0 0-1.4L9.2 4.9A.8.8 0 0 0 8 5.6z',
   pause: 'M7 5h3.2v14H7zM13.8 5H17v14h-3.2z',
@@ -341,6 +351,8 @@ const now = computed(() => {
     model: typeof at('vis_model') === 'string' ? String(at('vis_model')) : '',
     map: mapValid === undefined || mapValid === null ? 'not in the log' : mapValid === false ? 'no valid limit' : kphText(mapLimit ?? null, 'none'),
     mapKph: mapValid === true ? mapLimit ?? null : null,
+    // The car's own speed, on the picture: what it really drove there, next to the limits.
+    carKph: typeof at('v_ego') === 'number' ? Math.round(at('v_ego') as number) : null,
     ahead: typeof ahead === 'number' && typeof aheadDistance === 'number' ? ahead + ' km/h in ' + Math.round(aheadDistance) + ' m' : '',
     road: typeof at('road_name') === 'string' ? String(at('road_name')) : '',
     resolver: resolver === undefined ? 'not in the log' : (resolver === null ? 'none' : resolver + ' km/h') + (at('res_source') ? ' · ' + String(at('res_source')) : ''),
@@ -472,9 +484,12 @@ watch(() => props.route, () => {
             ? 'Making the video of the drive… ' + Math.round((video.progress ?? 0) * 100) + '%'
             : video.state === 'failed' ? 'The video could not be made: ' + (video.reason ?? 'unknown error') + '.'
             : 'No video of this drive on the server.' }}</div>
-          <div v-if="now" class="drive-hud dr-hud" aria-hidden="true">
-            <span class="drive-sign" :class="{empty: now.visionKph === null}">{{ now.visionKph ?? '–' }}</span>
-            <span class="drive-truth">map <b>{{ now.mapKph ?? '–' }}</b></span>
+          <div v-if="now" class="dr-hud" aria-hidden="true">
+            <span class="dr-box dr-box-vision" :class="{empty: now.visionKph === null}"><svg viewBox="0 0 24 17">
+              <path :d="HUD_ICONS.eye" fill="currentColor" fill-rule="evenodd"/></svg><b>{{ now.visionKph ?? '–' }}</b></span>
+            <span class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
+            <span class="dr-box dr-box-car"><svg viewBox="2 4 20 18"><path :d="HUD_ICONS.car" fill="currentColor"/></svg>
+              <b>{{ now.carKph ?? '–' }}</b></span>
           </div>
         </div>
 
@@ -504,7 +519,8 @@ watch(() => props.route, () => {
             <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
             <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
           </div>
-          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor" :episode="episode" @seek="seek">
+          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor" :episode="episode"
+                            :simple="simpleLanes" @seek="seek">
             <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
           </DriveReviewLanes>
           <p v-else class="dr-hint">{{ NO_LOGS }}</p>
