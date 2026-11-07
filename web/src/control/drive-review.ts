@@ -444,7 +444,7 @@ export function aheadAt(ahead: readonly AheadPoint[], s: number): {kph: number; 
 
 // -- the video -------------------------------------------------------------------------------------------------------------
 
-const FPS = 20;
+export const FPS = 20;
 
 /** The segment of the logs at s: the one whose span holds it, else the last one starting before it. */
 function segmentAt(segments: readonly SyncSegment[], s: number): SyncSegment | null {

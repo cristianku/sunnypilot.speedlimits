@@ -18,7 +18,7 @@ import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
-import {aheadAt, CHANNEL_LABEL, clockOf, type Episode, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, readText, REASON_LABEL,
+import {aheadAt, CHANNEL_LABEL, clockOf, type Episode, FPS, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, readText, REASON_LABEL,
   type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState, visionAtSign} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
@@ -239,6 +239,21 @@ function pause(): void {
   player.value?.pause();
 }
 const toggle = (): void => (playing.value ? pause() : play());
+/** One frame of the video on or back, paused (Shift+← →): to the middle of that frame, as a time on the edge between two
+ * shows either. Where the video has no picture of the time, a frame's time of the logs. */
+function stepFrame(direction: number): void {
+  pause();
+  const at = plainVideo.value ? cursor.value : videoTime.value;
+  if (player.value && at !== null) {
+    const target = (Math.floor(at * FPS + 1e-3) + direction + 0.5) / FPS;
+    const logs = plainVideo.value ? target : logTimeOf(segments.value, target);
+    if (logs !== null) {
+      seek(logs);
+      return;
+    }
+  }
+  seek(cursor.value + direction / FPS);
+}
 /** The speed of the playback, where the page offers a choice. */
 const rate = ref(1);
 const RATES = computed(() => props.rates.map((key) => ({key: String(key), label: key + '×'})));
@@ -252,7 +267,9 @@ function onKey(event: KeyboardEvent): void {
     toggle();
   } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     event.preventDefault();
-    seek(cursor.value + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 10 : 1));
+    const direction = event.key === 'ArrowLeft' ? -1 : 1;
+    if (event.shiftKey) stepFrame(direction);
+    else seek(cursor.value + direction);
   }
 }
 onMounted(() => window.addEventListener('keydown', onKey));
@@ -506,6 +523,8 @@ watch(() => props.route, () => {
               <path :d="playing ? MARKS.pause : MARKS.play" fill="currentColor"/></svg>{{ playing ? 'Pause' : 'Play' }}</button>
             <button type="button" class="btn small" aria-label="Back 5 seconds" @click="seek(cursor - 5)">−5 s</button>
             <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
+            <button type="button" class="btn small" aria-label="Back one frame" title="Shift+←" @click="stepFrame(-1)">−1 frame</button>
+            <button type="button" class="btn small" aria-label="On one frame" title="Shift+→" @click="stepFrame(1)">+1 frame</button>
             <button type="button" class="btn small" :disabled="!change" id="dr-last-change"
                     :title="change ? 'The vision limit changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change before'"
                     @click="change && seek(change.at - 2)">Last limit change</button>
