@@ -63,7 +63,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net
-from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, METRES_SCALE, NONE_AHEAD, NS, RATE_HZ, ahead_weights,
+from nnslr_tools.brain_targets import (DRIVER_INPUTS, INPUT_SIZES, LEFT_OUT, METRES_SCALE, NONE_AHEAD, NS, RATE_HZ, ahead_weights,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        sign_kph, swap_passages, swapped, wet_in_train)
@@ -79,7 +79,8 @@ END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
 DRY_FRAMES = 12
 DRY_STEPS = 2
-ROAD_INPUTS = tuple(name for name in INPUT_SIZES if name not in DRIVER_INPUTS)
+LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT)
+ROAD_INPUTS = tuple(name for name in LEARNED_INPUTS if name not in DRIVER_INPUTS)
 
 
 def _piece(drive: dict, first: int, last: int, store: FrameStore, device):
@@ -393,7 +394,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     rng = random.Random(seed)
     torch.manual_seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
-    groups = tuple(INPUT_SIZES) if driver else ROAD_INPUTS
+    groups = LEARNED_INPUTS if driver else ROAD_INPUTS
     drives = dataset(root, merged_of, log=log, rate=RATE_HZ, need_pictures=not dry_run)
     if dry_run:
         drives = [_short(drive, DRY_FRAMES) for drive in drives[:1]]

@@ -64,7 +64,8 @@ before the frame:
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
 
-pedals, speed and engaged are the driver, and they are apart so that a comparison can leave them out: on the drives the gas is often
+pedals and speed are the driver, and they are apart so that a comparison can leave them out (engaged is made but never
+learned, LEFT_OUT): on the drives the gas is often
 pressed just where the label is above the limit the car held (he overrode it), and the car's speed is what the network itself
 decides on the car. The measure says it: the frames with no gas, and the ones with the car's speed far from the label.
 
@@ -167,7 +168,10 @@ BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
 VISION = load_vision(package_path())
 COUNTRIES = BRAIN_INPUTS.COUNTRIES
 INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
-DRIVER_INPUTS = ('pedals', 'speed', 'engaged')
+DRIVER_INPUTS = ('pedals', 'speed')
+# Groups the car still makes that no brain learns from: engaged (openpilot on or off, 7 Nov 2026) only confused the
+# network, his call the same night. A brain built before keeps it: its groups are in its checkpoint and contract.
+LEFT_OUT = ('engaged',)
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 

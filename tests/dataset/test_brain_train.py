@@ -6,7 +6,8 @@ import pytest
 
 NS = 1_000_000_000
 T = 8
-GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed', 'plate_wet', 'engaged', 'sign_distance')
+# What a brain learns by default (brain_train.LEARNED_INPUTS): every group of the car but engaged.
+GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed', 'plate_wet', 'sign_distance')
 
 
 def fake_drive(partitions, *, speed=19, works=None, marks=(), route='00000001--abcdef0123'):
@@ -585,3 +586,9 @@ def test_the_network_goes_through_a_whole_drive_as_on_the_car():
     assert found['kph'].shape == (T,) and found['works'].shape == (T,)
     assert found['kph'].min() >= 5 and found['kph'].max() <= 200
     assert predict(tiny(torch, works=False), drive, store, chunk=3, device=torch.device('cpu'))['works'] is None
+
+
+def test_no_brain_learns_engaged():
+    from nnslr_tools import brain_train
+    assert 'engaged' not in brain_train.LEARNED_INPUTS + brain_train.ROAD_INPUTS
+    assert set(brain_train.LEARNED_INPUTS) - set(brain_train.ROAD_INPUTS) == {'pedals', 'speed'}

@@ -344,6 +344,13 @@ def test_a_comparison_can_leave_out_the_driver():
     assert targets.pack_inputs(inputs, tuple(targets.INPUT_SIZES)).shape == (2, sum(targets.INPUT_SIZES.values()))
 
 
+def test_engaged_is_made_and_never_learned():
+    """openpilot on or off only confused the network (7 Nov 2026): the group is still made as on the car, no brain learns it."""
+    targets = _targets()
+    assert 'engaged' in targets.INPUT_SIZES and targets.LEFT_OUT == ('engaged',)
+    assert 'engaged' not in targets.DRIVER_INPUTS
+
+
 def write_drive(root, route, frames):
     """frames: [(segment, index)], each with a picture and a decoded frame index of index * 20."""
     for segment in {segment for segment, _index in frames}:
