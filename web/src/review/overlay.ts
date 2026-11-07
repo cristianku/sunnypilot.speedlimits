@@ -8,6 +8,9 @@ import {boxColor, hintLabel, shortName} from './catalog';
 import {boxArea, boxesOverlap, freeLabelY, labelWidth, rectOf, type PlacedLabel} from './geometry';
 import type {Box, Corner, Detection, Hint} from './types';
 
+/** After the label of a box with the plate of a wet road. */
+export const WET_TAG = ' · WET';
+
 export interface Rect {
   x: number;
   y: number;
@@ -34,6 +37,8 @@ export interface DrawnBox {
   label: Label;
   /** For our road: the path of the road drawn before the label (two lanes narrowing to the horizon); else null. */
   road: string | null;
+  /** A limit with the plate of a wet road: WET_TAG follows the label, in its own colour. */
+  wet: boolean;
 }
 
 export interface DrawnHint {
@@ -153,8 +158,9 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     const ours = d.applicability === 'own_road';
     const road = ours ? ' · OURS' : d.applicability === 'other_road' ? ' · another' : '';
     const text = (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
+    const wet = d.supplementary_panel === 'wet';
     const icon = ours ? fontSize * (ROAD_ICON + 0.4) : 0;
-    const width = labelWidth(text, fontSize) + icon;
+    const width = labelWidth(text + (wet ? WET_TAG : ''), fontSize) + icon;
     const x = labelX(b[0], width, imageWidth, k);
     // The selected box has its corners outside: its label goes above them.
     const top = isSelected ? b[1] - handleSize - fontSize * 0.2 : b[1] - fontSize * 0.35;
@@ -162,7 +168,7 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     placed.push({x, y, w: width, h: fontSize, text});
     boxes.push({
       index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : boxColor(d),
-      label: label(text, x + icon, y, fontSize, k), road: ours ? roadIcon(x, y, fontSize) : null,
+      label: label(text, x + icon, y, fontSize, k), road: ours ? roadIcon(x, y, fontSize) : null, wet,
     });
   }
   const drawnHints: DrawnHint[] = [];

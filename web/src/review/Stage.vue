@@ -8,7 +8,7 @@ import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carAskOf, carDetection, carSignLeft} from './car';
 import {coarsePointer} from './dom';
-import {drawAi, drawCar, drawStage, sceneScale} from './overlay';
+import {drawAi, drawCar, drawStage, sceneScale, WET_TAG} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
 import PhotoGrip from './PhotoGrip.vue';
 import {hintsOf, state} from './store';
@@ -90,7 +90,8 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
             <path :d="box.road" class="road-mark" :stroke-width="box.label.strokeWidth * 0.55"/>
           </template>
           <text :x="box.label.x" :y="box.label.y" class="tag" :font-size="box.label.fontSize"
-                :stroke-width="box.label.strokeWidth" paint-order="stroke">{{ box.label.text }}</text>
+                :stroke-width="box.label.strokeWidth" paint-order="stroke">{{ box.label.text }}<tspan v-if="box.wet"
+                class="tag-wet">{{ WET_TAG }}</tspan></text>
         </template>
         <rect v-for="handle in drawing.handles" :key="'mark-' + handle.corner" :x="handle.mark.x" :y="handle.mark.y"
               :width="handle.mark.width" :height="handle.mark.height" class="handle"/>
