@@ -6,9 +6,12 @@ Every drive and label here is SYNTHETIC: made up by these tests. Nothing here is
 from __future__ import annotations
 
 import inspect
+import io
 import json
+import shutil
 import sqlite3
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -572,6 +575,34 @@ def test_only_a_person_signed_in_marks_roadworks(tmp_path, drives):
         status, answer = post(session, {**body, 'base_revision': 1})
         assert (status, answer['error']) == (400, 'bad_works')
         assert server.request('GET', path, headers=token)[0] == 405
+    finally:
+        server.close()
+        speed_review._stores.clear()
+
+
+def test_the_hd_switch_gets_the_frame_of_the_road_video_at_its_own_size(tmp_path):
+    """Standing still with HD on, the player shows frame k of a minute of the comma's road video (fcamera.hevc): frame k of
+    that minute of its own video. Served as a JPEG at the video's size, never scaled; a frame the video lacks is a 404."""
+    from PIL import Image
+    if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
+        pytest.skip('ffmpeg/ffprobe required for local media integration')
+    video = tmp_path / 'raw/routes' / ROUTE / '0' / 'fcamera.hevc'
+    video.parent.mkdir(parents=True)
+    made = subprocess.run([
+        'ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=s=96x54:r=20:d=2', '-pix_fmt', 'yuv420p',
+        '-c:v', 'libx265', '-x265-params', 'pools=1:frame-threads=1:log-level=error:bframes=0:keyint=20:min-keyint=20',
+        '-f', 'hevc', str(video)], capture_output=True, text=True)
+    assert made.returncode == 0, made.stderr
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    token = {'X-Review-Token': TOKEN}
+    try:
+        status, response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}/frames/0/25.jpg', headers=token)
+        assert status == 200 and response.getheader('Content-Type') == 'image/jpeg'
+        assert response.getheader('Cache-Control') == 'private, max-age=3600'
+        assert Image.open(io.BytesIO(data)).size == (96, 54)
+        for path in (f'/api/speed-review/drives/{ROUTE}/frames/0/40.jpg', f'/api/speed-review/drives/{ROUTE}/frames/1/0.jpg'):
+            status, _response, data = server.request('GET', path, headers=token)
+            assert (status, json_of(data)['error']) == (404, 'no_video_frame')
     finally:
         server.close()
         speed_review._stores.clear()

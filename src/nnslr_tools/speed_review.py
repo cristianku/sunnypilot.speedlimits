@@ -58,7 +58,7 @@ import threading
 from pathlib import Path
 from typing import Iterator
 
-from nnslr_tools import drive_logs
+from nnslr_tools import drive_logs, video_frames
 from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
 from nnslr_tools.road_types import map_road_types, maxspeed_limit
 
@@ -587,6 +587,17 @@ def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]
         rows.append({**drive, 'first': drive['route'] in FIRST_DRIVES, 'examined_s': round(examined.get(drive['route'], 0) / NS, 1),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0})
     return rows
+
+
+def frame_jpeg(root: Path, route: str, segment: int, decoded: int) -> bytes:
+    """Frame `decoded` of minute `segment` of the drive's road video at its full definition (the comma's fcamera.hevc,
+    1344x760 or 2688x1520): what the player shows over its smaller video while it stands still, with the HD switch on,
+    the same pixels Sign review labels. Frame k of a minute of the player's video is frame k of that minute's
+    fcamera.hevc (nnslr_tools.drive_video). SpeedReviewError 404 when the server has no such frame."""
+    try:
+        return video_frames.preview(root, route, segment, decoded).read_bytes()
+    except (video_frames.VideoFrameError, OSError) as exc:
+        raise SpeedReviewError(404, 'no_video_frame', 'This frame of the video cannot be shown.') from exc
 
 
 def save(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:

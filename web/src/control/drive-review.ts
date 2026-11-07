@@ -493,6 +493,17 @@ export function logTimeOf(segments: readonly SyncSegment[], videoTime: number): 
   return null;
 }
 
+/** The minute of the comma's road video and the frame in it shown at a time of the drive's video (its encode index): frame k
+ * of a minute of the video is frame k of that minute's fcamera.hevc. With the number of frames of the minute; null outside. */
+export function rawFrameOf(index: VideoState['index'], videoTime: number): {segment: number; frame: number; frames: number} | null {
+  const at = Math.floor(videoTime * FPS + 1e-3);
+  for (const item of index?.segments ?? []) {
+    const first = Math.round(item.start * FPS);
+    if (at >= first && at < first + item.frames) return {segment: item.segment, frame: at - first, frames: item.frames};
+  }
+  return null;
+}
+
 /** Second N of a segment (its minute of video) at a time of the logs: what Sign review places its frames by. */
 export function segmentSecondOf(segments: readonly SyncSegment[], s: number): {segment: number; second: number} | null {
   const item = segmentAt(segments, s);

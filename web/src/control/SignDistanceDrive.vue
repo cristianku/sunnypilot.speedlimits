@@ -13,6 +13,7 @@ import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue'
 import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
+import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
 import {API, classText, type DriveView, type Drive, frameIndex, frameUrl, lateSentence, type MarkName,
   markLabel, nearestFrame, screenText, type Sign, signedMetres, type SignView, statusTone, timeText, toMark,
@@ -164,22 +165,7 @@ function startIndex(answer: SignView): number {
   return seen >= 0 ? seen : 0;
 }
 
-const cache = new Map<string, Promise<boolean>>();
-function load(url: string): Promise<boolean> {
-  let loaded = cache.get(url);
-  if (loaded === undefined) {
-    const image = new Image();
-    image.decoding = 'async';
-    image.src = url;
-    loaded = image.decode().then(() => true, () => {
-      cache.delete(url);
-      return false;
-    });
-    cache.set(url, loaded);
-    if (cache.size > 128) cache.delete(cache.keys().next().value as string);
-  }
-  return loaded;
-}
+const load = pictureCache();
 /** One picture asked of the server at a time, the latest frame wanted winning: a drag never queues a decode a frame. */
 let pumping = false;
 async function pump(): Promise<void> {

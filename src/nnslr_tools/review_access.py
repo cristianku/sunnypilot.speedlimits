@@ -89,6 +89,7 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('POST', r'/api/sign-distance/drives/' + DRIVE + r'/(marks|undo)', ('distance',)),
     # Speed review, on the lanes and the video of the drive.
     ('GET', r'/api/speed-review/drives/' + DRIVE, ('speed',)),
+    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/frames/' + FRAME + r'\.jpg', ('speed',)),
     ('POST', r'/api/speed-review/drives/' + DRIVE + r'/(stretches|works)', ('speed',)),
     ('GET', r'/api/drive-review/drives/' + DRIVE + r'(/timeline)?', ('speed',)),
     ('GET', r'/api/panel/drive-video/' + DRIVE, ('speed',)),

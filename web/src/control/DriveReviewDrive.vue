@@ -10,24 +10,26 @@
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
 // or rlog/qlog files named with their drive and segment). Speed review shows a drive with this same player
 // (SpeedReviewDrive.vue): its own tab and back label (tab, backLabel), no episodes (noEpisodes), a choice of playback
-// speed (rates), a lane of its own over the others (slot "lane"), only the lanes a speed is judged on (simpleLanes) and
-// its controls at the top of the side (slot "side");
+// speed (rates), a lane of its own over the others (slot "lane"), only the lanes a speed is judged on (simpleLanes), the
+// switch HD (sharp: standing still, the frame at the comma's full definition over the video) and its controls at the top
+// of the side (slot "side");
 // it follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
+import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
-import {aheadAt, CHANNEL_LABEL, clockOf, type Episode, FPS, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, readText, REASON_LABEL,
-  type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState, visionAtSign} from './drive-review';
+import {aheadAt, CHANNEL_LABEL, clockOf, type Episode, FPS, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
+  REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState, visionAtSign} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
 import {type ControlTab, goTo, showEpisode, tabEpisode} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab?: ControlTab; backLabel?: string; noEpisodes?: boolean;
-  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom}>(), {tab: 'drivereview', backLabel: 'Drive review', noEpisodes: false,
-  simpleLanes: false, rates: () => [],
+  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean}>(), {tab: 'drivereview', backLabel: 'Drive review',
+  noEpisodes: false, simpleLanes: false, rates: () => [], sharp: false,
   startZoom: 'episode'});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
@@ -224,6 +226,7 @@ function tick(now: number): void {
 }
 function play(): void {
   if (playing.value) return;
+  zoomAt.value = null;
   if (end.value && cursor.value >= end.value - 0.05) seek(0);
   playing.value = true;
   last = 0;
@@ -254,6 +257,91 @@ function stepFrame(direction: number): void {
   }
   seek(cursor.value + direction / FPS);
 }
+// -- the full definition, standing still ------------------------------------------------------------------------------
+// The switch HD, where the page offers it (sharp): while the video stands still (paused, a frame on or back), the frame on
+// screen at the full definition of the comma's road video (1344×760, or 2688×1520), decoded on the server from its
+// fcamera.hevc, over the smaller video that plays. Its frame comes from the video's own time, never from the time of the
+// logs: the frame shown is the frame cut at. A tap on it zooms in where it was touched, another tap out.
+const SHARP_KEY = 'nnslr-sharp';
+function storedSharp(): boolean {
+  try {
+    return localStorage.getItem(SHARP_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+const sharpOn = ref(storedSharp());
+watch(sharpOn, (on) => {
+  try {
+    localStorage.setItem(SHARP_KEY, on ? '1' : '0');
+  } catch {
+    // Storage off: the choice lasts until the page is left.
+  }
+});
+/** The video's own time while it stands still (after a seek, at a pause); null while it plays or seeks. */
+const stillAt = ref<number | null>(null);
+function onStill(): void {
+  const element = player.value;
+  stillAt.value = element && element.paused && !element.seeking ? element.currentTime : null;
+}
+const sharpFrame = computed(() => {
+  if (!props.sharp || !sharpOn.value || playing.value || stillAt.value === null || (!plainVideo.value && videoTime.value === null)) return null;
+  return rawFrameOf(video.value?.index, stillAt.value);
+});
+const sharpUrl = (segment: number, frame: number): string =>
+  '/api/speed-review/drives/' + encodeURIComponent(props.route) + '/frames/' + segment + '/' + frame + '.jpg';
+const wantedSharp = computed(() => sharpFrame.value ? sharpUrl(sharpFrame.value.segment, sharpFrame.value.frame) : null);
+const shownSharp = ref<string | null>(null);
+const sharpFailed = ref(false);
+const loadPicture = pictureCache();
+/** One frame asked of the server at a time, the latest wanted winning; then the five on either side, so a step into the
+ * next group of pictures (a GOP, decoded whole) finds it ready. */
+let pumping = false;
+async function pumpSharp(): Promise<void> {
+  if (pumping) return;
+  pumping = true;
+  try {
+    for (;;) {
+      const url = wantedSharp.value;
+      const at = sharpFrame.value;
+      if (url === null || at === null || url === shownSharp.value) break;
+      const ok = await loadPicture(url);
+      if (wantedSharp.value !== url) continue;
+      sharpFailed.value = !ok;
+      if (ok) {
+        shownSharp.value = url;
+        for (const step of [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]) {
+          if (at.frame + step >= 0 && at.frame + step < at.frames) void loadPicture(sharpUrl(at.segment, at.frame + step));
+        }
+      }
+      break;
+    }
+  } finally {
+    pumping = false;
+  }
+}
+watch(wantedSharp, () => {
+  sharpFailed.value = false;
+  void pumpSharp();
+});
+const sharpShown = computed(() => wantedSharp.value !== null && shownSharp.value === wantedSharp.value);
+const sharpTag = computed(() => {
+  if (!props.sharp || !sharpOn.value || playing.value || !ready.value) return '';
+  if (sharpShown.value) return 'HD';
+  if (sharpFailed.value) return 'No HD frame here';
+  return wantedSharp.value ? 'HD…' : '';
+});
+/** Where the sharp frame is zoomed in, in % of the picture; null: the whole picture. */
+const zoomAt = ref<{x: number; y: number} | null>(null);
+function zoomSharp(event: MouseEvent): void {
+  if (zoomAt.value) {
+    zoomAt.value = null;
+    return;
+  }
+  const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  zoomAt.value = {x: (event.clientX - box.left) / box.width * 100, y: (event.clientY - box.top) / box.height * 100};
+}
+
 /** The speed of the playback, where the page offers a choice. */
 const rate = ref(1);
 const RATES = computed(() => props.rates.map((key) => ({key: String(key), label: key + '×'})));
@@ -500,7 +588,12 @@ watch(() => props.route, () => {
       <div class="dr-main">
         <div class="dr-stage" :class="{empty: !ready}" @click="toggle">
           <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"
-                 @error="onVideoError" @playing="videoProblem = ''"></video>
+                 @error="onVideoError" @playing="videoProblem = ''" @seeking="stillAt = null" @seeked="onStill" @pause="onStill"
+                 @play="stillAt = null"></video>
+          <img v-if="sharpShown" :src="shownSharp!" class="dr-sharp" :class="{zoomed: zoomAt}" alt="" draggable="false"
+               :style="zoomAt ? {transform: 'scale(2.5)', transformOrigin: zoomAt.x + '% ' + zoomAt.y + '%'} : undefined"
+               :title="zoomAt ? 'Tap to see the whole picture' : 'Tap to zoom in here'" @click.stop="zoomSharp">
+          <span v-if="sharpTag" class="dr-sharp-tag" aria-live="polite">{{ sharpTag }}</span>
           <div v-if="ready && videoProblem" class="dr-stage-note">{{ videoProblem }}</div>
           <div v-else-if="ready && hasLogs && videoTime === null" class="dr-stage-note">No picture of this time: the logs go on.</div>
           <div v-else-if="!ready" class="dr-stage-note">{{ video === null ? 'Asking for the video…' : video.state === 'making' || video.state === 'waiting'
@@ -525,6 +618,8 @@ watch(() => props.route, () => {
             <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
             <button type="button" class="btn small" aria-label="Back one frame" title="Shift+←" @click="stepFrame(-1)">−1 frame</button>
             <button type="button" class="btn small" aria-label="On one frame" title="Shift+→" @click="stepFrame(1)">+1 frame</button>
+            <button v-if="sharp" type="button" class="btn small" :aria-pressed="sharpOn" aria-label="Full definition when paused"
+                    title="Paused, the frame at the comma's full definition; tap the picture to zoom" @click="sharpOn = !sharpOn">HD</button>
             <button type="button" class="btn small" :disabled="!change" id="dr-last-change"
                     :title="change ? 'The vision limit changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change before'"
                     @click="change && seek(change.at - 2)">Last limit change</button>

@@ -1427,7 +1427,8 @@ def make_handler(app: ReviewApp):
 
         # [speed-review] - START
         def _speed_review_get(self, path):
-            """Data › Speed review, reading only: the drives with how much of each is examined, a drive's stretches."""
+            """Data › Speed review, reading only: the drives with how much of each is examined, a drive's stretches, a
+            frame of its road video at full definition (the HD switch)."""
             from nnslr_tools import drive_review, speed_review
             store = speed_review.store_for(app.root)
             drives = drive_review.store_for(app.root)
@@ -1438,6 +1439,20 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(drive, path)
             if match:
                 self._json(200, speed_review.drive_view(store, drives, match.group(1)))
+                return
+            match = re.fullmatch(drive + r'/frames/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
+            if match:
+                try:
+                    data = speed_review.frame_jpeg(app.root, match.group(1), int(match.group(2)), int(match.group(3)))
+                except speed_review.SpeedReviewError as exc:
+                    self._problem(exc.status, exc.reason, exc.message, True)
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(data)))
+                self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
+                self.end_headers()
+                self.wfile.write(data)
                 return
             if re.fullmatch(drive + '/(stretches|works)', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)

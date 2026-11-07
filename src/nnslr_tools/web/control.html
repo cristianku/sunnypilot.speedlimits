@@ -1267,6 +1267,14 @@ gap:12px 20px;align-items:start}
 .dr-stage{grid-area:stage;position:relative;aspect-ratio:1928/1208;width:min(100%,calc((100dvh - 420px) * 1928 / 1208));
 min-width:min(100%,420px);justify-self:center;border-radius:12px;overflow:hidden;background:var(--stage);cursor:pointer}
 .dr-stage video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none}
+/* HD: standing still, the frame at the comma's full definition over the video, in the same box (the same letterbox); a tap
+zooms it in where it was touched. */
+.dr-stage .dr-sharp{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;user-select:none;
+-webkit-user-drag:none;cursor:zoom-in;transition:transform .18s ease}
+.dr-stage .dr-sharp.zoomed{cursor:zoom-out}
+.dr-sharp-tag{position:absolute;right:10px;bottom:10px;padding:3px 9px;border-radius:999px;background:rgba(0,0,0,.6);color:#fff;
+font-size:12px;font-weight:600;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.dr-stage .dr-sharp{transition:none}}
 .dr-stage-note{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);max-width:calc(100% - 28px);padding:6px 13px;
 border-radius:999px;background:rgba(0,0,0,.6);color:#fff;font-size:13px;text-align:center;-webkit-backdrop-filter:blur(10px);
 backdrop-filter:blur(10px)}
