@@ -38,16 +38,18 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
+- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged: what the car has, described in sunnypilot/speed_limits/brain_inputs.py. A drive not read
   yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
   The pedals are in the last second, from the same carState (_pressed, as brain_inputs.PedalInputs does on the car).
+  engaged goes through the car's own brain_inputs.EngagedInputs with the changes of sd_enabled, gas and brake in their
+  order (engaged_inputs).
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
 
-pedals and speed are the driver, and they are apart so that a comparison can leave them out: on the drives the gas is often
+pedals, speed and engaged are the driver, and they are apart so that a comparison can leave them out: on the drives the gas is often
 pressed just where the label is above the limit the car held (he overrode it), and the car's speed is what the network itself
 decides on the car. The measure says it: the frames with no gas, and the ones with the car's speed far from the label.
 
@@ -142,7 +144,7 @@ BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
 VISION = load_vision(package_path())
 COUNTRIES = BRAIN_INPUTS.COUNTRIES
 INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
-DRIVER_INPUTS = ('pedals', 'speed')
+DRIVER_INPUTS = ('pedals', 'speed', 'engaged')
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 
@@ -303,6 +305,28 @@ def _pressed(points: list, ns: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return pressed, known
 
 
+def engaged_inputs(series: dict, ns: np.ndarray) -> np.ndarray:
+    """The engaged group (frames, size): the car's EngagedInputs given the changes of gas, brake and sd_enabled in their
+    order, the pedals before openpilot at the same moment as on the car, and asked at each frame. Unknown at a frame with no
+    time."""
+    events = sorted([(t, 0, name, value) for name in ('gas', 'brake') for t, value in series.get(name) or []] +
+                    [(t, 1, 'enabled', value) for t, value in series.get('sd_enabled') or []], key=lambda event: event[:2])
+    engaged, pedals = BRAIN_INPUTS.EngagedInputs(), {'gas': False, 'brake': False}
+    rows = np.zeros((len(ns), INPUT_SIZES['engaged']), dtype=np.float32)
+    at = 0
+    for row in sorted(np.flatnonzero(ns >= 0), key=lambda row: ns[row]):
+        while at < len(events) and events[at][0] <= ns[row]:
+            t, _, name, value = events[at]
+            if name == 'enabled':
+                engaged.add_enabled(t / NS, value is True)
+            else:
+                pedals[name] = value is True
+                engaged.add_pedals(t / NS, pedals['gas'], pedals['brake'])
+            at += 1
+        rows[row] = engaged.row(ns[row] / NS)
+    return rows
+
+
 def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The signs, plate, plate_hours and plate_wet groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
     drive, by the car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
@@ -366,7 +390,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
-            'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed'])}
+            'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed']),
+            'engaged': engaged_inputs(series, ns)}
 
 
 def inputs_sha256() -> str:

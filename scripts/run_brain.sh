@@ -21,7 +21,7 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
 # (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
-# roadworks; 0: not), NNSLR_BRAIN_DRIVER (1: also the pedals and the speed; 0: not),
+# roadworks; 0: not), NNSLR_BRAIN_DRIVER (1: also the pedals, the speed and openpilot engaged; 0: not),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 

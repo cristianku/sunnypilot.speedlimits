@@ -27,7 +27,7 @@ flowchart TD
   cam["Road camera"] --> read["SignNet + classifier<br/>read the signs"]
   cam --> brain
   read --> brain
-  car["The car<br/>gas, brake, speed, car ahead"] --> brain
+  car["The car<br/>gas, brake, speed, car ahead,<br/>openpilot on or off"] --> brain
   gps["Hour and country<br/>from GPS"] --> brain
   brain(["The brain<br/>sees, remembers, decides"]) --> out["Speed to hold<br/>once a second"]
   classDef hero fill:#0071e3,stroke:#0071e3,color:#ffffff
@@ -87,7 +87,7 @@ flowchart TD
 
 How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
 
-**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). "Map Data + Vision" stays the one choice in sunnylink and the resolver does not change. The brain always says a number, so while it runs the map is not used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, and by default gas, brake and the car's speed; never the map. It gets the plates of hours only if its training had them (`plates` in its contract, shown in Models › Brain). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
+**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). "Map Data + Vision" stays the one choice in sunnylink and the resolver does not change. The brain always says a number, so while it runs the map is not used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, and by default gas, brake, the car's speed and whether openpilot is engaged (how long ago it went off, and whether the brake, the gas or something else turned it off: a driver who brakes once and then lets the car roll still shows); never the map. It gets the plates of hours only if its training had them (`plates` in its contract, shown in Models › Brain). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
 
 **Signs**
 
