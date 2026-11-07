@@ -142,7 +142,7 @@ class CorrectionError(ValueError):
     """A correction that cannot be kept: a frame that is not of the drive, a type that is not one."""
 
 
-def _limit(value) -> tuple[int, str] | None:
+def maxspeed_limit(value) -> tuple[int, str] | None:
     """The limit of a maxspeed tag and its unit: (50, 'km/h') for "50", (35, 'mph') for "35 mph" or "35mph"; None for
     anything else ("signals", "none", "CH:urban", two values)."""
     if not isinstance(value, str):
@@ -170,7 +170,7 @@ def _kind(way: dict) -> str | None:
 def way_type(way: dict) -> tuple[str | None, str]:
     """The road type of an OSM way and why: ('town', 'maxspeed 50'), ('rural', 'maxspeed 55 mph')."""
     highway = way.get('highway') or ''
-    limit = _limit(way.get('maxspeed'))
+    limit = maxspeed_limit(way.get('maxspeed'))
     kind = _kind(way)
     # A town's limit: 50 km/h or less, US_TOWN_MPH or less.
     town = limit is not None and limit[0] <= (US_TOWN_MPH if limit[1] == 'mph' else TOWN_KPH)

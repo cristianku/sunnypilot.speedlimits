@@ -1,8 +1,8 @@
 // Data › Speed review: what the page knows of a drive (GET /api/speed-review/drives/<route>, nnslr_tools.speed_review) and
 // the rules of its commands. A stretch is on the comma's clock, in ns. A stretch not examined has no row on the server:
-// its kph is the proposal: the nearest limit to the driver's steady speed on free road (source 'driven'), elsewhere the limit
-// the comma's vision held. A split lives here, as a cut in the list of the page, until
-// one of its halves is saved: the server then clips what stays outside, and the cut is a boundary of its own.
+// its kph is the proposal: the OpenStreetMap limit (source 'map'), and where the map has no number the limit of the signs
+// the comma read (source 'signs'). Next to it the page shows what the map and the signs said, and where the two differ. A split lives here, as a cut in the list of the page, until one of its halves is saved: the server then clips
+// what stays outside, and the cut is a boundary of its own.
 import type {DriveRow} from './drive-review';
 
 export type StretchState = 'not_examined' | 'confirmed' | 'corrected' | 'undetermined';
@@ -16,8 +16,23 @@ export interface Stretch {
   known_ns: number | null;
   note: string;
   reviewer: string | null;
-  /** On a stretch not examined: 'driven' when the proposal comes from the speed held, absent when from the vision limit. */
-  source?: 'driven';
+  /** On a stretch not examined: where the proposal comes from, the map or the signs read where the map has no number. */
+  source?: 'map' | 'signs';
+}
+
+/** A limit along the drive: kph null where there is none. */
+export interface LimitRun {
+  start_ns: number;
+  end_ns: number;
+  kph: number | null;
+}
+
+/** Where the signs read said another limit than the map's, for long enough to be no sign and way end at two places. */
+export interface Differ {
+  start_ns: number;
+  end_ns: number;
+  map_kph: number;
+  sign_kph: number;
 }
 
 /** Roadworks a person marked, two taps on the frame shown: they say nothing of the speed and cut no stretch. */
@@ -40,6 +55,13 @@ export interface SpeedDrive {
   works_checked_ns: number | null;
   examined_s: number;
   total_s: number;
+  /** Whether the map was read for this drive at all (Overview › Find the road types). */
+  map_read: boolean;
+  /** The OpenStreetMap limit along the drive, as read on the server. */
+  map: LimitRun[];
+  /** The limit of the signs the comma read: a number holds to the next sign, an end of a limit or a minute unseen. */
+  signs: LimitRun[];
+  differ: Differ[];
 }
 
 export interface SpeedRow extends DriveRow {
@@ -62,6 +84,8 @@ export const STEP_KPH = 5;
 const MAX_KPH = 200;
 /** A cut leaves at least this on both sides: less is no stretch of road. */
 const MIN_PIECE_NS = 1e9;
+/** A limit shorter than this on a stretch is a flicker (MERGE_SECONDS of speed_review.py). */
+const MERGE_NS = 5e9;
 
 export const STATE_LABEL: Record<StretchState, string> = {not_examined: 'Not examined', confirmed: 'Confirmed', corrected: 'Corrected',
   undetermined: 'Can\'t tell'};
@@ -139,4 +163,20 @@ export function worksAt(works: readonly Works[], ns: number): Works | null {
 export function canEndWorks(works: readonly Works[], open: Works, ns: number): boolean {
   const next = works.find((item) => item.start_ns > open.start_ns);
   return ns > open.start_ns && (!next || ns <= next.start_ns);
+}
+
+/** The limits along a stretch in time order, each once in a row, where there is one; one that touches the stretch for less
+ * than MERGE_NS (or than the stretch, when it is shorter) is left out. */
+export function limitsOver(runs: readonly LimitRun[], start: number, end: number): number[] {
+  const least = Math.min(MERGE_NS, end - start);
+  const out: number[] = [];
+  for (const item of runs) {
+    if (item.kph !== null && Math.min(end, item.end_ns) - Math.max(start, item.start_ns) >= least && out[out.length - 1] !== item.kph) out.push(item.kph);
+  }
+  return out;
+}
+
+/** The limits of limitsOver as a line: "120 → 80", "none" without one. */
+export function limitsText(limits: readonly number[]): string {
+  return limits.length ? limits.join(' → ') : 'none';
 }

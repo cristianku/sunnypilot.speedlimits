@@ -46,8 +46,8 @@ onMounted(() => { if (tabDrive.value === null) void load(); });
         <h2 id="sr-drives-title">Drives</h2>
         <span v-if="drives" class="ds-when">{{ plural(rows.length, 'drive') }}</span>
       </div>
-      <p class="import-why">Say the speed the car should hold along a drive: the limit the comma's vision held is proposed, you confirm or correct
-        it. The brain network learns from these labels; nothing here changes the car.</p>
+      <p class="import-why">Say the speed the car should hold along a drive: the OpenStreetMap limit is proposed, next to the limit
+        the comma read from the signs, and you confirm or correct it. The brain network learns from these labels; nothing here changes the car.</p>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <ul v-else class="rt-list">

@@ -1,12 +1,12 @@
-"""Speed review (Data › Speed review, nnslr_tools.speed_review): the proposals from the logged vision limit, the writes
-of a person, and who may write them.
+"""Speed review (Data › Speed review, nnslr_tools.speed_review): the proposals from the map and the signs the comma
+read, the writes of a person, and who may write them.
 
 Every drive and label here is SYNTHETIC: made up by these tests. Nothing here is a real drive or a person's label.
 """
 from __future__ import annotations
 
 import inspect
-import math
+import json
 import sqlite3
 import stat
 import sys
@@ -64,114 +64,141 @@ def store(tmp_path):
 
 # ---------- the proposals ----------
 
-def test_a_proposal_rounds_to_the_grid_and_a_flicker_joins_the_stretch_before():
-    found = speed_review.proposals(merged([(at(0), 79.99), (at(100), 121.0), (at(102), 80.0), (at(200), 0.0)]))
+def test_a_limit_rounds_to_the_grid_and_a_flicker_joins_the_stretch_before():
+    found = speed_review.sign_runs(merged([(at(0), 79.99), (at(100), 121.0), (at(102), 80.0), (at(200), 0.0)]))
     assert found == [{'start_ns': at(0), 'end_ns': at(200), 'kph': 80},
                      {'start_ns': at(200), 'end_ns': END, 'kph': None}]
 
 
-def test_a_proposal_covers_the_drive_from_its_first_second_even_with_nothing_held():
+def test_a_limit_covers_the_drive_from_its_first_second_even_with_nothing_held():
     # Before the first message nothing is known; a drive without the series has one stretch with no value.
-    assert speed_review.proposals(merged([(at(50), 60.0)])) == [
+    assert speed_review.sign_runs(merged([(at(50), 60.0)])) == [
         {'start_ns': T0, 'end_ns': at(50), 'kph': None}, {'start_ns': at(50), 'end_ns': END, 'kph': 60}]
-    assert speed_review.proposals(merged([])) == [{'start_ns': T0, 'end_ns': END, 'kph': None}]
-    assert speed_review.proposals(None) == []
-    assert speed_review.proposals({'t0': None, 'span': [None, None], 'series': {}}) == []
+    assert speed_review.sign_runs(merged([])) == [{'start_ns': T0, 'end_ns': END, 'kph': None}]
+    assert speed_review.sign_runs(None) == []
+    assert speed_review.sign_runs({'t0': None, 'span': [None, None], 'series': {}}) == []
 
 
 def test_a_flicker_at_the_start_of_a_drive_joins_the_stretch_after():
     # The first message comes a moment after the start of the logs: no stretch of a tenth of a second to answer for.
-    assert speed_review.proposals(merged([(at(0.1), 80.0), (at(100), 60.0)])) == [
+    assert speed_review.sign_runs(merged([(at(0.1), 80.0), (at(100), 60.0)])) == [
         {'start_ns': T0, 'end_ns': at(100), 'kph': 80}, {'start_ns': at(100), 'end_ns': END, 'kph': 60}]
 
 
-def road(speeds, leads=((T0, False),), turn_from=None, vision=((T0, 120.0),)):
-    """A drive with a speed, a car ahead or not, and a GPS track a fix a second, straight until turn_from, in a tight
-    curve after it."""
-    lat, lon, heading, gps = 47.0, 8.0, 0.0, []
-    for second in range(300):
-        if turn_from is not None and second >= turn_from:
-            heading += 0.2
-        lat, lon = lat + 0.0002 * math.cos(heading), lon + 0.0003 * math.sin(heading)
-        gps.append([at(second), round(lat, 6), round(lon, 6), 0])
-    return {'t0': T0, 'span': [T0, END], 'gps': gps,
-            'series': {'vis_limit': [list(point) for point in vision], 'v_ego': [list(point) for point in speeds],
-                       'lead_present': [list(point) for point in leads]}}
+def read_signs(reads, once=(), brain_limit=130.0):
+    """A drive with the brain: its vision limit is the brain's answer, the signs are the signReads with their frame's
+    raw reading. Each of reads is logged twice, 0.2 s apart, as a sign is read again as the car comes to it; each of once
+    in one frame alone."""
+    logged = sorted([(seconds + again, name, kph) for seconds, name, kph in reads for again in (0, 0.2)] + list(once))
+    series = {'vis_limit': [[T0, brain_limit]], 'vis_raw_class': [[at(seconds), name] for seconds, name, _ in logged],
+              'vis_raw_speed': [[at(seconds), kph] for seconds, _, kph in logged]}
+    return {'t0': T0, 'span': [T0, END], 'series': series,
+            'events': [[at(seconds), 'sign', brain_limit] for seconds, _, _ in logged]}
 
 
-def test_a_steady_speed_on_free_road_proposes_the_nearest_limit():
-    assert speed_review.driven(road([(T0, 78.0)])) == [{'start_ns': at(2), 'end_ns': END, 'source': 'driven', 'kph': 80}]
+def test_the_signs_are_the_numbers_read_until_the_next_an_end_or_a_minute_unseen():
+    reads = [(10, 'maximum_speed:80', 80.0), (40, 'maximum_speed:80', 80.0), (90, 'cancellation', None),
+             (120, 'variable_display:100', 100.0), (200, 'minimum_speed:60', 60.0), (210, 'maximum_speed_hours:30', 30.0)]
+    # The brain's 130 is never a sign; the 80 read again at 40 s holds to the end; the 100 a minute after it was seen.
+    assert speed_review.sign_runs(read_signs(reads)) == [run(0, 10, None), run(10, 90, 80), run(90, 120, None),
+                                                          run(120, 180.2, 100), run(180.2, None, None)]
+    # A raw reading with no signRead is not a sign.
+    unconfirmed = read_signs([(10, 'maximum_speed:80', 80.0)])
+    unconfirmed['events'] = []
+    assert speed_review.sign_runs(unconfirmed) == [run(0, None, None)]
 
 
-@pytest.mark.parametrize('kph, limit', [(25.5, 30), (54.0, 50), (85.0, 80), (86.0, 90), (127.0, 130), (160.0, 130)])
-def test_the_limit_proposed_is_the_nearest_and_a_tie_goes_down(kph, limit):
-    assert [run['kph'] for run in speed_review.driven(road([(T0, kph)]))] == [limit]
+def test_a_number_read_once_is_a_misreading():
+    # One frame of 20 between two reads of 80, no second 20 near it.
+    drive = read_signs([(10, 'maximum_speed:80', 80.0), (30, 'maximum_speed:80', 80.0)], once=[(20, 'maximum_speed:20', 20.0)])
+    assert speed_review.sign_runs(drive) == [run(0, 10, None), run(10, 90.2, 80), run(90.2, None, None)]
 
 
-@pytest.mark.parametrize('changes', [
-    {'speeds': [(T0, 20.0)]},
-    {'speeds': [(at(second), 80.0 + 7 * (second % 2)) for second in range(0, 300, 1)]},
-    {'speeds': [(T0, 78.0)], 'leads': [(T0, True)]},
-    {'speeds': [(T0, 78.0)], 'leads': [(T0, None)]},
-    {'speeds': [(T0, 78.0)], 'leads': []},
-    {'speeds': [(T0, 78.0)], 'turn_from': 0},
-])
-def test_no_free_road_proposes_nothing(changes):
-    assert speed_review.driven(road(**changes)) == []
+def test_a_drive_from_before_the_raw_reading_takes_the_vision_limit():
+    assert speed_review.sign_runs(merged([(at(0), 80.0), (at(100), 60.0)])) == [run(0, 100, 80), run(100, None, 60)]
 
 
-def test_a_run_too_short_proposes_nothing():
-    leads = [(T0, True), (at(50), False), (at(50 + speed_review.STEADY_SECONDS - 1), True)]
-    assert speed_review.driven(road([(T0, 78.0)], leads=leads)) == []
+def drive_with_frames(held=()):
+    """A drive of two segments: segment 0 with an encode index whose frame 0 is exposed 2 s after the start of the
+    logs, segment 1 without one."""
+    ids = list(range(0, 1200, 20))
+    return {'t0': T0, 'span': [T0, END], 'series': {'vis_limit': [list(point) for point in held]}, 'segments': [0, 1],
+            'frames': {0: {'ids': ids, 'sof': [at(2 + frame / 20) for frame in ids]}},
+            'spans': {0: [T0, at(60)], 1: [at(60), at(120)]}}
 
 
-def test_a_car_ahead_or_a_curve_ends_the_free_road():
-    runs = speed_review.driven(road([(T0, 78.0)], leads=[(T0, False), (at(100), True), (at(150), False)], turn_from=250))
-    assert [(run['start_ns'], run['kph']) for run in runs] == [(at(2), 80), (at(150), 80)]
-    assert runs[0]['end_ns'] == at(100) and at(245) < runs[1]['end_ns'] < at(252)
+def map_rows(segment, seconds, maxspeed):
+    return [{'frame_key': f'{segment}/{second}', 'segment_index': segment, 'output_index': second, 'maxspeed': maxspeed}
+            for second in seconds]
 
 
-def test_a_track_with_a_hole_says_nothing_of_the_road_in_the_hole():
-    drive = road([(T0, 78.0)])
-    drive['gps'] = [fix for fix in drive['gps'] if not at(100) <= fix[0] < at(160)]
-    assert [run['end_ns'] for run in speed_review.driven(drive)][0] <= at(104)
+def test_the_map_limit_is_placed_on_the_frames_of_the_video_and_only_a_number_is_a_limit():
+    rows = (map_rows(0, range(0, 30), '80') + map_rows(0, range(30, 40), '30 mph') + map_rows(0, range(40, 44), 'FR:urban')
+            + map_rows(0, range(44, 47), 'none') + map_rows(0, range(47, 50), None) + map_rows(1, range(0, 10), '120'))
+    # Segment 0 on its frame line (a second 2 s after the logs' start), segment 1 from its start in the logs; the hole
+    # between the two and the end of the rows say nothing.
+    assert speed_review.map_runs(drive_with_frames(), rows) == [
+        {'start_ns': T0, 'end_ns': at(32), 'kph': 80}, {'start_ns': at(32), 'end_ns': at(42), 'kph': 50},
+        {'start_ns': at(42), 'end_ns': at(60), 'kph': None}, {'start_ns': at(60), 'end_ns': at(70), 'kph': 120},
+        {'start_ns': at(70), 'end_ns': END, 'kph': None}]
+    assert speed_review.map_runs(drive_with_frames(), []) == []
+    assert speed_review.map_runs(None, rows) == []
 
 
-def test_the_driven_proposal_goes_over_the_vision_limit_and_the_vision_limit_stays_elsewhere():
-    drive = road([(T0, 78.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
-    laid = speed_review.with_driven(speed_review.proposals(drive), speed_review.driven(drive), SPAN)
-    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [
-        (T0, at(100), 120, None), (at(100), at(200), 80, 'driven'), (at(200), END, 120, None)]
+def run(first, last, kph):
+    return {'start_ns': at(first), 'end_ns': END if last is None else at(last), 'kph': kph}
 
 
-def test_where_vision_and_the_driver_agree_it_is_one_stretch_of_vision():
-    drive = road([(T0, 118.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
-    laid = speed_review.with_driven(speed_review.proposals(drive), speed_review.driven(drive), SPAN)
-    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [(T0, END, 120, None)]
+def test_the_proposal_is_the_map_and_the_signs_only_where_the_map_has_no_number():
+    mapped = [run(0, 100, 80), run(100, 103, None), run(103, 150, 80), run(150, None, None)]
+    laid = speed_review.proposed(speed_review.sign_runs(merged([(T0, 100.0)])), mapped, SPAN)
+    # Three seconds of the signs between two of the map join the stretch before.
+    assert laid == [{**run(0, 150, 80), 'source': 'map'}, {**run(150, None, 100), 'source': 'signs'}]
 
 
-def test_a_sliver_of_vision_between_two_runs_joins_the_stretch_before():
-    runs = [{'start_ns': at(0), 'end_ns': at(100), 'kph': 80, 'source': 'driven'},
-            {'start_ns': at(103), 'end_ns': at(300), 'kph': 80, 'source': 'driven'}]
-    laid = speed_review.with_driven(speed_review.proposals(merged([(T0, 120.0)])), runs, SPAN)
-    assert [(item['start_ns'], item['end_ns'], item['kph'], item.get('source')) for item in laid] == [(T0, END, 80, 'driven')]
+def test_a_stretch_of_one_speed_says_where_most_of_it_comes_from():
+    mapped = [run(0, 50, 80), run(50, None, None)]
+    laid = speed_review.proposed(speed_review.sign_runs(merged([(T0, 80.0)])), mapped, SPAN)
+    assert laid == [{**run(0, None, 80), 'source': 'signs'}]
+    assert speed_review.proposed(speed_review.sign_runs(merged([(T0, 80.0)])), [], SPAN) == [
+        {**run(0, None, 80), 'source': 'signs'}]
 
 
-def test_a_driven_proposal_is_shown_stored_nowhere_and_a_person_confirms_it(store):
+def test_the_signs_and_the_map_differ_only_both_known_and_for_long():
+    signs = [run(0, 100, 80), run(100, 200, 120), run(200, 250, 100), run(250, None, None)]
+    mapped = [run(0, 106, 80), run(106, None, 120)]
+    # The 120 read 6 s before the map's way of 120 is a sign and the end of a way at two places, not a disagreement.
+    assert speed_review.differences(signs, mapped) == [
+        {'start_ns': at(200), 'end_ns': at(250), 'map_kph': 120, 'sign_kph': 100}]
+
+
+def test_a_map_proposal_is_shown_stored_nowhere_and_a_person_confirms_it(store):
+    path = store.root / 'derived' / 'road_types' / (ROUTE + '.jsonl')
+    path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps(row) + '\n' for row in map_rows(0, range(0, 58), '80')), encoding='utf-8')
     drives = FakeDrives()
-    drives.merged = lambda route: road([(T0, 78.0)], leads=[(T0, True), (at(100), False), (at(200), True)])
+    drives.merged = lambda route: drive_with_frames([(T0, 120.0)])
     view = speed_review.drive_view(store, drives, ROUTE)
-    shown = next(item for item in view['stretches'] if item.get('source') == 'driven')
-    assert (shown['kph'], shown['state']) == (80, 'not_examined') and view['examined_s'] == 0
-    assert store.stretches(ROUTE) == [] and store.revision(ROUTE) == 0
-    body = {'start_ns': shown['start_ns'], 'end_ns': shown['end_ns'], 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
+    assert view['map_read'] is True and view['map'] == [run(0, 60, 80), run(60, None, None)]
+    assert view['signs'] == [run(0, None, 120)]
+    assert view['differ'] == [{'start_ns': T0, 'end_ns': at(60), 'map_kph': 80, 'sign_kph': 120}]
+    assert [(item['kph'], item['source'], item['state']) for item in view['stretches']] == [
+        (80, 'map', 'not_examined'), (120, 'signs', 'not_examined')]
+    assert store.stretches(ROUTE) == [] and store.revision(ROUTE) == 0 and view['examined_s'] == 0
+    body = {'start_ns': T0, 'end_ns': at(60), 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
     view = speed_review.save(store, drives, ROUTE, body, 'someone')
-    saved = next(item for item in view['stretches'] if item['start_ns'] == shown['start_ns'])
+    saved = view['stretches'][0]
     assert (saved['kph'], saved['state'], saved['reviewer']) == (80, 'confirmed', 'someone') and 'source' not in saved
 
 
+def test_a_drive_without_the_map_read_is_proposed_from_the_signs(store):
+    view = speed_review.drive_view(store, FakeDrives(), ROUTE)
+    assert view['map_read'] is False and view['map'] == [] and view['differ'] == []
+    assert [(item['kph'], item['source']) for item in view['stretches']] == [(80, 'signs')]
+
+
 def test_saved_stretches_cut_the_proposals_and_the_whole_drive_stays_covered():
-    proposed = speed_review.proposals(merged([(at(0), 80.0), (at(100), 120.0)]))
+    proposed = speed_review.sign_runs(merged([(at(0), 80.0), (at(100), 120.0)]))
     saved = [{'start_ns': at(50), 'end_ns': at(150), 'kph': 100, 'state': 'corrected', 'known_ns': None, 'note': '',
               'reviewer': 'a'}]
     whole = speed_review.partition(proposed, saved, SPAN)

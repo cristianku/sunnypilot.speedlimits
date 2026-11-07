@@ -16,12 +16,14 @@ stays the same if a new scan moves the start of the drive:
   say: kph is None). A stretch nobody looked at has no row: 'not_examined' is only ever computed, so a proposal left
   alone never counts as approved.
 
-The proposal (proposals) is the limit the comma's vision held, in runs rounded to 5 km/h, a run under MERGE_SECONDS
-joined to the one before (the first one of a drive to the one after). On free road the driver's own speed goes over it
-(driven, with_driven): no car ahead, no curve, the speed steady for STEADY_SECONDS, and the proposal is the nearest limit
-(78 km/h held proposes 80). A car ahead, a curve or a series not in the log is no free road: there the vision limit stays.
-It is worked out when a drive is shown and never stored, so a proposal is an answer only once a person says yes to it.
-OpenStreetMap is never a proposal.
+The proposal (proposed) is the OpenStreetMap limit of the drive's frames, as nnslr road-types read it on the server
+(map_runs, "Find the road types" on the Overview), in runs rounded to 5 km/h, a run under MERGE_SECONDS joined to the one
+before (the first one of a drive to the one after). Where the map has no number (no way found, "none", a general limit
+like "FR:urban"), the limit of the signs the comma read stands in (sign_runs), and every stretch says which of the two it
+comes from. The map is wrong in places, so it is only ever a proposal: it is worked out when a drive is shown and never
+stored, and it is an answer only once a person says yes to it. Next to it the page shows the limit of the signs read
+and marks red where the two differ (differences): there the map may be wrong. The signs are the numbers the comma
+confirmed reading, not its vision limit: on a drive with the brain that is the brain's own answer, never a proposal.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
 on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI). One write (apply)
@@ -47,32 +49,35 @@ from __future__ import annotations
 
 import bisect
 import contextlib
-import math
 import os
 import sqlite3
-import statistics
 import threading
 from pathlib import Path
 from typing import Iterator
 
+from nnslr_tools import drive_logs
 from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
+from nnslr_tools.road_types import map_road_types, maxspeed_limit
 
 DB_RELATIVE_PATH = Path('annotations') / 'speed_review.sqlite'
 SCHEMA_VERSION = 1
 NS = 1_000_000_000
-# A run of the vision limit shorter than this joins the one before, or at the start of a drive the one after: it is a
-# flicker, not a stretch of road.
+# A run of a limit shorter than this joins the one before, or at the start of a drive the one after: it is a flicker,
+# not a stretch of road.
 MERGE_SECONDS = 5
-# The driven proposal: how long and how steady a speed has to be, and what is still straight (the sideways acceleration
-# the GPS track gives, m/s^2). The track is read over TURN_FIXES fixes on each side, about a second apart; a gap in it
-# longer than MAX_TRACK_GAP_S says nothing of the road.
-STEADY_SECONDS = 15
-STEADY_KPH = 6
-MIN_DRIVEN_KPH = 25
-STRAIGHT_LATERAL = 1.0
-TURN_FIXES = 2
-MAX_TRACK_GAP_S = 3
-LIMITS_KPH = range(30, 140, 10)
+# The map's frames are a second apart: a longer gap between two is a hole of the map, where it says nothing.
+FRAME_GAP_S = 1.5
+MPH_KPH = 1.609344
+# A sign read holds this long after it was last seen (sign_runs).
+SIGN_HOLD_SECONDS = 60
+# A number read once, with no second read of it this close, is a misreading, not a sign (sign_runs).
+READ_AGAIN_SECONDS = 2
+# The classes of a sign that sets a limit, and of one that ends it: a minimum speed or a limit at some hours sets none.
+LIMIT_CLASSES = ('maximum_speed:', 'variable_display:')
+ENDS_OF_LIMIT = ('cancellation', 'end_of_limit')
+# Shorter than this, a sign's limit other than the map's is no disagreement: a sign and the end of its way in the map
+# are seldom at the same place.
+DIFFER_SECONDS = 8
 GRID_KPH = 5
 MAX_KPH = 200
 MAX_NOTE = 500
@@ -118,13 +123,15 @@ def db_path(root: Path) -> Path:
     return Path(root) / DB_RELATIVE_PATH
 
 
-def proposals(merged: dict | None) -> list[dict]:
-    """The stretches the comma's vision limit proposes, from the start of the drive to its end, in time order: kph
-    None where it held none (not sure, not in the log). Empty for a drive with nothing read."""
-    if merged is None or merged.get('t0') is None or merged['span'][1] is None or merged['span'][1] <= merged['t0']:
-        return []
-    start, end = merged['t0'], merged['span'][1]
-    points = [(t, value) for t, value in merged['series'].get('vis_limit') or () if start <= t < end]
+def _has_span(merged: dict | None) -> bool:
+    return bool(merged) and merged.get('t0') is not None and merged['span'][1] is not None and merged['span'][1] > merged['t0']
+
+
+def _runs(points: list, start: int, end: int) -> list[dict]:
+    """A limit over [start, end) as stretches in time order, from the points (t, km/h) where it changes: rounded to
+    GRID_KPH, kph None where there is none (None or 0), a run under MERGE_SECONDS joined to the one before (the first one
+    of the drive to the one after)."""
+    points = [(t, value) for t, value in points if start <= t < end]
     if not points or points[0][0] > start:
         points.insert(0, (start, None))
     runs: list[list] = []
@@ -147,74 +154,111 @@ def proposals(merged: dict | None) -> list[dict]:
     return [{'start_ns': first, 'end_ns': stop, 'kph': kph} for first, stop, kph in joined]
 
 
-def _turn_rates(gps: list[list]) -> list[tuple[int, float]]:
-    """(t, rad/s) along the GPS track: the heading into a fix against the heading out of it."""
-    def heading(a: list, b: list) -> float:
-        return math.atan2((b[2] - a[2]) * math.cos(math.radians(a[1])), b[1] - a[1])
-
-    rates = []
-    for before, here, after in zip(gps, gps[TURN_FIXES:], gps[2 * TURN_FIXES:]):
-        seconds = (after[0] - before[0]) / NS
-        if seconds <= 2 * TURN_FIXES * MAX_TRACK_GAP_S:
-            turn = (heading(here, after) - heading(before, here) + math.pi) % (2 * math.pi) - math.pi
-            rates.append((here[0], abs(turn) / (seconds / 2)))
-    return rates
+def _at(points: list, t: int):
+    """The value of a series of changes [[t, value], ...] at a time: its last change at or before it, None before."""
+    at = bisect.bisect_right(points, t, key=lambda point: point[0]) - 1
+    return points[at][1] if at >= 0 else None
 
 
-def _steady_runs(seconds: list[tuple[int, float | None]]) -> Iterator[list[tuple[int, float]]]:
-    """The runs of (t, kph) that stay inside STEADY_KPH; a second with no speed ends one."""
-    run: list[tuple[int, float]] = []
-    low = high = 0.0
-    for t, kph in seconds:
-        if run and (kph is None or max(high, kph) - min(low, kph) > STEADY_KPH):
-            yield run
-            run = []
-        if kph is not None:
-            low, high = (min(low, kph), max(high, kph)) if run else (kph, kph)
-            run.append((t, kph))
-    if run:
-        yield run
-
-
-def driven(merged: dict | None) -> list[dict]:
-    """The stretches of free road where the driver held a steady speed, each proposing the limit nearest to it (a tie
-    goes to the lower one, kph is a cap). What the log does not say counts as not free."""
-    if merged is None or merged.get('t0') is None or merged['span'][1] is None:
+def sign_runs(merged: dict | None) -> list[dict]:
+    """The limit of the signs the comma read, from the start of the drive to its end: kph None where none is known. It is
+    the last number the comma confirmed reading (a signRead, with the raw reading of its frame: rawSignClass and
+    rawSignSpeed), until the next one, an end of a limit, or SIGN_HOLD_SECONDS after the number was last seen: past that a
+    sign says nothing of the road (a motorway entered, a limit ended with no sign seen). A number read in one frame alone
+(none of the same within READ_AGAIN_SECONDS) is a misreading: a sign is read again and again as the car comes to it. Not the vision limit: with the
+    brain that is the brain's answer, and the memory's held its limits for good. Of a frame with two numbers (a gantry)
+    the log keeps the surest. A drive from before rawSignClass was logged (31 Oct 2026) has only the memory's vision limit:
+    that is taken. Empty for a drive with nothing read."""
+    if not _has_span(merged):
         return []
-    start, end = merged['t0'], merged['span'][1]
-    speeds, leads = merged['series'].get('v_ego') or [], merged['series'].get('lead_present') or []
-    rates = _turn_rates(merged.get('gps') or [])
-    speed_times, lead_times, rate_times = [p[0] for p in speeds], [p[0] for p in leads], [p[0] for p in rates]
+    series = merged['series']
+    classes, speeds = series.get('vis_raw_class') or [], series.get('vis_raw_speed') or []
+    if not any(isinstance(name, str) for _, name in classes):
+        return _runs(series.get('vis_limit') or [], merged['t0'], merged['span'][1])
+    read: list[tuple[int, float | None]] = []
+    for event in merged.get('events') or ():
+        name = _at(classes, event[0]) if event[1] == 'sign' else None
+        if name in ENDS_OF_LIMIT:
+            read.append((event[0], None))
+        elif isinstance(name, str) and name.startswith(LIMIT_CLASSES) and _at(speeds, event[0]):
+            read.append((event[0], _at(speeds, event[0])))
+    again = READ_AGAIN_SECONDS * NS
+    read = [(t, kph) for index, (t, kph) in enumerate(read)
+            if any(abs(other - t) <= again and value == kph for other, value in read[max(0, index - 20):index + 21]
+                   if other != t)]
+    points: list[tuple[int, float | None]] = []
+    for index, (t, kph) in enumerate(read):
+        points.append((t, kph))
+        following = read[index + 1][0] if index + 1 < len(read) else None
+        if kph is not None and (following is None or following - t > SIGN_HOLD_SECONDS * NS):
+            points.append((t + SIGN_HOLD_SECONDS * NS, None))
+    return _runs(points, merged['t0'], merged['span'][1])
 
-    def free_speed(t: int) -> float | None:
-        at_speed = bisect.bisect_right(speed_times, t) - 1
-        at_lead = bisect.bisect_right(lead_times, t) - 1
-        at_rate = bisect.bisect_right(rate_times, t) - 1
-        if min(at_speed, at_lead, at_rate) < 0 or leads[at_lead][1] is not False:
-            return None
-        kph = speeds[at_speed][1]
-        if kph is None or kph < MIN_DRIVEN_KPH or t - rate_times[at_rate] > MAX_TRACK_GAP_S * NS:
-            return None
-        return kph if kph / 3.6 * rates[at_rate][1] <= STRAIGHT_LATERAL else None
 
-    return [{'start_ns': run[0][0], 'end_ns': min(run[-1][0] + NS, end), 'source': 'driven',
-             'kph': min(LIMITS_KPH, key=lambda limit, kph=statistics.median(kph for _, kph in run): (abs(limit - kph), limit))}
-            for run in _steady_runs([(t, free_speed(t)) for t in range(start, end, NS)]) if len(run) >= STEADY_SECONDS]
-
-
-def with_driven(proposed: list[dict], runs: list[dict], span: tuple[int, int]) -> list[dict]:
-    """The proposals with the runs of driven on top: what the vision limit keeps under MERGE_SECONDS joins the stretch
-    before, neighbours of one speed are one stretch, and that one says driven only if nothing of it comes from vision."""
-    out: list[dict] = []
-    for item in partition(proposed, runs, span):
-        sliver = 'source' not in item and item['end_ns'] - item['start_ns'] < MERGE_SECONDS * NS
-        if out and (sliver or out[-1]['kph'] == item['kph']):
-            out[-1]['end_ns'] = item['end_ns']
-            if not sliver and 'source' not in item:
-                out[-1].pop('source', None)
+def map_runs(merged: dict | None, rows: list[dict]) -> list[dict]:
+    """The OpenStreetMap limit of the drive's frames as nnslr road-types read it on the server (one row a second,
+    derived/road_types), from the start of the drive to its end: kph None where the way found has no number (no way,
+    "none", "FR:urban": no general limit is made up), a limit in mph turned into km/h. A frame holds for its second, and
+    a missing one ends the limit there. A second of a segment is placed as the page places it (secondOf in
+    drive-review.ts): on the segment's frame line when its encode index has one, else from the segment's start in the
+    logs. Empty without rows."""
+    if not _has_span(merged) or not rows:
+        return []
+    lines = {item['segment']: item for item in drive_logs.sync(merged, None)}
+    points = []
+    for row in rows:
+        segment, second = row.get('segment_index'), row.get('output_index')
+        if not isinstance(segment, int) or not isinstance(second, (int, float)):
+            continue
+        line = lines.get(segment)
+        if line and line['start'] is not None and line['period']:
+            t = merged['t0'] + round((line['start'] + second * drive_logs.FPS * line['period']) * NS)
+        elif segment in merged['spans']:
+            t = merged['spans'][segment][0] + round(second * NS)
         else:
-            out.append(dict(item))
-    return out
+            continue
+        limit = maxspeed_limit(row.get('maxspeed'))
+        points.append((t, None if limit is None else limit[0] * (MPH_KPH if limit[1] == 'mph' else 1)))
+    points.sort(key=lambda point: point[0])
+    held = []
+    for index, (t, kph) in enumerate(points):
+        held.append((t, kph))
+        if index + 1 == len(points) or points[index + 1][0] - t > FRAME_GAP_S * NS:
+            held.append((t + NS, None))
+    return _runs(held, merged['t0'], merged['span'][1])
+
+
+def proposed(signs: list[dict], mapped: list[dict], span: tuple[int, int]) -> list[dict]:
+    """The proposal of the drive: the map's limit (source 'map'), and where the map has no number the signs' (source
+    'signs', sign_runs). A piece of the signs' under MERGE_SECONDS joins the stretch before, neighbours of one speed are one
+    stretch, and a stretch says the source of most of it."""
+    out: list[dict] = []
+    top = [{**item, 'source': 'map'} for item in mapped if item['kph'] is not None]
+    for item in partition(signs, top, span):
+        length = item['end_ns'] - item['start_ns']
+        from_map = item.get('source') == 'map'
+        if out and (out[-1]['kph'] == item['kph'] or not from_map and length < MERGE_SECONDS * NS):
+            out[-1]['end_ns'] = item['end_ns']
+            out[-1]['map_ns'] += length if from_map else 0
+        else:
+            out.append({'start_ns': item['start_ns'], 'end_ns': item['end_ns'], 'kph': item['kph'],
+                        'map_ns': length if from_map else 0})
+    return [{'start_ns': item['start_ns'], 'end_ns': item['end_ns'], 'kph': item['kph'],
+             'source': 'map' if 2 * item['map_ns'] >= item['end_ns'] - item['start_ns'] else 'signs'} for item in out]
+
+
+def differences(signs: list[dict], mapped: list[dict]) -> list[dict]:
+    """Where the signs read gave another limit than the map's, both known, for at least DIFFER_SECONDS: the stretches the
+    page marks red, for a person to see at once where the map may be wrong."""
+    out: list[dict] = []
+    for sign in signs:
+        for way in mapped:
+            if sign['kph'] is None or way['kph'] is None or sign['kph'] == way['kph']:
+                continue
+            first, last = max(sign['start_ns'], way['start_ns']), min(sign['end_ns'], way['end_ns'])
+            if last - first >= DIFFER_SECONDS * NS:
+                out.append({'start_ns': first, 'end_ns': last, 'map_kph': way['kph'], 'sign_kph': sign['kph']})
+    return sorted(out, key=lambda item: item['start_ns'])
 
 
 def partition(proposed: list[dict], saved: list[dict], span: tuple[int, int]) -> list[dict]:
@@ -468,16 +512,21 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
-    """A drive for the page: its revision, its stretches from start to end, its roadworks, how much of it is examined. A
-    drive whose logs are not scanned has no stretches."""
+    """A drive for the page: its revision, its stretches from start to end, its roadworks, how much of it is examined,
+    and next to them the map's limit (map, map_read: whether the map was read for the drive at all), the limit of the
+    signs the comma read (signs) and where the two differ (differ). A drive whose logs are not scanned has no stretches."""
     span = _span_of(drives, route)
     if span is None:
         return {'ok': True, 'route': route, 'revision': store.revision(route), 'stretches': [], 'works': [],
-                'works_checked_ns': None, 'examined_s': 0, 'total_s': 0}
+                'works_checked_ns': None, 'examined_s': 0, 'total_s': 0, 'map_read': False, 'map': [], 'signs': [],
+                'differ': []}
     saved = store.stretches(route)
     merged = drives.merged(route)
+    rows = map_road_types(store.root, route)
+    signs, mapped = sign_runs(merged), map_runs(merged, rows)
     return {'ok': True, 'route': route, 'revision': store.revision(route),
-            'stretches': partition(with_driven(proposals(merged), driven(merged), span), saved, span),
+            'stretches': partition(proposed(signs, mapped, span), saved, span),
+            'map_read': bool(rows), 'map': mapped, 'signs': signs, 'differ': differences(signs, mapped),
             'works': store.works(route),
             'works_checked_ns': store.works_checked(route),
             'examined_s': round(sum(row['end_ns'] - row['start_ns'] for row in saved) / NS, 1),

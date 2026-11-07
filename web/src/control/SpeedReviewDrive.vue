@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Data › Speed review, a drive opened ("/speed-review?drive=<route>"): the player of Drive review (DriveReviewDrive.vue)
-// with one lane more, the speed to hold, and the commands at its side. The proposal is the limit nearest to the steady speed
-// on free road, elsewhere the limit the comma's vision held, and a person says what the speed to hold really was
-// (speed_review.py). Every command saves at once and acts on the
+// with one lane more, the speed to hold, and the commands at its side. The proposal is the OpenStreetMap limit, where the
+// map has no number the limit of the signs the comma read, and a person says what the speed to hold really was
+// (speed_review.py). The card shows what the map and the signs read said on the stretch, and the lane marks red where
+// they differ: there the map may be wrong. Every command saves at once and acts on the
 // stretch under the time shown; Yes and Can't tell go on to the next stretch nobody looked at. In a stuck limit the right
 // change is inside the stretch: Split here cuts it at the time shown, and saving one half makes the cut real. Roadworks
 // are marked next to the speed, two taps on the frame shown, and cut no stretch; a third tap says that the drive was gone
@@ -13,8 +14,8 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
-import {canCut, canEndWorks, cutOf, type Label, labelOf, nextOpen, openCuts, pieceAt, SPEEDS, type SpeedDrive, STATE_LABEL, STEP_KPH, stepped,
-  type Stretch, withCuts, worksAt, type WorksTap} from './speed-review';
+import {canCut, canEndWorks, cutOf, type Label, labelOf, limitsOver, limitsText, nextOpen, openCuts, pieceAt, SPEEDS, type SpeedDrive,
+  STATE_LABEL, STEP_KPH, stepped, type Stretch, withCuts, worksAt, type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
 const RATES = [1, 2, 4] as const;
@@ -52,6 +53,19 @@ const pieces = computed(() => withCuts(drive.value?.stretches ?? [], cuts.value)
 const index = computed(() => pieceAt(pieces.value, now.value));
 const piece = computed((): Stretch | null => pieces.value[index.value] ?? null);
 const examined = computed(() => drive.value && drive.value.total_s ? drive.value.examined_s / drive.value.total_s : 0);
+
+// -- the map and the signs read on the stretch shown -----------------------------------------------------------------------
+const mapText = computed(() => !drive.value?.map_read ? 'not read for this drive'
+  : piece.value ? limitsText(limitsOver(drive.value.map, piece.value.start_ns, piece.value.end_ns)) : '');
+const signText = computed(() => drive.value && piece.value ? limitsText(limitsOver(drive.value.signs, piece.value.start_ns, piece.value.end_ns)) : '');
+const differs = computed(() => !!piece.value && (drive.value?.differ ?? []).some((item) => item.start_ns < piece.value!.end_ns && piece.value!.start_ns < item.end_ns));
+const sourceText = computed(() => {
+  const item = piece.value;
+  if (!item) return '';
+  if (item.source === 'map') return 'from the map';
+  if (item.kph === null) return drive.value?.map_read ? 'no limit in the map or the signs read' : 'no sign read';
+  return drive.value?.map_read ? 'from the signs read: no number in the map' : 'from the signs read';
+});
 
 const go = (item: Stretch | undefined): void => {
   // A millisecond in: the time shown is on this stretch, not at the end of the one before.
@@ -180,6 +194,14 @@ function checkedIn(from: number, to: number) {
   const last = Math.min(secondOf(worksChecked.value), to);
   return from < last ? [{from, to: last}] : [];
 }
+/** Where the map and the signs read differ, inside the window of the lanes. */
+function differIn(from: number, to: number) {
+  return (drive.value?.differ ?? []).flatMap((item) => {
+    const first = Math.max(secondOf(item.start_ns), from);
+    const last = Math.min(secondOf(item.end_ns), to);
+    return first < last ? [{key: item.start_ns, from: first, to: last}] : [];
+  });
+}
 /** The roadworks inside the window of the lanes. */
 function worksIn(from: number, to: number) {
   const end = pieces.value[pieces.value.length - 1]?.end_ns ?? 0;
@@ -195,7 +217,7 @@ function worksIn(from: number, to: number) {
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" no-episodes
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from your steady speed on free road or from the comma's vision; green confirmed; blue corrected; ? nobody can tell; orange bar: roadworks; grey line: gone through for roadworks">
+      <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from the map, or from the signs read where the map has no number; green confirmed; blue corrected; ? nobody can tell; red line: the sign read differs from the map; orange bar: roadworks; grey line: gone through for roadworks">
         <span class="dr-lane-name">To hold<small>review</small></span>
         <svg :width="width" height="24" :viewBox="`0 0 ${width} 24`" aria-hidden="true">
           <g v-for="run in runs(from, to)" :key="run.key">
@@ -203,6 +225,7 @@ function worksIn(from: number, to: number) {
             <text v-if="fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="15.5" class="dr-run-text" :class="'sr-text-' + run.state">{{ run.text }}</text>
             <line v-if="run.known !== null" :x1="x(run.known)" :x2="x(run.known)" y1="1" y2="22" class="sr-known"/>
           </g>
+          <rect v-for="part in differIn(from, to)" :key="'d' + part.key" :x="x(part.from)" y="0" :width="w(part.from, part.to)" height="3" class="sr-differ"/>
           <rect v-for="part in checkedIn(from, to)" :key="part.from" :x="x(part.from)" y="22" :width="w(part.from, part.to)" height="2" class="sr-works-checked"/>
           <rect v-for="mark in worksIn(from, to)" :key="mark.key" :x="x(mark.from)" y="18" :width="w(mark.from, mark.to)" height="4" :class="['sr-works', {'sr-works-open': mark.open}]"/>
         </svg>
@@ -227,8 +250,9 @@ function worksIn(from: number, to: number) {
             <span class="sr-tag" :class="'sr-tag-' + piece.state">{{ STATE_LABEL[piece.state] }}</span>
           </div>
           <p class="dr-hint">{{ clockOf(secondOf(piece.start_ns)) }}–{{ clockOf(secondOf(piece.end_ns)) }}
-            <template v-if="piece.state === 'not_examined'"> · {{ piece.source === 'driven' ? 'your steady speed on a free road' : piece.kph === null ? 'the comma\'s vision held none' : 'held by the comma\'s vision' }}</template>
+            <template v-if="piece.state === 'not_examined'"> · {{ sourceText }}</template>
             <template v-else-if="piece.reviewer"> · {{ piece.reviewer }}</template></p>
+          <p class="sr-compare" :class="{'sr-compare-differ': differs}">Map <b>{{ mapText }}</b> · Sign read <b>{{ signText }}</b></p>
           <p class="dr-hint">The cap on a free road: queues, curves and stops stay with the planner.</p>
 
           <button type="button" class="btn primary sr-yes" id="sr-yes" :disabled="locked || !canYes" title="Key y" @click="yes">{{ piece.kph === null
