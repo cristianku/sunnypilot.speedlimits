@@ -430,6 +430,12 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     assert drive['cuts'] == set() and drive['reader'] is None
     found['drives'][0].update(signs_read=True, reader_current=False)
     assert 'signs read by ANOTHER reader' in targets.summary_text(found)
+    # The car's speed of the measure is the dashboard's, in the labels' units: vEgo + 3 on a Peugeot log without its own.
+    merged.update(series={'v_ego': [[0, 50.0]]}, meta={'car': {'fingerprint': 'PSA_PEUGEOT_3008'}})
+    drive = targets.drive_targets(tmp_path, route, labels[route], merged, split)
+    assert {kph for kph in drive['own_kph'].tolist() if kph == kph} == {53.0} and drive['ns'][23] == -1
+    # The speed input stays vEgo, as the car gives it.
+    assert drive['inputs']['speed'][10].tolist() == _np().float32(targets.BRAIN_INPUTS.speed_row(50 / 3.6)).tolist()
 
 
 def test_reading_the_labels_changes_nothing(tmp_path):

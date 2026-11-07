@@ -67,7 +67,9 @@ the network learns on is what it gets on the car, and the checkpoint keeps the f
 pedals and speed are the driver, and they are apart so that a comparison can leave them out (engaged is made but never
 learned, LEFT_OUT): on the drives the gas is often
 pressed just where the label is above the limit the car held (he overrode it), and the car's speed is what the network itself
-decides on the car. The measure says it: the frames with no gas, and the ones with the car's speed far from the label.
+decides on the car. The measure says it: the frames with no gas, and the ones with the car's speed far from the label. The
+speed input is vEgo, as on the car; the measure's own speed is the dashboard's (drive_logs.dashboard_speed: vEgoCluster, or
+vEgo + 3 km/h on a Peugeot log without it), in the units of the labels.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
@@ -562,7 +564,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     """A drive for the training at rate frames a second (1 or RATE_HZ): frames, ns, partitions, cells, cuts (memory_cuts),
     speed (class per frame), speed_out (why a frame is out of the loss, 0 when in), speed_weight, works, works_weight, next,
     next_weight, metres, metres_weight (ahead_answers), measured (the frames a measure counts: one a second, so that it
-    reads the same at both rates), inputs, own_kph (the car's speed, NaN unknown: for the measure, no input), signs_read,
+    reads the same at both rates), inputs, own_kph (the car's speed as the dashboard shows it, in the labels' units:
+    drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read,
     reader (what read them), pictures (at RATE_HZ, the brain's pictures are there), no_picture_s (labelled seconds without a
     frame at all: prepare keeps only the slow ones at the start and the end of a drive). need_pictures=False (a dry run): a
     frame without its picture keeps its answers."""
@@ -583,7 +586,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     works_weight[~usable] = 0
     readings = record['readings'] if record else None
     v_ego = (merged.get('series') or {}).get('v_ego') or []
-    own = _last_at(v_ego, ns)
+    own = _last_at(drive_logs.dashboard_speed(merged), ns)
     following, next_weight, metres, metres_weight = ahead_answers(ns, labels['stretches'], metres_driven(v_ego),
                                                                   speed_out == 0)
     labelled = sum(((ns >= row['start_ns']) & (ns < row['end_ns'])).sum() for row in labels['stretches'])

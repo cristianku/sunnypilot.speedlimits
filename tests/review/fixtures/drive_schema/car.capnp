@@ -10,6 +10,7 @@ struct CarState {
   cruiseState @4 :CruiseState;
   vCruise @5 :Float32;
   buttonEvents @6 :List(ButtonEvent);
+  vEgoCluster @7 :Float32;
   struct CruiseState {
     enabled @0 :Bool;
     available @1 :Bool;

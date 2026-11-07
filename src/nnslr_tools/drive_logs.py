@@ -82,6 +82,12 @@ SCHEMA_ENV = 'NNSLR_DRIVE_SCHEMA'
 FPS = 20
 # How much two consecutive minutes of a log may overlap (the logger's hand-over takes a few tens of ms).
 OVERLAP_NS = 5_000_000_000
+# The dashboard's speed over vEgo, km/h, on a car whose log has no speed of the dashboard (dashboard_speed). The
+# Peugeot's cluster shows the set speed + 3 and SET takes vEgo, so its speedometer is taken to read vEgo + 3 (opendbc
+# psa/carstate.py DASH_OFFSET_KPH, the same number; not checked on the needle).
+DASH_OFFSET_KPH = {'PSA_PEUGEOT_3008': 3.0, 'PSA_CITROEN_C4_SPACETOURER': 3.0}
+DASH_MIN_KPH = 0.5  # below it the dashboard reads 0 (the car's cluster_min_speed)
+COPY_KPH = 0.05  # a vEgoCluster this near vEgo is a copy of it
 
 
 class DriveLogError(RuntimeError):
@@ -375,6 +381,39 @@ def merge(extracts: dict[int, dict]) -> dict:
     spans = {segment: extracts[segment]['span'] for segment in kept}
     return {'series': series, 'events': events, 'gps': gps, 'frames': frames, 'segments': kept, 'spans': spans,
             'holes': holes, 'left_out': left_out, 't0': t0, 'span': [t0, end], 'meta': meta}
+
+
+def _values_at(points: list, times: list) -> list:
+    """The value of a step series [t, value] at each of the sorted times: its last point at or before it, None before."""
+    at = [point[0] for point in points]
+    return [points[i][1] if i >= 0 else None for i in (bisect.bisect_right(at, t) - 1 for t in times)]
+
+
+def dashboard_speed(merged: dict) -> list:
+    """The speed the dashboard shows, as a step series [t_ns, km/h] (None where unknown) on the times of vEgo and of
+    vEgoCluster: the units of the labels, which are the dashboard's (the car takes the cluster offset off a limit).
+
+    vEgoCluster where the drive has its own: some value of it, while moving, is not vEgo. A port that does not set it
+    logs a copy of vEgo (opendbc interfaces.py), as the Peugeot did before opendbc f219690d (7 Nov 2026); there, and
+    wherever it is unknown (a minute extracted before it was kept), vEgo + DASH_OFFSET_KPH of the car (vEgo itself for a
+    car not in it), and 0 below DASH_MIN_KPH, as the car's own vEgoCluster."""
+    series = merged.get('series') or {}
+    own, cluster = series.get('v_ego') or [], series.get('v_ego_cluster') or []
+    car = ((merged.get('meta') or {}).get('car') or {}).get('fingerprint')
+    offset = DASH_OFFSET_KPH.get(car, 0.0)
+    times = sorted({point[0] for point in own} | {point[0] for point in cluster})
+    own_at, cluster_at = _values_at(own, times), _values_at(cluster, times)
+    real = any(v is not None and c is not None and v >= DASH_MIN_KPH and abs(c - v) > COPY_KPH
+               for v, c in zip(own_at, cluster_at))
+    speed: list = []
+    for t, v, c in zip(times, own_at, cluster_at):
+        if real and c is not None:
+            value = c
+        else:
+            value = None if v is None else 0.0 if v < DASH_MIN_KPH else round(v + offset, 4)
+        if not speed or speed[-1][1] != value:
+            speed.append([t, value])
+    return speed
 
 
 def frame_index(merged: dict) -> list[tuple]:

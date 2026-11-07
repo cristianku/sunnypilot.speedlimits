@@ -38,6 +38,8 @@ EXTRACT_VERSION = 3
 # (series, service, field path, kind, tolerance, scale): numbers are km/h where the log has m/s (scale 3.6).
 SERIES = (
     ('v_ego', 'carState', 'vEgo', 'num', 0.5, 3.6),
+    # The speed the dashboard shows; a copy of vEgo where the port does not set it (drive_logs.dashboard_speed).
+    ('v_ego_cluster', 'carState', 'vEgoCluster', 'num', 0.5, 3.6),
     ('gas', 'carState', 'gasPressed', 'bool', 0, 1),
     ('brake', 'carState', 'brakePressed', 'bool', 0, 1),
     ('steer_pressed', 'carState', 'steeringPressed', 'bool', 0, 1),

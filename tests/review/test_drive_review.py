@@ -94,6 +94,7 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
         def car_state(event, s=s):
             car = event.init('carState')
             car.vEgo = 85 / 3.6
+            car.vEgoCluster = 88 / 3.6
             car.vCruise = 100
             car.gasPressed = _pressed(s, GAS)
             car.brakePressed = _pressed(s, BRAKE)
@@ -399,6 +400,28 @@ def test_the_car_ahead_has_numbers_only_while_it_is_there(tmp_path):
     # No car ahead: nothing known, never 0 or the numbers of the message.
     for name in ('lead_d', 'lead_v', 'lead_v_rel'):
         assert at(name, 5) is None and at(name, 25) is None
+
+
+def test_the_dashboard_speed_is_the_logs_own_or_vego_plus_the_cars_offset(tmp_path):
+    comma_drive(tmp_path, segments=(0,))
+    store = drive_review.store_for(tmp_path)
+    store.scan(ROUTE)
+    merged = store.merged(ROUTE)
+    assert {value for _, value in merged['series']['v_ego_cluster']} == {88.0}
+    assert {value for _, value in drive_logs.dashboard_speed(merged)} == {88.0}
+    peugeot = {'meta': {'car': {'fingerprint': 'PSA_PEUGEOT_3008'}}}
+    own = [[0, 0.2], [10, 50.0], [20, 80.0], [30, None]]
+    # A log from before vEgoCluster was kept, and one where it is a copy of vEgo: vEgo + 3 on the Peugeot, 0 when still.
+    for series in ({'v_ego': own}, {'v_ego': own, 'v_ego_cluster': own}):
+        assert drive_logs.dashboard_speed({**peugeot, 'series': series}) == [[0, 0.0], [10, 53.0], [20, 83.0], [30, None]]
+    # A car with no offset known stays at vEgo.
+    assert drive_logs.dashboard_speed({'series': {'v_ego': own}}) == [[0, 0.0], [10, 50.0], [20, 80.0], [30, None]]
+    # Its own (the car's cluster speed): taken as it is, and vEgo + 3 only on a minute extracted without it.
+    cluster = [[0, 0.0], [10, 53.0], [15, None]]
+    assert drive_logs.dashboard_speed({**peugeot, 'series': {'v_ego': own, 'v_ego_cluster': cluster}}) == [
+        [0, 0.0], [10, 53.0], [20, 83.0], [30, None]]
+    toyota = [[0, 0.0], [10, 50.75], [15, None]]
+    assert drive_logs.dashboard_speed({**peugeot, 'series': {'v_ego': own, 'v_ego_cluster': toyota}})[1] == [10, 50.75]
 
 
 def test_holes_in_the_encode_index_degrade_the_sync_and_the_gps_gives_the_date(tmp_path):
