@@ -469,8 +469,8 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
 #panels { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .segmented button { padding: 4px 8px; min-height: 32px; }
-/* Value buttons look like the Swiss signs: white face, red ring, readable "100" and "120". Five per row. */
-.signs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; justify-items: center; }
+/* Value buttons look like the Swiss signs: white face, red ring, readable "100" and "120". Six per row. */
+.signs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; justify-items: center; }
 .sign {
   width: 100%; max-width: 50px; aspect-ratio: 1; padding: 0; border-radius: 50%;
   border: 4.5px solid var(--sign-ring); background: var(--sign-face); color: var(--sign-ink);
@@ -681,7 +681,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .timeline { padding: 2px 16px 14px; }
   .quality { padding: 10px 16px; }
   .tl-ticks button { height: 16px; }
-  .signs { grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+  .signs { grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; }
   /* The confirm button is in the bottom bar: the section under the inspector shows only messages and links. */
   .panel .confirm-section.quiet { display: none; }
   .confirm-area .btn.primary, .keys, .keys-toggle { display: none; }
@@ -756,7 +756,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .tl-card { border-radius: 16px; }
   .status-line { min-height: 0; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
-  .signs { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px 8px; }
+  .signs { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 8px; }
   .sign { max-width: 56px; font-size: 18px; border-width: 5px; }
   .sign.wide { font-size: 16px; }
   .empty-note { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; }

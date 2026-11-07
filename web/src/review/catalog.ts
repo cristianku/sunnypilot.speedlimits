@@ -24,7 +24,7 @@ export const FAMILIES: readonly Family[] = [
   {id: 'other_sign', label: 'Other sign', hasValue: false, minor: true},
   {id: 'not_a_sign', label: 'Not a sign', hasValue: false, minor: true},
 ];
-export const QUICK_VALUES: readonly number[] = [20, 30, 40, 50, 60, 70, 80, 100, 120];
+export const QUICK_VALUES: readonly number[] = [10, 20, 30, 40, 50, 60, 70, 80, 100, 120];
 /** The one kind of a "Not a sign" box (nnslr_tools.sign_types.NOT_A_SIGN_TYPES): a sign-like disc or panel on a
  * vehicle, such as the top-speed sticker on the back of a truck. */
 export const ON_VEHICLE = 'on_vehicle';

@@ -78,7 +78,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - **✕**: elimina quel riquadro.
 - **Riquadro N**, quando un riquadro è selezionato:
   - lo zoom sul cartello, con gli angoli gialli per ridimensionare;
-  - i cartelli rapidi **20 30 40 50 60 70 80 100 120** e **?** (numero non leggibile);
+  - i cartelli rapidi **10 20 30 40 50 60 70 80 100 120** e **?** (numero non leggibile);
   - **Altro valore**, per i numeri che non ci sono tra quelli rapidi. Compare solo quando il tipo ammette un numero;
   - **Tipo**: Limite massimo, Fine limitazione, Illeggibile, Segnale variabile, Zona; più in piccolo Numero a terra, Altro cartello, Non è un cartello;
   - **Strada**: La nostra, Un'altra, Da chiarire;
