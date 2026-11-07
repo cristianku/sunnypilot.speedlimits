@@ -2342,6 +2342,9 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
     # A token fixed in NNSLR_REVIEW_TOKEN (the systemd service) is never printed:
     # the output may end in a log. A random token must be printed, or nobody could use it.
     token_from_env = bool(os.environ.get(TOKEN_ENV))
+    # The video of a drive made as soon as its minutes arrive, before the page asks for it.
+    from nnslr_tools import drive_video
+    drive_video.start_watch(root)
     with server:
         port = server.server_port
         # [site-login] - START

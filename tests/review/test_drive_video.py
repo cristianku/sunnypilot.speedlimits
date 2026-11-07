@@ -82,8 +82,71 @@ def test_the_gpu_must_write_every_frame_of_the_index(tmp_path, monkeypatch):
     # A frame lost where two minutes join would move all the minutes after it.
     monkeypatch.setattr(drive_video, '_ffmpeg', lambda _arguments, _done: 59)
     with pytest.raises(RuntimeError, match='59 frames written of 60'):
-        drive_video._encode_on_gpu([(0, tmp_path / 'fcamera.hevc')], tmp_path / 'out.mp4', drive_video.WIDTH, 60,
-                                   lambda _frames: None)
+        drive_video._encode_on_gpu([(0, tmp_path / 'fcamera.hevc')], [60], tmp_path / 'parts', tmp_path / 'out.mp4',
+                                   drive_video.WIDTH, lambda _frames: None)
+
+
+def test_the_cpu_decodes_the_last_minutes_beside_the_gpu(monkeypatch):
+    monkeypatch.setattr(drive_video, '_cpu_busy', lambda: False)
+    parts = [(segment, Path(f'{segment}/fcamera.hevc')) for segment in range(50)]
+    pieces = drive_video._split(parts, [1200] * 50)
+    # The GPU's minutes first, then the CPU's, every minute once and in order.
+    assert [i for piece in pieces for i in piece] == list(range(50))
+    assert len(pieces) == drive_video.CPU_WORKERS + 1
+    assert len(pieces[0]) == 28
+    # A busy CPU, or a short drive, leaves it all to the GPU.
+    monkeypatch.setattr(drive_video, '_cpu_busy', lambda: True)
+    assert drive_video._split(parts, [1200] * 50) == [list(range(50))]
+    monkeypatch.setattr(drive_video, '_cpu_busy', lambda: False)
+    assert drive_video._split(parts[:3], [1200] * 3) == [list(range(3))]
+
+
+@needs_ffmpeg
+def test_a_drive_split_between_gpu_and_cpu_is_whole_and_in_order(tmp_path, monkeypatch):
+    monkeypatch.setattr(drive_video, '_cpu_busy', lambda: False)
+    for segment in range(10):
+        _minute(tmp_path, segment, 1)
+    made = drive_video.make(tmp_path, ROUTE)
+    video = drive_video.paths(tmp_path, ROUTE)[0]
+    frames = subprocess.run(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
+                             'stream=nb_read_packets', '-of', 'csv=p=0', str(video)], capture_output=True, text=True, check=True)
+    assert int(frames.stdout.strip()) == 200 and made['duration'] == 10.0
+    assert not list(video.parent.glob('*.parts'))
+
+
+def test_an_old_full_definition_video_is_made_again(tmp_path):
+    _folder = tmp_path / 'raw' / 'routes' / ROUTE / '0'
+    _folder.mkdir(parents=True)
+    (_folder / 'fcamera.hevc').write_bytes(b'x')
+    video, index = drive_video.paths(tmp_path, ROUTE)
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b'v')
+    value = {'width': drive_video.FULL_WIDTH, 'source': drive_video._signature(drive_video.minutes(tmp_path, ROUTE))}
+    index.write_text(json.dumps(value))
+    assert drive_video.index(tmp_path, ROUTE) is None
+    index.write_text(json.dumps(dict(value, width=drive_video.HD_WIDTH)))
+    assert drive_video.index(tmp_path, ROUTE) is not None
+
+
+def test_the_watch_makes_a_recent_drive_once_its_minutes_stopped_changing(tmp_path, monkeypatch):
+    folder = tmp_path / 'raw' / 'routes' / ROUTE / '0'
+    folder.mkdir(parents=True)
+    (folder / 'fcamera.hevc').write_bytes(b'x')
+    started = []
+    monkeypatch.setattr(drive_video, 'state', lambda _root, route, start=False: started.append(route))
+
+    class Ticks:
+        def __init__(self, count):
+            self.count = count
+
+        def wait(self, _seconds):
+            self.count -= 1
+            return self.count < 0
+
+    drive_video.watch(tmp_path, Ticks(1))
+    assert started == []  # seen once: it may still be arriving
+    drive_video.watch(tmp_path, Ticks(2))
+    assert started == [ROUTE]
 
 
 @needs_ffmpeg
