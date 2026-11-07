@@ -804,6 +804,9 @@ class Panel:
             payload['min_routes'] = module.MIN_REVIEWED_ROUTES
             payload['reviewed_routes'] = sum(1 for row in rows if row['confirmed'])
             payload['next_action'] = _next_action(payload['next_step'])
+            # The prepared drives without road types: the Overview asks for them once nothing waits to be prepared.
+            from nnslr_tools.road_types import drives_without
+            payload['road_types_missing'] = drives_without(self.root)
         # Who can propose the signs on this server (the choice of the Prepare tab), and why not.
         from nnslr_tools.preannotate import ours_missing, vlm_missing
         # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then); ours:

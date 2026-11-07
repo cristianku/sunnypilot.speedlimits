@@ -637,6 +637,13 @@ def maps_status(root: Path) -> dict:
             'checked_at': status.get('checked_at')}
 
 
+def drives_without(root: Path) -> int:
+    """The prepared drives (with a pre-annotation report) that have no road types yet: the Overview's Drives row."""
+    from nnslr_tools.review import list_reports
+    folder = Path(root) / ROAD_TYPES_RELATIVE
+    return sum(1 for route, _ in list_reports(Path(root)) if not (folder / (route + '.jsonl')).is_file())
+
+
 def summary(root: Path) -> dict:
     """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
     'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':

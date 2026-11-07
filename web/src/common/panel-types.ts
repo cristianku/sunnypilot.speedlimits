@@ -409,6 +409,8 @@ export interface PanelStatus {
   /** The dataset is current and a training can start. */
   all_ready: boolean;
   next_action: 'prepare' | 'review' | 'train' | 'fetch' | null;
+  /** Prepared drives without road types yet (Data › Roads); absent before the panel is available. */
+  road_types_missing?: number;
   reviewed_routes: number;
   min_routes: number;
   activities: Activity[];

@@ -366,3 +366,14 @@ def test_the_classifier_and_the_board_input_reach_the_panel_over_http(root, chec
                          full_log(server.app.panel, job), re.M)
     finally:
         server.close()
+
+
+def test_the_overview_counts_the_prepared_drives_without_road_types(tmp_path):
+    from nnslr_tools.road_types import drives_without
+    from review_helpers import make_report
+    make_report(tmp_path, route='00000001--aaaaaaaaaa')
+    make_report(tmp_path, route='00000002--bbbbbbbbbb')
+    assert drives_without(tmp_path) == 2
+    (tmp_path / 'derived' / 'road_types').mkdir(parents=True)
+    (tmp_path / 'derived' / 'road_types' / '00000001--aaaaaaaaaa.jsonl').write_text('{}\n')
+    assert drives_without(tmp_path) == 1

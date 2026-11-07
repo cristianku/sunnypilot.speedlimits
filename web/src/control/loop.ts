@@ -74,6 +74,17 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
   const proposers = status.proposers;
   const chosen = proposers?.chosen ?? null;
   const missing = chosen === 'ours' ? proposers?.ours ?? '' : chosen === 'qwen' ? proposers?.qwen ?? proposers?.qwen_gpu ?? '' : '';
+  // Prepared, but their road types not found yet (Data › Roads): that is the work of the row until it is done.
+  const roads = !count ? status.road_types_missing ?? 0 : 0;
+  if (roads && status.actions.road_types) {
+    return {
+      key: 'drives', label: 'Drives', href: '/roads', kind: 'prepare',
+      big: plural(roads, 'drive') + ' without road types',
+      note: 'Prepared: the map still has to say the type of road of each picture.', warn: '',
+      more: {href: '/roads', label: 'Roads'}, waiting: true, ok: false, running: running(status, 'drives'),
+      action: {name: 'road_types', state: status.actions.road_types, label: 'Find the road types'},
+    };
+  }
   // Nothing to prepare: the button downloads the new drives from the comma (also in the comma's panel, at the top).
   const name: ActionName = count ? 'prepare' : 'fetch';
   return {
