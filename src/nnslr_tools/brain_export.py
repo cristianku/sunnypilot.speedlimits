@@ -1,9 +1,13 @@
-"""The brain as the car runs it: one step a second as ONNX with its contract (<output>.contract.json).
+"""The brain as the car runs it: one step at each of its frames (the checkpoint's rate_hz: 1 for the first brains, every
+reading of the car since 7 Nov 2026) as ONNX with its contract (<output>.contract.json).
 
 The step: image (1, 3, 144, 256) 0..1, extra (1, inputs) the groups of the checkpoint side by side (brain_inputs.pack_inputs)
 and hidden (1, hidden), zeros at the start -> speed (1, SPEED_CLASSES) logits and hidden_out, given back as hidden at the next
 step. The speed said is contract['output']['kph'][argmax(speed)]; no softmax, nothing is read from how sure it is. The GRU is
-written out with matrix products as the road-type network's (gru_step): no GRU node in the graph the comma compiles.
+written out with matrix products as the road-type network's (gru_step): no GRU node in the graph the comma compiles. A brain
+with the limit ahead also gives next (1, SPEED_CLASSES + 1), kph[argmax] or none for the last class, and metres (1, 1), the
+metres to it over output.metres_scale. The contract's step says how the car steps it: rate_hz, clock ("schedule": on the
+grid of the rate, as the training's frames) and picture ("brain": vision.BrainInput; "road_type": the PIL picture).
 
 works_head stays out (brain_net.car_weights). What comes out of the export is checked twice: against PyTorch with onnxruntime
 on random inputs, and along a whole real drive against what training measured (brain_train.predict), the memory fed back as
@@ -18,13 +22,15 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import build_brain_net, car_weights
-from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, SPEED_CLASSES, class_kph, dataset, inputs_sha256, pack_inputs
+from nnslr_tools.brain_targets import (BRAIN_INPUTS, INPUT_SIZES, METRES_SCALE, SPEED_CLASSES, class_kph, dataset,
+                                       inputs_sha256, pack_inputs)
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
 from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
 
 BRAIN_FILE = 'brain.onnx'
 INPUT_NAMES = ['image', 'extra', 'hidden']
 OUTPUT_NAMES = ['speed', 'hidden_out']
+AHEAD_OUTPUT_NAMES = ['speed', 'next', 'metres', 'hidden_out']
 RTOL, ATOL = 1e-4, 1e-4
 
 
@@ -32,15 +38,20 @@ def load_brain(checkpoint: Path):
     """(the network on the CPU in eval mode, without works_head; what the checkpoint says of itself)."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
-    model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, pretrained=False,
-                            features=saved['features'], hidden=saved['hidden'])
+    model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
+                            pretrained=False, features=saved['features'], hidden=saved['hidden'])
     weights = {name: value for name, value in saved['weights'].items() if name in car_weights(model)}
     model.load_state_dict(weights, strict=True)
     return model.eval(), saved
 
 
+def output_names(model) -> list[str]:
+    return AHEAD_OUTPUT_NAMES if getattr(model, 'ahead', False) else OUTPUT_NAMES
+
+
 def step_module(model):
-    """The second of the car: (image, extra, hidden) -> (speed logits, hidden_out), the numbers of BrainNet.forward."""
+    """A step of the car: (image, extra, hidden) -> (speed logits, hidden_out), with the limit ahead (speed logits, next
+    logits, metres, hidden_out): the numbers of BrainNet.forward."""
     torch = _torch()
     from torch import nn
 
@@ -52,8 +63,15 @@ def step_module(model):
         def forward(self, image, extra, hidden):
             x = torch.cat([self.model.encode(image), extra], dim=-1)
             hidden_out = gru_step(self.model.gru, x, hidden)
-            speed = self.model.speed_head(hidden_out) + self.model.trust(hidden_out) * self.model.number_in_force(extra)
-            return speed, hidden_out
+            number = self.model.number_in_force(extra)
+            speed = self.model.speed_head(hidden_out) + self.model.trust(hidden_out) * number
+            if not self.model.ahead:
+                return speed, hidden_out
+            following = (self.model.next_head(hidden_out) +
+                         self.model.trust_next(hidden_out) * torch.cat([number, number[..., :1] * 0], dim=-1))
+            metres = (self.model.metres_head(hidden_out) +
+                      self.model.metres_gate(hidden_out) * self.model.sign_metres(extra)[..., None])
+            return speed, following, metres, hidden_out
 
     return Step().eval()
 
@@ -64,41 +82,48 @@ def _random_inputs(torch, width: int, hidden: int, generator) -> tuple:
 
 
 def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu') -> dict:
-    """A whole drive by step_run(image, extra, hidden) -> (logits, hidden_out), numpy, against brain_train.predict: the frames
-    and how many of them say another speed. The memory starts again where the car's does (drive['cuts'])."""
-    expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)['kph']
+    """A whole drive by step_run(image, extra, hidden) -> the step's outputs (speed logits first, hidden_out last), numpy,
+    against brain_train.predict: the frames and how many of them say another speed, or another limit ahead. The memory
+    starts again where the car's does (drive['cuts'])."""
+    expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
     hidden = np.zeros((1, model.gru.hidden_size), dtype=np.float32)
-    said = np.zeros(len(expected), dtype=np.int64)
-    for frame in range(len(expected)):
+    said = np.zeros(len(expected['kph']), dtype=np.int64)
+    ahead = np.zeros(len(expected['kph']), dtype=np.int64)
+    for frame in range(len(said)):
         if frame in drive['cuts']:
             hidden = np.zeros_like(hidden)
         image = store.batch([(drive['route'], [frame])])[0].cpu().numpy()
-        logits, hidden = step_run(image, drive['extra'][frame:frame + 1], hidden)
-        said[frame] = int(class_kph(int(np.argmax(logits))))
-    other = int((said != expected).sum())
-    return {'route': drive['route'], 'frames': len(expected), 'other_speed': other, 'said': sorted({int(v) for v in said})}
+        outputs = step_run(image, drive['extra'][frame:frame + 1], hidden)
+        hidden = outputs[-1]
+        said[frame] = int(class_kph(int(np.argmax(outputs[0]))))
+        ahead[frame] = int(np.argmax(outputs[1])) if 'next' in expected else 0
+    found = {'route': drive['route'], 'frames': len(said), 'other_speed': int((said != expected['kph']).sum()),
+             'said': sorted({int(v) for v in said})}
+    if 'next' in expected:
+        found['other_ahead'] = int((ahead != expected['next']).sum())
+    return found
 
 
-def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None,
-                  device: str = 'cpu') -> tuple[dict, FrameStore]:
-    """A drive of the labels, with its pictures: route, or the one with the most frames in test."""
-    drives = dataset(root, merged_of, [route] if route else None)
+def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None, device: str = 'cpu',
+                  rate: float = 1.0) -> tuple[dict, FrameStore]:
+    """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test."""
+    drives = dataset(root, merged_of, [route] if route else None, rate=rate)
     drive = max(drives, key=lambda item: sum(partition == 'test' for partition in item['partitions']))
     drive['extra'] = pack_inputs(drive['inputs'], groups)
     return drive, FrameStore(_pictures(root, [drive], dry_run=False, log=lambda text: None), device)
 
 
-def _export(step, example: tuple, output: Path) -> None:
+def _export(step, example: tuple, output: Path, names: list[str] = OUTPUT_NAMES) -> None:
     torch = _torch()
     try:
-        program = torch.onnx.export(step, example, input_names=INPUT_NAMES, output_names=OUTPUT_NAMES, dynamo=True,
+        program = torch.onnx.export(step, example, input_names=INPUT_NAMES, output_names=names, dynamo=True,
                                     external_data=False)
         program.save(str(output))
     except ImportError as exc:
         raise ValueError('onnx_dependencies_missing: install onnx and onnxscript in the training environment') from exc
     except Exception as exc:  # torch.export refuses the graph: the TorchScript exporter
         print(f'torch.export could not export the brain step ({type(exc).__name__}); using TorchScript', flush=True)
-        torch.onnx.export(step, example, str(output), input_names=INPUT_NAMES, output_names=OUTPUT_NAMES, dynamo=False,
+        torch.onnx.export(step, example, str(output), input_names=INPUT_NAMES, output_names=names, dynamo=False,
                           opset_version=17)
 
 
@@ -120,9 +145,10 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     if not set(groups) <= set(BRAIN_INPUTS.INPUT_SIZES):
         raise ValueError(f'this network has inputs the car does not give: {groups}')
     width, hidden = sum(INPUT_SIZES[name] for name in groups), saved['hidden']
-    step = step_module(model)
+    step, names = step_module(model), output_names(model)
+    rate = float(saved.get('rate_hz', 1.0))
     output.parent.mkdir(parents=True, exist_ok=True)
-    _export(step, _random_inputs(torch, width, hidden, torch.Generator().manual_seed(1)), output)
+    _export(step, _random_inputs(torch, width, hidden, torch.Generator().manual_seed(1)), output, names)
     onnx.checker.check_model(onnx.load(str(output)))
     session = onnxruntime.InferenceSession(str(output), providers=['CPUExecutionProvider'])
 
@@ -141,27 +167,40 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     if not passed:
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
-        drive, store = rollout_drive(Path(data_root), merged_of, groups, route)
+        drive, store = rollout_drive(Path(data_root), merged_of, groups, route, rate=rate)
         verification['rollout'] = drive_rollout(model, run, drive, store)
-        if verification['rollout']['other_speed']:
+        if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
     shapes = {'image': [1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH], 'extra': [1, width], 'hidden': [1, hidden]}
+    brain_picture = saved.get('picture', 'road_type') == 'brain'
+    resize = ({'method': 'vision.BrainInput: the NV12 planes scaled first with PIL bilinear weights, then RGB',
+               'from': list(data.SOURCE_SIZE), 'to': [data.FRAME_WIDTH, data.FRAME_HEIGHT], 'crop': 'none, the whole frame'}
+              if brain_picture else
+              {'method': 'PIL BILINEAR (antialiased), vision.resize', 'from': list(data.SOURCE_SIZE),
+               'to': [data.FRAME_WIDTH, data.FRAME_HEIGHT], 'crop': 'none, the whole frame'})
+    outputs = [{'name': 'speed', 'shape': [1, SPEED_CLASSES], 'dtype': 'float32'}]
+    if model.ahead:
+        outputs += [{'name': 'next', 'shape': [1, SPEED_CLASSES + 1], 'dtype': 'float32',
+                     'meaning': 'the next limit: kph[argmax], none for the last class'},
+                    {'name': 'metres', 'shape': [1, 1], 'dtype': 'float32', 'meaning': 'the metres to it over metres_scale'}]
+    outputs.append({'name': 'hidden_out', 'shape': [1, hidden], 'dtype': 'float32', 'meaning': 'give it back as hidden'})
     contract = {
         'schema_version': 1, 'task': 'brain', 'architecture': 'mobilenet_v3_small+gru', 'checkpoint': str(checkpoint),
         'checkpoint_sha256': sha256_file(checkpoint), 'onnx_sha256': sha256_file(output), 'split_sha256': saved['split'],
         'epoch': saved['epoch'], 'inputs_sha256': saved['inputs_sha256'], 'reader': saved['reader'],
         'input': {'name': 'image', 'shape': shapes['image'], 'dtype': 'float32', 'layout': 'NCHW', 'color': 'RGB', 'range': '0..1',
                   'normalization': 'none: ImageNet mean and std are applied inside the network',
-                  'resize': {'method': 'PIL BILINEAR (antialiased), vision.resize', 'from': list(data.SOURCE_SIZE),
-                             'to': [data.FRAME_WIDTH, data.FRAME_HEIGHT], 'crop': 'none, the whole frame'},
-                  'source': 'narrow road camera NV12 -> vision.yuv_to_rgb -> vision.resize'},
+                  'resize': resize,
+                  'source': ('narrow road camera NV12 -> vision.BrainInput' if brain_picture else
+                             'narrow road camera NV12 -> vision.yuv_to_rgb -> vision.resize')},
         'inputs': [{'name': name, 'shape': shapes[name], 'dtype': 'float32'} for name in INPUT_NAMES],
         'output': {'name': 'speed', 'shape': [1, SPEED_CLASSES], 'kph': [int(class_kph(index)) for index in range(SPEED_CLASSES)],
-                   'decode': 'kph[argmax(speed)]'},
-        'outputs': [{'name': 'speed', 'shape': [1, SPEED_CLASSES], 'dtype': 'float32'},
-                    {'name': 'hidden_out', 'shape': [1, hidden], 'dtype': 'float32', 'meaning': 'give it back as hidden'}],
-        'step': {'rate_hz': 1.0, 'groups': list(groups), 'memory_gap_seconds': BRAIN_INPUTS.MEMORY_GAP_SECONDS,
-                 'inputs': INPUT_NAMES, 'outputs': OUTPUT_NAMES, 'plates': bool(saved.get('plates', False)),
+                   'decode': 'kph[argmax(speed)]', **({'metres_scale': METRES_SCALE} if model.ahead else {})},
+        'outputs': outputs,
+        'step': {'rate_hz': rate, 'clock': 'last' if rate == 1.0 else 'schedule',
+                 'picture': 'brain' if brain_picture else 'road_type', 'groups': list(groups),
+                 'memory_gap_seconds': BRAIN_INPUTS.MEMORY_GAP_SECONDS,
+                 'inputs': INPUT_NAMES, 'outputs': names, 'plates': bool(saved.get('plates', False)),
                  'hours': bool(saved.get('hours', False)), 'wet': bool(saved.get('wet', False))},
         'verification': verification,
     }

@@ -360,16 +360,23 @@ def step_flops(model, width: int = data.FRAME_WIDTH, height: int = data.FRAME_HE
 
 class FrameStore:
     """The resized pictures of the drives in one uint8 tensor (frames, H, W, 3) on the device, and each drive's
-    first row in it."""
+    first row in it. A drive's pictures can be anything with a length that np.asarray reads: they are read one drive at a
+    time, straight into their place, so that the memory holds one drive besides the store."""
 
     def __init__(self, arrays: dict[str, np.ndarray], device):
         torch = _torch()
-        self.offset, rows, start = {}, [], 0
+        self.offset, start = {}, 0
         for route, array in arrays.items():
             self.offset[route] = start
-            rows.append(array)
             start += len(array)
-        self.pixels = torch.from_numpy(np.concatenate(rows)).to(device)
+        self.pixels = None
+        for route, array in arrays.items():
+            values = torch.from_numpy(np.ascontiguousarray(np.asarray(array)))
+            if self.pixels is None:
+                self.pixels = torch.empty((start, *values.shape[1:]), dtype=values.dtype, device=device)
+            self.pixels[self.offset[route]:self.offset[route] + len(values)] = values.to(device)
+        if self.pixels is None:
+            raise ValueError('no pictures')
 
     def batch(self, route_positions: list[tuple[str, list[int]]]):
         """(B, T, 3, H, W) float 0..1 of equal-length position lists."""

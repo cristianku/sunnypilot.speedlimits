@@ -15,8 +15,15 @@ speedvisiond), the settings of the car's release in place. The reviewed sign lab
 the car never has them; what the car's networks miss or misread, the road-type network meets the same way.
 
 Per drive, data/derived/road_type_signs/<route>.json: the fingerprint of the code and networks used, the frames read
-per segment, every frame with a sign read sure enough (time in seconds from the start of the drive, class, confidence)
-and the road signs SpeedLimitMemory confirms (time, road). Built again when the vision code, a network or the video
+per segment, every frame with a sign read sure enough (time in seconds from the start of the drive, class, confidence;
+'boxes', in the same order, their boxes in the frame's pixels, what vision.SignDistance measures the sign by) and the
+road signs SpeedLimitMemory confirms (time, road).
+
+The brain's pictures come from the same pass (pictures=True: the drives of Speed review and the certified ones): each
+frame read through the car's vision.BrainInput, the same class and the same NV12 frame as speedvisiond, saved per segment
+as data/derived/brain_frames/<route>/<segment>.npy, uint8 (frames read, BRAIN_HEIGHT, BRAIN_WIDTH, 3), and their count
+per segment in the record ('pictures'). A drive asked with pictures and without them is read again; a drive that has them
+keeps them when it is read again. Built again when the vision code, a network or the video
 changed. On the GPU when there is one (device 'auto'): the video decoded by NVDEC (ffmpeg -hwaccel cuda, bit-exact: HEVC
 decoding is), the two networks under onnxruntime-gpu (their outputs differ from the CPU's by about 1e-6); else, or
 with device 'cpu', ffmpeg and onnxruntime on the CPU.
@@ -59,7 +66,7 @@ SUNNYPILOT_ENV, SUNNYPILOT_DEFAULT = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot
 NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 RELEASE_MANIFEST = 'speed_limits.json'
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
-CACHE_VERSION = 2  # 2: the boards
+CACHE_VERSION = 3  # 2: the boards; 3: the boxes of the signs
 PROBE_ATTEMPTS = 4
 PROBE_PAUSE_S = 10
 CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
@@ -68,6 +75,8 @@ VIDEO_FPS = 20
 # camera's 50 ms grid, and its logs read 4.1 a second.
 VIDEO_STEP = 5
 SEGMENT_SECONDS = 60
+STEPS_PER_SECOND = VIDEO_FPS // VIDEO_STEP
+PICTURES_RELATIVE = Path('derived') / 'brain_frames'
 # The roads whose confirmed sign the network gets (vision.SpeedLimitMemory sets _road_sign_at for these).
 SIGN_ROADS = ('motorway', 'expressway')
 # The input: [min(age, SIGN_HORIZON) / SIGN_SCALE, 1 when a sign was confirmed within SIGN_HORIZON seconds]. Never, or
@@ -204,25 +213,34 @@ def _video_size(video: Path) -> tuple[int, int]:
     raise RuntimeError(f'ffprobe cannot read {video}: {done.stderr.strip()}')
 
 
-def read_segment(task: tuple[str, int]) -> dict:
+def read_segment(task: tuple[str, int, str | None]) -> dict:
     """The car's read_signs on one segment's road video, one frame in VIDEO_STEP: {'segment', 'frames' (read), 'signs':
-    [[seconds into the segment, [[class, confidence], ...]], ...] (the frames with a sign read sure enough), 'gpu' (the
-    networks ran there), 'nvdec' (the video was decoded there)}. NVDEC first when the worker may use the GPU: a video it
-    cannot decode is read again on the CPU."""
-    video, segment = task
+    [[seconds into the segment, [[class, confidence], ...]], ...] (the frames with a sign read sure enough), 'boxes' (their
+    boxes, in the same order), 'gpu' (the networks ran there), 'nvdec' (the video was decoded there), 'pictures' (how many
+    were saved to the task's path, None without one)}. NVDEC first when the worker may use the GPU: a video it cannot decode
+    is read again on the CPU."""
+    video, segment, pictures = task
     width, height = _video_size(Path(video))
     # A video at full definition is read at the size of the others: these signs are big, no crop of the frame is needed.
     reduce = (width, height) == FULL_SIZE
     if reduce:
         width, height = FRAME_SIZE
     if _WORKER.get('nvdec'):
-        result = _read_video(video, width, height, nvdec=True, reduce=reduce)
+        result = _read_video(video, width, height, nvdec=True, reduce=reduce, pictures=pictures)
         if result['frames']:
             return {'segment': segment, **result}
-    return {'segment': segment, **_read_video(video, width, height, nvdec=False, reduce=reduce)}
+    return {'segment': segment, **_read_video(video, width, height, nvdec=False, reduce=reduce, pictures=pictures)}
 
 
-def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: bool = False) -> dict:
+def _save_pictures(path: Path, pictures: list[np.ndarray]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f'{path.stem}.{os.getpid()}.tmp.npy')
+    np.save(temporary, np.stack(pictures) if pictures else np.zeros((0, 0, 0, 3), dtype=np.uint8))
+    temporary.replace(path)
+
+
+def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: bool = False,
+                pictures: str | None = None) -> dict:
     vision, finder, classifier, classes = (_WORKER[name] for name in ('vision', 'finder', 'classifier', 'classes'))
     size = width * height * 3 // 2
     chosen = f'select=not(mod(n\\,{VIDEO_STEP}))' + (',' + REDUCE_FILTER if reduce else '')
@@ -230,7 +248,8 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
                '-i', str(video), '-vf', chosen, '-vsync', '0', '-pix_fmt', 'nv12', '-f',
                'rawvideo', '-']
     signnet_input = vision.SignNetInput(width, height)
-    found, count = [], 0
+    brain_input = vision.BrainInput(width, height) if pictures else None
+    found, boxes, saved, count = [], [], [], 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
         while True:
             buffer = process.stdout.read(size)
@@ -239,12 +258,18 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
             data = np.frombuffer(buffer, dtype=np.uint8)
             y, uv = vision.nv12_planes(data, width, height, width, width * height)
             signs = vision.read_signs(y, uv, signnet_input, finder, classifier, classes)
-            sure = [[sign['class'], round(sign['confidence'], 4)] for sign in signs
-                    if sign['confidence'] >= vision.MIN_CONFIDENCE and sign['class'] != NOT_A_SIGN]
-            if sure:
-                found.append([round(count * VIDEO_STEP / VIDEO_FPS, 3), sure])
+            kept = [sign for sign in signs if sign['confidence'] >= vision.MIN_CONFIDENCE and sign['class'] != NOT_A_SIGN]
+            if kept:
+                found.append([round(count * VIDEO_STEP / VIDEO_FPS, 3),
+                              [[sign['class'], round(sign['confidence'], 4)] for sign in kept]])
+                boxes.append([[round(float(value), 2) for value in sign['box']] for sign in kept])
+            if brain_input is not None:
+                saved.append(brain_input.planes(y, uv).transpose(1, 2, 0))
             count += 1
-    return {'frames': count, 'signs': found, 'gpu': finder.gpu, 'nvdec': nvdec}
+    if pictures and count:
+        _save_pictures(Path(pictures), saved)
+    return {'frames': count, 'signs': found, 'boxes': boxes, 'gpu': finder.gpu, 'nvdec': nvdec,
+            'pictures': count if pictures and count else None}
 
 
 def confirmations(vision, readings: list[tuple[float, list]]) -> list[list]:
@@ -299,6 +324,25 @@ def cache_path(root: Path, route: str) -> Path:
     return Path(root) / SIGNS_RELATIVE / f'{route}.json'
 
 
+def picture_path(root: Path, route: str, segment: int) -> Path:
+    """The brain's pictures of one segment: uint8 (frames read, BRAIN_HEIGHT, BRAIN_WIDTH, 3), one every VIDEO_STEP."""
+    return Path(root) / PICTURES_RELATIVE / route / f'{int(segment)}.npy'
+
+
+def pictures_ready(root: Path, record: dict | None) -> bool:
+    """The drive's record has the brain's pictures of every segment it read, and their files are there."""
+    if not record or not record.get('pictures'):
+        return False
+    return all(record['pictures'].get(segment) == frames and picture_path(root, record['route'], int(segment)).is_file()
+               for segment, frames in record['frames'].items() if frames)
+
+
+def load_pictures(root: Path, route: str, segment: int) -> np.ndarray | None:
+    """One segment's pictures, mapped from the disk (None without them)."""
+    path = picture_path(root, route, segment)
+    return np.load(path, mmap_mode='r') if path.is_file() else None
+
+
 def _videos(root: Path, route: str) -> dict[int, Path]:
     folder = Path(root) / RAW_RELATIVE / route
     videos = {}
@@ -321,7 +365,7 @@ def load_signs(root: Path, route: str) -> dict | None:
 
 def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: list, classifier: Path | None,
                 package: Path) -> dict:
-    """The record of a drive read to the end, written to its cache."""
+    """The record of a drive read to the end, written to its cache. 'pictures' only when every segment saved them."""
     vision = load_vision(package)
     segments.sort(key=lambda item: item['segment'])
     readings = [(item['segment'] * SEGMENT_SECONDS + seconds, signs)
@@ -329,9 +373,12 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
     record = {'route': route, 'fingerprint': stamp, 'videos': videos,
               'frames': {str(item['segment']): item['frames'] for item in segments},
               'readings': [[round(t, 3), signs] for t, signs in readings],
+              'boxes': [boxes for item in segments for boxes in item['boxes']],
               'confirmed': confirmations(vision, readings),
               'boards': board_confirmations(vision, readings),
               'classifier': str(classifier) if classifier is not None else None}
+    if all(item.get('pictures') == item['frames'] for item in segments if item['frames']):
+        record['pictures'] = {str(item['segment']): item['pictures'] for item in segments if item['frames']}
     path = cache_path(root, route)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.json.tmp')
@@ -341,11 +388,13 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
 
 
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
-                device: str = 'auto', classifier: Path | None = None, log=print) -> dict[str, dict]:
+                device: str = 'auto', classifier: Path | None = None, pictures: bool = False,
+                log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
     The segments of all drives are read in parallel by workers processes (default half the cores), on the GPU when
     there is one (device 'auto'; 'cpu' never). classifier: a v2 reader-best.pt to read with instead of the car's
-    (classifier_onnx)."""
+    (classifier_onnx). pictures: also the brain's pictures (picture_path), read again where they are missing; a drive
+    that has them gets them again whenever it is read."""
     package = package_path() if package is None else Path(package)
     onnx = classifier_onnx(root, classifier) if classifier is not None else None
     stamp = fingerprint(package, onnx)
@@ -354,22 +403,26 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         videos = _videos(root, route)
         stamps[route] = _video_stamp(videos)
         record = load_signs(root, route)
-        if record and record.get('fingerprint') == stamp and record.get('videos') == stamps[route]:
+        if record and record.get('fingerprint') == stamp and record.get('videos') == stamps[route] and \
+                (not pictures or pictures_ready(root, record)):
             records[route] = record
             continue
-        tasks += [(route, segment, str(path)) for segment, path in videos.items()]
+        keep = pictures or bool(record and record.get('pictures'))
+        tasks += [(route, segment, str(path), str(picture_path(root, route, segment)) if keep else None)
+                  for segment, path in videos.items()]
     if tasks:
         workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 2))
         which = f'the classifier {classifier}' if classifier is not None else "the car's classifier"
         log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
-            f'SignNet and {which}, 4 frames a second, {workers} processes')
+            f'SignNet and {which}, 4 frames a second, {workers} processes'
+            + (f', the brain\'s pictures of {sum(1 for t in tasks if t[3])} of them' if any(t[3] for t in tasks) else ''))
         results: dict[str, list] = {}
         left = Counter(task[0] for task in tasks)
         gpu = device != 'cpu'
         with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start,
                                  initargs=(str(package), gpu, str(onnx) if onnx else None)) as pool:
             done = 0
-            for (route, _, _), result in zip(tasks, pool.map(read_segment, [(v, s) for _, s, v in tasks])):
+            for (route, _, _, _), result in zip(tasks, pool.map(read_segment, [(v, s, p) for _, s, v, p in tasks])):
                 results.setdefault(route, []).append(result)
                 done += 1
                 left[route] -= 1

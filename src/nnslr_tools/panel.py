@@ -1082,18 +1082,20 @@ class Panel:
 
     def brain_labels(self) -> dict:
         """Train › Brain, what the labels of Speed review give a training today: brain_targets.summary, with the drives the
-        next training reads again first (not read, or read by another reader than the car's of today). A few seconds: asked
-        when the section opens, never by the status."""
+        next training reads again first (not read, read by another reader than the car's of today, or without the brain's
+        pictures). A few seconds: asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone.
             from nnslr_tools import brain_targets
+            # As the training will have them, once it has read again what it reads first.
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
-                                                                log=lambda text: None))
+                                                                log=lambda text: None, rate=brain_targets.RATE_HZ,
+                                                                need_pictures=False))
         except (ImportError, OSError, ValueError) as exc:
             return {'problem': str(exc)}
-        return {**found, 'to_read': sum(not row['reader_current'] for row in found['drives'])}
+        return {**found, 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:

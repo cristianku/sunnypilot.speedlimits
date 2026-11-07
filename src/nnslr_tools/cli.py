@@ -1813,11 +1813,11 @@ def build_parser() -> argparse.ArgumentParser:
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
     p_road_signs.add_argument("--labelled", action="store_true",
-                              help="the drives of Speed review instead of those with road types: what the brain needs "
-                                   "(scripts/run_brain.sh)")
+                              help="the drives of Speed review instead of those with road types, with the brain's "
+                                   "pictures: what the brain needs (scripts/run_brain.sh)")
     p_road_signs.add_argument("--certified", action="store_true",
-                              help="the drives certified in Models › Regression, those prepared: what its brains need "
-                                   "(scripts/run_regression.sh)")
+                              help="the drives certified in Models › Regression, those prepared, with the brain's "
+                                   "pictures: what its brains need (scripts/run_regression.sh)")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -2596,7 +2596,8 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
-    drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route)
+    drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route,
+                                   rate=brain_targets.RATE_HZ, need_pictures=False)
     found = brain_targets.summary(drives)
     print(json.dumps(found, indent=2) if args.json else brain_targets.summary_text(found))
     return 0
@@ -2915,7 +2916,7 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
                           workers=args.workers or None, device=args.device,
                           classifier=Path(args.classifier) if args.classifier else None,
-                          log=lambda line: print(line, flush=True))
+                          pictures=bool(args.labelled or args.certified), log=lambda line: print(line, flush=True))
     for route, record in records.items():
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}, "

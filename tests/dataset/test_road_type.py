@@ -548,7 +548,7 @@ def test_a_chosen_classifier_is_part_of_the_readings_fingerprint(tmp_path):
     other.write_bytes(b'another classifier')
     assert signs.network_paths(package, other)['classifier'] == other
     assert signs.fingerprint(package) != signs.fingerprint(package, other)
-    assert signs.fingerprint(package)['version'] == signs.CACHE_VERSION == 2
+    assert signs.fingerprint(package)['version'] == signs.CACHE_VERSION == 3
 
 
 def test_the_readings_go_by_the_settings_of_the_release(tmp_path):
@@ -1170,8 +1170,8 @@ def test_a_drive_read_to_the_end_is_kept_when_a_later_one_fails(tmp_path, monkey
         def __enter__(self): return self
         def __exit__(self, *error): return False
         def map(self, function, tasks):
-            yield from ({'segment': segment, 'frames': 1, 'signs': [], 'gpu': False, 'nvdec': False}
-                        for _, segment in tasks[:1])
+            yield from ({'segment': segment, 'frames': 1, 'signs': [], 'boxes': [], 'gpu': False, 'nvdec': False,
+                         'pictures': None} for _, segment, _ in tasks[:1])
             raise RuntimeError('the NAS went away')
 
     video = tmp_path / 'fcamera.hevc'
@@ -1186,3 +1186,45 @@ def test_a_drive_read_to_the_end_is_kept_when_a_later_one_fails(tmp_path, monkey
         signs.build_signs(tmp_path, ['first', 'second'], package=tmp_path, workers=1, log=lambda line: None)
     assert signs.load_signs(tmp_path, 'first')['fingerprint'] == 'stamp'
     assert signs.load_signs(tmp_path, 'second') is None
+
+
+def test_a_segment_read_keeps_the_boxes_and_the_brain_pictures(tmp_path, monkeypatch):
+    import subprocess
+    import numpy as np
+    from nnslr_tools import road_type_signs as signs
+    package = signs.package_path()
+    if not (package / 'vision.py').is_file():
+        pytest.skip('no sunnypilot clone with the car code')
+    car = signs.load_vision(package)
+    video = tmp_path / 'fcamera.hevc'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=64x36:rate=20:duration=1',
+                    '-pix_fmt', 'yuv420p', '-x265-params', 'log-level=error', str(video)], check=True)
+    frames = []
+
+    def read_signs(y, uv, signnet_input, finder, classifier, classes):
+        frames.append(car.BrainInput(64, 36).planes(y, uv).transpose(1, 2, 0))
+        return [{'class': 'maximum_speed:80', 'confidence': 0.9, 'box': (1.234, 2.0, 30.5, 31.0)},
+                {'class': signs.NOT_A_SIGN, 'confidence': 0.99, 'box': (0, 0, 1, 1)},
+                {'class': 'maximum_speed:50', 'confidence': 0.2, 'box': (0, 0, 2, 2)}]
+
+    Vision = SimpleNamespace(MIN_CONFIDENCE=car.MIN_CONFIDENCE, SignNetInput=lambda width, height: None,
+                             BrainInput=car.BrainInput, nv12_planes=car.nv12_planes, read_signs=read_signs)
+    monkeypatch.setattr(signs, '_WORKER', {'vision': Vision, 'finder': SimpleNamespace(gpu=False), 'classifier': None,
+                                           'classes': None, 'nvdec': False})
+    monkeypatch.setattr(signs, '_video_size', lambda path: (64, 36))
+    path = signs.picture_path(tmp_path, 'drive', 3)
+    read = signs.read_segment((str(video), 3, str(path)))
+    assert read['frames'] == 4 and read['pictures'] == 4
+    assert [t for t, _ in read['signs']] == [0.0, 0.25, 0.5, 0.75]
+    assert read['signs'][0][1] == [['maximum_speed:80', 0.9]] and read['boxes'][0] == [[1.23, 2.0, 30.5, 31.0]]
+    assert len(read['boxes']) == len(read['signs'])
+    saved = signs.load_pictures(tmp_path, 'drive', 3)
+    assert saved.shape == (4, car.BRAIN_HEIGHT, car.BRAIN_WIDTH, 3) and saved.dtype == np.uint8
+    assert (saved == np.stack(frames)).all() and saved.std() > 10 and not list(path.parent.glob('*.tmp.npy'))
+    # Without a path no picture is made.
+    assert signs.read_segment((str(video), 3, None))['pictures'] is None
+    record = {'route': 'drive', 'frames': {'3': 4, '4': 0}, 'pictures': {'3': 4}}
+    assert signs.pictures_ready(tmp_path, record)
+    assert not signs.pictures_ready(tmp_path, {**record, 'pictures': {'3': 3}})
+    assert not signs.pictures_ready(tmp_path, {**record, 'frames': {'3': 4, '5': 2}})
+    assert not signs.pictures_ready(tmp_path, {key: value for key, value in record.items() if key != 'pictures'})

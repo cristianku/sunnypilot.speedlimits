@@ -21,6 +21,17 @@ road. The network still decides: trust comes from the memory and can be 0 or bel
 speed_head can say any speed. It is all comparisons, which export as they are. A comparison with no signs among the groups
 has no number and no such path.
 
+The limit ahead (ahead=True, the brains since 7 Nov 2026): two more heads on the same h, so that sunnypilot slows down for
+the next limit as for the map's (brain_targets.ahead_answers):
+
+    next   = next_head(h) + trust_next(h) * number   the next limit: a class of the speed, or the last one, none
+    metres = metres_head(h) + metres_gate(h) * sign  the metres to it, over METRES_SCALE
+
+The number is the one read, and a sign is read some way before it: on the way to it the number is the next limit, so it
+goes straight to next as to the speed, and the memory decides which of the two it is (sign_distance among its inputs).
+sign is vision.SignDistance's metres to the sign ahead, the same scale: metres can be that, or anything the memory says.
+loss += NEXT_LOSS * cross entropy(next) + METRES_LOSS * smooth L1(metres), each on its own frames.
+
 The picture's features. pool 'mean' is the road-type network's: the mean of the 8 x 5 map keeps what is in a frame and loses
 most of where, and a truck in the lane beside ours is a matter of where. pool 'grid' keeps the map: a 1 x 1 convolution to
 GRID_CHANNELS, then all its cells into one layer. Which one sees works is measured too.
@@ -37,6 +48,9 @@ from nnslr_tools.brain_targets import BRAIN_INPUTS, GRID_KPH, INPUT_SIZES, SPEED
 from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_STD, _torch
 
 WORKS_LOSS = 0.3
+NEXT_LOSS = 0.5
+METRES_LOSS = 1.0
+METRES_BETA = 0.1  # smooth L1 within 10 m (over METRES_SCALE), then linear
 POOLS = ('mean', 'grid')
 GRID_CHANNELS = 32
 GRID_CELLS = 8 * 5  # the encoder's map of a 256 x 144 frame
@@ -45,10 +59,11 @@ BACKBONE_CHANNELS = 576
 TRAINING_ONLY = 'works_head.'
 
 
-def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, pretrained: bool = True,
-                    features: int = FEATURES, hidden: int = HIDDEN):
+def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
+                    pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
-    (B, hidden) or None) -> (speed logits (B, T, SPEED_CLASSES), works logit (B, T) or None, state)."""
+    (B, hidden) or None) -> (speed logits (B, T, SPEED_CLASSES), works logit (B, T) or None, state); with ahead=True
+    asked of forward (a network built with ahead) also next logits (B, T, SPEED_CLASSES + 1) and metres (B, T)."""
     torch = _torch()
     from torch import nn
     from torchvision.models import MobileNet_V3_Small_Weights, mobilenet_v3_small
@@ -57,6 +72,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
         raise ValueError(f'pool must be one of {POOLS}')
     extra = sum(INPUT_SIZES[name] for name in groups)
     signs_at = sum(INPUT_SIZES[name] for name in groups[:groups.index('signs')]) if 'signs' in groups else None
+    distance_at = (sum(INPUT_SIZES[name] for name in groups[:groups.index('sign_distance')])
+                   if 'sign_distance' in groups else None)
 
     class BrainNet(nn.Module):
         def __init__(self):
@@ -74,6 +91,12 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.speed_head = nn.Linear(hidden, SPEED_CLASSES)
             self.trust = nn.Linear(hidden, 1)
             self.works_head = nn.Linear(hidden, 1) if works else None
+            self.ahead = ahead
+            if ahead:
+                self.next_head = nn.Linear(hidden, SPEED_CLASSES + 1)
+                self.trust_next = nn.Linear(hidden, 1)
+                self.metres_head = nn.Linear(hidden, 1)
+                self.metres_gate = nn.Linear(hidden, 1)
             self.register_buffer('class_kph', class_kph(torch.arange(SPEED_CLASSES, dtype=torch.float32)))
 
         def train(self, mode: bool = True):
@@ -98,33 +121,55 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             near = (signs[..., :1] * BRAIN_INPUTS.SIGN_KPH_SCALE - self.class_kph).abs() < GRID_KPH / 2
             return (near & held).to(extra_input.dtype)
 
-        def forward(self, images, extra_input, state=None):
+        def sign_metres(self, extra_input):
+            """(B, T, inputs) -> (B, T): vision.SignDistance's metres over METRES_SCALE, 0 without a sign or the input."""
+            if distance_at is None:
+                return extra_input.new_zeros(extra_input.shape[:-1])
+            return extra_input[..., distance_at]
+
+        def forward(self, images, extra_input, state=None, ahead: bool = False):
             b, t = images.shape[:2]
             extra_input = extra_input.to(images.dtype)
             x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
             out, last = self.gru(x, None if state is None else state[None].contiguous())
-            speed = self.speed_head(out) + self.trust(out) * self.number_in_force(extra_input)
-            return speed, None if self.works_head is None else self.works_head(out)[..., 0], last[0]
+            number = self.number_in_force(extra_input)
+            speed = self.speed_head(out) + self.trust(out) * number
+            works = None if self.works_head is None else self.works_head(out)[..., 0]
+            if not ahead:
+                return speed, works, last[0]
+            following = self.next_head(out) + self.trust_next(out) * torch.cat([number, number[..., :1] * 0], dim=-1)
+            metres = self.metres_head(out)[..., 0] + self.metres_gate(out)[..., 0] * self.sign_metres(extra_input)
+            return speed, works, last[0], following, metres
 
     return BrainNet()
 
 
 def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
-               frames: int | None = None):
+               frames: int | None = None, ahead: tuple | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
     A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
-    frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one."""
-    torch = _torch()
+    frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one.
+    ahead: (next logits, metres, next, next_weight, metres answers, metres_weight) of a network with the limit ahead."""
+    _torch()
     from torch.nn import functional
 
+    def mean(errors, weight):
+        return (errors * weight).sum() / (frames or weight.sum().clamp_min(1))
+
     errors = functional.cross_entropy(speed_logits.flatten(0, 1), speed.clamp_min(0).flatten(), reduction='none')
-    total = (errors * speed_weight.flatten()).sum() / (frames or speed_weight.sum().clamp_min(1))
-    if works_logit is None:
-        return total
-    errors = functional.binary_cross_entropy_with_logits(works_logit, works, reduction='none')
-    return total + works_share * (errors * works_weight).sum() / (frames or works_weight.sum().clamp_min(1))
+    total = mean(errors, speed_weight.flatten())
+    if works_logit is not None:
+        total = total + works_share * mean(functional.binary_cross_entropy_with_logits(works_logit, works, reduction='none'),
+                                           works_weight)
+    if ahead is not None:
+        next_logits, metres, following, next_weight, target, metres_weight = ahead
+        errors = functional.cross_entropy(next_logits.flatten(0, 1), following.flatten(), reduction='none')
+        total = total + NEXT_LOSS * mean(errors, next_weight.flatten())
+        total = total + METRES_LOSS * mean(functional.smooth_l1_loss(metres, target, reduction='none', beta=METRES_BETA),
+                                           metres_weight)
+    return total
 
 
 def car_weights(model) -> dict:
-    """The weights that go to the car: all but works_head."""
+    """The weights that go to the car: all but works_head (the heads of the limit ahead go too)."""
     return {name: value for name, value in model.state_dict().items() if not name.startswith(TRAINING_ONLY)}
