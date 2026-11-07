@@ -309,18 +309,23 @@ def probe_video(path: Path, *, ffprobe: str | None = None) -> VideoProbe:
     )
 
 
-def probe_frame_timestamps(path: Path, *, ffprobe: str | None = None) -> list[VideoFrameTiming]:
-    """Return media presentation/decode timing; never camera capture timing."""
+def probe_frame_timestamps(path: Path, *, ffprobe: str | None = None, decode: bool = True) -> list[VideoFrameTiming]:
+    """Return media presentation/decode timing; never camera capture timing.
+
+    ``decode`` False reads the packets instead of decoding the frames, for a raw HEVC video (its packets are in display
+    order): the same timing without ``pict_type``, in 0.2 s instead of 35 s for a minute of the road camera.
+    """
     if not path.is_file():
         raise MediaToolError("video_not_found", str(path))
     exe = _resolve_executable("ffprobe", ffprobe)
+    entries = ("frame=pts_time,pkt_dts_time,best_effort_timestamp_time,key_frame,pict_type,duration_time,pkt_duration_time"
+               if decode else "packet=pts_time,dts_time,duration_time,flags")
     payload = _run_json([
-        exe, "-v", "error", "-select_streams", "v:0", "-show_frames", "-show_format",
-        "-show_entries",
-        "frame=pts_time,pkt_dts_time,best_effort_timestamp_time,key_frame,pict_type,duration_time,pkt_duration_time:format=format_name",
+        exe, "-v", "error", "-select_streams", "v:0", "-show_frames" if decode else "-show_packets", "-show_format",
+        "-show_entries", entries + ":format=format_name",
         "-print_format", "json", str(path),
     ], reject_stderr=True)
-    frames = payload.get("frames", [])
+    frames = payload.get("frames" if decode else "packets", [])
     if not isinstance(frames, list):
         raise MediaToolError("invalid_frame_probe", "frames is not a list")
 
@@ -331,9 +336,9 @@ def probe_frame_timestamps(path: Path, *, ffprobe: str | None = None) -> list[Vi
         out.append(VideoFrameTiming(
             decoded_frame_index=idx,
             pts_time_s=_number_or_none(raw.get("pts_time")),
-            dts_time_s=_number_or_none(raw.get("pkt_dts_time")),
+            dts_time_s=_number_or_none(raw.get("pkt_dts_time", raw.get("dts_time"))),
             best_effort_timestamp_s=_number_or_none(raw.get("best_effort_timestamp_time")),
-            key_frame=bool(raw.get("key_frame") == 1),
+            key_frame=bool(raw.get("key_frame") == 1 or "K" in str(raw.get("flags", ""))),
             pict_type=raw.get("pict_type") if isinstance(raw.get("pict_type"), str) else None,
         ))
     # [media-clock] - START

@@ -129,15 +129,15 @@ def frame_count(video: Path) -> int:
 
 
 def timings_of(video: Path) -> tuple:
-    """probe_frame_timestamps of a video, kept for the last TIMINGS_KEPT videos: the probe decodes the whole video
-    (about 11 s for a minute of the road camera)."""
+    """probe_frame_timestamps of a video, kept for the last TIMINGS_KEPT videos. Read from the packets: a save waits
+    for them, and decoding the whole video takes 35 s for a minute of the road camera."""
     from nnslr_tools.media import probe_frame_timestamps
     stat = video.stat()
     key = (str(video), stat.st_mtime_ns, stat.st_size)
     with _lock('timings', str(video)):
         found = _timings.get(key)
         if found is None:
-            found = tuple(probe_frame_timestamps(video))
+            found = tuple(probe_frame_timestamps(video, decode=False))
             with _locks_guard:
                 _timings[key] = found
                 while len(_timings) > TIMINGS_KEPT:

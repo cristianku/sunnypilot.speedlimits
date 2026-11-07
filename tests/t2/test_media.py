@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
@@ -116,6 +117,12 @@ def raw_hevc(tmp_path):
     ], capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     return video
+
+
+def test_raw_hevc_timing_from_the_packets_is_the_decoded_timing(raw_hevc):
+    decoded = probe_frame_timestamps(raw_hevc)
+    assert probe_frame_timestamps(raw_hevc, decode=False) == [replace(x, pict_type=None) for x in decoded]
+    assert decoded[0].key_frame and decoded[0].media_time_source == "raw_hevc_frame_duration"
 
 
 def test_raw_hevc_clip_seeks_to_real_frames_and_default_is_usable(raw_hevc, tmp_path):
