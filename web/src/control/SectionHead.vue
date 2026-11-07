@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The head of a page: its section's title, large as on iOS, and under it the section's pages as a segmented control
-// (Data: Drives, Review, Drive review, Speed review, Roads, Training dataset; Models: Versions, Results, Publish), the page shown marked and a
+// (Data: Drives, Review, Drive review, Speed review, Sign distance, Training dataset; Models: Versions, Results, Publish), the page shown marked and a
 // dot on a page with work running; on a phone the control scrolls sideways, the page shown brought into view. pages.sub_nav
 // draws the same on the route list.
 import {computed, nextTick, onMounted, useTemplateRef, watch} from 'vue';

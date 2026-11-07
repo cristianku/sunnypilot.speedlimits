@@ -103,7 +103,7 @@ BRAIN_DRIVER = {'on': '1', 'off': '0'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
 REGRESSION_SCRIPT = 'scripts/run_regression.sh'
-# The road type of every frame from the map (Data › Roads): the GPS of the drives, the map roads near them, the types.
+# The road type and limit of every frame from the map (Find the road types, on Data › Speed review): the GPS of the drives, the map roads near them, the types.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
 # Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
@@ -344,7 +344,7 @@ ACTIONS = {
     # frames stay (nnslr preannotate --keep-reviews).
     'prepare_again': {'label': 'Propose again', 'group': 'prepare', 'command': ['helpers/1_prepare.sh', '--again']},
     # The road type of every frame of the prepared drives (town, rural, expressway, motorway) from their GPS and the
-    # map, read offline (Data › Roads); in the prepare group: it reads the reports a preparation writes.
+    # map, read offline (Data › Speed review); in the prepare group: it reads the reports a preparation writes.
     'road_types': {'label': 'Find the road types', 'group': 'prepare', 'command': [ROAD_TYPES_SCRIPT]},
     # One round with the machine of the outside reviewers (nnslr_tools.review_box); a timer does the same every 5 minutes.
     'review_box': {'label': 'Update the review machine', 'group': 'review_box', 'command': ['helpers/review_box.sh']},
@@ -1014,11 +1014,11 @@ class Panel:
             elif name == 'train_road_type' and not (self.repo / ROAD_TYPE_SCRIPT).is_file():
                 reason = ROAD_TYPE_SCRIPT + ' is missing in this installation'
             elif name == 'train_road_type' and not self._road_types_found():
-                reason = 'no road types yet: Data › Roads, Find the road types'
+                reason = 'no road types yet: Data › Speed review, Find the road types'
             elif name == 'train_road_type' and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
             elif name == 'train_road_type':
-                # Its labels are the road types of the map (Data › Roads): it needs no confirmed sign.
+                # Its labels are the road types a person confirmed: it needs no confirmed sign.
                 pass
             elif name == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
                 reason = BRAIN_SCRIPT + ' is missing in this installation'

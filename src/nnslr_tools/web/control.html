@@ -571,25 +571,17 @@ background:var(--ok-soft);color:var(--ok)}
 .import-why,.import-last{margin:0;font-size:13px;color:var(--muted)}
 .import-why.warn{color:var(--warn)}
 @media (max-width:480px){.import-row{flex-wrap:wrap}.import-row .btn{width:100%;justify-content:center}}
-/* Data › Roads (RoadsTab.vue): the same action card, then each drive as a thin strip of its whole length coloured by
-   the road type of its pictures. Four slots of the reference categorical palette, checked in both themes on every pair
-   (any type can follow any other): amber town, green rural, magenta expressway, blue motorway; unknown is the muted grey,
-   half see-through so it reads as "nothing known" in both themes. */
+/* The lists of drives (Speed review, Sign distance, Regression): a row each, its name and when over its state. The
+   colours of the road types are those of the scene network's lane on Drive review (.dr-lanes): four slots of the
+   reference categorical palette, checked in both themes on every pair (any type can follow any other): amber town,
+   green rural, magenta expressway, blue motorway. */
 :root{--rt-rural:#008300}
-.rt-town{background:var(--split-4)}.rt-rural{background:var(--rt-rural)}.rt-expressway{background:var(--split-5)}
-.rt-motorway{background:var(--c-train)}.rt-unknown{background:var(--muted);opacity:.5}
-.rt-drives{display:flex;flex-direction:column;gap:14px}
-.rt-legend{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;color:var(--muted)}
-.rt-legend li{display:inline-flex;align-items:center;gap:7px}
-.rt-key{width:10px;height:10px;border-radius:3px;flex:none}
 .rt-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .rt-drive{display:flex;flex-direction:column;gap:7px;padding:14px 0;border-top:1px solid var(--line)}
 .rt-drive:last-child{padding-bottom:0}
 .rt-name{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 12px;min-width:0}
 .rt-name strong{font-size:15px;font-weight:600;letter-spacing:-.01em}
 .rt-name span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.rt-strip{display:flex;gap:2px;height:10px;border-radius:5px;overflow:hidden}
-.rt-strip span{flex-basis:0;min-width:2px}
 .rt-shares{margin:0;display:flex;flex-wrap:wrap;gap:2px 14px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .rt-frames{margin-left:auto}
 .train-sections{width:100%;max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
@@ -1137,15 +1129,13 @@ border-top:1px solid var(--line)}
 .proposer .figure-note{flex:1 0 100%}
 .proposer .proposer-missing{color:var(--bad)}
 @media (max-width:800px){.proposer .seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.proposer .seg button{padding-left:6px;padding-right:6px}}
-/* Data › Roads, a drive opened (RoadDrive.vue): its row of the list a link; the picture as large as the window leaves,
-   the strip of the drive under it (a dark line under the stretches a person set, the marked stretch over it), the type
-   here and its correction at the side; on an iPad or a phone all in one column. */
+/* A row of a list of drives is a link; a drive opened (Drive review, Speed review, Sign distance) has Back and its name
+   at the top, and the controls of its video. */
 .rt-open{position:relative;display:flex;flex-direction:column;gap:7px;margin:-8px -10px;padding:8px 32px 8px 10px;border-radius:12px;
 color:inherit;text-decoration:none;transition:background .15s}
 .rt-open:hover{background:var(--surface-2)}
 .rt-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rt-go{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
-.rt-reviewed{color:var(--ok)}
 .rt-view{display:flex;flex-direction:column;gap:14px;padding:16px 18px}
 .rt-view-head{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
 .rt-back{display:inline-flex;align-items:center;gap:4px;font-size:15px}
@@ -1153,212 +1143,46 @@ color:inherit;text-decoration:none;transition:background .15s}
 .rt-view-name{display:flex;flex-direction:column;gap:2px;min-width:0}
 .rt-view .rt-view-name h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 .rt-view-name span{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-.rt-view-main{display:grid;grid-template-columns:minmax(0,1fr) 300px;grid-template-areas:"stage side" "time side";gap:12px 20px;
-align-items:start}
-.rt-stage{grid-area:stage;position:relative;aspect-ratio:1344/760;width:min(100%,calc((100dvh - 330px) * 1344 / 760));
-min-width:min(100%,420px);justify-self:center;border-radius:12px;overflow:hidden;background:var(--stage);cursor:pointer;outline-offset:3px}
-.rt-stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;user-select:none;display:block}
-.rt-time{grid-area:time;display:flex;flex-direction:column;gap:8px;min-width:0}
-.rt-track{width:100%;height:30px;cursor:pointer;touch-action:none;display:block}
-.rt-track .rt-town{fill:var(--split-4)}.rt-track .rt-rural{fill:var(--rt-rural)}.rt-track .rt-expressway{fill:var(--split-5)}
-.rt-track .rt-motorway{fill:var(--c-train)}.rt-track .rt-unknown{fill:var(--muted)}
-.rt-track .rt-done{fill:var(--fg)}.rt-track .rt-marked{fill:var(--accent)}
 .rt-controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
 .rt-play{min-width:92px;justify-content:center}
-.rt-step{padding:5px 10px}
-.rt-step .icon{margin:0}
 .rt-pos{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .rt-pos b{color:var(--fg);font-weight:600}
-.rt-speed{margin-left:auto}
-.rt-side{grid-area:side;display:flex;flex-direction:column;gap:12px;min-width:0}
-.rt-now{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
-.rt-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 11px;border-radius:999px;background:var(--surface-2);
-font-size:17px;font-weight:650;letter-spacing:-.01em}
-.rt-chip .rt-key{width:14px;height:14px;border-radius:4px}
-.rt-flag{padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
-.rt-flag.done{background:var(--ok-soft);color:var(--ok)}.rt-flag.unsure{background:var(--todo-soft);color:var(--todo)}
-.rt-flag.none{background:var(--surface-2);color:var(--muted)}
-.rt-basis{margin:-4px 0 0;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
-.rt-fix{display:flex;flex-direction:column;gap:10px;padding-top:12px;border-top:1px solid var(--line)}
-.rt-fix-head{margin:0;display:flex;flex-direction:column;gap:2px}
-.rt-fix-head strong{font-size:15px;font-weight:600}
-.rt-fix-head span{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
-.rt-pick{display:grid;grid-template-columns:1fr 1fr;width:100%}
-.rt-pick button{display:inline-flex;align-items:center;gap:7px;padding:8px 10px;min-height:38px;white-space:nowrap}
-.rt-pick button:last-child{grid-column:1/-1}
-.rt-pick .rt-key{width:10px;height:10px;border-radius:3px}
-.rt-pick button.rt-map{opacity:1;outline:1.5px dashed var(--muted);outline-offset:-4px}
-.rt-fix-row{display:flex;flex-wrap:wrap;gap:8px}
-.rt-hint{margin:0;font-size:12.5px;color:var(--muted)}
-.rt-next{justify-content:center}
-.rt-confirm{width:100%;justify-content:center;min-height:44px}
-.rt-left{margin-left:8px;padding:0 7px;border-radius:999px;background:var(--todo-soft);color:var(--todo);font-size:12.5px;font-weight:650;
-font-variant-numeric:tabular-nums}
 @media (max-width:860px){
   .rt-view{padding:14px}
-  .rt-view-main{grid-template-columns:minmax(0,1fr);grid-template-areas:"stage" "time" "side"}
-  .rt-stage{width:100%;min-width:0}
-  .rt-pick{grid-template-columns:repeat(5,minmax(0,1fr))}
-  .rt-pick button{justify-content:center;padding:8px 6px}
-  .rt-pick button:last-child{grid-column:auto}
 }
 @media (max-width:560px){
   .rt-view .rt-view-name h2{font-size:19px}
-  .rt-track{height:36px}
   .rt-play{min-width:0}
-  .rt-step{padding:5px 9px}
   .rt-pos{margin-left:auto}
-  .rt-count{display:none}
-  .rt-pick{grid-template-columns:repeat(4,minmax(0,1fr))}
-  .rt-pick button{flex-direction:column;gap:4px;padding:7px 2px;font-size:12.5px}
-  .rt-pick button:last-child{grid-column:1/-1;flex-direction:row;gap:7px}
-  .rt-speed{margin-left:0}
 }
 @media (prefers-reduced-motion:reduce){.rt-open{transition:none}}
-/* Data › Roads, parking and the loop of a check (RoadDrive.vue). Parking is the violet of the reference palette, stepped
-   for each theme: with the four others every pair passes the validator in both themes (all pairs, as any type can follow
-   any other: colour-blind ΔE ≥ 8.9, normal ≥ 15.5) and it clears 3:1 on the dark card. Unknown is a solid grey, 3.4:1 on
-   the dark card (half see-through it was 2.5:1), as light as before on the light one. On the strip of a drive an orange
-   line under the stretches to check (the colour of Next to check), the dark one under those a person set, the blue one
-   over the stretch a tap sets; the type buttons and Next to check right under the picture, the speeds, Mark start, Undo
-   and the legend under them; 44 px targets on a touch screen; a phone held sideways puts the buttons beside the picture. */
+/* Parking is the violet of the reference palette, stepped for each theme: with the four others every pair passes the
+   validator in both themes (all pairs, as any type can follow any other: colour-blind ΔE ≥ 8.9, normal ≥ 15.5) and it
+   clears 3:1 on the dark card. Unknown is a solid grey, 3.4:1 on the dark card, as light as before on the light one. */
 :root{--rt-parking:#8a57ae;--rt-unknown:#6e6e73;--rt-ramp:#1fb3c9}
 :root[data-theme="light"]{--rt-parking:#744399;--rt-unknown:#8e8e93;--rt-ramp:#0b8597}
 @media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-parking:#744399;--rt-unknown:#8e8e93;--rt-ramp:#0b8597}}
-/* A ramp: cyan, the light side of the motorway's blue, so the strip shows where a motorway is entered and left. */
-.rt-parking{background:var(--rt-parking)}.rt-unknown{background:var(--rt-unknown);opacity:1}.rt-ramp{background:var(--rt-ramp)}
-.rt-track .rt-parking{fill:var(--rt-parking)}.rt-track .rt-ramp{fill:var(--rt-ramp)}.rt-track .rt-unknown{fill:var(--rt-unknown)}.rt-track .rt-tocheck{fill:var(--bad)}
+/* A ramp: cyan, the light side of the motorway's blue, so the lane shows where a motorway is entered and left. */
 /* A 30 zone: one khaki for both themes, an earth tone beside the town's amber. Against every other type it passes the
    same validator in both themes (normal ΔE ≥ 18, colour-blind ≥ 10.5 under the three kinds) and clears 3:1 on both
    cards. */
 :root{--rt-zone30:#99905c}
-.rt-zone30{background:var(--rt-zone30)}.rt-track .rt-zone30{fill:var(--rt-zone30)}
 /* A garage (a car park underground or indoors): magenta, stepped for each theme. Eight kinds fill the palette: against
    every other type the normal ΔE is ≥ 17 in both themes and it clears 3:1 on both cards, but the colour-blind ΔE against
    the motorway's blue is 7.0 (dark) and 6.9 (light), the floor band the validator allows only with a second cue: the
-   strip's gaps and tips, the shares and the chip in words. */
+   type in words. */
 :root{--rt-garage:#e830e8}
 :root[data-theme="light"]{--rt-garage:#d02cd0}
 @media (prefers-color-scheme:light){:root[data-theme="auto"]{--rt-garage:#d02cd0}}
-.rt-garage{background:var(--rt-garage)}.rt-track .rt-garage{fill:var(--rt-garage)}
-/* The acceleration lane after an entry ramp: no ninth hue (the palette is full) but the two it joins, the ramp's cyan
-   over the motorway's blue, a two-tone key no other type has; on the strip a gradient of hard stops (RoadDrive.vue), as
-   the SVG is stretched. */
-.rt-merge{background:linear-gradient(to bottom,var(--rt-ramp) 0 40%,var(--c-train) 40%)}
-.rt-track .rt-merge{fill:url(#rt-merge-fill)}
-.rt-merge-top{stop-color:var(--rt-ramp)}.rt-merge-bottom{stop-color:var(--c-train)}
-.rt-view-main{grid-template-rows:auto 1fr}
-.rt-fix-head{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
-.rt-pick button:last-child{grid-column:auto}
-.rt-more{display:flex;flex-direction:column;align-items:flex-start;gap:12px;padding-top:12px;border-top:1px solid var(--line)}
-.rt-more .rt-speed{margin-left:0}
-.rt-marks{gap:6px 14px;font-size:12.5px}
-.rt-line{width:14px;height:3px;border-radius:2px;flex:none}
-.rt-line.rt-tocheck{background:var(--bad)}.rt-line.rt-done{background:var(--fg)}.rt-line.rt-marked{background:var(--accent)}
-.rt-left{white-space:nowrap}
-@media (max-width:860px){
-  .rt-view-main{grid-template-rows:none}
-  .rt-pick{grid-template-columns:repeat(6,minmax(0,1fr))}
-}
+/* The acceleration lane after an entry ramp: no ninth hue (the palette is full), the ramp's cyan (.dr-lanes). A drive
+   opened has 44 px targets on a touch screen. */
 @media (max-width:860px),(pointer:coarse){
   .rt-view .rt-back{min-height:44px;min-width:44px;margin:-10px 0 -8px -6px;padding:0 6px}
-  .rt-view .btn.rt-play,.rt-view .btn.rt-step,.rt-view .rt-fix-row .btn,.rt-view .btn.rt-next{min-height:44px}
-  .rt-view .btn.rt-step{min-width:48px;justify-content:center}
-  .rt-view .rt-speed button{min-height:44px;min-width:48px}
-  .rt-view .rt-pick button{min-height:44px}
+  .rt-view .btn.rt-play{min-height:44px}
 }
 @media (max-width:560px){
   .rt-view{gap:10px}
-  .rt-view-main,.rt-side{gap:10px}
-  .rt-time{gap:6px}
-  .rt-chip{font-size:16px;padding:4px 12px 4px 10px}
-  .rt-fix{gap:8px;padding-top:10px}
-  .rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .rt-pick button,.rt-pick button:last-child{grid-column:auto;flex-direction:row;gap:6px;padding:4px;font-size:13px}
 }
-@media (max-height:500px) and (min-width:600px){
-  .rt-view-main{grid-template-columns:minmax(0,1fr) 300px;grid-template-rows:auto 1fr;grid-template-areas:"stage side" "time side";
-    gap:10px 16px}
-  .rt-stage{width:min(100%,calc((100dvh - 124px) * 1344 / 760));min-width:0}
-  .rt-side{gap:8px}
-  .rt-chip{font-size:15px;padding:3px 12px 3px 9px}
-  .rt-basis{margin:-2px 0 0}
-  .rt-fix{gap:6px;padding-top:8px}
-  .rt-pick{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .rt-pick button,.rt-pick button:last-child{grid-column:auto;flex-direction:row;gap:6px;padding:4px;font-size:12.5px}
-}
-/* The part of a stretch a tap sets (RoadDrive.vue): the whole stretch, up to the picture shown, or from it. */
-.rt-part{display:flex;width:100%;margin:2px 0 8px}.rt-part button{flex:1 1 0;min-width:0;white-space:nowrap}
-@media (max-width:860px),(pointer:coarse){.rt-part button{min-height:44px}}
-/* The type buttons of a correction (RoadDrive.vue): pills one can see are buttons, not a legend; the type the map
-   proposes has a dashed ring, the one a person set a solid one. */
-.rt-pick{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0;background:none}
-.rt-pick .rt-type{justify-content:center;gap:7px;min-height:44px;padding:8px 10px;font-size:14.5px;white-space:nowrap}
-.rt-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
-.rt-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
-.rt-fix-head strong{font-size:15px}
-/* Nine types in rows of four, each button its dot over its word, and Can't tell across the rest of the last row; in the
-   one column of a tablet, wide enough, each dot beside its word. */
-.rt-pick{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
-.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:column;gap:4px;padding:6px 0;font-size:12px}
-.rt-pick .rt-type:last-child{grid-column:span 3;flex-direction:row;gap:7px}
-@media (max-width:860px) and (min-width:521px) and (min-height:501px){
-  .rt-pick{gap:8px}.rt-pick .rt-type,.rt-pick .rt-type:last-child{flex-direction:row;gap:7px;padding:8px 6px;font-size:14.5px}}
-/* The cut of a stretch (RoadDrive.vue): a short title over Whole / Before / After, and the cut drawn on the strip. */
-.rt-cut-head{margin:0 0 6px;font-size:13px;color:var(--muted);line-height:1.35}
-.rt-cut-head strong{color:var(--fg);font-size:14.5px;margin-right:4px}
-.rt-track .rt-cut{fill:var(--surface);stroke:var(--fg);stroke-width:0.6}
-/* The junctions of a drive (RoadDrive.vue): a row of dots under the strip, round in HTML (the strip's SVG is stretched):
-   a solid dot a junction (the map's or a person's), an orange ring one to check (Next to check stops there, the orange
-   of its count), a grey ring one that is not (a person said so, or the map's on another road). Under the type buttons
-   the junction at the picture shown and Junction here / Not a junction / Undo, the same pills as the types. */
-.rt-scrub{position:relative;display:flex;flex-direction:column;gap:3px;cursor:pointer;touch-action:none}
-.rt-jrow{position:relative;height:10px}
-.rt-jdot{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--fg);box-sizing:border-box;flex:none}
-.rt-jrow .rt-jdot{position:absolute;top:0;margin-left:-4.5px}
-.rt-jdot.check{background:var(--surface);border:2px solid var(--todo)}
-.rt-jhead{position:absolute;top:-3px;bottom:0;width:2px;margin-left:-1px;border-radius:1px;background:var(--fg)}
-.rt-jdot.not{background:transparent;border:1.5px solid var(--muted)}
-.rt-jx{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
-.rt-jx-head{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px}
-.rt-jx-undo{margin-left:auto;font-size:13.5px}
-.rt-jx-head strong{font-size:15px;font-weight:600}
-.rt-jx-head span{font-size:13px;color:var(--muted)}
-.rt-jx-head span.rt-jx-doubt{color:var(--todo);font-weight:600}
-.rt-jx-why{margin:-4px 0 0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
-.rt-jx-pick{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
-.rt-jx-pick .rt-type{justify-content:center;gap:7px;min-height:44px;padding:8px 10px;font-size:14.5px;white-space:nowrap}
-.rt-jx-pick .rt-type[aria-pressed="true"]{box-shadow:0 0 0 2px var(--fg) inset}
-.rt-jx-pick button.rt-map{outline:1.5px dashed var(--muted);outline-offset:-5px}
-@media (max-width:860px),(pointer:coarse){.rt-jx-undo{min-height:44px;margin:-14px -6px -14px auto;padding:0 6px}}
-@media (max-width:560px){.rt-jx{gap:6px;padding-top:10px}.rt-jx-pick .rt-type{font-size:13.5px;padding:6px 8px;gap:6px}}
-@media (max-height:500px) and (min-width:600px){.rt-jx{gap:6px;padding-top:8px}.rt-jx-pick .rt-type{min-height:38px;font-size:12.5px;padding:4px 6px}}
-/* The position on the strip of a drive (RoadDrive.vue): a line with a round knob on top, in HTML (the SVG is stretched),
-   ringed in the card's colour so it stands out on every type; room above for the knob, the time over it while a strip is
-   dragged. On a long drive a frame round the stretch of the close strip under it: the minute or two around the picture,
-   five pixels a picture, on a grey ground past the ends of the drive, a notch every 10 pictures and a long one every
-   60 so a drag along one type shows it moves, the line of the picture wanted in its middle. A finger moves it sideways;
-   up or down the page scrolls. */
-.rt-scrub{padding-top:12px}
-.rt-bar{position:relative}
-.rt-knob{position:absolute;top:-5px;bottom:-2px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--fg);
-box-shadow:0 0 0 1.5px var(--surface);pointer-events:none}
-.rt-knob::before{content:"";position:absolute;top:-7px;left:50%;width:14px;height:14px;margin-left:-7px;border-radius:50%;
-background:var(--fg);box-shadow:0 0 0 2px var(--surface),0 1px 4px rgba(0,0,0,.35)}
-.rt-lens{position:absolute;top:calc(15% - 3px);bottom:calc(5% - 3px);min-width:6px;box-sizing:border-box;border:1.5px solid var(--fg);
-border-radius:5px;opacity:.75;pointer-events:none}
-.rt-bubble{position:absolute;bottom:calc(100% + 14px);transform:translateX(-50%);padding:3px 10px;border-radius:999px;background:var(--fg);
-color:var(--surface);font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap;pointer-events:none;
-box-shadow:0 2px 10px rgba(0,0,0,.3);z-index:2}
-.rt-close{position:relative;display:flex;flex-direction:column;gap:3px;padding:5px 0 4px;border-radius:9px;background:var(--surface-2);
-overflow:hidden;cursor:grab;touch-action:pan-y;user-select:none;-webkit-user-select:none}
-.rt-close:active{cursor:grabbing}
-.rt-close .rt-track{height:28px;cursor:inherit}
-.rt-track .rt-tick{fill:var(--surface);opacity:.5}
-.rt-close-head{position:absolute;top:0;bottom:0;left:50%;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--fg);
-box-shadow:0 0 0 1.5px var(--surface);pointer-events:none}
-/* A phone: the strip of the drive lower, the close strip is where a finger points at one picture. */
-@media (max-width:560px){.rt-track{height:26px}.rt-close{padding:4px 0 3px}.rt-close .rt-track{height:28px}}
 /* The junction head of a road-type version (ModelItem.vue): the second number of a cell on its own line, so the table
    fits a phone. */
 .jx-table small{display:block;font-size:11.5px;font-weight:400;white-space:nowrap}

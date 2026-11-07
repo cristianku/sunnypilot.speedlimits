@@ -1,6 +1,6 @@
 """How well the road-type network finds the kind of road and its changes, from its answers on whole sequences.
 
-The truth of every measure is what a person confirmed or corrected in Data › Roads (road_type_data.frame_label): the
+The truth of every measure is what a person confirmed or corrected in Data › Roads until 7 Nov 2026 (road_type_data.frame_label): the
 map's proposals are no truth, their frames are unknown here (label -1, weight 0), so a network is measured only on the
 confirmed stretches and a change between two of them only when they are at most GAP_SECONDS apart.
 

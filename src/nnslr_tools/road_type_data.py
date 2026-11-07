@@ -5,7 +5,7 @@ sign, the motorway's 120 starts where the ramp merges (vision.SpeedLimitMemory).
 camera, one frame a second, and keeps a memory (a GRU) of what it saw, so that the moment of the merge, the entry
 into a town and the exit from it are found from the change of the picture, not from a sign.
 
-Labels: the kind of road a person gave a frame in Data › Roads, confirming the map's proposal or correcting it
+Labels: the kind of road a person gave a frame in Data › Roads (until 7 Nov 2026), confirming the map's proposal or correcting it
 (road_types.confirmed, annotations/road_types): nothing else is a label. The classes are road_types.ROAD_TYPES, in the order
 of the network's output and with the same names the car's SpeedLimitMemory takes: town, rural, expressway, motorway,
 ramp (an OSM link of a motorway or an expressway, highway motorway_link or trunk_link out of town), parking (a car

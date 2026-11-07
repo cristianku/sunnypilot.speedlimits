@@ -522,11 +522,11 @@ def load_map(root: Path) -> Junctions | None:
     return Junctions(road_map)
 
 
-# -- a person's corrections (Data › Roads, a drive opened) ---------------------------------------------------------------
+# -- a person's corrections (Data › Roads, a drive opened, until 7 Nov 2026) ----------------------------------------------
 # The map misses junctions (a new road, a crossing drawn a few metres off) and has some a driver would not call one (a
-# car park's exit tagged as a road, a bridge right over a crossing). On the review page of a drive a person marks the
+# car park's exit tagged as a road, a bridge right over a crossing). On the review page of a drive a person marked the
 # picture shown "Junction here" or "Not a junction"; each tap is a line appended to annotations/junctions/<route>.jsonl
-# ({'frame_key', 'junction': 'here' | 'none', 'reviewer', 'at'}), Undo drops the last line, and nnslr junctions never
+# ({'frame_key', 'junction': 'here' | 'none', 'reviewer', 'at'}), and nnslr junctions never
 # touches the file. The labels of a training are the map's with these over them (labelled_junctions), the last line
 # about a junction winning:
 # - "none" inside a junction of the map (or on the frame just after it) drops it: its frames are not a junction, its
@@ -593,17 +593,6 @@ def correct(root: Path, route: str, frame_key, junction, reviewer: str) -> dict:
             before += b'\n'
         atomic_write(path, before + jsonl_bytes([line]))
     return line
-
-
-def undo_correction(root: Path, route: str) -> bool:
-    """Drops the last junction correction of a route; False when there is none."""
-    path = corrections_path(root, route)
-    with _CORRECTING:
-        lines = [line for line in path.read_bytes().splitlines(keepends=True) if line.strip()] if path.is_file() else []
-        if not lines:
-            return False
-        atomic_write(path, b''.join(lines[:-1]))
-    return True
 
 
 def _doubt(passage: dict) -> str | None:
@@ -733,25 +722,3 @@ def labelled_junctions(root: Path, route: str) -> dict | None:
     if record is None:
         return None
     return corrected(record, load_corrections(root, route))
-
-
-def drive_marks(root: Path, route: str, keys: list[str]) -> dict:
-    """The junctions of a drive for its review page (Data › Roads, GET /api/panel/road-types/<route>): {'found': nnslr
-    junctions ran for it, 'corrections': how many a person made, 'marks': [{'id', 'kind', 'first', 'last', 'passed'
-    (indices into keys, the frames of the page), 'label', 'by', 'reviewed', 'doubt', 'arms', 'roads'}]}."""
-    record = labelled_junctions(root, route)
-    if record is None:
-        return {'found': False, 'corrections': len(load_corrections(root, route)), 'marks': []}
-    where = {key: i for i, key in enumerate(keys)}
-    frames = record['frames']
-    marks = []
-    for mark in record['marks']:
-        first, last = where.get(frames[mark['first']]['frame_key']), where.get(frames[mark['last']]['frame_key'])
-        if first is None or last is None:
-            continue
-        passed = where.get(frames[mark['passed']]['frame_key']) if mark['passed'] is not None else None
-        passage = mark['passage'] or {}
-        marks.append({'id': mark['id'], 'kind': mark['kind'], 'first': first, 'last': last, 'passed': passed,
-                      'label': mark['label'], 'by': mark['by'], 'reviewed': mark['reviewed'], 'doubt': mark['doubt'],
-                      'arms': passage.get('arms'), 'roads': passage.get('highways')})
-    return {'found': True, 'corrections': record['corrections'], 'marks': marks}

@@ -409,7 +409,7 @@ export interface PanelStatus {
   /** The dataset is current and a training can start. */
   all_ready: boolean;
   next_action: 'prepare' | 'review' | 'train' | 'fetch' | null;
-  /** Prepared drives without road types yet (Data › Roads); absent before the panel is available. */
+  /** Prepared drives without road types yet (Data › Speed review, Find the road types); absent before the panel is available. */
   road_types_missing?: number;
   reviewed_routes: number;
   min_routes: number;
@@ -1528,7 +1528,7 @@ export interface RoadDrive {
   frames: number;
   /** Frames of each type; a type missing: none (parking or garage, from a server before them). */
   types: Partial<Record<RoadType | 'unknown', number>>;
-  /** The frames a person looked at (Data › Roads, the drive opened): usable and cant_tell. */
+  /** The frames a person looked at (Data › Roads, until 7 Nov 2026): usable and cant_tell. */
   reviewed: number;
   /** The frames a person confirmed or corrected to a type: the only labels of the training. */
   usable: number;
@@ -1539,7 +1539,7 @@ export interface RoadDrive {
   /** In the order of the drive. */
   stretches: RoadStretch[];
 }
-/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Data › Roads. */
+/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Find the road types on Data › Speed review. */
 export interface RoadTypesPayload {
   /** Newest drive first. */
   routes: RoadDrive[];
@@ -1578,59 +1578,6 @@ export interface RoadMaps {
   max_gb: number | null;
   /** When the maps were last looked for (ISO); null: never. */
   checked_at: string | null;
-}
-
-/** A frame of a drive opened on Data › Roads: its picture and its road type, the map's or a person's. */
-export interface RoadFrame {
-  /** "segment/image". */
-  key: string;
-  /** /route/<route>/images/<8 digits>.jpg, or null without a picture. */
-  image: string | null;
-  /** null: unknown (the map says nothing, or a person cannot tell). */
-  road_type: RoadType | null;
-  /** Why: "maxspeed 50", "no gps", "car park on the map", "filled (no gps)"..., "reviewed" when a person set it. */
-  basis: string;
-  /** False where the map is often wrong. */
-  sure: boolean;
-  reviewed: boolean;
-}
-/** GET /api/panel/road-types/<route> (nnslr_tools.road_types.drive_view), and the answer of a correction. */
-export interface RoadDriveView extends Omit<RoadDrive, 'frames'> {
-  /** When the drive started (ISO), or null. */
-  start: string | null;
-  frames: RoadFrame[];
-  /** The corrections kept for this drive: Undo drops the last. */
-  corrections: number;
-  /** The intersections of the drive (nnslr junctions), the map's with a person's corrections over them. */
-  junctions: RoadJunctions;
-}
-/** An intersection of a drive on Data › Roads (nnslr_tools.junctions.drive_marks): frame indices into its frames. */
-export interface RoadJunction {
-  id: string;
-  kind: 'crossing' | 'roundabout';
-  /** The first and last frame inside it. */
-  first: number;
-  last: number;
-  /** The first frame after it (where the limit of a Polish sign ends), null when not labelled. */
-  passed: number | null;
-  /** junction: a label of the training; dropped: a person said it is not one; maybe: the map's, on another road (a
-   * bridge, a road beside), not a label. */
-  label: 'junction' | 'dropped' | 'maybe';
-  by: 'map' | 'person';
-  /** A person settled it. */
-  reviewed: boolean;
-  /** Why it is worth a look (Next to check stops there), null once reviewed or when nothing is odd about it. */
-  doubt: string | null;
-  /** The arms of public roads that meet there and their kinds (the map's), null for one a person added. */
-  arms: number | null;
-  roads: string[] | null;
-}
-export interface RoadJunctions {
-  /** nnslr junctions ran for the drive (Find the road types). */
-  found: boolean;
-  /** The junction corrections kept for this drive: Undo junction drops the last. */
-  corrections: number;
-  marks: RoadJunction[];
 }
 
 /** POST /api/panel/models/active */

@@ -1,13 +1,12 @@
 """The intersections the car drives through, from the map (nnslr_tools.junctions): the rules, the labels of the
-frames, a person's corrections and the review page's endpoints."""
+frames and a person's corrections (made on Data › Roads until 7 Nov 2026)."""
 import json
 
 import pytest
 
 from nnslr_tools.cli import main
 from nnslr_tools.junctions import (CorrectionError, Junctions, build_junctions, correct, corrected, corrections_path,
-                                   drive_marks, is_public, labelled_junctions, load_junctions, radius, road_width,
-                                   undo_correction)
+                                   is_public, labelled_junctions, load_junctions, radius, road_width)
 from nnslr_tools.map_context import RoadMap
 
 ROUTE = '0000002a--0123456789'
@@ -193,11 +192,6 @@ def test_corrections_drop_confirm_add_and_the_last_wins(tmp_path):
     assert corrections_path(tmp_path, ROUTE).read_text().splitlines() == lines
     assert load_junctions(tmp_path, ROUTE)['frames'] == map_record['frames']
     assert _labels(labelled_junctions(tmp_path, ROUTE)) == ([6, 7, 8, 22, 23], [9, 24])
-    # Undo, one line at a time, back to the map.
-    for _ in lines:
-        assert undo_correction(tmp_path, ROUTE)
-    assert not undo_correction(tmp_path, ROUTE)
-    assert labelled_junctions(tmp_path, ROUTE)['frames'] == map_record['frames']
 
 
 def test_a_correction_names_a_frame_of_the_drive_and_a_choice(tmp_path):
@@ -218,93 +212,3 @@ def test_a_correction_names_a_frame_of_the_drive_and_a_choice(tmp_path):
     path.write_text('\n'.join(['{"frame_key": "0/1", "junction":', '[1]', json.dumps({**good, 'junction': 'maybe'}),
                                json.dumps({**good, 'frame_key': 7}), json.dumps(good)]) + '\n')
     assert labelled_junctions(tmp_path, ROUTE)['passages'] == []
-
-
-def test_drive_marks_are_indices_into_the_page_frames(tmp_path):
-    assert drive_marks(tmp_path, ROUTE, ['0/0']) == {'found': False, 'corrections': 0, 'marks': []}
-    _street_drive(tmp_path)
-    keys = [f'0/{index}' for index in range(5, 40)]
-    found = drive_marks(tmp_path, ROUTE, keys)
-    assert found['found'] and found['corrections'] == 0
-    assert [(mark['label'], mark['first'], mark['last'], mark['passed'], mark['roads']) for mark in found['marks']] == [
-        ('maybe', 3, 3, None, ['primary', 'tertiary']), ('junction', 17, 18, 19, ['residential'])]
-    # Marks off the page's frames are left out.
-    assert drive_marks(tmp_path, ROUTE, keys[:10])['marks'][0]['label'] == 'maybe'
-    assert len(drive_marks(tmp_path, ROUTE, keys[:10])['marks']) == 1
-
-
-# -- the review page: Data › Roads, a drive opened -------------------------------------------------------------------
-def _prepared(tmp_path):
-    from review_helpers import make_report
-
-    from nnslr_tools.road_types import build_road_types
-    make_report(tmp_path, ROUTE, count=40)
-    road_map = _write_map(tmp_path, STREET)
-    build_road_types(tmp_path, ROUTE, _positions(), road_map)
-    build_junctions(tmp_path, ROUTE, _positions(), Junctions(road_map))
-
-
-def test_junctions_over_http(tmp_path):
-    from review_helpers import TOKEN, RunningServer, json_of, sign_in
-
-    _prepared(tmp_path)
-    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
-    drive_address = f'/api/panel/road-types/{ROUTE}'
-    address = drive_address + '/junction'
-    body = {'frame_key': '0/23', 'junction': 'none'}
-    try:
-        assert server.request('POST', address, body=body)[0] == 401
-        cookie = sign_in(server)
-        drive = json_of(server.request('GET', drive_address, headers=cookie)[2])
-        assert drive['junctions']['found'] and drive['junctions']['corrections'] == 0
-        assert [(mark['label'], mark['first'], mark['passed']) for mark in drive['junctions']['marks']] == [
-            ('maybe', 8, None), ('junction', 22, 24)]
-
-        status, response, data = server.request('POST', address, body=body,
-                                                headers={**cookie, 'Origin': 'http://evil.example'})
-        assert status == 403 and json_of(data)['error'] == 'cross_origin'
-        status, response, data = server.request('POST', address, body=b'frame_key=0/23',
-                                                headers={**cookie, 'Content-Type': 'application/x-www-form-urlencoded'})
-        assert status == 415
-        for bad in ([], {'frame_key': '0/23'}, {**body, 'junction': 'maybe'}, {**body, 'frame_key': '7/7'},
-                    {**body, 'reviewer': 'someone'}):
-            assert server.request('POST', address, body=bad, headers=cookie)[0] == 400, bad
-        assert server.request('POST', address, body=b'{"frame_key":', headers=cookie)[0] == 400
-        for path in (address, address + '/undo'):
-            assert server.request('GET', path, headers=cookie)[0] == 405
-        for other in ('0000002b--0123456789', 'not-a-route'):
-            assert server.request('POST', f'/api/panel/road-types/{other}/junction', body=body,
-                                  headers=cookie)[0] == 404
-        assert not corrections_path(tmp_path, ROUTE).exists()
-
-        # Saved by the signed-in person: the drive again, the junction dropped.
-        status, response, data = server.request('POST', address, body=body,
-                                                headers={**cookie, 'Origin': f'http://127.0.0.1:{server.port}'})
-        drive = json_of(data)
-        assert status == 200 and drive['ok'] and drive['junctions']['corrections'] == 1
-        assert drive['junctions']['marks'][1]['label'] == 'dropped'
-        assert json.loads(corrections_path(tmp_path, ROUTE).read_text())['reviewer'] == 'admin'
-        # The road-type corrections are another file: nothing there.
-        from nnslr_tools.road_types import corrections_path as road_corrections
-        assert not road_corrections(tmp_path, ROUTE).exists()
-        # Undo, then nothing left to undo.
-        status, response, data = server.request('POST', address + '/undo', body={}, headers=cookie)
-        assert status == 200 and json_of(data)['junctions']['corrections'] == 0
-        assert server.request('POST', address + '/undo', body={}, headers=cookie)[0] == 409
-    finally:
-        server.close()
-
-
-def test_a_read_only_panel_refuses_a_junction(tmp_path):
-    from review_helpers import RunningServer, json_of
-
-    _prepared(tmp_path)
-    server = RunningServer(tmp_path)
-    server.app.panel.actions_enabled = False
-    try:
-        status, response, data = server.request('POST', f'/api/panel/road-types/{ROUTE}/junction',
-                                                body={'frame_key': '0/23', 'junction': 'here'})
-        assert status == 403 and json_of(data)['error'] == 'actions_disabled'
-        assert not corrections_path(tmp_path, ROUTE).exists()
-    finally:
-        server.close()

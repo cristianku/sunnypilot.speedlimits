@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Overview, Drives, Roads, Drive review, Speed review, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
+// Overview, Drives, Drive review, Speed review, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
 // tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
 // (/api/panel/models).
@@ -17,7 +17,6 @@ import ModelsTab from './ModelsTab.vue';
 import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
 import PublishTab from './PublishTab.vue';
-import RoadsTab from './RoadsTab.vue';
 import SignDistanceTab from './SignDistanceTab.vue';
 import RegressionTab from './RegressionTab.vue';
 import ReviewersTab from './ReviewersTab.vue';
@@ -64,9 +63,9 @@ watch(busyPaths, markBusy);
               @pipeline="startPipeline" @stop-pipeline="stopPipeline"/>
     <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
     <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <RoadsTab v-else-if="currentTab === 'roads'" :status="status" @run="run" @stop="stop" @details="details"/>
     <DriveReviewTab v-else-if="currentTab === 'drivereview'" :read-only="status?.actions_enabled === false"/>
-    <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false"/>
+    <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false" :status="status" @run="run"
+                    @stop="stop" @details="details"/>
     <RegressionTab v-else-if="currentTab === 'regression'" :status="status" @run="run" @stop="stop" @details="details"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>

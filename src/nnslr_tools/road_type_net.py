@@ -18,7 +18,7 @@ random colour and framing; a second dropped now and then; the speed scaled by +-
 unknown; the sign and the board missed or misread now and then; the car's motion unknown in MOTION_DROP_SHARE of the windows and its
 yaw or its carState part in MOTION_PART_SHARE, so that the network still works without them. The speed input is
 carState.vEgo when the motion is read (the GPS speed where it is missing). Loss: cross-entropy over the frames a person
-confirmed or corrected in Data › Roads (road_type_data.frame_label; every other frame only feeds the memory, and the
+confirmed or corrected in Data › Roads until 7 Nov 2026 (road_type_data.frame_label; every other frame only feeds the memory, and the
 windows drawn anywhere are drawn around a confirmed frame), weighted by 1 / sqrt(class frequency). The training stops
 at once, a dry run too, when the partitions hold too few of them (road_type_data.missing_labels); the best epoch by the road type's own measure on validation
 (road_score: macro F1, the first minute after a merge, false switches; the whole sequences run with their memory, as
@@ -1249,8 +1249,8 @@ def train_road_type(data_root: Path, run_dir: Path, *, memory: str = 'gru', epoc
     missing = data.missing_labels(dataset['summary'])
     if missing:
         raise ValueError('too few road types confirmed by a person to train, and a proposal of the map is never a label: '
-                         + '; '.join(missing) + '. Confirm or correct more of them in Data › Roads, on other drives '
-                         'than the test.')
+                         + '; '.join(missing) + '. A person confirmed them in Data › Roads, until 7 Nov 2026: that page '
+                         'is gone, no more can be added.')
     torch = _torch()
     run_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(seed)

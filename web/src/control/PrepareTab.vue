@@ -120,7 +120,7 @@ const COUNTS: [RouteState, string][] = [['collegare', 'waiting for their videos'
   ['preannotare', 'waiting for their signs']];
 
 const job = computed(() => jobOf(props.status, PREPARE_ACTIONS));
-// The road types share the group of the preparation: they are on Roads.
+// The road types share the group of the preparation: they are on Speed review.
 const activities = computed(() => terminalActivities(props.status, ['fetch', 'prepare'])
   .filter((activity) => activityTab(activity) === '/prepare'));
 const counts = computed(() => COUNTS.map(([state, label]) => ({state, label,

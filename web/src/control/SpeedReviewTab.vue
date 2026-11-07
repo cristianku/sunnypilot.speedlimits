@@ -1,17 +1,21 @@
 <script setup lang="ts">
 // Data › Speed review, where a person says the speed the car should hold, for the brain to learn from (speed_review.py):
 // nothing here changes the car. Every drive, the newest first; a tap opens it ("/speed-review?drive=<route>",
-// SpeedReviewDrive.vue). Drive review stays what it is: a place to look.
+// SpeedReviewDrive.vue). Drive review stays what it is: a place to look. Above the list, Find the road types reads the map
+// for the drives (RoadTypesCard.vue): the OpenStreetMap limit it finds is the proposal of each stretch.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {plural} from '../common/format';
+import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import {clockOf, scanText} from './drive-review';
+import RoadTypesCard from './RoadTypesCard.vue';
 import SectionHead from './SectionHead.vue';
 import type {SpeedRow} from './speed-review';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {tabDrive} from './tabs';
 
-defineProps<{readOnly: boolean}>();
+defineProps<{readOnly: boolean; status: PanelStatus | null}>();
+const emit = defineEmits<{run: [name: ActionName, state: ActionState]; stop: [job: Job]; details: [job: Job]}>();
 
 const drives = shallowRef<SpeedRow[] | null>(null);
 const error = ref('');
@@ -41,6 +45,8 @@ onMounted(() => { if (tabDrive.value === null) void load(); });
   <SpeedReviewDrive v-if="tabDrive" :key="tabDrive" :route="tabDrive" :read-only="readOnly"/>
   <template v-else>
     <SectionHead tab="speedreview"/>
+    <RoadTypesCard :status="status" @run="(name, state) => emit('run', name, state)" @stop="emit('stop', $event)"
+                   @details="emit('details', $event)"/>
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>

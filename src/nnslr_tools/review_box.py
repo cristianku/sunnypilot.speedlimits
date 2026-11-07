@@ -10,7 +10,7 @@ can only copy files inside one folder of the box (rrsync, no shell).
 rsync never touches the live databases of the box. A sync leaves a package in inbox/, and the tick, the only program
 there that writes both sides, installs it; the tick writes in outbox/ one package per drive with what the people did,
 and a sync reads only that. A package is the same on both machines (reviews_of): the rows of the signs and of the
-speeds, and the lines of the marks and of the corrections of the roads.
+speeds, and the lines of the marks of Sign distance.
 
 What a drive takes there: its frames, its video, its report and the reduced logs of the pages. The raw logs stay here.
 The positions are not sent: a reduced log travels with its track moved to the middle of nowhere (the turns of the track
@@ -45,7 +45,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Iterator
 
-from nnslr_tools import drive_review, drive_video, junctions, road_types, sign_distance, speed_review, video_frames
+from nnslr_tools import drive_review, drive_video, sign_distance, speed_review, video_frames
 from nnslr_tools.annotations import atomic_write
 from nnslr_tools.drive_logs import EXTRACT_VERSION, cache_dir
 from nnslr_tools.gps import load_positions, positions_path
@@ -69,8 +69,10 @@ REMOVAL = re.compile(DRIVE + r'\.remove')
 AS_THEY_ARE = ('derived/preannotations/{route}', 'derived/frames/{route}', 'derived/road_type_frames/{route}',
                'derived/car_motion/{route}.json', 'derived/road_type_signs/{route}.json', 'derived/video/{route}.mp4',
                'derived/video/{route}.json')
-JUNCTIONS = 'derived/junctions/{route}.json'
+# The map's road types and limits of the frames, for the proposals of Speed review.
 ROADS = 'derived/road_types/{route}.jsonl'
+# The map's junctions, sent until Roads went (7 Nov 2026): still deleted with a drive.
+JUNCTIONS = 'derived/junctions/{route}.json'
 # What a removal deletes on the box, besides the rows and the marks.
 ON_THE_BOX = (*AS_THEY_ARE, JUNCTIONS, ROADS, 'derived/gps/{route}', 'derived/drive_logs/{route}',
               f'{video_frames.CACHE_DIR}/{{route}}', 'raw/routes/{route}')
@@ -96,7 +98,7 @@ SPEED_TABLES = {'stretches': ('speed_stretches', ('route', 'start_ns', 'end_ns',
 SPEED_HISTORY_COLUMNS = ('route', 'revision', 'action', 'start_ns', 'end_ns', 'kph', 'state', 'known_ns', 'note',
                          'reviewer', 'at')
 # The stores made of lines, and the kind of work that writes each.
-LINE_STORES = {'distance': 'distance', 'road_types': 'roads', 'junctions': 'roads'}
+LINE_STORES = {'distance': 'distance'}
 DRIVE_TABLES = ('scans', 'log_files', 'episodes')
 # The columns that must be numbers in a package from the box, whatever else it holds.
 INTEGERS = frozenset({'revision', 'start_ns', 'end_ns'})
@@ -175,8 +177,7 @@ def _lines(path: Path) -> list[str]:
 
 
 def _line_paths(root: Path, route: str) -> dict[str, Path]:
-    return {'distance': sign_distance.marks_path(root, route), 'road_types': road_types.corrections_path(root, route),
-            'junctions': junctions.corrections_path(root, route)}
+    return {'distance': sign_distance.marks_path(root, route)}
 
 
 def _write_lines(path: Path, lines: list[str]) -> None:
@@ -227,7 +228,7 @@ def _origin(paths: list[Path]) -> tuple[float, float] | None:
 
 def without_places(extract: dict, origin: tuple[float, float] | None) -> dict:
     """A reduced log with its track moved around 0, 0, in the same scale, and no road names. The headings stay: the
-    longitude is scaled here as speed_review._turn_rates would scale it at the drive's latitude."""
+    longitude is scaled here as a heading scales it at the drive's latitude."""
     moved = dict(extract)
     moved['series'] = {key: value for key, value in (extract.get('series') or {}).items() if key != 'road_name'}
     moved['gps'] = []
@@ -281,9 +282,6 @@ def stage_without_places(root: Path, route: str, stage: Path) -> None:
         target = stage / path.relative_to(root)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(gzip.compress(_text(without_places(extract, origin)).encode('utf-8'), 6))
-    source = root / JUNCTIONS.format(route=route)
-    if source.is_file():
-        _stage(stage, JUNCTIONS.format(route=route), _text(scrubbed(json.loads(source.read_text(encoding='utf-8')))))
     source = root / ROADS.format(route=route)
     if source.is_file():
         _stage(stage, ROADS.format(route=route),

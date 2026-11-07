@@ -55,7 +55,7 @@ def _types(*parts):
 
 
 def _confirm_all(root: Path, route: str):
-    """A person confirms every stretch the map proposes, as Data › Roads saves it."""
+    """A person confirms every stretch the map proposes, as Data › Roads saved it until 7 Nov 2026."""
     from nnslr_tools import road_types
     for stretch in road_types.stretches(road_types.map_road_types(root, route)):
         if stretch['type'] is not None:
@@ -304,7 +304,7 @@ def test_too_few_confirmed_frames_stop_a_training_before_it_writes_anything(prop
     # The proposals alone would fill every partition: they are not counted, and nothing falls back on them.
     assert main(['train-road-type', '--dry-run', '--run-dir', str(run_dir), '--data-root', str(proposed)]) != 0
     message = capsys.readouterr().err
-    assert 'a proposal of the map is never a label' in message and 'Data › Roads' in message
+    assert 'a proposal of the map is never a label' in message and 'no more can be added' in message
     assert 'train has 0 of 2000 confirmed frames' in message and 'validation has 0 of 30 ramp frames' in message
     assert not run_dir.exists()
 

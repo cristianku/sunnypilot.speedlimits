@@ -49,8 +49,8 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
 # shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, their
-# review, Speed review (the speed a person wants held along a drive), Sign distance (where the comma's vision says a
-# sign is passed against the frame a person marks), the road types from the map and the training dataset; Models the
+# review, Speed review (the speed a person wants held along a drive, with the map's limits it proposes), Sign distance
+# (where the comma's vision says a sign is passed against the frame a person marks) and the training dataset; Models the
 # versions to choose, their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
@@ -58,7 +58,7 @@ SECTIONS = (
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
                                   ('drivereview', '/drive-review', 'Drive review'),
                                   ('speedreview', '/speed-review', 'Speed review'),
-                                  ('signdistance', '/sign-distance', 'Sign distance'), ('roads', '/roads', 'Roads'),
+                                  ('signdistance', '/sign-distance', 'Sign distance'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
@@ -70,7 +70,7 @@ SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (page
 SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
-CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset', '/roads': 'roads',
+CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset',
                 '/drive-review': 'drivereview', '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
                 '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
@@ -86,7 +86,7 @@ SECTION_ICONS = {
 # what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
 GUEST_HOME = '/reviews'
 OLD_ADDRESSES = {GUEST_HOME: '/', '/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
-                 '/settings': '/account', '/review': '/routes'}
+                 '/settings': '/account', '/review': '/routes', '/roads': '/speed-review'}
 # The name of each page in the window title.
 TAB_TITLES = {key: label for key, _, label in SITE_TABS}
 # Dark (the default) or the choice kept in this browser, applied before the first paint

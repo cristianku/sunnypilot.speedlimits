@@ -203,7 +203,7 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 - the version without memory, to compare: the same encoder and speed with a small head per frame (`--memory none`), also measured with a causal 5-second majority vote over its answers, the cheapest memory;
 - size: 1,101,478 parameters (1,018,406 without memory), about 84 MFLOPs a step, 3.9 ms a step on the V100 at batch 1. At 1 Hz that is a small fraction of Chestnut, next to the driving model. Measured on the comma 4 (30 Oct 2026): the resize of the road frame to 256 × 144 on the CPU 263 ms, the network on the GPU 26 ms, once a second; the resize is the part to make faster.
 
-**Labels and weights** (`src/nnslr_tools/road_type_data.py`). `nnslr road-types` only proposes a road type for each frame. Since 4 Nov 2026 (`LABEL_POLICY`, `confirmed-only`) a frame has a label only when a person confirmed or corrected its type in Data › Roads (`road_types.confirmed`: `reviewed` true and a valid type), and those decisions outlive a new search of the map. The weight of a frame in the loss:
+**Labels and weights** (`src/nnslr_tools/road_type_data.py`). `nnslr road-types` only proposes a road type for each frame. Since 4 Nov 2026 (`LABEL_POLICY`, `confirmed-only`) a frame has a label only when a person confirmed or corrected its type in Data › Roads, a page there until 7 Nov 2026 (`road_types.confirmed`: `reviewed` true and a valid type), and those decisions outlive a new search of the map. The weight of a frame in the loss:
 - a person's type: 1;
 - everything else: 0. That is a proposal of the map, however sure, a ramp from its OSM link (`motorway_link`, `trunk_link`), an acceleration lane, a frame without a road type and "Can't tell". It is out of the loss and out of every measure, on validation and test too, but still goes through the memory;
 - on top, the loss weighs each class by 1 / √(its frequency).
@@ -222,7 +222,7 @@ Everything trained before that date, the results of this section included, learn
 
 There is no expressway frame anywhere (the drives have none on the map), and no parking in validation or test. The changes of road type (10 s of each side): ramp → motorway 2 in train, 1 in validation, 4 in test; motorway → ramp 2, 1, 2; town entry 13, 3, 11; town exit 11, 3, 10. Merges (a ramp of 3 s or more, then the motorway): 5 in train, 1 in validation, 7 in test.
 
-Unsure frames, by class (to confirm first in Data › Roads): town 343, rural 1,352, motorway 397, ramp 832, parking 13.
+Unsure frames, by class (to confirm first in Data › Roads, gone since 7 Nov 2026): town 343, rural 1,352, motorway 397, ramp 832, parking 13.
 
 **Training.** Windows of 48 seconds, 35 % of them around a change of road type; half of the batches start from the memory of the 32 seconds before the window, as on the car, the others from zeros. Per sequence the same random colour and framing (no mirror: traffic keeps right), a second dropped now and then, the speed ±5 % and unknown in one sequence in ten. AdamW, the best epoch by the validation macro F1, run over whole sequences with their memory. `scripts/run_road_type.sh` does both networks, the comparison and the export in about 15 minutes on the V100.
 
@@ -258,7 +258,7 @@ Unsure frames, by class (to confirm first in Data › Roads): town 343, rural 1,
 8. `road_type = classes[argmax(probabilities)]`, taken only after the same class 3 steps in a row.
 
 **What is missing.**
-- Ramps: confirmed ramp frames in Data › Roads, and more drives with on- and off-ramps. Until the network says "ramp", the car must not lift a ramp's limit on "motorway" alone: it says motorway on the ramp itself.
+- Ramps: confirmed ramp frames (Data › Roads went on 7 Nov 2026), and more drives with on- and off-ramps. Until the network says "ramp", the car must not lift a ramp's limit on "motorway" alone: it says motorway on the ramp itself.
 - Expressways: no frame yet. Parking: no held-out frame.
 - More merges in validation and test, to make the after-merge number a measure.
 - The stretches of motorway taken as rural, to look at (the frames, or the map's labels there).
@@ -434,13 +434,13 @@ The third version says ramp sometimes, for 29 of the 319 ramp seconds of test, a
 
 **On the car.** The ONNX step has one more output, after the road type's, which keep their names and order: `probabilities` (1, 6), `hidden_out` (1, 128), `junction` (1, 2) = sigmoid of `in_junction` and `passed`. The contract has `outputs.junction` (names, the decode, the operating point chosen on validation), `step.junctions` and `car_input.junction_decode`, the line the car runs. Checked against PyTorch with onnxruntime: largest error 5e-6 on random inputs, 9e-6 over 60 s of a real drive with the same answer in all 60. The network has 1,102,504 parameters (258 more); a step still costs 84 MFLOPs.
 
-**Corrections in Data › Roads.** The review page of a drive shows the map's intersections as dots under the strip: filled for an intersection, an orange ring for one to check (the GPS stops inside, the track passes more than 8 m from it, the car stays more than 30 s inside, or a "maybe" on another road), a gray ring for one dropped. Next to review stops on the rings. Under the road-type buttons, "Junction here" and "Not a junction" (and Undo) correct the picture shown. The corrections are appended to `annotations/junctions/<route>.jsonl` (the last line wins) and are never touched by a new map run; the training labels are the map's with the corrections over them. Today 56 are to check: 39 "maybe" and 17 of the map's intersections.
+**Corrections in Data › Roads (until 7 Nov 2026).** The review page of a drive shows the map's intersections as dots under the strip: filled for an intersection, an orange ring for one to check (the GPS stops inside, the track passes more than 8 m from it, the car stays more than 30 s inside, or a "maybe" on another road), a gray ring for one dropped. Next to review stops on the rings. Under the road-type buttons, "Junction here" and "Not a junction" (and Undo) correct the picture shown. The corrections are appended to `annotations/junctions/<route>.jsonl` (the last line wins) and are never touched by a new map run; the training labels are the map's with the corrections over them. Today 56 are to check: 39 "maybe" and 17 of the map's intersections.
 
 **What is missing.**
 - **Look at the false "passed"**: the 69 of test at the operating point, on the frames. Are they driveways and car park exits (the rules leave them out, the camera does not), stretches the map lacks, or plain mistakes? That decides between more rules, more data and another input.
 - **More intersections in validation**: 28, and 6 minutes of town, are not enough to choose an epoch or a threshold.
 - **The epoch for two heads**: choose the road type's epoch by its own measure, and train or fine-tune the junction head apart, so that one does not spoil the other. Done in the fourth version.
-- **A person's pass over the 56 to check** in Data › Roads, then train again.
+- **A person's pass over the 56 to check**, then train again (Data › Roads, where it was done, went on 7 Nov 2026).
 - **Poland**: there is no Polish drive yet. The head is trained on Swiss intersections, which look alike but are not the same.
 - **The car**: nothing uses it, and it should not until the false "passed" are rare. `SpeedLimitMemory` would end a sign's number at a "passed" only where the law says so (Poland; in Switzerland, some signs).
 
@@ -550,7 +550,7 @@ No version ever says merge (F1 0): the training has 48 merge frames. The version
 
 **A link right after an entry (31 October 2026).** Past a ramp's limit a number is the carriageway's, so the sign of an interchange's link, read within `RAMP_SECONDS` of the entry's motorway sign but before the debounced road type says ramp, stays on the next motorway: too low, until the next sign. At `74a0778ab` the car took it as the ramp's, but it took the carriageway's own 100 there as the ramp's too and gave 120. A rule that took the number back as the ramp's when the road type says ramp within 6 s of it was tried and dropped. The version in use never says ramp on a link between two carriageways (9 in test, ramp probability at most 0.05), so the rule changed none of the 9 test merges; and a false ramp on the carriageway right after its own number gave the general limit, too high. Neither case happens before the car confirms motorway signs, which it has not done on any drive so far.
 
-**Still to do.** More motorway entries for the class merge; check the lanes of the map by eye in Data › Roads; let the version without the car's motion go on the car (its ONNX step exported, chosen on the Models tab).
+**Still to do.** More motorway entries for the class merge; check the lanes of the map by eye (Data › Roads went on 7 Nov 2026); let the version without the car's motion go on the car (its ONNX step exported, chosen on the Models tab).
 
 ### A limit read before the motorway (31 October 2026)
 

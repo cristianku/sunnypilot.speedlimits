@@ -55,8 +55,8 @@ frames of the acceleration lane that were the ramp's (the measures fold them bac
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
 91% of town frames, 75% of rural ones and 95% of motorway ones; most rural misses were roads at 60 in a town.
 
-The map labels are a proposal: OpenStreetMap can be wrong or old, and a person corrects them in the road-type review
-(Data › Roads, a drive opened). A correction is kept apart, in ``annotations/road_types/<route>.jsonl``: one line per
+The map labels are a proposal: OpenStreetMap can be wrong or old, and a person corrected them in the road-type review
+(Data › Roads, a drive opened, until 7 Nov 2026: the page went, the corrections made stay labels). A correction is kept apart, in ``annotations/road_types/<route>.jsonl``: one line per
 correction, appended, ``{"from", "to" (frame keys, the stretch), "road_type" (null: the person cannot tell), "reviewer",
 "at"}``; the last line covering a frame wins. ``nnslr road-types`` never touches it, so a correction survives a new map
 run; load_road_types gives the map labels with the corrections over them. A person confirms a proposal the same way,
@@ -81,7 +81,7 @@ from nnslr_tools.sign_reads import is_read_frame
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
-# The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Data › Roads).
+# The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Find the road types, Data › Speed review).
 MAPS_RELATIVE = Path('raw') / 'osm'
 MAPS_STATUS_RELATIVE = Path('derived') / 'osm' / 'maps.json'
 # The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
@@ -116,7 +116,7 @@ MIN_LINK_RUN = 10
 TOWN_KINDS = ('urban', 'zone', 'zone30')
 # The reasons the map is often wrong about, measured on 27 Oct 2026 against 240 frames looked at without the map:
 # a road at 60 was in a town one time in three, a ramp is between two kinds of road, a filled gap is mostly a tunnel.
-# Their frames are not "sure": Data › Roads says so; sure or not, a training takes none until a person confirmed it. A
+# Their frames are not "sure"; sure or not, a training takes none until a person confirmed it. A
 # road at 30 without its kind is a 30 zone or a 30 street. The US cut is looked at on a few frames only (3 Nov 2026: at 40
 # and 45 mph shops, sidewalks and signals, at 55 mph open country): 35, 40 and 45 mph are not sure either.
 WEAK_BASES = ('maxspeed 30', 'maxspeed 60', 'maxspeed 70', 'highway motorway_link', 'highway trunk_link',
@@ -127,10 +127,7 @@ US_TOWN_MPH = 45
 TOWN_KPH = 50
 MPH = re.compile(r'([0-9]+) ?mph')
 TOWN_HIGHWAYS = ('residential', 'living_street')
-# The picture of a frame in its pre-annotation report (preview_path), served at /route/<route>/images/<8 digits>.jpg, and
-# smaller at /route/<route>/small/images/<8 digits>.jpg, the one Roads shows: the kind of road needs no signs.
-PREVIEW = re.compile(r'images/[0-9]{8}\.jpg')
-# The drives of Data › Roads (summary) by data root: (every road-types file with its time and the time of its
+# The drives of summary by data root: (every road-types file with its time and the time of its
 # corrections, the drives read from them). About 20,000 lines for 11 drives take a fifth of a second: read again only
 # when a file changed.
 _DRIVES: dict[str, tuple[tuple, list[dict]]] = {}
@@ -493,7 +490,7 @@ def review_counts(lines: list[dict]) -> dict[str, int]:
 
 def load_road_types(root: Path, route: str) -> list[dict]:
     """The lines of a route in the order of the drive with a person's corrections over the map (corrected), [] when
-    nnslr road-types has not run for it. Every reader takes these: Data › Roads, its API, a training."""
+    nnslr road-types has not run for it. Every reader takes these: a training."""
     lines = map_road_types(root, route)
     corrections = load_corrections(root, route) if lines else []
     return corrected(lines, corrections) if corrections else lines
@@ -516,17 +513,6 @@ def correct(root: Path, route: str, start, end, road_type, reviewer: str) -> dic
             before += b'\n'
         atomic_write(path, before + jsonl_bytes([line]))
     return line
-
-
-def undo_correction(root: Path, route: str) -> bool:
-    """Drops the last correction of a route (Undo of the page); False when there is none."""
-    path = corrections_path(root, route)
-    with _CORRECTING:
-        lines = [line for line in path.read_bytes().splitlines(keepends=True) if line.strip()] if path.is_file() else []
-        if not lines:
-            return False
-        atomic_write(path, b''.join(lines[:-1]))
-    return True
 
 
 def stretches(lines: list[dict]) -> list[dict]:
@@ -560,34 +546,6 @@ def _drive(root: Path, route: str) -> dict:
             'stretches': stretches(lines)}
 
 
-def drive_view(root: Path, route: str, by_key: dict) -> dict:
-    """A drive of Data › Roads opened (GET /api/panel/road-types/<route>): {'route', 'title', 'when', 'start', 'minutes',
-    'frames': [{'key', 'image', 'road_type', 'basis', 'sure', 'reviewed'}] in the order of the drive, 'stretches',
-    'types', 'reviewed', 'usable', 'cant_tell', 'to_review' (review_counts), 'corrections': how many, 'junctions': the intersections of the drive, the map's with a person's
-    corrections over them (junctions.drive_marks: {'found', 'corrections', 'marks'})}; frames [] before nnslr road-types
-    ran for it. by_key: the rows of the drive's pre-annotation report by frame key, whose preview_path names the picture
-    of the frame on the site (/route/<route>/small/images/<8 digits>.jpg)."""
-    from nnslr_tools.drives import drive_of
-    from nnslr_tools.junctions import drive_marks
-    lines = map_road_types(root, route)
-    corrections = load_corrections(root, route) if lines else []
-    lines = corrected(lines, corrections)
-    frames = []
-    for line in lines:
-        preview = (by_key.get(line['frame_key']) or {}).get('preview_path')
-        frames.append({'key': line['frame_key'],
-                       'image': f'/route/{route}/small/{preview}' if isinstance(preview, str) and PREVIEW.fullmatch(preview)
-                       else None,
-                       'road_type': line.get('road_type'), 'basis': line.get('basis'), 'sure': bool(line.get('sure')),
-                       'reviewed': bool(line.get('reviewed'))})
-    drive = drive_of(root, route) or {}
-    return {'route': route, 'title': drive.get('title'), 'when': drive.get('when'), 'start': drive.get('start'),
-            'minutes': drive.get('minutes'), 'frames': frames, 'stretches': stretches(lines), 'types': type_counts(lines),
-            'reviewed': sum(1 for frame in frames if frame['reviewed']), **review_counts(lines),
-            'corrections': len(corrections),
-            'junctions': drive_marks(root, route, [frame['key'] for frame in frames])}
-
-
 def _stamp(path: Path) -> tuple | None:
     """When a corrections file changed, None without one: each correction rewrites it (a new inode, a line more or
     less), maybe within one tick of the clock."""
@@ -605,7 +563,7 @@ def _map_name(file: str) -> str:
 
 
 def maps_status(root: Path) -> dict:
-    """The maps of the server for Data › Roads: {'names': the extracts of raw/osm, oldest first, by their name in
+    """The maps of the server for the card of Find the road types: {'names': the extracts of raw/osm, oldest first, by their name in
     derived/osm/maps.json (scripts/osm_maps.py; a file it has not seen yet by its own: "illinois-latest.osm.pbf" ->
     "Illinois"), 'needed': [{'name', 'bytes' (None: unknown), 'state' (to download, failed, busy, too big), 'reason',
     'drives': how many need it}] the extracts the drives need that raw/osm still lacks, 'outside': how many drives they
@@ -645,7 +603,8 @@ def drives_without(root: Path) -> int:
 
 
 def summary(root: Path) -> dict:
-    """The road types of every drive, for Data › Roads (GET /api/panel/road-types): {'routes': [{'route', 'title',
+    """The road types of every drive, for the card of Find the road types on Data › Speed review (GET
+    /api/panel/road-types): {'routes': [{'route', 'title',
     'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':
     frames a person set, 'usable', 'cant_tell', 'to_review' (review_counts), 'stretches'}] newest drive first, 'review':
     those three over every drive, 'made_at': when the newest file of the map was written (None

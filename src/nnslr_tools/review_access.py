@@ -56,11 +56,10 @@ NOT_THROUGH_PROXY = 'This address opens only through the sign-in of the site.'
 NOT_ASSIGNED = 'This is not part of the work given to you.'
 
 # The kinds of work, in the order of the pages: (key, what the person does).
-WORK_KINDS = (('signs', 'Sign review'), ('distance', 'Sign distance'), ('speed', 'Speed review'), ('roads', 'Roads'))
+WORK_KINDS = (('signs', 'Sign review'), ('distance', 'Sign distance'), ('speed', 'Speed review'))
 KIND_KEYS = tuple(key for key, _ in WORK_KINDS)
 # The page of each kind for a drive.
-WORK_LINKS = {'signs': '/route/{route}/', 'distance': '/sign-distance?drive={route}', 'speed': '/speed-review?drive={route}',
-              'roads': '/roads?drive={route}'}
+WORK_LINKS = {'signs': '/route/{route}/', 'distance': '/sign-distance?drive={route}', 'speed': '/speed-review?drive={route}'}
 
 DRIVE = r'([0-9a-f]{8}--[0-9a-f]{10})'
 FRAME = r'[0-9]{1,4}/[0-9]{1,6}'
@@ -69,7 +68,7 @@ SAVED_FRAME = r'[0-9]{1,9}/[0-9]{1,9}'
 # every reviewer. The first group of a row with kinds is the drive.
 GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, kinds in (
     # The pages of the guest's app (pages.render_guest), which hold no data, and their own list.
-    ('GET', r'/(reviews|speed-review|sign-distance|roads)?', None),
+    ('GET', r'/(reviews|speed-review|sign-distance)?', None),
     ('GET', r'/api/auth/state', None),
     ('GET', r'/api/reviewer/work', None),
     # "Review completed" of the list: a drive of the guest's, checked on their work (Assignments.complete).
@@ -78,8 +77,7 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('GET', r'/api/sign-distance/drives', None),
     # Sign review.
     ('GET', r'/route/' + DRIVE + r'(/(index\.html)?)?', ('signs',)),
-    ('GET', r'/route/' + DRIVE + r'/images/[0-9]{8}\.jpg', ('signs', 'roads')),
-    ('GET', r'/route/' + DRIVE + r'/small/images/[0-9]{8}\.jpg', ('roads',)),
+    ('GET', r'/route/' + DRIVE + r'/images/[0-9]{8}\.jpg', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/video/' + FRAME + r'\.jpg', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/(reviews|live|busy(/[0-9]{1,7})?)', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/video/' + FRAME, ('signs',)),
@@ -95,9 +93,6 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('GET', r'/api/drive-review/drives/' + DRIVE + r'(/timeline)?', ('speed',)),
     ('GET', r'/api/panel/drive-video/' + DRIVE, ('speed',)),
     ('GET', r'/route/' + DRIVE + r'/video\.mp4', ('speed',)),
-    # Roads.
-    ('GET', r'/api/panel/road-types/' + DRIVE, ('roads',)),
-    ('POST', r'/api/panel/road-types/' + DRIVE + r'(/junction)?(/undo)?', ('roads',)),
 ))
 
 # What a guest never receives, at any depth of an answer: where the drive was.
@@ -198,8 +193,14 @@ class Assignments:
             data = json.loads(text)
         except ValueError:
             raise ReviewRejected(500, 'unreadable', 'The assignments file of this server is damaged.') from None
-        if not isinstance(data, dict) or not isinstance(data.get('people'), dict) or not isinstance(data.get('work'), dict):
+        if not isinstance(data, dict) or not isinstance(data.get('people'), dict) or not isinstance(data.get('work'), dict) \
+                or not all(isinstance(drives, dict) and all(isinstance(kinds, list) for kinds in drives.values())
+                           for drives in data['work'].values()):
             raise ReviewRejected(500, 'unreadable', 'The assignments file of this server is damaged.')
+        # A kind of work this server no longer gives (Roads, until 7 Nov 2026) is left out, and a drive with only that.
+        work = {name: {route: [kind for kind in kinds if kind in KIND_KEYS] for route, kinds in drives.items()}
+                for name, drives in data['work'].items()}
+        data['work'] = {name: {route: kinds for route, kinds in drives.items() if kinds} for name, drives in work.items()}
         return data
 
     def _write(self, data: dict) -> None:

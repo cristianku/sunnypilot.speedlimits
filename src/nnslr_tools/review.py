@@ -378,15 +378,13 @@ class ReviewApp(ReviewService):
                 'can_complete': os.environ.get(REVIEW_BOX_ENV) == '1'}
 
     def assignable_drives(self) -> list[dict]:
-        """Every drive with the work it can give today, the latest first: Sign review and Roads need its report, Sign
-        distance signs to mark, Speed review its video."""
-        from nnslr_tools import drive_review, road_types, sign_distance, speed_review
+        """Every drive with the work it can give today, the latest first: Sign review needs its report, Sign distance
+        signs to mark, Speed review its video."""
+        from nnslr_tools import drive_review, sign_distance, speed_review
         store = drive_review.store_for(self.root)
         kinds: dict[str, set[str]] = {}
         for link in self.route_links():
             kinds.setdefault(link['route_id'], set()).add('signs')
-        for item in road_types.summary(self.root)['routes']:
-            kinds.setdefault(item['route'], set()).add('roads')
         for item in sign_distance.overview(store)['drives']:
             if item['status'] == 'signs':
                 kinds.setdefault(item['route'], set()).add('distance')
@@ -809,21 +807,11 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/proposers':
                 self._json(200, app.panel.proposers())
                 return
-            # The road type of every frame of the drives, from the map (nnslr road-types), for Data › Roads.
+            # The road type and limit of every frame of the drives, from the map (nnslr road-types): the card of Find the
+            # road types on Data › Speed review.
             if path == '/api/panel/road-types':
                 from nnslr_tools import road_types
                 self._json(200, road_types.summary(app.root))
-                return
-            # One drive of Data › Roads opened: every frame with its picture and its road type, the map's or a person's.
-            match = re.fullmatch(r'/api/panel/road-types/([^/]+)', path)
-            if match:
-                from nnslr_tools import road_types
-                by_key = self._prepared_drive(match.group(1))
-                if by_key is not None:
-                    self._json(200, road_types.drive_view(app.root, match.group(1), by_key))
-                return
-            if re.fullmatch(r'/api/panel/road-types/[^/]+(/junction)?/undo|/api/panel/road-types/[^/]+/junction', path):
-                self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
@@ -939,10 +927,6 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(r'/route/([^/]+)(/images/[0-9]{8}\.jpg)', path)
             if match:
                 self._send_image(match.group(1), match.group(2))
-                return
-            match = re.fullmatch(r'/route/([^/]+)/small(/images/[0-9]{8}\.jpg)', path)
-            if match:
-                self._send_small_image(match.group(1), match.group(2))
                 return
             match = re.fullmatch(r'/route/([^/]+)/video/([0-9]{1,4})/([0-9]{1,6})\.jpg', path)
             if match:
@@ -1125,45 +1109,6 @@ def make_handler(app: ReviewApp):
                 return None
             return route
 
-        def _prepared_drive(self, route):
-            """The rows of a prepared drive's report by frame key; None (answered 404) for a drive that is not prepared,
-            a malformed id or a path outside the data root."""
-            try:
-                parse_route_id(route)
-                return app.report(route)[2]
-            except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, True)
-                return None
-
-        def _road_type_post(self, route, undo, body):
-            """Data › Roads: a person's road type for the frames from/to of a drive ({"from", "to", "road_type"}, null
-            when they cannot tell), or Undo of the last one; the drive again. A read-only panel refuses it, as it refuses
-            the actions."""
-            from nnslr_tools import road_types
-            if not app.panel.actions_enabled:
-                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            if not isinstance(body, dict):
-                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
-            by_key = self._prepared_drive(route)
-            if by_key is None:
-                return
-            who, via = self._who()
-            if undo:
-                if not road_types.undo_correction(app.root, route):
-                    raise ReviewRejected(409, 'nothing_to_undo', 'This drive has no correction to undo.')
-                print(f'Roads: {route} last correction undone ({terminal_text(who or via)})', flush=True)
-            else:
-                if set(body) != {'from', 'to', 'road_type'}:
-                    raise ReviewRejected(400, 'invalid_correction', 'Send {"from", "to", "road_type"}: two frame keys '
-                                                                    'of the drive and the type (null: cannot tell).')
-                try:
-                    line = road_types.correct(app.root, route, body['from'], body['to'], body['road_type'], who or via)
-                except road_types.CorrectionError as exc:
-                    raise ReviewRejected(400, 'invalid_correction', str(exc)) from None
-                print(f'Roads: {route} {line["from"]} to {line["to"]} is {line["road_type"] or "cannot tell"} '
-                      f'({terminal_text(who or via)})', flush=True)
-            self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
-
         def _car_settings_view(self):
             from nnslr_tools import car_release, car_settings
             return car_settings.view(app.root, car_release.published_settings())
@@ -1181,36 +1126,6 @@ def make_handler(app: ReviewApp):
                 raise ReviewRejected(400, 'invalid_settings', str(exc)) from None
             print(f'Panel: car settings {record["values"] or "all default"} ({terminal_text(who or via)})', flush=True)
             self._json(200, {'ok': True, **self._car_settings_view()})
-
-        def _junction_post(self, route, undo, body):
-            """Data › Roads: a person's "Junction here" ({"frame_key", "junction": "here"}) or "Not a junction"
-            ("none") for a frame of a drive, or Undo of the last one; the drive again. Kept apart from the map's
-            junctions (annotations/junctions/<route>.jsonl), as the road types are; a read-only panel refuses it."""
-            from nnslr_tools import junctions, road_types
-            if not app.panel.actions_enabled:
-                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            if not isinstance(body, dict):
-                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
-            by_key = self._prepared_drive(route)
-            if by_key is None:
-                return
-            who, via = self._who()
-            if undo:
-                if not junctions.undo_correction(app.root, route):
-                    raise ReviewRejected(409, 'nothing_to_undo', 'This drive has no junction correction to undo.')
-                print(f'Roads: {route} last junction correction undone ({terminal_text(who or via)})', flush=True)
-            else:
-                if set(body) != {'frame_key', 'junction'}:
-                    raise ReviewRejected(400, 'invalid_correction', 'Send {"frame_key", "junction"}: a frame key of '
-                                                                    'the drive and "here" or "none".')
-                try:
-                    line = junctions.correct(app.root, route, body['frame_key'], body['junction'], who or via)
-                except junctions.CorrectionError as exc:
-                    raise ReviewRejected(400, 'invalid_correction', str(exc)) from None
-                print(f'Roads: {route} {line["frame_key"]} is '
-                      f'{"a junction" if line["junction"] == "here" else "not a junction"} ({terminal_text(who or via)})',
-                      flush=True)
-            self._json(200, {'ok': True, **road_types.drive_view(app.root, route, by_key)})
 
         def _send_route_page(self, route):
             try:
@@ -1242,24 +1157,6 @@ def make_handler(app: ReviewApp):
             if path is None:
                 self._problem(404, 'not_found', 'Image not found.', False)
             return path
-
-        def _send_small_image(self, route, name):
-            """The picture of a frame made smaller, for Roads: the kind of road needs no signs, and a line may be slow."""
-            from nnslr_tools.media import small_jpeg
-            path = self._image_file(route, name)
-            if path is None:
-                return
-            try:
-                data = small_jpeg(path)
-            except OSError:
-                self._problem(404, 'not_found', 'Image not found.', False)
-                return
-            self.send_response(200)
-            self.send_header('Content-Type', 'image/jpeg')
-            self.send_header('Content-Length', str(len(data)))
-            self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
-            self.end_headers()
-            self.wfile.write(data)
 
         def _send_image(self, route, name):
             path = self._image_file(route, name)
@@ -1743,10 +1640,6 @@ def make_handler(app: ReviewApp):
             active = path == '/api/panel/models/active'
             # Who proposes the signs in Prepare ({"proposer"}), kept for every browser.
             chosen = path == '/api/panel/proposer'
-            # A person's road type for a stretch of a drive of Data › Roads ({"from", "to", "road_type"}), or /undo;
-            # /junction: a person's "Junction here" or "Not a junction" for a frame ({"frame_key", "junction"}), or
-            # /junction/undo.
-            road = re.fullmatch(r'/api/panel/road-types/([^/]+)(/junction)?(/undo)?', path)
             # The settings of the comma's vision limit ({"values": {setting: number or null}}).
             settings = path == '/api/panel/car-settings'
             # The settings of a training of Train ({"training": action, "values": {setting: number or null}}).
@@ -1754,7 +1647,7 @@ def make_handler(app: ReviewApp):
             # Train › Pipeline: our networks one after the other ({"steps": [{"action", "options"}]}), or /stop: the
             # next ones do not start.
             pipeline = re.fullmatch(r'/api/panel/pipeline(/stop)?', path)
-            if run or stop or active or chosen or road or settings or trainings or pipeline:
+            if run or stop or active or chosen or settings or trainings or pipeline:
                 # Same protections as saving a frame: same origin, JSON only (no form can send it).
                 if not self._same_origin():
                     self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1811,10 +1704,6 @@ def make_handler(app: ReviewApp):
                 elif pipeline:
                     who, via = self._who()
                     self._json(200, {'ok': True, 'pipeline': app.panel.start_pipeline(body, who or via)})
-                elif road and road.group(2):
-                    self._junction_post(road.group(1), road.group(3) is not None, body)
-                elif road:
-                    self._road_type_post(road.group(1), road.group(3) is not None, body)
                 else:
                     self._json(200, {'ok': True, **app.panel.stop(stop.group(1))})
                 return

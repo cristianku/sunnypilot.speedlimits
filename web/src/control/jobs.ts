@@ -35,7 +35,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
  */
 export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
-  dataset: '/dataset', road_types: '/roads', review_box: '/reviewers',
+  dataset: '/dataset', road_types: '/speed-review', review_box: '/reviewers',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_road_type: '/train', train_brain: '/train',
   train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
@@ -50,10 +50,10 @@ export const TRAIN_ACTIONS: ActionName[] = actionsOf('/train');
 export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's, the
- * road types (in the group of the preparation) are Roads', the Mapillary positions and windows Train's (its classifier
+ * road types (in the group of the preparation) are Speed review's, the Mapillary positions and windows Train's (its classifier
  * and its cutter). */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
-  if (activity.label === 'road types') return '/roads';
+  if (activity.label === 'road types') return '/speed-review';
   if (activity.group === 'mapillary') return '/train';
   if (activity.label === 'networks on the comma') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';

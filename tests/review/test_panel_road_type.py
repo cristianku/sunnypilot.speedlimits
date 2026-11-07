@@ -87,7 +87,7 @@ def test_the_road_type_is_trained_from_the_train_tab_once_the_road_types_are_fou
         'label': 'Train the scene network', 'allowed': False, 'reason': 'scripts/run_road_type.sh is missing in this installation'}
     road_type_script(checkout)
     assert panel._action_states(ready_payload(), [])['train_road_type']['reason'] == \
-        'no road types yet: Data › Roads, Find the road types'
+        'no road types yet: Data › Speed review, Find the road types'
     (root / 'derived' / 'road_types').mkdir(parents=True)
     (root / 'derived' / 'road_types' / 'r1.jsonl').write_text('{}\n')
     assert panel._action_states(ready_payload(gpu_processes=1), [])['train_road_type']['reason'] == \

@@ -149,7 +149,7 @@ On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `h
 
 It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default before any choice), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
-For the scene network, **Data › Roads › Find the road types** (`helpers/road_types.sh`) reads the kind of each road from OpenStreetMap, offline. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. These are proposals: a training learns only what a person confirms or corrects there, and the car never sees the map.
+**Find the road types**, on top of **Data › Speed review** (`helpers/road_types.sh`), reads the kind of each road and its limit from OpenStreetMap, offline. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. These are proposals: the map's limit is the proposal of Speed review, a label only once a person confirms or corrects it there, and the car never sees the map. The scene network learns from the road types a person confirmed in Data › Roads until 7 Nov 2026, when that page went: no more are added.
 
 ### 3. Review
 

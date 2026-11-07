@@ -53,7 +53,7 @@ def outside(tmp_path, proxied):
 
 
 def give_all(server, name='ana', route=ROUTE):
-    for kind in ('signs', 'distance', 'speed', 'roads'):
+    for kind in ('signs', 'distance', 'speed'):
         server.app.assignments.set_work(name, route, kind, True)
 
 
@@ -347,12 +347,11 @@ def test_work_taken_back_closes_at_once_and_a_person_removed_has_nothing(outside
 def test_my_list_holds_my_drives_by_date_with_their_pages(outside, tmp_path):
     server, _ = outside
     real_previews(tmp_path)
-    server.app.assignments.set_work('ana', ROUTE, 'roads', True)
-    assert server.request('GET', f'/route/{ROUTE}/small/images/00000000.jpg', headers=proof())[0] == 200
+    server.app.assignments.set_work('ana', ROUTE, 'speed', True)
     answer = json_of(server.request('GET', '/api/reviewer/work', headers=proof())[2])
     assert answer['user'] == 'ana' and [item['route'] for item in answer['drives']] == [ROUTE]
-    assert [item['kind'] for item in answer['drives'][0]['work']] == ['signs', 'roads']
-    assert answer['drives'][0]['work'][1]['href'] == f'/roads?drive={ROUTE}'
+    assert [item['kind'] for item in answer['drives'][0]['work']] == ['signs', 'speed']
+    assert answer['drives'][0]['work'][1]['href'] == f'/speed-review?drive={ROUTE}'
     assert 'title' not in answer['drives'][0] and 'from' not in answer['drives'][0]
 
 
@@ -471,7 +470,7 @@ def test_the_json_of_a_guest_is_scrubbed(outside, monkeypatch):
     assert json_of(server.request('GET', f'/api/sign-distance/drives/{ROUTE}', headers=proof())[2]) == {'route': ROUTE}
 
 
-@pytest.mark.parametrize('path', sorted(['/reviews', '/roads', '/speed-review', '/sign-distance']))
+@pytest.mark.parametrize('path', sorted(['/reviews', '/speed-review', '/sign-distance']))
 def test_the_pages_of_a_guest_show_their_bar_and_no_tab_of_the_administrator(outside, path):
     server, _ = outside
     status, _, data = server.request('GET', path, headers=proof())
@@ -508,7 +507,7 @@ def test_the_administrator_sees_people_work_and_drives(outside):
     assert answer['work'] == {'ana': {ROUTE: ['signs']}}
     assert {drive['route'] for drive in answer['drives']} >= {ROUTE, OTHER_ROUTE}
     assert 'signs' in next(drive for drive in answer['drives'] if drive['route'] == ROUTE)['kinds']
-    assert [kind['key'] for kind in answer['kinds']] == ['signs', 'distance', 'speed', 'roads']
+    assert [kind['key'] for kind in answer['kinds']] == ['signs', 'distance', 'speed']
 
 
 def test_the_administrator_gives_and_takes_back(outside):
@@ -565,13 +564,25 @@ def test_the_page_of_the_administrator_tells_when_nobody_can_come_in(tmp_path):
 def test_the_file_is_private_and_survives(tmp_path):
     assignments = Assignments(tmp_path / 'auth')
     assignments.add_person('ana')
-    assignments.set_work('ana', ROUTE, 'roads', True)
+    assignments.set_work('ana', ROUTE, 'distance', True)
     assignments.set_work('ana', ROUTE, 'signs', True)
     assert stat.S_IMODE((tmp_path / 'auth' / 'assignments.json').stat().st_mode) == 0o600
     again = Assignments(tmp_path / 'auth')
-    assert again.work_of('ana') == {ROUTE: ['signs', 'roads']}
-    assert again.may('ana', ROUTE, ('roads',)) and not again.may('ana', ROUTE, ('speed',))
-    assert not again.may('bea', ROUTE, ('roads',)) and not again.may('ana', OTHER_ROUTE, ('roads',))
+    assert again.work_of('ana') == {ROUTE: ['signs', 'distance']}
+    assert again.may('ana', ROUTE, ('distance',)) and not again.may('ana', ROUTE, ('speed',))
+    assert not again.may('bea', ROUTE, ('distance',)) and not again.may('ana', OTHER_ROUTE, ('distance',))
+
+
+def test_roads_given_before_7_nov_2026_are_left_out(tmp_path):
+    assignments = Assignments(tmp_path / 'auth')
+    assignments.add_person('ana')
+    path = tmp_path / 'auth' / 'assignments.json'
+    data = json.loads(path.read_text())
+    data['work'] = {'ana': {ROUTE: ['signs', 'roads'], OTHER_ROUTE: ['roads']}}
+    path.write_text(json.dumps(data))
+    again = Assignments(tmp_path / 'auth')
+    assert again.work_of('ana') == {ROUTE: ['signs']}
+    assert not again.may('ana', ROUTE, ('roads',)) and not again.may('ana', OTHER_ROUTE, ('signs', 'roads'))
 
 
 def test_a_damaged_file_opens_nothing(tmp_path):

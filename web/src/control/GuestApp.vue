@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The site of a reviewer from outside (nnslr_tools.review_access): "My reviews", the drives given to them with a link for
-// each kind of work, and the pages of Speed review, Sign distance and Roads for one of those drives; Sign review is its
+// each kind of work, and the pages of Speed review and Sign distance for one of those drives; Sign review is its
 // own page (/route/<id>/). No status of the server here, no tab of the administrator: every address without a drive shows
 // the list, and the server answers only for the work given.
 import {computed, onMounted, ref, shallowRef} from 'vue';
@@ -9,7 +9,6 @@ import {plural} from '../common/format';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import type {GivenDrive, MyWork} from './reviewers';
-import RoadDrive from './RoadDrive.vue';
 import SignDistanceDrive from './SignDistanceDrive.vue';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {currentTab, tabDrive, useTabRouting} from './tabs';
@@ -43,7 +42,6 @@ async function complete(drive: GivenDrive): Promise<void> {
   <main class="page" :data-tab="currentTab">
     <SpeedReviewDrive v-if="currentTab === 'speedreview' && tabDrive" :key="tabDrive" :route="tabDrive" :read-only="readOnly"/>
     <SignDistanceDrive v-else-if="currentTab === 'signdistance' && tabDrive" :route="tabDrive" :read-only="readOnly"/>
-    <RoadDrive v-else-if="currentTab === 'roads' && tabDrive" :route="tabDrive" :read-only="readOnly"/>
     <template v-else>
       <header class="section-head"><h1 class="head-title">My reviews</h1></header>
       <section class="card gr-work" aria-label="The drives given to you">

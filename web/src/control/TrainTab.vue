@@ -367,7 +367,7 @@ const numbers = computed(() => {
         <RoadSignsPicker :signs="roadSigns" id="train-road-signs"/>
         <ActionList :items="ROAD_ACTIONS" :actions="status?.actions ?? null"
                     @run="(name, state) => emit('run', name, state, undefined, {...starts.road_type.option, ...roadSigns.option})"/>
-        <p class="latest-none" id="train-road-note">It learns from the road types of Data › Roads. The one in use (Models) goes to the comma with Publish.</p>
+        <p class="latest-none" id="train-road-note">It learns from the road types a person confirmed on Data › Roads, until 7 Nov 2026. The one in use (Models) goes to the comma with Publish.</p>
       </template>
       <template v-else-if="section === 'brain'">
         <BrainChoices :choices="brainChoices" id="train-brain"/>

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from nnslr_tools import drive_review, drive_video, junctions, review_auth, review_box, road_types, video_frames, sign_distance, speed_review
+from nnslr_tools import drive_review, drive_video, review_auth, review_box, video_frames, sign_distance, speed_review
 from nnslr_tools.drive_logs import cache_dir
 from nnslr_tools.drive_extract import EXTRACT_VERSION
 from nnslr_tools.gps import load_positions
@@ -55,7 +55,7 @@ def extract(tmp_root: Path, route: str, segment: int, fixes: list[list]) -> Path
 
 
 def fake_drive(root: Path, route: str = ROUTE) -> None:
-    """A report with its frames, reduced logs with a track, a junction, and the raw logs that must not travel."""
+    """A report with its frames, reduced logs with a track, a junction and the raw logs that must not travel."""
     make_report(root, route=route)
     bearing = [[index * 10 ** 9, LATITUDE + index * 1e-4, LONGITUDE + (index ** 2) * 1e-5, 1_700_000_000 + index]
                for index in range(30)]
@@ -135,6 +135,8 @@ def test_a_drive_arrives_without_its_places_and_raw_logs(pair):
     assert load_positions(pair.data, ROUTE) == {'0/0': {'frame_key': '0/0', 'country': 'CH', 'country_from': 'gps'}}
     with review_box._open(drive_review.db_path(pair.data)) as connection:
         assert json.loads(connection.execute('SELECT summary FROM scans').fetchone()['summary']) == {'civil_ms': 5}
+    # The map's junctions were for Data › Roads, gone on 7 Nov 2026: they stay here.
+    assert not (pair.data / f'derived/junctions/{ROUTE}.json').exists()
     text = walk_text(pair.data / 'derived')
     assert 'Bahnhofstrasse' not in text and '47.3' not in text and 'latitude' not in text and 'way_id' not in text
     assert pair.there.work_of('ana') == {ROUTE: ['signs']}
@@ -158,12 +160,20 @@ def test_a_saved_review_goes_without_its_position_and_comes_back_with_it(pair):
     assert json.loads(reviews(pair.root)['0/0']['payload'])['gps'] == place
 
 
+def _turns(gps: list[list]) -> list[float]:
+    """The change of heading at each fix (rad), the longitude scaled at the latitude of the fix."""
+    def heading(a: list, b: list) -> float:
+        return math.atan2((b[2] - a[2]) * math.cos(math.radians(a[1])), b[1] - a[1])
+    return [(heading(here, after) - heading(before, here) + math.pi) % (2 * math.pi) - math.pi
+            for before, here, after in zip(gps, gps[1:], gps[2:])]
+
+
 def test_the_moved_track_keeps_its_turns_and_loses_its_place():
     fixes = [[index * 10 ** 9, LATITUDE + index * 1e-4, LONGITUDE + (index ** 2) * 1e-5, index] for index in range(40)]
     moved = review_box.without_places({'gps': fixes}, (LATITUDE, LONGITUDE))['gps']
-    before, after = speed_review._turn_rates(fixes), speed_review._turn_rates(moved)
-    assert len(before) == len(after) and before
-    assert all(math.isclose(a[1], b[1], rel_tol=0.02, abs_tol=1e-3) for a, b in zip(before, after))
+    before, after = _turns(fixes), _turns(moved)
+    assert len(before) == len(after) == 38 and any(before)
+    assert all(math.isclose(a, b, rel_tol=0.02, abs_tol=1e-3) for a, b in zip(before, after))
     assert max(abs(fix[1]) for fix in moved) < 0.01 and max(abs(fix[2]) for fix in moved) < 0.02
 
 
@@ -219,22 +229,19 @@ def test_a_review_of_another_drive_inside_a_package_is_refused(pair):
 
 
 def test_every_store_comes_back(pair):
-    for kind in ('speed', 'distance', 'roads'):
+    for kind in ('speed', 'distance'):
         pair.give(kind)
     pair.round()
     speed_review.SpeedReviewStore(pair.data).apply(ROUTE, 0, 10, LABEL, 0, GUEST)
     line = json.dumps({'reviewer': GUEST, 'sign': 1}) + '\n'
-    for path in (sign_distance.marks_path(pair.data, ROUTE), road_types.corrections_path(pair.data, ROUTE),
-                 junctions.corrections_path(pair.data, ROUTE)):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(line)
+    path = sign_distance.marks_path(pair.data, ROUTE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(line)
     tick(pair.data, pair.box, log=lambda _: None)
     pair.round()
     assert [row['kph'] for row in speed_review.SpeedReviewStore(pair.root).stretches(ROUTE)] == [80]
     assert len(speed_review.SpeedReviewStore(pair.root).history(ROUTE)) == 1
-    for path in (sign_distance.marks_path(pair.root, ROUTE), road_types.corrections_path(pair.root, ROUTE),
-                 junctions.corrections_path(pair.root, ROUTE)):
-        assert path.read_text() == line
+    assert sign_distance.marks_path(pair.root, ROUTE).read_text() == line
 
 
 @pytest.mark.parametrize('reviewer, kind, channel', [('guest/nobody', 'human', 'web'), ('local', 'human', 'web'),
@@ -306,7 +313,7 @@ def test_a_frame_changed_only_here_is_not_a_conflict(pair):
     '[]', 'not json', '{"format": 1, "route": "00000002--abcdef1234"}',
     json.dumps({'format': 1, 'route': ROUTE, 'signs': {'reviews': [{'route_id': ROUTE}], 'history': []},
                 'speed': {'stretches': [], 'works': [], 'checked': [], 'history': []},
-                'distance': [], 'road_types': [], 'junctions': []})])
+                'distance': []})])
 def test_a_broken_package_is_refused_and_said(pair, package):
     pair.give()
     pair.round()
