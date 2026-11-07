@@ -80,15 +80,13 @@ def test_a_first_run_without_a_map_downloads_the_maps_and_goes_on(tmp_path):
     lines = process.stdout.splitlines()
     steps = [line for line in lines if line.startswith('== ')]
     assert steps == ['== a. GPS of the drives', '== b. Maps the drives need', '== c. Speed of the drives',
-                     '== d. Map roads and car parks near the drives', '== e. Road type of every frame',
-                     '== f. Junctions of the drives']
+                     '== d. Map roads and car parks near the drives', '== e. Road type of every frame']
     assert lines.index('Alsace: downloaded') < lines.index('osm_roads ran') < lines.index('osm_places ran')
     assert (tmp_path / 'data' / 'derived' / 'osm' / 'places.jsonl').exists()
     # Every step of the page's bar is reached by the log.
     running = progress('road_types', 'running', process.stdout.split('Done:')[0])
     assert {step['key']: step['state'] for step in running['steps']} == {
-        'gps': 'done', 'maps': 'done', 'speed': 'done', 'map_roads': 'done', 'road_types': 'done',
-        'junctions': 'current'}
+        'gps': 'done', 'maps': 'done', 'speed': 'done', 'map_roads': 'done', 'road_types': 'current'}
 
 
 def test_a_download_that_fails_leaves_the_maps_present(tmp_path):
@@ -98,7 +96,7 @@ def test_a_download_that_fails_leaves_the_maps_present(tmp_path):
     process = run_script(tmp_path, maps='fail')
     assert process.returncode == 0, process.stderr + process.stdout
     assert 'the maps present are used, the job goes on' in process.stdout
-    assert 'nnslr road-types' in process.stdout and 'nnslr junctions' in process.stdout
+    assert 'nnslr road-types' in process.stdout and 'nnslr junctions' not in process.stdout
 
 
 def test_without_any_map_it_stops_after_the_download(tmp_path):

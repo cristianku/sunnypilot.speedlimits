@@ -1,9 +1,9 @@
 <script setup lang="ts">
-// The search for the map's limits and road types of the prepared drives (helpers/road_types.sh, the panel action
-// "road_types"), at the top of Data › Speed review: the OpenStreetMap limit it finds is the proposal of each stretch there.
+// Read the map: the map's limits of the prepared drives (helpers/road_types.sh, the panel action "road_types"), at the
+// top of Data › Speed review: the OpenStreetMap limit it finds is the proposal of each stretch there.
 // The button, or its job running; then the drives still without, the maps of the server and those the drives still need
-// (the search downloads them first, scripts/osm_maps.py), from GET /api/panel/road-types, read when the page opens and
-// again when a search ends.
+// (the reading downloads them first, scripts/osm_maps.py), from GET /api/panel/road-types, read when the page opens and
+// again when a reading ends.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, plural, sentence} from '../common/format';
@@ -46,8 +46,8 @@ watch(searching, (now, before) => {
 const without = computed(() => payload.value?.drives_without ?? 0);
 /** The maps of the server (absent from a server before them). */
 const maps = computed(() => payload.value?.maps ?? null);
-/** Maps the next search downloads for the drives outside the maps (one that failed is tried again; one bigger than a
- * search downloads is not): their limits are still to find there. */
+/** Maps the next reading downloads for the drives outside the maps (one that failed is tried again; one bigger than a
+ * reading downloads is not): their limits are still to find there. */
 const mapsToGet = computed(() => (maps.value?.needed ?? []).some((item) => item.state !== 'too big'));
 /** Prepared drives still without, none read yet, or maps to download first. */
 const fresh = computed(() => payload.value !== null && (without.value > 0 || !payload.value.routes.length || mapsToGet.value));
@@ -60,7 +60,7 @@ const madeAt = computed(() => isoWhen(payload.value?.made_at));
 const sizeText = (bytes: number): string => bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
 const andList = (names: string[]): string => names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names.at(-1);
 const nameOf = (item: RoadMapNeed): string => item.name ?? 'a map';
-/** The drives outside the maps, and what the next search downloads: "2 drives outside the maps: Find again downloads
+/** The drives outside the maps, and what the next reading downloads: "2 drives outside the maps: Read again downloads
  * Alsace and Michigan (≈ 448 MB)."; then why the last download failed, and the maps more than a search downloads. */
 const outsideText = computed(() => {
   const needed = maps.value?.needed ?? [];
@@ -70,11 +70,11 @@ const outsideText = computed(() => {
   const failed = needed.find((item) => item.state === 'failed');
   return [
     plural(maps.value?.outside ?? 0, 'drive') + ' outside the maps' + (items.length
-      ? ': ' + (fresh.value ? 'Find the road types' : 'Find again') + ' downloads ' + andList(items.map(nameOf))
+      ? ': ' + (fresh.value ? 'Read the map' : 'Read again') + ' downloads ' + andList(items.map(nameOf))
         + (total ? ' (≈ ' + sizeText(total) + ')' : '') : '') + '.',
     failed ? 'The last download failed' + (failed.reason ? ': ' + failed.reason : '') + '.' : '',
     big.length ? andList(big.map(nameOf)) + (big.length === 1 ? ' is' : ' are') + ' more than the '
-      + (maps.value?.max_gb ?? 5) + ' GB a search downloads.' : '',
+      + (maps.value?.max_gb ?? 5) + ' GB a reading downloads.' : '',
   ].filter(Boolean).join(' ');
 });
 </script>
@@ -91,14 +91,14 @@ const outsideText = computed(() => {
           : 'Drives to read on the map' }}</strong>
         <span v-if="payload !== null && !fresh">Every prepared drive has the map's limits{{ madeAt ? ' · ' + madeAt : '' }}: the
           proposals below.</span>
-        <span v-else-if="onlyMaps">Some drives went where the server has no map: the search downloads it first, then reads them
+        <span v-else-if="onlyMaps">Some drives went where the server has no map: the reading downloads it first, then reads them
           there.</span>
         <span v-else-if="error">{{ error }}</span>
         <span v-else>Reads where the car was and the limit there on the map, for every picture of the prepared drives: the proposal of each
           stretch below.</span>
       </div>
       <button type="button" class="btn" :class="{primary: fresh}" id="find-road-types" :disabled="!state?.allowed"
-              @click="state && emit('run', 'road_types', state)">{{ fresh ? 'Find the road types' : 'Find again' }}</button>
+              @click="state && emit('run', 'road_types', state)">{{ fresh ? 'Read the map' : 'Read again' }}</button>
     </div>
     <p v-if="idle && without > 0" class="import-why" id="rt-without">{{ plural(without, 'prepared drive has', 'prepared drives have') }}
       not been read on the map yet.</p>
@@ -109,7 +109,7 @@ const outsideText = computed(() => {
     <p v-if="idle && maps && maps.nowhere > 0" class="import-why" id="rt-nowhere">{{ plural(maps.nowhere, 'drive has', 'drives have') }}
       positions on no map to download (the sea, a lake, a GPS fix that jumped): no map limit there.</p>
     <p v-if="idle && state && !state.allowed" class="import-why">{{ sentence(state.reason) }}</p>
-    <p v-if="job && !bigJob" class="import-last">Last search {{ startedWhen(job) }} ·
+    <p v-if="job && !bigJob" class="import-last">Last reading {{ startedWhen(job) }} ·
       {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
       <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
   </section>

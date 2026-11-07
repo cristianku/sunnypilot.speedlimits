@@ -17,14 +17,12 @@ import type {NetworkStartChoice, StartRole} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
 import type {BrainChoice} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
-import type {RoadSignsChoice} from './road-signs';
-import RoadSignsPicker from './RoadSignsPicker.vue';
 import Segmented from './Segmented.vue';
 import TrainStart from './TrainStart.vue';
 
 const props = defineProps<{status: PanelStatus | null; choices: Choices; cutterChoices: CutterChoices;
   starts: Record<StartRole, NetworkStartChoice>;
-  roadSigns: RoadSignsChoice; brainChoices: BrainChoice; fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
+  brainChoices: BrainChoice; fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
 const families = defineModel<CutterFamilies>('families', {required: true});
 const emit = defineEmits<{pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string];
   stopPipeline: []; stop: [job: Job]; details: [job: Job]; run: [name: ActionName, state: ActionState, start?: TrainingStart]}>();
@@ -34,7 +32,6 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_road_type', label: 'Scene', text: 'With memory and without, compared. About 20 minutes.'},
   {action: 'train_brain', label: 'Brain', text: 'Three seeds, from the speeds of Speed review. About 15 minutes.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
@@ -52,7 +49,6 @@ function optionsOf(action: PipelineAction): ActionOptions {
   if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option, ...props.cutterChoices.options};
   if (action === 'train_classifier') return props.choices.options;
   if (action === 'train_decider') return props.starts.decider.option;
-  if (action === 'train_road_type') return {...props.starts.road_type.option, ...props.roadSigns.option};
   if (action === 'train_brain') return props.brainChoices.option;
   return {};
 }
@@ -71,8 +67,7 @@ const reason = computed(() => {
   if (on('train_classifier') && props.choices.invalid) return sentence('Classifier: ' + props.choices.invalid);
   return '';
 });
-const startLabel = computed(() => chosen.value.length === 1 ? (chosen.value[0]!.action === 'train_road_type'
-  ? 'Train the scene network' : 'Train ' + chosen.value[0]!.label.toLowerCase())
+const startLabel = computed(() => chosen.value.length === 1 ? 'Train ' + chosen.value[0]!.label.toLowerCase()
   : 'Train these ' + chosen.value.length + ' in a row');
 
 function start(): void {
@@ -82,8 +77,7 @@ function start(): void {
       + props.cutterChoices.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
       : step.action === 'dataset' ? 'the import of the reviews'
-        : step.action === 'train_road_type' ? 'the scene network' + props.starts.road_type.words + props.roadSigns.words
-          : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words
+        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words
           : LABEL[step.action].toLowerCase() + props.starts.decider.words);
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
     + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
@@ -150,10 +144,6 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_decider' && starts.decider.options.length > 1" class="pl-choices">
           <NetworkStartPicker :start="starts.decider" id="pipeline-decider-start"/>
-        </div>
-        <div v-else-if="on(step.action) && step.action === 'train_road_type'" class="pl-choices">
-          <NetworkStartPicker :start="starts.road_type" id="pipeline-road-start"/>
-          <RoadSignsPicker :signs="roadSigns" id="pipeline-road-signs"/>
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_brain'" class="pl-choices">
           <BrainChoices :choices="brainChoices" id="pipeline-brain"/>

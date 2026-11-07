@@ -264,14 +264,14 @@ def test_copied_checked_moved_manifest_last_then_ready(comma):
     assert said[-1].startswith('ready: used from the next drive')
 
 
-def test_the_builds_road_type_stays_in_use_during_a_trial(comma):
-    (comma['models'] / car_release.ROAD_TYPE_FILE).write_bytes(b'build road type')
-    (comma['models'] / (car_release.ROAD_TYPE_FILE + '.contract.json')).write_text('{}\n')
+def test_the_builds_brain_stays_in_use_during_a_trial(comma):
+    (comma['models'] / car_release.BRAIN_FILE).write_bytes(b'build brain')
+    (comma['models'] / (car_release.BRAIN_FILE + '.contract.json')).write_text('{}\n')
     assert run_trial(comma, sleep=compile_all(comma))['outcome'] == 'ready'
     models = models_state(comma)
-    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try', road_type=True,
+    assert json.loads(models['speed_limits.json']) == car_release.manifest_of('2026-10-28-try', brain=True,
                                                                                  settings=car_settings.DEFAULTS)
-    assert models[car_release.ROAD_TYPE_FILE] == b'build road type'
+    assert models[car_release.BRAIN_FILE] == b'build brain'
 
 
 def test_a_dry_run_reads_the_comma_and_copies_nothing(comma):

@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 def test_the_defaults_until_one_is_saved(tmp_path):
     view = train_settings.view(tmp_path)['trainings']
-    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train_brain']
+    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_brain']
     classifier = {item['key']: item for item in view['train_classifier']['settings']}
     assert {key: item['value'] for key, item in classifier.items()} == {
         'epochs': 30, 'pretrain_epochs': 30, 'patience': 5, 'batch': 64, 'workers': train_settings.DEFAULT_WORKERS,
@@ -77,7 +77,8 @@ def test_the_first_stage_set_apart_from_the_epochs(tmp_path):
     {'training': 'train_cutter', 'values': {'learning_rate': float('nan')}},
     {'training': 'train_cutter', 'values': {'workers': 33}}, {'training': 'train_cutter', 'values': {'seed': 1}},
     {'training': 'train_cutter', 'values': {'band': 960}}, {'training': 'train', 'values': {}},
-    {'training': 'train_road_type', 'values': {'patience': 0}}, {'values': {'epochs': 40}}, [],
+    {'training': 'train_decider', 'values': {'patience': 5}}, {'training': 'train_road_type', 'values': {}},
+    {'values': {'epochs': 40}}, [],
 ])
 def test_a_wrong_value_is_refused_and_nothing_is_written(tmp_path, body):
     with pytest.raises(train_settings.SettingsError):
@@ -88,10 +89,10 @@ def test_a_wrong_value_is_refused_and_nothing_is_written(tmp_path, body):
 def test_a_value_spoiled_in_the_file_is_the_default(tmp_path):
     path = tmp_path / train_settings.SETTINGS_FILE
     path.parent.mkdir(parents=True)
-    path.write_text(json.dumps({'trainings': {'train_road_type': {'values': {'epochs': 5000, 'batch': 8}}}}))
-    assert train_settings.environment(tmp_path, 'train_road_type') == {'NNSLR_ROAD_TYPE_BATCH': '8'}
+    path.write_text(json.dumps({'trainings': {'train_classifier': {'values': {'epochs': 5000, 'batch': 8}}}}))
+    assert train_settings.environment(tmp_path, 'train_classifier') == {'NNSLR_CLASSIFIER_BATCH_SIZE': '8'}
     path.write_text('not json')
-    assert train_settings.environment(tmp_path, 'train_road_type') == {}
+    assert train_settings.environment(tmp_path, 'train_classifier') == {}
 
 
 def _script_default(script: str, env: str) -> str:
@@ -160,19 +161,19 @@ def test_over_http(tmp_path):
         status, _, data = server.request('GET', '/api/panel/train-settings')
         view = json_of(data)
         assert status == 200 and set(view['trainings']) == set(train_settings.TRAININGS)
-        body = {'training': 'train_road_type', 'values': {'epochs': 80}}
+        body = {'training': 'train_decider', 'values': {'epochs': 80}}
         status, _, data = server.request('POST', '/api/panel/train-settings', body=body)
         view = json_of(data)
-        assert status == 200 and view['ok'] and train_settings.values(tmp_path, 'train_road_type')['epochs'] == 80
-        assert {item['key']: item['value'] for item in view['trainings']['train_road_type']['settings']}['epochs'] == 80
+        assert status == 200 and view['ok'] and train_settings.values(tmp_path, 'train_decider')['epochs'] == 80
+        assert {item['key']: item['value'] for item in view['trainings']['train_decider']['settings']}['epochs'] == 80
         status, _, data = server.request('POST', '/api/panel/train-settings',
-                                         body={'training': 'train_road_type', 'values': {'epochs': 900}})
+                                         body={'training': 'train_decider', 'values': {'epochs': 900}})
         assert status == 400 and json_of(data)['error'] == 'invalid_settings'
         server.app.panel.actions_enabled = False
         status, _, data = server.request('POST', '/api/panel/train-settings',
-                                         body={'training': 'train_road_type', 'values': {'epochs': None}})
+                                         body={'training': 'train_decider', 'values': {'epochs': None}})
         assert status == 403 and json_of(data)['error'] == 'actions_disabled'
-        assert train_settings.values(tmp_path, 'train_road_type')['epochs'] == 80
+        assert train_settings.values(tmp_path, 'train_decider')['epochs'] == 80
         assert not json_of(server.request('GET', '/api/panel/train-settings')[2])['can_edit']
     finally:
         server.close()

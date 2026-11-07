@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
-# The type of road of every frame of the prepared drives (town, 30 zone, rural, expressway, motorway, ramp, merge lane,
-# parking, garage), from the GPS and the speed of the comma and the OpenStreetMap roads and car parks, read offline:
-# proposals, prepared without a person (nnslr road-types; the button "Find the road types" of Data › Roads starts this).
-# They become labels of the road-type head only when a person confirms or corrects them in Data › Roads, and those
-# decisions outlive a search; nothing here touches the reviews of the signs.
+# The map's limit of every frame of the prepared drives, from the GPS and the speed of the comma and the OpenStreetMap
+# roads and car parks, read offline (nnslr road-types; the button "Read the map" on top of Data › Speed review starts
+# this): the proposal of each stretch there, which a person confirms or corrects. Nothing here touches the reviews of
+# the signs, and the comma never reads any of it.
 #
 #   a. the precise position of the road camera's frames from openpilot.distill's localizer, for the segments without
 #      it (nnslr localize --all; about 20 s of a core a segment, 6 side by side; skipped without distill's .venv),
 #      then the GPS position of the frames of the drives prepared without it or localized since (nnslr gps --all
 #      --missing)
 #   b. the maps the drives need: the Geofabrik extracts that hold a drive's positions and are not in raw/osm yet,
-#      downloaded (scripts/osm_maps.py, at most 5 GB a run; derived/osm/maps.json for Data › Roads). Only Geofabrik's
+#      downloaded (scripts/osm_maps.py, at most 5 GB a run; derived/osm/maps.json for Data › Speed review). Only Geofabrik's
 #      index and the extracts are fetched: no position of the drives leaves the server. A download that fails leaves
-#      the maps present, and the job goes on: the drives outside them stay without a road type
+#      the maps present, and the job goes on: the drives outside them stay without the map's limit
 #   c. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a
 #      garage of the map, is a garage when it is slow                                (nnslr car-motion --all, cached)
 #   d. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
 #      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are),
 #      and the names of the places that name the drives, again when the map is newer (scripts/osm_places.py)
-#   e. the road type of every frame                                                (nnslr road-types --all)
-#   f. the intersections every drive passed: the labels of the road-type network's junction head (nnslr junctions
-#      --all, data/derived/junctions; a person's corrections, annotations/junctions, are never touched)
+#   e. the map road of every frame, its limit and its type                         (nnslr road-types --all)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
 # No network but Geofabrik's index once a month and the extracts the drives miss (download.geofabrik.de), uv's first
@@ -52,7 +49,7 @@ echo "== a. GPS of the drives"
     || echo "The localizer did not run for some segments: their frames keep the position of the GPS"
 # A drive whose logs cannot be read keeps no position: it is said, and the others go on.
 "$NN" gps --all --missing --data-root "$DATA" < /dev/null \
-    || echo "GPS position not read for some drives: their frames stay without a road type"
+    || echo "GPS position not read for some drives: their frames stay without the map's limit"
 
 echo "== b. Maps the drives need"
 # shapely (the outlines of the extracts) is in the site's .venv with the OCR; without it, from uv's cache.
@@ -91,7 +88,7 @@ elif [ ! -f "$PARKING" ]; then
     # A map read before the car parks (and the kind of a service road) were kept.
     newer=yes
 elif ! grep -q -m 1 '"junction"' "$ROADS"; then
-    # A map read before the junction and access tags were kept (the intersections need them).
+    # A map read before the junction and access tags were kept (the road types need them).
     newer=yes
 fi
 places=no
@@ -108,7 +105,7 @@ if [ "$newer" = yes ]; then
 else
     echo "The map roads and car parks are up to date."
 fi
-# Only the names of the drives: without them the road types are the same.
+# Only the names of the drives: without them the limits are the same.
 if [ "$places" = yes ] && [ -n "$UV" ]; then
     (cd "$ROOT" && nice "$UV" run --no-project --with osmium python scripts/osm_places.py --data-root "$DATA" \
         < /dev/null) || echo "The names of the places not read: the drives keep the names they had"
@@ -118,7 +115,4 @@ fi
 
 echo "== e. Road type of every frame"
 "$NN" road-types --all --data-root "$DATA" < /dev/null
-
-echo "== f. Junctions of the drives"
-"$NN" junctions --all --data-root "$DATA" < /dev/null
-echo "Done: the road types are in $DATA/derived/road_types/, the junctions in $DATA/derived/junctions/."
+echo "Done: the map's limits are in $DATA/derived/road_types/."

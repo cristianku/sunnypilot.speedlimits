@@ -36,7 +36,7 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
-const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'road_type', 'brain'];
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'brain'];
 /** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-decider:<version id>,
  * Train's link to its latest version), else the cutter. */
 const hashRole = location.hash.split(':')[0];

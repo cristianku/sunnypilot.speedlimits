@@ -159,7 +159,7 @@ def test_the_run_needs_its_script_a_free_gpu_a_certified_drive_and_a_model(root,
 @pytest.mark.parametrize('key', ['openpilot', 'brains'])
 def test_its_choices_are_refused_on_another_action(root, checkout, key):
     with pytest.raises(PanelError) as refused:
-        Panel(root, repo=checkout).start('train_road_type', {key: 'stock'})
+        Panel(root, repo=checkout).start('train_decider', {key: 'stock'})
     assert refused.value.reason == 'bad_option'
 
 

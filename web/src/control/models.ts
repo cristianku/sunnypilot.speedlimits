@@ -41,23 +41,13 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
     uses: 'Nothing uses the applicability network yet: the choice is only noted for later.',
   },
-  road_type: {
-    what: 'Says from the camera what road the car is on, once a second: town, zone 30, rural, expressway, motorway, ramp, '
-      + 'the merge lane after it, a car park or a garage. '
-      + 'With memory it remembers the seconds before, and how long ago a motorway sign was read, so the 60 of a ramp ends '
-      + 'where the merge lane starts, without a sign.',
-    today: 'Today: prototypes, with memory and the sign, without the sign and without memory, judged on the test drives.',
-    empty: 'No scene network trained yet.',
-    emptyMore: '“Train the scene network” on the Train tab; its two networks appear here.',
-    uses: 'The comma runs the scene network in use once Publish puts it in its software.',
-  },
   brain: {
     what: 'Says the speed to hold, once a second, from the camera, the signs read, the car ahead, the hour and the country. '
-      + 'On the comma it is the vision limit: the rules of the signs and the scene network no longer run.',
+      + 'On the comma it is the vision limit: the rules of the signs no longer run.',
     today: 'Today: trained on the speeds of Speed review, judged on the frames of drives it never learned.',
     empty: 'No brain trained yet.',
     emptyMore: 'nnslr train-brain on the server; it appears here.',
-    uses: 'The comma runs the brain in use once Publish puts it in its software, in place of the scene network.',
+    uses: 'The comma runs the brain in use once Publish puts it in its software, in place of the rules of the signs.',
   },
 };
 
@@ -81,15 +71,14 @@ export function versionName(version: ModelVersion): string {
   return version.run + ' · ' + version.label;
 }
 
-/** A role's name inside a sentence: “scene network” for the role road_type (its label, “Scene”, is a name), else
- * its label in small letters. */
-export function roleWords(version: ModelVersion, roleLabel: string): string {
-  return version.role === 'road_type' ? 'scene network' : roleLabel.toLowerCase();
+/** A role's name inside a sentence: its label in small letters. */
+export function roleWords(roleLabel: string): string {
+  return roleLabel.toLowerCase();
 }
 
 /** Asks, then makes a version the one in use for its role; true when it is. */
 export async function putInUse(version: ModelVersion, roleLabel: string): Promise<boolean> {
-  const role = roleWords(version, roleLabel);
+  const role = roleWords(roleLabel);
   const ok = await askConfirm({
     title: 'Use this ' + role + '?', action: 'Use this one',
     text: versionName(version) + ' becomes the ' + role + ' in use on this server. ' + ROLE_TEXT[version.role].uses
@@ -116,22 +105,19 @@ export interface CarState {
   onTrial?: string | null;
 }
 
-/** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which road
- * type (the ones in use) the comma gets, what the job prepares, publishes and builds, and what is left to do on the comma. */
+/** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which brain
+ * (the ones in use) the comma gets, what the job prepares, publishes and builds, and what is left to do on the comma. */
 export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
-                                roadType: ModelVersion | null = null, brain: ModelVersion | null = null): ConfirmOptions {
+                                brain: ModelVersion | null = null): ConfirmOptions {
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
-  const scene = brain
-    ? ' and the brain of ' + brain.run + ' to say the speed to hold, in place of the rules and the scene network'
-    : roadType
-    ? ' and the scene network ' + roadType.label + ' of ' + roadType.run + ' to read the scene where no sign gives the limit '
-      + '(a garage 10, a car park 20, a town 50)'
-    : '; no scene network is in use, so it reads the signs alone';
+  const decides = brain
+    ? ' and the brain of ' + brain.run + ' to say the speed to hold, in place of the rules of the signs'
+    : '; no brain is in use, so the rules of the signs give the limit';
   return {
     title: 'Publish the networks in use to the car?', action: 'Publish',
     text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs, ' + reader
-      + ' to read them' + scene + '. The package is prepared and checked, published in speed-limits-models, the '
+      + ' to read them' + decides + '. The package is prepared and checked, published in speed-limits-models, the '
       + 'sunnypilot speed-limits branch moves to it and psa-torque-sunny-testing is built again: a few minutes. Then, on '
       + 'the comma: Settings, Software, Check for updates, and install.',
   };
@@ -236,10 +222,8 @@ export interface Metric {
  * test at its score (a detector passes on a couple of hundred boxes a frame at that score, SignNet a few), and the
  * speed signs among its 5 best boxes a frame at any score; the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
- * right; the decider: the “Another” signs found on validation and on the test; the road type: the merges where the
- * ramp's limit ends in time by the comma's rule (since the second version), the motorway said right in the first minute
- * after each ramp, the intersections passed (the junction head, since the third version: F1 of "passed" within 2 s, and
- * the false ones an hour, each a limit lifted too early), the mean F1 of the road types and the town's F1, on the test. */
+ * right; the brain: the frames of the test and of validation where it says the speed right; the decider: the “Another”
+ * signs found on validation and on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
   const of = (part: number | null | undefined, whole: number | null | undefined): string =>
     whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
@@ -314,41 +298,6 @@ export function metricsOf(version: ModelVersion): Metric[] {
       detail: numbers?.mean_error_kph == null ? '' : numbers.mean_error_kph.toFixed(1) + ' km/h off on average'});
     return version.test === null ? [] : [speed('Right on the test', 'test', version.test),
       speed('On validation', 'validation', version.validation)];
-  }
-  if (version.role === 'road_type') {
-    const test = version.test;
-    if (test === null) return [];
-    const merge = test.after_merge;
-    const town = test.classes['town'] ?? null;
-    const release = version.release?.test ?? null;
-    const late = release ? release.late + release.not_held : 0;
-    const junction = version.junctions?.test ?? null;
-    const needed = version.junctions?.needed ?? null;
-    const hourly = (value: number | null): string => value === null ? '–' : value < 10 ? value.toFixed(1) : String(Math.round(value));
-    return [
-      ...(release ? [{key: 'release', label: 'Ramp limit ends in time', short: 'Ends in time',
-        value: release.merges ? release.in_time / release.merges : null,
-        count: release.merges ? of(release.in_time, release.merges) + (release.merges === 1 ? ' merge' : ' merges') : 'no merge',
-        detail: release.merges ? 'The comma’s rule on the ' + release.merges + ' merges of the test: '
-          + (release.on_ramp ? release.on_ramp + ' ended on the ramp, ' : 'none on the ramp, ')
-          + (late ? late + ' late or never' : 'none late')
-          + (release.median_release === null ? '' : ', median ' + release.median_release + ' s after the merge')
-          : 'The test has no merge'}] : []),
-      {key: 'merge', label: 'Motorway after a ramp', short: 'After a ramp', value: merge.merges ? merge.accuracy : null,
-        count: merge.merges ? merge.seconds + ' s, ' + merge.merges + (merge.merges === 1 ? ' ramp' : ' ramps') : 'no ramp',
-        detail: merge.merges ? 'The first minute on the motorway after each of the ' + merge.merges + ' ramps of the test'
-          : 'The test has no ramp onto the motorway'},
-      ...(junction ? [{key: 'junction', label: 'Junctions passed', short: 'Junctions', value: junction.f1_2s,
-        count: hourly(junction.false_per_hour) + ' false/h',
-        detail: 'F1 of “passed” within 2 s on the ' + (junction.passed ?? 0) + ' intersections of the test; '
-          + hourly(junction.false_per_hour) + ' false an hour (town ' + hourly(junction.town_per_hour) + ', outside '
-          + hourly(junction.outside_per_hour) + '): each lifts a limit too early'
-          + (needed?.needed ? '; ' + needed.caught_2s + ' of the ' + needed.needed + ' after a number sign caught' : '')}] : []),
-      {key: 'macro', label: 'Road types', value: test.macro_f1, count: test.frames === null ? '' : thousands(test.frames) + ' s',
-        detail: 'Mean F1 of the road types the test has'},
-      {key: 'town', label: 'Town', value: town?.f1 ?? null, count: town ? thousands(town.support) + ' s' : '',
-        detail: 'F1 of the town on the test'},
-    ];
   }
   const another = (numbers: typeof version.validation): Metric['count'] =>
     numbers?.other_road_support ? of(numbers.other_road_found, numbers.other_road_support) : '';

@@ -1,26 +1,26 @@
-// Where the next training of the cutter, of applicability or of the scene network starts, kept once for its section and
-// for its step of Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it
-// goes on from (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
-// the others; the choice while none is in use). An applicability run and a scene run are one choice each: each of their
-// networks goes on from its own of that run.
+// Where the next training of the cutter or of applicability starts, kept once for its section and for its step of
+// Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it goes on from
+// (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
+// applicability; the choice while none is in use). An applicability run is one choice: each of its networks goes on
+// from its own of that run.
 import {computed, reactive, ref, type Ref} from 'vue';
 import {isoWhen, plural} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion, PanelStatus} from '../common/panel-types';
 import type {PickerOption} from '../components/PickerSheet.vue';
 
-export type StartRole = 'cutter' | 'decider' | 'road_type';
+export type StartRole = 'cutter' | 'decider';
 type Split = 'same' | 'another' | 'unknown';
 const SPLIT_WORDS: Record<Split, string> = {same: 'learnt on today’s split', another: 'learnt on another split',
   unknown: 'its split not recorded'};
 /** The usual start of each, first in the list: its test stays fair. */
-const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', road_type: 'ImageNet'};
-const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', road_type: 'Scene'};
+const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet'};
+const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability'};
 export const FRESH_START = 'fresh';
 
 export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>,
   versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined) {
   /** A finished version that can be a start: a SignNet the comma runs (its band and grid), a whole applicability
-   * training (not a smoke run), a scene network. */
+   * training (not a smoke run). */
   const startable = (version: ModelVersion): boolean => version.role === role && version.finished
     && (version.role !== 'cutter' || (version.kind === 'signnet' && version.fits_the_car === true))
     && (version.role !== 'decider' || !version.smoke_limit);
@@ -36,8 +36,7 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
   });
   const titleOf = (version: ModelVersion): string => (role === 'cutter' ? version.label : NAME[role]) + ' '
     + (version.trained_at ? isoWhen(version.trained_at) : version.run);
-  /** Whether it learnt on the split the new one is measured on; a scene network's test drives are checked when it
-   * trains (its run's split is a split of places, made again with every drive). */
+  /** Whether it learnt on the split the new one is measured on. */
   const currentSplit = computed(() => status.value?.classifier_options?.split_sha256 ?? null);
   const splitOf = (version: ModelVersion): Split | null => {
     if (version.role !== 'cutter' && version.role !== 'decider') return null;

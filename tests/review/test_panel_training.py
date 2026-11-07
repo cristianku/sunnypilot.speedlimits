@@ -824,12 +824,10 @@ def test_the_classifier_can_start_from_a_finished_classifier_of_models(root, che
     assert (error.value.status, error.value.message) == (400, 'Only a training has a starting point.')
 
 
-def test_the_cutter_applicability_and_scene_go_on_from_a_finished_version_of_models(root, checkout, monkeypatch):
+def test_the_cutter_and_applicability_go_on_from_a_finished_version_of_models(root, checkout, monkeypatch):
     from test_panel_models import experiment, make_signnet
-    from test_panel_road_type import result as road_result
     from test_panel_runs import SPLIT_SHA, experiment_result, write
-    for name, variable in (('run_signnet.sh', 'NNSLR_CUTTER_INIT_FROM'), ('run_experiment_b.sh', 'NNSLR_DECIDER_INIT_FROM'),
-                           ('run_road_type.sh', 'NNSLR_ROAD_TYPE_INIT_FROM')):
+    for name, variable in (('run_signnet.sh', 'NNSLR_CUTTER_INIT_FROM'), ('run_experiment_b.sh', 'NNSLR_DECIDER_INIT_FROM')):
         script = checkout / 'scripts' / name
         script.parent.mkdir(parents=True, exist_ok=True)
         script.write_text(f'#!/usr/bin/env bash\necho "run:          $1"\necho "init=${{{variable}:-fresh}}"\n')
@@ -842,10 +840,6 @@ def test_the_cutter_applicability_and_scene_go_on_from_a_finished_version_of_mod
     experiment(root, 'expB')
     write(root / 'runs/expS/experiment-b/crop/result.json', {**experiment_result('crop', 0.9, 0.6), 'limit': 5})
     write(root / 'runs/expS/experiment-b/crop/crop-best.pt', 'weights')
-    write(root / 'runs/rt1/road-type/gru/result.json', road_result('gru'))
-    write(root / 'runs/rt1/road-type/gru/road-type-best.pt', 'weights')
-    (root / 'derived/road_types').mkdir(parents=True)
-    (root / 'derived/road_types/r1.jsonl').write_text('{}\n')
 
     def init_of(action, options):
         job = panel.start(action, options)
@@ -855,17 +849,15 @@ def test_the_cutter_applicability_and_scene_go_on_from_a_finished_version_of_mod
 
     # The usual start, as before: nothing in the environment.
     assert init_of('train_cutter', None) == init_of('train_decider', {'start': 'fresh'}) == 'fresh'
-    # A finished version of Models, by its id: a SignNet's weights, the run's folder of applicability and of the scene.
+    # A finished version of Models, by its id: a SignNet's weights, the run's folder of applicability.
     assert init_of('train_cutter', {'families': 'speed', 'start': 'cutter:s1/signnet'}).endswith('/runs/s1/signnet-best.pt')
     assert init_of('train_decider', {'start': 'decider:expB/experiment-b/crop_geom'}).endswith('/runs/expB/experiment-b')
-    assert init_of('train_road_type', {'start': 'road_type:rt1/road-type/gru'}).endswith('/runs/rt1/road-type')
     refused = {('train_cutter', 'cutter:s2/signnet'): 'Only a SignNet of the comma’s band and grid can be a start.',
                ('train_cutter', 'cutter:s3/signnet'): 'That network has not finished its training: choose a finished one.',
                ('train_cutter', '/etc/passwd'): 'Unknown network to start from: choose one of Models.',
                ('train_cutter', 'imagenet'): 'Unknown network to start from: choose one of Models.',
                ('train_decider', 'decider:expS/experiment-b/crop'): 'A smoke run learnt on a few frames: choose a whole training.',
-               ('train_decider', 'cutter:s1/signnet'): 'Unknown network to start from: choose one of Models.',
-               ('train_road_type', 'decider:expB/experiment-b/crop'): 'Unknown network to start from: choose one of Models.'}
+               ('train_decider', 'cutter:s1/signnet'): 'Unknown network to start from: choose one of Models.'}
     for (action, start), message in refused.items():
         with pytest.raises(PanelError) as error:
             panel.start(action, {'start': start})
@@ -875,19 +867,13 @@ def test_the_cutter_applicability_and_scene_go_on_from_a_finished_version_of_mod
                                          'start': {'path': '/d/runs/s1/signnet-best.pt', 'run': 's1', 'epoch': 27,
                                                    'split_sha256': 'f' * 64}})
     write(root / 'runs/s4/signnet-best.pt', 'weights')
-    write(root / 'runs/rt2/road-type/gru/result.json', {**road_result('gru'), 'start': {'run': 'rt1', 'epoch': 7,
-                                                                                         'same_test_drives': True}})
-    write(root / 'runs/rt2/road-type/gru/road-type-best.pt', 'weights')
-    found = {entry['id']: entry for role in ('cutter', 'decider', 'road_type')
+    found = {entry['id']: entry for role in ('cutter', 'decider')
              for entry in panel.models_index.artifacts((role,))[role]}
     s4 = found['cutter:s4/signnet']
     assert (s4['split_sha256'], s4['initialization'], s4['start']) == (SPLIT_SHA, 'start', {'run': 's1', 'epoch': 27,
                                                                                             'another_split': True})
     assert (found['cutter:s1/signnet']['start'], found['cutter:s1/signnet']['initialization']) == (None, None)
     assert found['decider:expB/experiment-b/crop']['split_sha256'] == SPLIT_SHA
-    rt2 = found['road_type:rt2/road-type/gru']
-    assert (rt2['initialization'], rt2['start']) == ('start', {'run': 'rt1', 'epoch': 7, 'another_split': False})
-    assert found['road_type:rt1/road-type/gru']['initialization'] == 'ImageNet'
 
 
 def test_a_job_says_the_run_its_network_went_on_from(tmp_path):

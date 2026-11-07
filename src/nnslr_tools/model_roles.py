@@ -22,16 +22,12 @@ from what the training and the evaluation wrote:
   (the speed signs found and read right, the false boxes per frame that survive it);
 - decider: ``<run>/experiment-b/<variant>/<variant>-best.pt`` with its ``result.json`` (nnslr_tools.context_experiment):
   whom the sign applies to on validation and test, and the reading;
-- road type: ``<run>/road-type/gru/road-type-best.pt`` (with memory), ``<run>/road-type/gru-nomotion/`` (with memory,
-  without the car's motion) and ``<run>/road-type/frame/road-type-best.pt`` (the same encoder without memory) of
-  scripts/run_road_type.sh, with their ``result.json`` (nnslr_tools.road_type_net): macro F1 over the road types, the
-  accuracy in the first minute after a merge, the delay of each kind of change and the false switches per hour, on
-  validation and test; the junction head and the car's turn alone as a plain rule. Not part of the sign pipeline:
-  nothing uses the one in use yet.
+- brain: ``<run>/brain-last.pt`` with its ``result.json`` (``nnslr train-brain``): the speed it says against the
+  labels of Speed review, on validation and test.
 
 Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/detector``,
 ``cutter:<run>/detector-sizes/640x360``, ``cutter:<run>/signnet``, ``classifier:<run>/reader``,
-``classifier:<run>/classifier``, ``decider:<run>/experiment-b/crop_geom``, ``road_type:<run>/road-type/gru``.
+``classifier:<run>/classifier``, ``decider:<run>/experiment-b/crop_geom``, ``brain:<run>/brain``.
 
 What runs on the comma is <data root>/models/on-car.json, written by ``nnslr on-car --models <clone>``
 (record_on_car) from a clone of the published models repository (speed_limits.json and each network's contract):
@@ -71,22 +67,8 @@ from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NA
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_the_car
 from nnslr_tools.training import DETECTOR_FAMILIES
 
-ROLES = ('cutter', 'classifier', 'decider', 'road_type', 'brain')
-ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'road_type': 'Scene',
-               'brain': 'Brain'}
-# The road-type network of scripts/run_road_type.sh: its folders in <run>/road-type, with memory (and the sign input,
-# since the second version, and the car's own motion, since the fourth), with memory without the car's motion (with
-# memory without the sign input in the runs before), and without memory.
-ROAD_TYPE_PART = 'road-type'
-ROAD_TYPE_FOLDERS = {'gru': ('With memory', 'GRU over the seconds'),
-                     'gru-nomotion': ('With memory, no motion', "GRU over the seconds and the motorway sign, without "
-                                                                "the car's motion"),
-                     'gru-nosign': ('With memory, no sign', 'GRU over the seconds, without the motorway sign'),
-                     'frame': ('Without memory', 'one frame at a time')}
-ROAD_TYPE_SIGN = ('With memory and the sign', 'GRU over the seconds and the motorway sign')
-ROAD_TYPE_MOTION = ('With memory, sign and motion', "GRU over the seconds, the motorway sign and the car's turn, "
-                                                    'steering and blinkers')
-ROAD_TYPE_KINDS = ('ramp_to_motorway', 'motorway_to_ramp', 'town_entry', 'town_exit', 'other')
+ROLES = ('cutter', 'classifier', 'decider', 'brain')
+ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'brain': 'Brain'}
 # The cutter must miss nothing: it is judged on recall at a low score (nnslr_tools.evaluation.CUTTER_SCORE_THRESHOLDS).
 CUTTER_SCORE = 0.1
 # What a cutter learnt to find (result.json and its reports, "families"): every sign (the speed signs and the other
@@ -101,9 +83,8 @@ SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
 # The brain (nnslr train-brain): its weights at the root of its run too, its id brain:<run>/brain.
 BRAIN_PART = 'brain'
 # Any id of the index; the signnet part only for the cutter (role_of).
-MODEL_ID = re.compile(rf'(cutter|classifier|decider|road_type|brain):({_RUN})/({SIGNNET_PART}|{BRAIN_PART}|detector|'
-                      rf'detector-sizes/{SIZE_NAME.pattern}|reader|classifier|{EXPERIMENT_DIR}/{_RUN}|'
-                      rf'{ROAD_TYPE_PART}/(?:gru|gru-nomotion|gru-nosign|frame))')
+MODEL_ID = re.compile(rf'(cutter|classifier|decider|brain):({_RUN})/({SIGNNET_PART}|{BRAIN_PART}|detector|'
+                      rf'detector-sizes/{SIZE_NAME.pattern}|reader|classifier|{EXPERIMENT_DIR}/{_RUN})')
 # The boxes a frame the classifier reads after the cutter in the car (SignNet keeps its epoch with the best recall
 # at this many, nnslr_tools.signnet.BOX_BUDGETS): every cutter is also judged on the speed signs among its best 5.
 BOX_BUDGET = 5
@@ -111,12 +92,12 @@ MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
 ON_CAR_FILE = 'models/on-car.json'
 # The networks of the published models repository (speed_limits.json, format 2) by the role they play here.
-CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'road_type': 'road_type', 'brain': 'brain'}
-# A release may have no road type: speedvisiond then reads the signs alone. With a brain it says the limit itself.
-OPTIONAL_CAR_NETWORKS = ('road_type', 'brain')
+CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'brain': 'brain'}
+# A release may have no brain: speedvisiond then reads the signs alone. With a brain it says the limit itself.
+OPTIONAL_CAR_NETWORKS = ('brain',)
 SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
 # The weights file of a version, inside its part (SignNet's is at the root of its run).
-WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt', 'road_type': 'road-type-best.pt'}
+WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt'}
 BRAIN_WEIGHTS = 'brain-last.pt'
 SHA256 = re.compile(r'[0-9a-f]{64}')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -315,9 +296,9 @@ def cutter_digest(report: Any) -> dict:
 
 
 def network_start_digest(start: Any, split_sha256: Any) -> dict | None:
-    """The start of a SignNet, an applicability variant or a scene network (their result.json "start", --init-from)
-    without its path: the run it went on from, that run's epoch, and whether it learnt on another split than this one
-    (its test may then hold frames it saw); a scene network says instead whether it was tested on other drives."""
+    """The start of a SignNet or an applicability variant (their result.json "start", --init-from) without its
+    path: the run it went on from, that run's epoch, and whether it learnt on another split than this one (its test
+    may then hold frames it saw); an old result may say instead whether it was tested on other drives."""
     if not isinstance(start, dict):
         return None
     run = start.get('run')
@@ -405,95 +386,6 @@ def model_result_digest(result: Any) -> dict:
     }
 
 
-def _road_type_partition(report: Any) -> dict | None:
-    """One partition of a road-type result.json (nnslr_tools.road_type_metrics.sequence_metrics), its headline."""
-    if not isinstance(report, dict):
-        return None
-    sure = report.get('weight_1') if isinstance(report.get('weight_1'), dict) else {}
-    classes = sure.get('classes') if isinstance(sure.get('classes'), dict) else {}
-    merge = report.get('after_merge') if isinstance(report.get('after_merge'), dict) else {}
-    transitions = {}
-    for kind in ROAD_TYPE_KINDS:
-        entry = _dig(report, ('transitions', kind))
-        if isinstance(entry, dict):
-            transitions[kind] = {'count': _int(entry.get('count')) or 0, 'found': _int(entry.get('found')) or 0,
-                                 'median_delay': _num(entry.get('median_delay'))}
-    return {
-        'macro_f1': _num(sure.get('macro_f1')), 'accuracy': _num(sure.get('accuracy')), 'frames': _int(sure.get('frames')),
-        'classes': {name: {'f1': _num(value.get('f1')), 'support': _int(value.get('support')) or 0}
-                    for name, value in classes.items() if isinstance(name, str) and isinstance(value, dict)},
-        'after_merge': {'merges': _int(merge.get('merges')) or 0, 'seconds': _int(merge.get('frames')) or 0,
-                        'accuracy': _num(merge.get('accuracy')),
-                        'accuracy_debounced': _num(merge.get('accuracy_debounced'))},
-        'transitions': transitions,
-        'false_switches_per_hour': _num(report.get('false_switches_per_hour')),
-        'false_switches_per_hour_debounced': _num(report.get('false_switches_per_hour_debounced')),
-    }
-
-
-def _road_type_release(summary: Any) -> dict | None:
-    """The comma's rule on one partition (nnslr_tools.road_type_metrics.release_summary): when the ramp's limit ends."""
-    if not isinstance(summary, dict):
-        return None
-    return {key: _int(summary.get(key)) or 0 for key in ('merges', 'held', 'on_ramp', 'in_time', 'late', 'not_held')} | {
-        'median_release': _num(summary.get('median_release'))}
-
-
-def _junction_numbers(report: Any, operating: dict) -> dict | None:
-    """The junction head on one partition (nnslr_tools.road_type_metrics.junction_metrics) at the car's operating
-    point: F1, recall and precision of the "passed" events within 2 s, recall within 4 s, the false "passed" (a limit
-    lifted where no intersection was) per hour and per 10 km, in town and outside."""
-    if not isinstance(report, dict):
-        return None
-    numbers = _dig(report, ('decodes', operating['decode'], f"{operating['threshold']:g}"))
-    if not isinstance(numbers, dict):
-        return None
-    area = lambda name: numbers.get(name) if isinstance(numbers.get(name), dict) else {}  # noqa: E731
-    return {'passed': _int(report.get('passed')), 'hours': _num(report.get('hours')), 'km': _num(report.get('km')),
-            'f1_2s': _num(numbers.get('f1_2s')), 'recall_2s': _num(numbers.get('recall_2s')),
-            'recall_4s': _num(numbers.get('recall_4s')), 'precision_2s': _num(numbers.get('precision_2s')),
-            'false': _int(numbers.get('false')), 'false_per_hour': _num(numbers.get('false_per_hour')),
-            'false_per_10km': _num(numbers.get('false_per_10km')),
-            'town_per_hour': _num(area('town').get('per_hour')), 'outside_per_hour': _num(area('outside').get('per_hour'))}
-
-
-def _road_type_junctions(result: dict) -> dict | None:
-    """The junction head of a road-type result (since the third version), None without one: the operating point
-    chosen on validation, its numbers on validation and test, and the test's intersections after a number sign."""
-    operating = result.get('junction_operating')
-    if not result.get('junctions') or not isinstance(operating, dict) or operating.get('decode') not in ('passed', 'exit') \
-            or _num(operating.get('threshold')) is None:
-        return None
-    operating = {'decode': operating['decode'], 'threshold': float(operating['threshold'])}
-    needed = result.get('junction_needed') if isinstance(result.get('junction_needed'), dict) else None
-    stage = result.get('junction_stage') if isinstance(result.get('junction_stage'), dict) else {}
-    return {**operating,
-            'validation': _junction_numbers(_dig(result, ('validation', 'junctions')), operating),
-            'test': _junction_numbers(_dig(result, ('test', 'junctions')), operating),
-            'needed': {key: _int(needed.get(key)) or 0 for key in ('junctions', 'needed', 'caught_2s', 'caught_4s')}
-            if needed else None,
-            'branch': result.get('junction_branch') if result.get('junction_branch') in ('shared', 'separate') else None,
-            'stage_epoch': _int(stage.get('best_epoch')),
-            'turn_rule': _turn_rule(_dig(result, ('turn_rule', 'test')))}
-
-
-def _turn_rule(report: Any) -> dict | None:
-    """The car's turn alone as a plain "passed" detector on the test (nnslr_tools.road_type_net.turn_rule): its rule,
-    its numbers as the junction head's, the intersections the car turned in and those the network caught, turned and
-    straight."""
-    if not isinstance(report, dict) or not isinstance(report.get('metrics'), dict):
-        return None
-    rule = report.get('rule') if isinstance(report.get('rule'), dict) else {}
-    passages = report.get('passages') if isinstance(report.get('passages'), dict) else {}
-    split = report.get('network_by_turn') if isinstance(report.get('network_by_turn'), dict) else {}
-    caught = {kind: {key: _int(_dig(split, (kind, key))) or 0 for key in ('passed', 'caught_2s', 'caught_4s')}
-              for kind in ('turned', 'straight') if isinstance(split.get(kind), dict)}
-    return {'degrees': _num(rule.get('degrees')), 'radius_m': _num(rule.get('radius_m')),
-            'numbers': _junction_numbers(report['metrics'], {'decode': 'passed', 'threshold': 0.5}),
-            'passed': _int(passages.get('passed')), 'turned_60': _int(passages.get('turned_60')),
-            'turned_30': _int(passages.get('turned_30')), 'caught': caught or None}
-
-
 def brain_digest(result: Any) -> dict:
     """result.json of ``nnslr train-brain``: what it was given and how it did on validation and test, the speed it says
     against the labels of Speed review (nnslr_tools.brain_train)."""
@@ -507,36 +399,6 @@ def brain_digest(result: Any) -> dict:
     return {'groups': result['groups'], 'seed': result.get('seed'), 'works': result.get('works'), 'pool': result.get('pool'),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
             'validation': speed('validation'), 'test': speed('test')}
-
-
-def road_type_digest(result: Any) -> dict:
-    """result.json of ``nnslr train-road-type``: how it was trained (no history) and validation and test as the road
-    type is judged; the frame network also with its 5-second majority vote (``test_smoothed``)."""
-    if not isinstance(result, dict) or result.get('task') != 'road_type':
-        raise ValueError('not a road-type result')
-    history = result.get('history')
-    classes = result.get('classes')
-    step = result.get('step_seconds') if isinstance(result.get('step_seconds'), dict) else {}
-    return {
-        'memory': result.get('memory') if result.get('memory') in ('gru', 'none') else None,
-        'architecture': result.get('architecture') if isinstance(result.get('architecture'), str) else None,
-        'best_epoch': _int(result.get('best_epoch')), 'epochs': _int(_dig(result, ('config', 'epochs'))),
-        'epochs_run': len(history) if isinstance(history, list) else None,
-        'classes': [name for name in classes if isinstance(name, str)] if isinstance(classes, list) else None,
-        'parameters': _int(result.get('parameters')), 'flops_per_step': _int(result.get('flops_per_step')),
-        'step_ms': _num(step.get('milliseconds')), 'step_device': step.get('device') if isinstance(step.get('device'), str) else None,
-        'dry_run': bool(result.get('dry_run')),
-        'validation': _road_type_partition(result.get('validation')),
-        'test': _road_type_partition(result.get('test')),
-        'test_smoothed': _road_type_partition(result.get('test_smoothed')),
-        'signs': bool(result.get('signs')),
-        'motion': bool(result.get('motion')),
-        'speed_source': result.get('speed_source') if result.get('speed_source') in ('gps', 'v_ego') else 'gps',
-        'release': {partition: _road_type_release(_dig(result, ('release', partition)))
-                    for partition in ('validation', 'test')} if isinstance(result.get('release'), dict) else None,
-        'junctions': _road_type_junctions(result),
-        'start': network_start_digest(result.get('start'), result.get('split_sha256')),
-    }
 
 
 def decider_digest(result: Any) -> dict:
@@ -713,7 +575,7 @@ def _git(folder: Path, *args: str) -> str:
 
 def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
     """``nnslr on-car``: <root>/models/on-car.json from a clone of the published models repository, the networks
-    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier, road_type and brain when
+    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier and brain when
     there is one) must match its contract (the ONNX sha256), name weights of a run on this server, and those weights must be
     the ones the contract was made from (checkpoint sha256); the clone must be clean and its commit on a remote
     branch. Reads only the clone (no network) and the runs; writes the one file, unless dry_run."""
@@ -962,41 +824,6 @@ class ModelIndex:
             found.append(entry)
         return found
 
-    def _road_types(self, name: str, run: Path) -> list[dict]:
-        """The road-type network of scripts/run_road_type.sh: with memory and without (its dry run is not a version);
-        the one with memory says whether its ONNX step was exported."""
-        found = []
-        for folder, (label, detail) in ROAD_TYPE_FOLDERS.items():
-            part = f'{ROAD_TYPE_PART}/{folder}'
-            checkpoint = self.runs._file(run, part + '/road-type-best.pt')
-            if checkpoint is None:
-                continue
-            problems: list[str] = []
-            result = self._read(run, part + '/result.json', road_type_digest, problems)
-            trained = result or {}
-            entry = self._base('road_type', name, part, checkpoint, result, problems)
-            onnx = self.runs._file(run, ROAD_TYPE_PART + '/export/road-type.onnx.contract.json') if folder == 'gru' else None
-            if folder == 'gru' and trained.get('motion'):
-                label, detail = ROAD_TYPE_MOTION
-            elif folder == 'gru' and trained.get('signs'):
-                label, detail = ROAD_TYPE_SIGN
-            entry.update({
-                'label': label, 'detail': detail, 'memory': trained.get('memory'), 'signs': trained.get('signs', False),
-                'motion': trained.get('motion', False), 'speed_source': trained.get('speed_source', 'gps'),
-                'release': trained.get('release'), 'junctions': trained.get('junctions'),
-                'architecture': trained.get('architecture'),
-                'initialization': 'start' if trained.get('start') else 'ImageNet', 'start': trained.get('start'),
-                'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
-                'epochs_run': trained.get('epochs_run'), 'classes': trained.get('classes'),
-                'parameters': trained.get('parameters'), 'flops_per_step': trained.get('flops_per_step'),
-                'step_ms': trained.get('step_ms'), 'step_device': trained.get('step_device'),
-                'onnx': onnx is not None,
-                'validation': trained.get('validation'), 'test': trained.get('test'),
-                'test_smoothed': trained.get('test_smoothed'),
-            })
-            found.append(entry)
-        return found
-
     def _brain(self, name: str, run: Path) -> dict | None:
         """The brain of a run of ``nnslr train-brain`` (its dry run is not a version)."""
         checkpoint = self.runs._file(run, BRAIN_WEIGHTS)
@@ -1030,8 +857,6 @@ class ModelIndex:
                                         if entry is not None]
             if 'decider' in roles:
                 found['decider'] += self._deciders(name, run)
-            if 'road_type' in roles:
-                found['road_type'] += self._road_types(name, run)
             if 'brain' in roles:
                 found['brain'] += [entry for entry in (self._brain(name, run),) if entry is not None]
             if 'cutter' not in roles:
@@ -1120,7 +945,7 @@ class ModelIndex:
         return version, ''
 
     def index(self) -> dict:
-        """GET /api/panel/models: the roles (the three of the sign pipeline and the road type), each with its versions
+        """GET /api/panel/models: the roles (the three of the sign pipeline and the brain), each with its versions
         newest first and the one in use."""
         artifacts = self.artifacts()
         active, problem = self.read_active()
@@ -1151,7 +976,7 @@ class ModelIndex:
         can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector); the
         file keeps the other roles as they are."""
         if not isinstance(role, str) or role not in ROLES:
-            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider, road_type or brain.')
+            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider or brain.')
         if not isinstance(model_id, str) or len(model_id) > MAX_ID or MODEL_ID.fullmatch(model_id) is None:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
         if role_of(model_id) != role:

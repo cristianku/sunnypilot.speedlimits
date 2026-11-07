@@ -430,20 +430,19 @@ def test_the_road_types_have_their_steps_from_their_own_lines():
            '== c. Speed of the drives\n== d. Map roads near the drives\nreading the map\n')
     running = progress('road_types', 'running', log)
     assert states(running) == {'gps': 'done', 'maps': 'done', 'speed': 'done', 'map_roads': 'current',
-                               'road_types': 'todo', 'junctions': 'todo'}
+                               'road_types': 'todo'}
     assert running['percent'] == 25.0 and running['last_line'] == 'reading the map'
     maps = progress('road_types', 'running', log.split('== c.')[0])
     assert states(maps)['maps'] == 'current' and maps['percent'] == 10.0
     failed = progress('road_types', 'failed', log + '== e. Road type of every frame\nno map\n')
     assert states(failed)['road_types'] == 'failed' and failed['percent'] == 75.0
-    # The junctions last: the labels of the road-type network's junction head.
+    # A log from before 7 Nov 2026 has the junctions after the road types: no step of today, the road types go on.
     junctions = progress('road_types', 'running', log + '== e. Road type of every frame\n== f. Junctions of the drives\n')
-    assert states(junctions)['junctions'] == 'current' and junctions['percent'] == 93.0
+    assert states(junctions)['road_types'] == 'current' and junctions['percent'] == 75.0
     # A log from before the maps: its letters one earlier, the maps never looked for.
     before_maps = progress('road_types', 'running', '== a. GPS of the drives\n== b. Speed of the drives\n'
-                           '== c. Map roads near the drives\n== d. Road type of every frame\n'
-                           '== e. Junctions of the drives\n')
-    assert states(before_maps)['junctions'] == 'current' and states(before_maps)['speed'] == 'done'
+                           '== c. Map roads near the drives\n== d. Road type of every frame\n')
+    assert states(before_maps)['road_types'] == 'current' and states(before_maps)['speed'] == 'done'
     # A log from before the speed: its letters two earlier, the speed never read.
     old = progress('road_types', 'running', '== a. GPS of the drives\n== b. Map roads near the drives\n'
                    '== c. Road type of every frame\n')
@@ -451,25 +450,6 @@ def test_the_road_types_have_their_steps_from_their_own_lines():
     # The import's "== b. " is not one of its steps, nor its "== b. Map roads" one of the import's.
     assert states(progress('road_types', 'running', '== b. controllo il dataset\n'))['gps'] == 'current'
     assert states(progress('dataset', 'running', '== a. importo\n== b. Map roads\n'))['split'] == 'current'
-
-
-def test_the_road_type_curves_have_the_measure_that_chooses_their_best_epoch():
-    log = ('== 5/8 Train the road type with memory ==\n'
-           'dry run road_type_gru epoch 1/1 train_loss 3.5848 val_macro_f1 0.0000 val_accuracy 0.0000 val_road_score 0.0000 '
-           'val_junction_f1 0.0000 4s\n'
-           'road_type_gru epoch 1/60 train_loss 3.0381 val_macro_f1 0.1415 val_accuracy 0.2983 val_road_score 0.0829 '
-           'val_junction_f1 0.1819 33s\n'
-           'road_type_gru epoch 2/60 train_loss 2.2930 val_macro_f1 0.3308 val_accuracy 0.5000 val_road_score -0.0123 5s\n'
-           'road_type_gru stops early after epoch 2: no better validation road score for 15 epochs\n'
-           'road_type_gru junction epoch 1/30 train_loss 0.3773 val_junction_f1 0.5661 val_false_passed_per_hour 36.43 4s\n')
-    curve = progress('train_road_type', 'running', log)['curves']['road_type_gru']
-    assert curve['epochs'] == 60 and curve['stopped_early'] == 2
-    # The dry run and the junction stage are not epochs of the network.
-    assert curve['points'] == [
-        {'epoch': 1, 'train_loss': 3.0381, 'val_macro_f1': 0.1415, 'val_accuracy': 0.2983, 'val_road_score': 0.0829,
-         'val_junction_f1': 0.1819, 'seconds': 33},
-        {'epoch': 2, 'train_loss': 2.2930, 'val_macro_f1': 0.3308, 'val_accuracy': 0.5000, 'val_road_score': -0.0123,
-         'seconds': 5}]
 
 
 def test_the_experiment_b_curves_have_the_measure_that_chooses_their_best_epoch():

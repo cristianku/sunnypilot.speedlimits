@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The settings of a training of Train (Cutter, Classifier, Applicability, Scene): its epochs, patience, batch, learning
+// The settings of a training of Train (Cutter, Classifier, Applicability, Brain): its epochs, patience, batch, learning
 // rate, the processes reading the frames, the classifier's false boxes; GET/POST /api/panel/train-settings
 // (nnslr_tools.train_settings). Saved here, the next training of that kind uses them (Panel.start sets the variables
 // of its script); the one running keeps its own, and the job's chips say what each one used. What the car needs (the
@@ -21,9 +21,8 @@ const field = (key: string): string => props.training + '.' + key;
 const current = computed(() => payload.value?.trainings[props.training] ?? null);
 const settings = computed(() => current.value?.settings ?? []);
 const readOnly = computed(() => !payload.value?.can_edit);
-/** The network inside a sentence: “scene network” for train_road_type (its label, “Scene”, is a name). */
-const networkWords = computed(() => props.training === 'train_road_type' ? 'scene network'
-  : current.value?.label.toLowerCase() ?? 'network');
+/** The network inside a sentence. */
+const networkWords = computed(() => current.value?.label.toLowerCase() ?? 'network');
 
 /** The value typed, NaN when not a number (v-model of a number input gives a number once typed). */
 function typed(setting: TrainSetting): number {

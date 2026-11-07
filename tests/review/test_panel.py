@@ -299,18 +299,17 @@ def test_the_road_types_need_no_confirmed_frame_and_are_no_preparation(root, che
     script.write_text('#!/usr/bin/env bash\necho "== a. GPS of the drives"\nsleep "${FAKE_SLEEP:-0}"\n')
     script.chmod(0o755)
     # Nothing confirmed yet: the GPS and the map are enough. A server without a prepared drive has nothing to read.
-    assert panel.status()['actions']['road_types'] == {'label': 'Find the road types', 'allowed': True, 'reason': ''}
+    assert panel.status()['actions']['road_types'] == {'label': 'Read the map', 'allowed': True, 'reason': ''}
     assert Panel(tmp_path / 'empty', repo=checkout).status()['actions']['road_types']['reason'] == 'no prepared drive'
     monkeypatch.setenv('FAKE_SLEEP', '30')
     job = panel.start('road_types')
     try:
         status = panel.status()
-        assert status['actions']['prepare']['reason'] == 'A search for the road types is running'
+        assert status['actions']['prepare']['reason'] == 'A reading of the map is running'
         # It shares the group of the preparation, but the Prepare page shows no drive being prepared.
         assert status['preparation'] is None
         steps = next(item for item in status['jobs'] if item['id'] == job['id'])['progress']['steps']
-        assert [step['key'] for step in steps] == ['gps', 'maps', 'speed', 'map_roads', 'road_types',
-                                                    'junctions']
+        assert [step['key'] for step in steps] == ['gps', 'maps', 'speed', 'map_roads', 'road_types']
         assert steps[0]['state'] == 'current'
     finally:
         panel.stop(job['id'])

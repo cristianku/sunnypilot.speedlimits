@@ -73,19 +73,6 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
-# scripts/run_road_type.sh: the junctions of the drives, the motorway signs and the car's own motion read from its logs,
-# the road-type network with memory (and its junction head), the sign input and the car's motion, the same without the
-# car's motion, the same without memory, then the comparison and the ONNX step (their epoch lines name them:
-# road_type_gru, road_type_gru_nomotion, road_type_frame; road_type_gru_nosign in the runs before 29 Oct 2026).
-ROAD_TYPE_STEPS = (
-    ('checks', 'Checks and GPU smoke test', 4),
-    ('frames', 'Find the junctions, resize the frames', 4),
-    ('signs', "Read the motorway signs and the car's motion", 8),
-    ('road_type_gru', 'Train with memory, the sign and the motion', 30),
-    ('road_type_gru_nomotion', 'Train with memory, no motion', 27),
-    ('road_type_frame', 'Train without memory', 23),
-    ('export', 'Compare and export the ONNX step', 4),
-)
 # scripts/run_brain.sh: the signs of the drives of Speed review as the car reads them today, then its three seeds (their
 # epoch lines name them: brain_s0, brain_s1, brain_s2).
 BRAIN_STEPS = (
@@ -119,13 +106,11 @@ FETCH_STEPS = (('fetch', 'Download the drives from the comma', 100),)
 # helpers/road_types.sh: openpilot.distill's localizer on the segments new to it (about 20 s of a core each, 6 side by
 # side: some 20 minutes the first time) and the GPS of the drives prepared without it or localized since, the maps the
 # drives need (seconds, a minute or two for each map downloaded), the car's speed from the logs (a minute for each new
-# drive), the map roads near the drives (minutes when the map is read again), the road type of every frame, the
-# intersections every drive passed.
+# drive), the map roads near the drives (minutes when the map is read again), the map's limit of every frame.
 ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('maps', 'Download the maps the drives need', 5),
                     ('speed', 'Read the speed of the drives', 10),
                     ('map_roads', 'Read the map roads near the drives', 50),
-                    ('road_types', 'Find the road type of every picture', 18),
-                    ('junctions', 'Find the junctions the car drove through', 7))
+                    ('road_types', "Find the map's limit of every picture", 25))
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
@@ -134,14 +119,14 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 # [ai-reviewer] - END
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
-         'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS, 'train_road_type': ROAD_TYPE_STEPS,
+         'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS,
          'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-            'train_road_type', 'train_brain', 'regression', 'dataset', 'ai_review',
+            'train_brain', 'regression', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore')
 
@@ -161,8 +146,6 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
 DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
-            'train_road_type': (8, {1: 'checks', 2: 'checks', 3: 'frames', 4: 'signs', 5: 'road_type_gru',
-                                    6: 'road_type_gru_nomotion', 7: 'road_type_frame', 8: 'export'}),
             'train_brain': (6, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}),
             'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
@@ -185,33 +168,29 @@ MARKERS = (
     (re.compile(r'^== b\+c\. '), 'frames', ()),
     # helpers/road_types.sh, by the words after its letters (a marker counts only for an action with that step: the
     # "== b. " of the import above is not one of its steps): the letters of a log from before the maps (3 Nov 2026),
-    # or from before the speed, are one or two earlier.
+    # or from before the speed, are one or two earlier; the junctions step after the road types was removed on 7 Nov 2026.
     (re.compile(r'^== a\. GPS of the drives'), 'gps', ()),
     (re.compile(r'^== b\. Maps the drives need'), 'maps', ()),
     (re.compile(r'^== [bc]\. Speed of the drives'), 'speed', ()),
     (re.compile(r'^== [bcd]\. Map roads'), 'map_roads', ()),
     (re.compile(r'^== [cde]\. Road type'), 'road_types', ()),
-    (re.compile(r'^== [def]\. Junctions of the drives'), 'junctions', ()),
 )
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
 REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
-                   r'road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|road_type_frame|brain_s[0-2]) epoch (\d+)/(\d+)\b')
+                   r'brain_s[0-2]) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
-EARLY = re.compile(r'^(detector|reader|classifier|pretrain|road_type_gru_nosign|road_type_gru_nomotion|road_type_gru|'
-                   r'road_type_frame) stops early after epoch (\d+)\b')
+EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
 # val_recall, its validation recall at score 0.1, which chooses its best epoch; the classifier with "not a sign"
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
-# the balanced accuracy, chooses its best epoch; the road-type network val_macro_f1, its F1 over the road types,
-# val_road_score, its own measure that chooses its best epoch (road_type_net.road_score), and val_junction_f1, its
-# junction head; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them, and
+# the balanced accuracy, chooses its best epoch; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them, and
 # in its Mapillary stage val_speed_recall, the speed signs found, which chooses that stage's best epoch; experiment B
 # val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case; the brain
 # val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
-                    r'val_rejection|val_balanced_accuracy|val_macro_f1|val_false_per_frame|val_road_score|val_junction_f1|'
+                    r'val_rejection|val_balanced_accuracy|val_false_per_frame|'
                     r'val_ownership_macro_f1|val_other_road_recall|val_error_kph) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
@@ -296,8 +275,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet'|'signnet_pretrain': {'epochs': total,
     ('stopped_early': epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',)
     ('val_recall',) ('val_false_per_frame', 'val_speed_recall',) ('val_sign_accuracy', 'val_rejection',
-    'val_balanced_accuracy',) ('val_macro_f1', 'val_road_score', 'val_junction_f1',) ('val_ownership_macro_f1',
-    'val_other_road_recall', 'val_selection_score',) 'seconds'}]}}} (also the road type's networks and experiment B's variants, by the names of their epoch lines) for an
+    'val_balanced_accuracy',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_selection_score',) 'seconds'}]}}}
+    (also experiment B's variants and the brain's seeds, by the names of their epoch lines) for an
     action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
     unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,
     '' when unknown) for a failed job."""
@@ -451,7 +430,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     elif epoch is not None and epoch[0] == current and state == 'running':
         # A variant of the decider by its step's label ("Crop, position and speed"), a network by its name.
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
-            if epoch[0].startswith(('experiment_b', 'road_type', 'brain')) else NET_NAMES.get(epoch[0], epoch[0])
+            if epoch[0].startswith(('experiment_b', 'brain')) else NET_NAMES.get(epoch[0], epoch[0])
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)

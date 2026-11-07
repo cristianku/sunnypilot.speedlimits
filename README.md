@@ -8,7 +8,7 @@
 
 > **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. **Smartspeed**, a mode in sunnylink next to the factory ones, turns them on. The brain then chooses the speed, the map fills in where vision has none, and the car's set speed is only on and off. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
-> **Reviewers wanted.** We're looking for people to help label the drives: confirming the speed signs, saying what kind of road each scene shows, and marking the speed that makes sense on a stretch. It all happens in the browser, on the drives you're given. Sign up at [smartspeed.14bodhi.com](https://smartspeed.14bodhi.com).
+> **Reviewers wanted.** We're looking for people to help label the drives: confirming the speed signs and marking the speed that makes sense on a stretch. It all happens in the browser, on the drives you're given. Sign up at [smartspeed.14bodhi.com](https://smartspeed.14bodhi.com).
 
 [Why](#why) · [The brain](#the-brain) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
@@ -40,7 +40,7 @@ Where it stands: the first brain is in the release on Cristian's comma. On place
 
 ## How it works
 
-Three networks: the **sign finder** (SignNet, also called the *cutter*) puts a box around each sign, the **sign reader** (the *classifier*) reads each box, and the **scene** network says what kind of road the car is on.
+Three networks: the **sign finder** (SignNet, also called the *cutter*) puts a box around each sign, the **sign reader** (the *classifier*) reads each box, and the [brain](#the-brain) says the speed to hold. The scene network, which said what kind of road the car was on, is no longer trained or published (7 Nov 2026): the brain decides.
 
 From a drive to the car, in six steps:
 
@@ -49,7 +49,7 @@ flowchart TD
   A["Drives<br/>from the comma"] --> B["Prepare<br/>pictures + proposed boxes"]
   B --> C["Review on the site<br/>a person confirms the boxes"]
   C --> D["Import reviews<br/>→ training dataset"]
-  D --> E["Train<br/>sign finder, sign reader, scene"]
+  D --> E["Train<br/>sign finder, sign reader, brain"]
   E --> F["Publish<br/>speed-limits-models"]
   F -.->|new drives| A
 ```
@@ -62,23 +62,23 @@ flowchart TD
 
 ### What runs on the car
 
-This is the chain of a release without a brain. With one, the [brain](#the-brain) takes the place of the scene network and of the rules below.
+The chain of a release with a brain, as the one of 7 Nov 2026. A release without a brain has the signs alone and the [rules below](#the-rules-on-the-car).
 
 ```mermaid
 flowchart TD
   cam["Road camera<br/>5 pictures a second"] --> sn["SignNet<br/>boxes the signs"]
   sn --> cl["Classifier<br/>reads each box"]
-  cl --> lim["Vision limit"]
-  cam --> rt["Scene<br/>town, rural, motorway…"]
-  sig["Car signals<br/>speed, gyro, steering, blinkers"] --> rt
-  rt -->|"general limit where<br/>no sign holds"| lim
+  cl --> br["Brain<br/>the speed to hold"]
+  cam --> br
+  sig["Car signals<br/>speed, gas, brake, openpilot on"] --> br
+  br --> lim["Vision limit"]
   lim --> res["sunnypilot resolver<br/>Map Data + Vision<br/>or Vision Only"]
   osm["Map<br/>OpenStreetMap"] --> res
 ```
 
 - **SignNet** looks only at a band at the top of the picture, where signs stand (896 × 288 pixels, a grid of 8 pixels). It keeps up to 5 boxes per picture.
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
-- The **scene** network says what kind of road it is: town, 30 zone, rural, expressway, motorway, ramp, the acceleration lane after it, car park or garage. Where no sign holds, that gives the country's general limit; from the acceleration lane on, the carriageway's, not the ramp's. In Switzerland: 50 in town, 80 rural, 100 expressway, 120 motorway, 20 in a car park, 10 in a garage.
+- The **brain** says the speed itself, once a second, from the picture, the signs read and the car's own signals ([the brain](#the-brain)).
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **Full definition, for far signs and plates.** Two Developer switches, both off by default. **Record road at full resolution** writes `fcamera.hevc` at 2688 × 1520, and the server then keeps that frame beside each picture for Sign review and the classifier's training ([the guide](docs/GUIDE.md#drives-at-full-definition)). **Read signs at full resolution** has the cutter search the 1344 × 760 frame as always and cuts the classifier's crop from the 2688 × 1520 one. With either one on, the road camera goes through the BPS: the driving model then reads that picture too.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. Map and vision meet only in sunnypilot's resolver, with **Smartspeed** (Map Data + Vision); the old Vision Only takes the vision limit alone.
@@ -108,7 +108,7 @@ How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limit
 - A number read off the carriageways (in town, on a rural road, before a ramp the scene network missed) ends once the scene network has seen the motorway or expressway for 10 s (the *setting* of a new road type): a missed end sign must not keep the car at 40 or 60 on the motorway. A number read less than 5 s (*setting*) before the network saw the carriageway may already be the carriageway's (the network lags a few seconds) and holds.
 - Roadworks on the carriageway hold: their sign is read on the carriageway, and repeated there.
 
-**The scene, where no sign holds**
+**The scene, where no sign holds** (only with a scene network, which no release has had since 7 Nov 2026)
 
 - The scene network's answer counts after 3 equal answers in a row, one a second (*setting*).
 - A green board towards a motorway or expressway (`other_sign:motorway_direction`: places, arrows, the motorway pictogram on a direction board) never sets a limit: in Switzerland it stands at the start of the entry ramp, where the limit is not yet 120. Confirmed as a sign is (2 pictures within 1.5 s), it only gives the scene network one more input, the seconds since the last board, from which the network learns that a ramp or a motorway is coming. Only a scene network trained with that input reads it, and only with a classifier that has the class; until then the input stays "no board".
@@ -149,7 +149,7 @@ On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `h
 
 It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default before any choice), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
-**Find the road types**, on top of **Data › Speed review** (`helpers/road_types.sh`), reads the kind of each road and its limit from OpenStreetMap, offline. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. These are proposals: the map's limit is the proposal of Speed review, a label only once a person confirms or corrects it there, and the car never sees the map. The scene network learns from the road types a person confirmed in Data › Roads until 7 Nov 2026, when that page went: no more are added.
+**Read the map**, on top of **Data › Speed review** (`helpers/road_types.sh`), reads the kind of each road and its limit from OpenStreetMap, offline. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. These are proposals: the map's limit is the proposal of Speed review, a label only once a person confirms or corrects it there, and the car never sees the map.
 
 ### 3. Review
 
@@ -197,7 +197,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 
 - **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours, chosen at first once the windows are cut; the classifier's switch starts on it too).
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
-- **Train the scene network**: about 15 minutes (longer the first time). It needs **Find the road types** (step 2) to have run once. It needs no reviewed sign.
+- **Train the brain**: three networks that differ only by their seed, from the speeds marked in Data › Speed review; compare them in Models › Brain.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
 <img src="docs/images/panel-train.png" alt="Training page, Cutter tab: the Train the cutter button, the latest SignNet 896 by 288 (in use, 74.9% of the speed signs) and the curves of its last training, validation recall and loss over 40 epochs." width="100%">
@@ -218,8 +218,8 @@ Before it goes to the car, **Models › Regression** tests it on the drives you 
 
 To the car:
 
-- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the scene network or the brain in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
-- **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The scene network stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
+- **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the brain in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
+- **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The brain stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
 
 The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.
 
@@ -251,7 +251,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 
 - `helpers/1_prepare.sh`, `helpers/2_review.sh`, `helpers/3_train.sh`, `helpers/update.sh`: the daily steps above. `helpers/status.sh` only reads.
 - `scripts/run_regression.sh`: the Run button of Models › Regression (GPU).
-- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_road_type.sh`, `scripts/run_brain.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
+- `scripts/run_signnet.sh`, `scripts/run_classifier.sh`, `scripts/run_brain.sh`, `scripts/run_experiment_b.sh`: the trainings of the Training page (GPU).
 - `scripts/send_to_car.sh` and `scripts/try_on_comma.sh`: Publish (to the car) and Try on the comma now.
 - `helpers/ai_review.sh` and `helpers/measure_ai_reviewer.sh`: the AI reviewer. Its providers and keys stay on the server.
 - `helpers/mapillary.sh`, `helpers/mapillary_windows.sh`, `helpers/mapillary_locations.sh`: the Mapillary Traffic Sign Dataset, as crops for the classifier, as windows for the cutter, and where its photos were taken (CPU; the last one asks the Mapillary API).
@@ -274,7 +274,7 @@ Day-to-day work happens on the site, whose buttons run a few helper scripts and 
 
 - **Sign finder (cutter).** SignNet is the one cutter, on the car since 28 October. The one in use, trained on 30 October, finds 68% of the speed signs as the car reads them (IoU 0.5).
 - **Classifier.** A version with "not a sign" is trained, measured, and on the car.
-- **Scene.** A network with memory: the kind of road from the camera and the car's own motion, one answer a second, and the merge after a ramp. On the car ([details](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
+- **Scene.** A network with memory that said the kind of road from the camera and the car's own motion. On the car until the 7 Nov 2026 release, when the brain took its place; no longer trained or published ([details](docs/NEURAL_NETWORK.md#the-road-type-with-memory-29-october-2026)).
 - **Applicability** (is this sign for our road, or for another one?). A prototype. Not on the car, so a side road's sign can be taken for ours.
 - **Country rules.** The general limits (town, rural, expressway, motorway) of 22 countries are on the car, from [`docs/road-rules/`](docs/road-rules/README.md). The country is the one chosen in sunnypilot's settings (Switzerland by default). A small core with no dependencies ([`src/speed_vision_core`](src/speed_vision_core)) has the types and checks.
 - [`integrations/sunnypilot`](integrations/sunnypilot/README.md) keeps an old, frozen advisory snapshot. It is not the runtime on the comma.
@@ -384,7 +384,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
 ### How you can help
 
 - **Drives** on new roads, in other countries, at dusk, at night, in rain, or from a comma 3X. Recordings are private, so please [open an issue](https://github.com/cristianku/sunnypilot.speedlimits/issues) first.
-- **Reviewing.** Confirmations by a person are the most valuable labels: signs, road scenes, the speed of each stretch. [Sign up here](https://smartspeed.14bodhi.com).
+- **Reviewing.** Confirmations by a person are the most valuable labels: signs and the speed of each stretch. [Sign up here](https://smartspeed.14bodhi.com).
 - **The load on the comma 4.** Measuring how much room the networks leave next to the driving model.
 - **Country rules.** How signs are read where you drive (town entries, motorway defaults, zones).
 - **Code and ideas.** Issues and pull requests are welcome.
@@ -421,7 +421,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
   - [RapidOCR](https://github.com/RapidAI/RapidOCR) 3.4.0 with PaddleOCR PP-OCRv4 (Apache-2.0), for numbers painted on the road.
 - The [Mapillary Traffic Sign Dataset](https://www.mapillary.com/dataset/trafficsign) (CC BY-NC-SA 4.0): optional extra sign crops for the classifier (`helpers/mapillary.sh`) and windows for the cutter (`helpers/mapillary_windows.sh`), both off by default. Never committed; a classifier or a cutter trained with it, or started from one that was, carries its non-commercial terms.
 - The table of Mapillary's old image keys and current ids, [viajerus/mapillary_keys_ids](https://github.com/viajerus/mapillary_keys_ids), shared on the [Mapillary forum](https://forum.mapillary.com/t/mapillary-traffic-sign-dataset-keys/10282); positions from the [Mapillary API](https://www.mapillary.com/developer/api-documentation).
-- Planned for the scene network, not downloaded or used yet. They would teach it what a town and open country look like, by day and night and in bad weather, in many countries; none of them marks where a town ends:
+- Planned for the scene network, which is no longer trained (7 Nov 2026), and never used. They would have taught it what a town and open country look like, by day and night and in bad weather, in many countries; none of them marks where a town ends:
   - [BDD100K](https://www.bdd100k.com) (Berkeley DeepDrive; educational, research and not-for-profit use): its 100K images only, with their scene, weather and time-of-day labels, not the videos.
   - [ACDC](https://acdc.vision.ee.ethz.ch) (ETH Zurich; its own non-commercial terms): drives in Switzerland at night, in fog, rain and snow.
   - [Mapillary Vistas](https://www.mapillary.com/dataset/vistas) (CC BY-NC-SA 4.0): left out for now, its download is about 60 GB.

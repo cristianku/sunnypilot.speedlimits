@@ -601,3 +601,14 @@ def test_a_broken_corrections_line_is_skipped(tmp_path):
     # A new correction is appended after them and counts.
     correct(tmp_path, ROUTE, '0/1', '0/1', 'rural', 'admin')
     assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'rural', None]
+
+
+def test_the_overview_counts_the_prepared_drives_without_road_types(tmp_path):
+    from nnslr_tools.road_types import drives_without
+    from review_helpers import make_report
+    make_report(tmp_path, route='00000001--aaaaaaaaaa')
+    make_report(tmp_path, route='00000002--bbbbbbbbbb')
+    assert drives_without(tmp_path) == 2
+    (tmp_path / 'derived' / 'road_types').mkdir(parents=True)
+    (tmp_path / 'derived' / 'road_types' / '00000001--aaaaaaaaaa.jsonl').write_text('{}\n')
+    assert drives_without(tmp_path) == 1

@@ -41,12 +41,12 @@ const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
 const ROW_ACTIONS: Record<LoopKey, ActionName[]> = {
   drives: ['fetch', 'prepare', 'prepare_again', 'road_types'],
   review: ['ai_review'],
-  train: ['dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_road_type', 'train_brain', 'train', 'train_continue', 'train_resume'],
+  train: ['dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'train', 'train_continue', 'train_resume'],
   car: ['send_to_car', 'try_on_comma', 'comma_restore'],
 };
 /** The terminal work of each stop, by its group (nnslr_tools.panel.ACTIVITIES). */
 const ROW_GROUPS: Partial<Record<LoopKey, string[]>> = {drives: ['fetch', 'prepare'], train: ['train'], car: ['publish']};
-const CAR_ROLES = ['cutter', 'classifier', 'road_type', 'brain'] as const;
+const CAR_ROLES = ['cutter', 'classifier', 'brain'] as const;
 
 const wholePercent = (percent: number | null): string =>
   percent === null ? '' : Math.floor(Math.max(0, Math.min(100, percent))) + '%';
@@ -74,15 +74,15 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
   const proposers = status.proposers;
   const chosen = proposers?.chosen ?? null;
   const missing = chosen === 'ours' ? proposers?.ours ?? '' : chosen === 'qwen' ? proposers?.qwen ?? proposers?.qwen_gpu ?? '' : '';
-  // Prepared, but their road types not found yet (Data › Speed review, Find the road types): that is the work of the row until it is done.
+  // Prepared, but not read on the map yet (Data › Speed review, Read the map): that is the work of the row until it is done.
   const roads = !count ? status.road_types_missing ?? 0 : 0;
   if (roads && status.actions.road_types) {
     return {
       key: 'drives', label: 'Drives', href: '/speed-review', kind: 'prepare',
-      big: plural(roads, 'drive') + ' without road types',
-      note: 'Prepared: the map still has to say the type of road of each picture.', warn: '',
+      big: plural(roads, 'drive') + ' not read on the map',
+      note: 'Prepared: the map still has to give the limit of each picture.', warn: '',
       more: {href: '/speed-review', label: 'Speed review'}, waiting: true, ok: false, running: running(status, 'drives'),
-      action: {name: 'road_types', state: status.actions.road_types, label: 'Find the road types'},
+      action: {name: 'road_types', state: status.actions.road_types, label: 'Read the map'},
     };
   }
   // Nothing to prepare: the button downloads the new drives from the comma (also in the comma's panel, at the top).
@@ -149,7 +149,7 @@ function car(status: PanelStatus): Omit<LoopRow, 'primary'> {
       note: inUse.length ? 'The branch has the networks in use: ' + inUse.join(' · ') + '.' : '', warn: '',
       waiting: false, ok: summary.on_car !== null, action: null};
   }
-  // "classifier, 30 Oct 11:22 (the car has 29 Oct 09:00)"; a network the car has and none in use: "scene: none in use".
+  // "classifier, 30 Oct 11:22 (the car has 29 Oct 09:00)"; a network the car has and none in use: "brain: none in use".
   const words = differ.map((role) => {
     const used = summary.in_use[role];
     const there = summary.on_car?.[role];

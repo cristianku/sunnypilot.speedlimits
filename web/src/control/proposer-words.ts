@@ -4,8 +4,7 @@
 import type {Proposer} from '../common/panel-types';
 
 export const PROPOSER_LABELS: Record<Proposer, string> = {vietnam: 'Vietnamese YOLO', ours: 'Our networks', qwen: 'Qwen3-VL'};
-const PART_NAMES: Record<string, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability', road_type: 'scene',
-  brain: 'brain'};
+const PART_NAMES: Record<string, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability', brain: 'brain'};
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** One network in use by its id ("cutter:2026-10-30_1046-cutter/signnet"): "cutter SignNet, 30 Oct 10:46". The time

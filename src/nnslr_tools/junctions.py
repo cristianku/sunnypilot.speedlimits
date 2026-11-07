@@ -579,7 +579,7 @@ def correct(root: Path, route: str, frame_key, junction, reviewer: str) -> dict:
     appended to its corrections. Returns the line kept."""
     record = load_junctions(root, route)
     if record is None:
-        raise CorrectionError('The junctions of this drive have not been found yet: Find the road types reads them.')
+        raise CorrectionError('The junctions of this drive have not been found yet: nnslr junctions finds them.')
     if not isinstance(frame_key, str) or frame_key not in {frame['frame_key'] for frame in record['frames']}:
         raise CorrectionError('frame_key is a frame of this drive.')
     if junction not in CHOICES:

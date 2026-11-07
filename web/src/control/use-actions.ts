@@ -49,14 +49,6 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'band, for the cutter’s Mapillary switch. The CPU for a while, no GPU and no internet; the windows already cut '
         + 'are kept.'};
   }
-  if (name === 'train_road_type') {
-    const signs = options?.classifier && options.classifier !== 'car'
-      ? ' The signs are read with the classifier of ' + (/^classifier:(.+)\/classifier$/.exec(options.classifier)?.[1] ?? options.classifier)
-        + ', not the car’s: the first time it reads every drive again.' : '';
-    return {title: 'Train the scene network?', action: 'Start training',
-      text: 'Trains the scene network on the GPU twice, with memory and without, compares them and exports the one '
-        + 'with memory for the car: about 15 minutes. Its run is a new one, named by the time it starts.' + signs};
-  }
   if (name === 'regression') {
     return {title: 'Run the regression?', action: 'Run',
       text: 'Runs the chosen models along the certified drives, only what is missing, on the GPU: a few minutes per model and '
@@ -155,7 +147,6 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_classifier: 'This training is lost: training again starts a new run from the beginning.',
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
   train_decider: 'The applicability networks already trained stay; training again starts a new run.',
-  train_road_type: 'A network already trained stays; training again starts a new run.',
   train_brain: 'The seeds already trained stay in Models; training again starts a new run.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
   networks_prepare: 'Nothing is kept: preparing again starts over.',

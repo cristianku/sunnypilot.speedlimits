@@ -17,7 +17,7 @@ stays the same if a new scan moves the start of the drive:
   alone never counts as approved.
 
 The proposal (proposed) is the OpenStreetMap limit of the drive's frames, as nnslr road-types read it on the server
-(map_runs, "Find the road types" on the Overview), in runs rounded to 5 km/h, a run under MERGE_SECONDS joined to the one
+(map_runs, "Read the map" on Speed review), in runs rounded to 5 km/h, a run under MERGE_SECONDS joined to the one
 before (the first one of a drive to the one after). Where the map has no number (no way found, "none", a general limit
 like "FR:urban"), the limit of the signs the comma read stands in (sign_runs), and every stretch says which of the two it
 comes from. The map is wrong in places, so it is only ever a proposal: it is worked out when a drive is shown and never

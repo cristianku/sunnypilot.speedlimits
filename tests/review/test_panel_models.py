@@ -101,7 +101,7 @@ def by_role(index: dict) -> dict:
 # -- the index --------------------------------------------------------------------------------------------
 def test_without_runs_every_role_is_empty_and_nothing_is_in_use(models):
     index = models.index()
-    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'road_type', 'brain']
+    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain']
     assert all(role['versions'] == [] and role['active'] is None for role in index['roles'])
     assert (index['runs_dir_exists'], index['active_problem'], index['cutter_score_threshold']) == (False, None, 0.1)
 
@@ -214,8 +214,7 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     assert (entry['id'], entry['who'], entry['via']) == ('cutter:s1/signnet', 'admin', 'sign-in') and entry['at']
     path = root / 'models' / 'active.json'
     saved = json.loads(path.read_text())
-    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None,
-                     'road_type': None, 'brain': None}
+    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None, 'brain': None}
     # Atomic: the temporary file is renamed, nothing is left next to it.
     assert sorted(item.name for item in path.parent.iterdir()) == ['active.json']
 
@@ -696,16 +695,17 @@ def test_the_overview_has_the_car_at_a_glance(root):
     # Nothing published, nothing in use yet.
     root.mkdir(parents=True)
     panel = Panel(root)
-    assert panel.car_summary() == {'in_use': {'cutter': None, 'classifier': None, 'road_type': None, 'brain': None},
+    assert panel.car_summary() == {'in_use': {'cutter': None, 'classifier': None, 'brain': None},
                                    'on_car': None,
                                    'problem': None, 'build_pending': False}
-    write(root / 'models/active.json', {'cutter': {'id': 'cutter:s2/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'}})
-    write(root / 'models/on-car.json', {'cutter': {'id': 'cutter:s1/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'}})
+    # A scene network of before 7 Nov 2026, in use and on the car, is no longer one of them.
+    write(root / 'models/active.json', {'cutter': {'id': 'cutter:s2/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'},
+                                        'road_type': {'id': 'road_type:t1/road-type/gru'}})
+    write(root / 'models/on-car.json', {'cutter': {'id': 'cutter:s1/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'},
+                                        'road_type': {'id': 'road_type:t1/road-type/gru'}})
     car = panel.status()['car']
-    assert car['in_use'] == {'cutter': 'cutter:s2/signnet', 'classifier': 'classifier:k2/classifier', 'road_type': None,
-                             'brain': None}
-    assert car['on_car'] == {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:k2/classifier', 'road_type': None,
-                             'brain': None}
+    assert car['in_use'] == {'cutter': 'cutter:s2/signnet', 'classifier': 'classifier:k2/classifier', 'brain': None}
+    assert car['on_car'] == {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:k2/classifier', 'brain': None}
     write(root / 'models/on-car.json', '{"cutter": ')
     assert panel.car_summary()['problem'] == 'models/on-car.json cannot be read'
 

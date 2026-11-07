@@ -56,7 +56,7 @@ const pairText = computed((): string => {
   const cutter = cutterOf(version);
   return (cutter ? cutter.text.charAt(0).toUpperCase() + cutter.text.slice(1) : 'The cutter') + ' finds the signs, the classifier of '
     + isoWhen(version.trained_at) + ' reads them: the pair measured at the end of that classifier’s training. '
-    + 'No Applicability and no scene network: every speed sign read counts.';
+    + 'No Applicability and no brain: every speed sign read counts.';
 });
 
 const PARTITIONS = [{key: 'test' as WatchPartition, label: 'Test drives'}, {key: 'validation' as WatchPartition, label: 'Validation drives'}];

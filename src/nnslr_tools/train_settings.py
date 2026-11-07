@@ -1,6 +1,6 @@
-"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Scene, Brain): the epochs, the patience, the batch,
+"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Brain): the epochs, the patience, the batch,
 the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an environment
-variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh, run_road_type.sh,
+variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh,
 run_brain.sh)
 with the same default: the panel sets the ones changed here when it starts the next training of that kind
 (Panel.start, environment), the one running keeps its own. The job's chips say the values a training used (the head
@@ -89,22 +89,6 @@ TRAININGS = {
         {'key': 'epochs', 'env': 'NNSLR_EXPERIMENT_EPOCHS', 'label': 'Epochs',
          'help': 'Passes over the training signs, for each of the three versions.', 'default': 20, 'min': 1,
          'max': 200, 'step': 1, 'unit': 'epochs'},
-    ), 'fixed': ()},
-    'train_road_type': {'label': 'Scene', 'script': 'scripts/run_road_type.sh', 'settings': (
-        {'key': 'epochs', 'env': 'NNSLR_ROAD_TYPE_EPOCHS', 'label': 'Epochs',
-         'help': 'Passes over the drives, for each of the three networks; the best one on validation is kept.',
-         'default': 60, 'min': 1, 'max': 200, 'step': 1, 'unit': 'epochs'},
-        {'key': 'patience', 'env': 'NNSLR_ROAD_TYPE_PATIENCE', 'label': 'Patience',
-         'help': 'Stops after this many epochs without a better validation.', 'default': 15, 'min': 1, 'max': 200,
-         'step': 1, 'unit': 'epochs'},
-        {'key': 'batch', 'env': 'NNSLR_ROAD_TYPE_BATCH', 'label': 'Batch',
-         'help': 'Stretches of drive in each step of the training: more takes more of the GPU.', 'default': 12,
-         'min': 1, 'max': 128, 'step': 1, 'unit': 'stretches'},
-        _workers('The processes reading the frames.'),
-        {'key': 'sign_workers', 'env': 'NNSLR_SIGN_WORKERS', 'label': 'Processes reading the signs',
-         'help': 'The processes reading the signs and the car’s motion of the drives not read yet, each with its '
-                 'ffmpeg, on the CPU. Only the speed changes. Default: half the cores.',
-         'default': max(1, (os.cpu_count() or 8) // 2), 'min': 1, 'max': 64, 'step': 1, 'unit': 'workers'},
     ), 'fixed': ()},
     'train_brain': {'label': 'Brain', 'script': 'scripts/run_brain.sh', 'settings': (
         {'key': 'epochs', 'env': 'NNSLR_BRAIN_EPOCHS', 'label': 'Epochs',
@@ -247,8 +231,7 @@ def save(root: Path, body: dict, who: str) -> dict:
     for key, value in body['values'].items():
         setting = _setting(training, key)
         if setting is None:
-            words = 'scene network' if action == 'train_road_type' else training['label'].lower()
-            raise SettingsError(f'{key} is not a setting of the {words}.')
+            raise SettingsError(f'{key} is not a setting of the {training["label"].lower()}.')
         if value is None:
             if setting.get('same_as'):
                 following.add(key)

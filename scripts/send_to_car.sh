@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish to the car: the button Publish of the Publish tab runs it, for the SignNet in use. The SignNet of <run>, the
-# classifier in use and the road type in use replace the networks the comma downloads, and the testing branch is
+# classifier in use and the brain in use replace the networks the comma downloads, and the testing branch is
 # built again.
 #
 # Usage:
@@ -8,12 +8,12 @@
 #
 #   1/5 Export   the SignNet of <run> and the classifier in use (models/active.json; --classifier: another id of the
 #                Models tab) to ONNX on the CPU with the GPU venv, each checked against PyTorch with onnxruntime;
-#                the road type in use (with memory), when one is chosen, is the ONNX step its training exported.
+#                the brain in use, when one is chosen, is exported here too (its ONNX step, checked along a drive).
 #   2/5 Publish  them in the clone of cristianku/speed-limits-models: the ONNX, their contracts and speed_limits.json
 #                (format 2, version = the day, .2 .3 ... for another one the same day), one commit pushed to main.
 #                Nothing when every ONNX is the published one already (the export is the same byte for byte).
-#                Without a road type in use the published one is removed (the comma reads the signs alone).
-#                The brain in use, when one is chosen, is exported here too, and with it no road type goes.
+#                Without a brain in use the published one is removed (the comma reads the signs alone). The
+#                scene network of older releases (road-type.onnx) is removed too: nothing here makes it (7 Nov 2026).
 #   3/5 Record   models/on-car.json of the data root (what `nnslr on-car` writes): Models, "On the car".
 #   4/5 Move     the submodule openpilot/sunnypilot/speed_limits/models of the sunnypilot clone (branch speed-limits)
 #                to that commit, one commit of that path alone pushed to speed-limits; nothing when it is there.

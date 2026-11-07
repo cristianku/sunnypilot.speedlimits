@@ -138,7 +138,7 @@ def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, o
 @pytest.mark.parametrize('key,value', [('works', 'off'), ('driver', 'off'), ('pool', 'mean')])
 def test_its_choices_are_refused_on_another_training(root, checkout, key, value):
     with pytest.raises(PanelError) as refused:
-        Panel(root, repo=checkout).start('train_road_type', {key: value})
+        Panel(root, repo=checkout).start('train_decider', {key: value})
     assert refused.value.reason == 'bad_option'
 
 

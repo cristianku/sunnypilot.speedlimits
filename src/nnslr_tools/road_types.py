@@ -81,7 +81,7 @@ from nnslr_tools.sign_reads import is_read_frame
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
-# The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Find the road types, Data › Speed review).
+# The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Read the map, Data › Speed review).
 MAPS_RELATIVE = Path('raw') / 'osm'
 MAPS_STATUS_RELATIVE = Path('derived') / 'osm' / 'maps.json'
 # The classes of the road-type network in this order: a new one goes at the end, so a checkpoint trained before it
@@ -563,7 +563,7 @@ def _map_name(file: str) -> str:
 
 
 def maps_status(root: Path) -> dict:
-    """The maps of the server for the card of Find the road types: {'names': the extracts of raw/osm, oldest first, by their name in
+    """The maps of the server for the card of Read the map: {'names': the extracts of raw/osm, oldest first, by their name in
     derived/osm/maps.json (scripts/osm_maps.py; a file it has not seen yet by its own: "illinois-latest.osm.pbf" ->
     "Illinois"), 'needed': [{'name', 'bytes' (None: unknown), 'state' (to download, failed, busy, too big), 'reason',
     'drives': how many need it}] the extracts the drives need that raw/osm still lacks, 'outside': how many drives they
@@ -603,7 +603,7 @@ def drives_without(root: Path) -> int:
 
 
 def summary(root: Path) -> dict:
-    """The road types of every drive, for the card of Find the road types on Data › Speed review (GET
+    """The road types of every drive, for the card of Read the map on Data › Speed review (GET
     /api/panel/road-types): {'routes': [{'route', 'title',
     'when', 'minutes', 'frames', 'types': {town, rural, ..., garage, unknown: frames}, 'reviewed':
     frames a person set, 'usable', 'cant_tell', 'to_review' (review_counts), 'stretches'}] newest drive first, 'review':

@@ -298,17 +298,6 @@ def test_enough_labels_name_what_each_partition_lacks():
     assert 'test has 0 of 300 confirmed frames' in data.missing_labels(summary(full, full))
 
 
-def test_too_few_confirmed_frames_stop_a_training_before_it_writes_anything(proposed, tmp_path, capsys):
-    from nnslr_tools.cli import main
-    run_dir = tmp_path / 'run'
-    # The proposals alone would fill every partition: they are not counted, and nothing falls back on them.
-    assert main(['train-road-type', '--dry-run', '--run-dir', str(run_dir), '--data-root', str(proposed)]) != 0
-    message = capsys.readouterr().err
-    assert 'a proposal of the map is never a label' in message and 'no more can be added' in message
-    assert 'train has 0 of 2000 confirmed frames' in message and 'validation has 0 of 30 ramp frames' in message
-    assert not run_dir.exists()
-
-
 def test_a_dry_run_on_a_person_s_types_records_its_label_policy(root, tmp_path, monkeypatch):
     pytest.importorskip('torch')
     from nnslr_tools import road_type_data as data
@@ -322,7 +311,7 @@ def test_a_dry_run_on_a_person_s_types_records_its_label_policy(root, tmp_path, 
     assert result['config']['label_policy'] == data.LABEL_POLICY
     assert 'unsure_weight' not in result['config'] and 'ramp_weight' not in result['config']
     assert json.loads((run_dir / 'dataset.json').read_text())['label_policy'] == data.LABEL_POLICY
-    assert '"label_policy": "confirmed-only"' in (run_dir / 'result.json').read_text()  # what run_road_type.sh looks for
+    assert '"label_policy": "confirmed-only"' in (run_dir / 'result.json').read_text()
 
 
 def test_a_dry_run_takes_the_sequences_with_the_most_confirmed_frames(proposed):

@@ -2,7 +2,7 @@
 import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
-  | 'train_cutter' | 'train_decider' | 'train_road_type' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
+  | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
@@ -68,13 +68,10 @@ export interface ActionOptions {
   region?: string;
   share?: string;
   /** Where the classifier's training starts (train_classifier): "imagenet", or the id of a finished classifier of Models
-   * (classifier:<run>/classifier), whose weights it starts from. Where the cutter's, the applicability's and the scene
-   * network's start (train_cutter, train_decider, train_road_type): "fresh" (random weights for SignNet, ImageNet for the
-   * others), or the id of a finished version of their role, whose run they go on from (network-start.ts). */
+   * (classifier:<run>/classifier), whose weights it starts from. Where the cutter's and the applicability's start
+   * (train_cutter, train_decider): "fresh" (random weights for SignNet, ImageNet for the applicability), or the id of a
+   * finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
-  /** The classifier that reads the signs of the drives for the scene network (train_road_type): "car" (the car's), or the
-   * id of a finished classifier of Models (classifier:<run>/classifier). */
-  classifier?: string;
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, the driver's inputs (only to measure: the car
    * does not give them), the picture's features as a mean or as a grid. */
   works?: 'on' | 'off';
@@ -85,7 +82,7 @@ export interface ActionOptions {
   brains?: string;
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
-export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type' | 'train_brain';
+export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';
 export interface PipelineStep {
   action: PipelineAction;
   label: string;
@@ -156,11 +153,6 @@ export interface EpochPoint {
   val_sign_accuracy?: number;
   val_rejection?: number;
   val_balanced_accuracy?: number;
-  /** The road type: its macro F1 over the road types, its road score (which chooses its best epoch: macro F1, the minute
-   * after a merge, false switches) and the F1 of its junction head. */
-  val_macro_f1?: number;
-  val_road_score?: number;
-  val_junction_f1?: number;
   /** Experiment B (applicability): whose sign it is (macro F1), the other-road signs found, and the mean of the reading
    * accuracy and that macro F1, which chooses its best epoch. */
   val_ownership_macro_f1?: number;
@@ -181,13 +173,11 @@ export interface TrainingCurve {
 
 /** The networks with curves: the pipeline’s detector and reader, the classifier with “not a sign” and its pretraining
  * on the Mapillary signs alone (pretrain), SignNet (the cutter the comma runs) and its stage on the Mapillary windows
- * alone (signnet_pretrain), the road type's networks
- * (scripts/run_road_type.sh; road_type_gru_nosign in the runs before 29 Oct 2026) and experiment B's variants. */
-export type RoadNet = 'road_type_gru' | 'road_type_gru_nosign' | 'road_type_gru_nomotion' | 'road_type_frame';
+ * alone (signnet_pretrain), experiment B's variants and the brain's seeds. */
 export type DeciderNet = 'experiment_b_crop' | 'experiment_b_crop_geom' | 'experiment_b_full';
 /** The brain's three seeds (scripts/run_brain.sh). */
 export type BrainNet = 'brain_s0' | 'brain_s1' | 'brain_s2';
-export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | RoadNet | DeciderNet | BrainNet;
+export type CurveNet = 'detector' | 'reader' | 'classifier' | 'pretrain' | 'signnet' | 'signnet_pretrain' | DeciderNet | BrainNet;
 
 export interface StepProgress {
   done: number;
@@ -409,7 +399,7 @@ export interface PanelStatus {
   /** The dataset is current and a training can start. */
   all_ready: boolean;
   next_action: 'prepare' | 'review' | 'train' | 'fetch' | null;
-  /** Prepared drives without road types yet (Data › Speed review, Find the road types); absent before the panel is available. */
+  /** Prepared drives not read on the map yet (Data › Speed review, Read the map); absent before the panel is available. */
   road_types_missing?: number;
   reviewed_routes: number;
   min_routes: number;
@@ -458,8 +448,8 @@ export interface PanelStatus {
 /** The networks the car runs: in use here (models/active.json) and in the comma's software (models/on-car.json, null
  * before the first Publish), by role and id; why one of the files cannot be read; a build of the testing branch owed. */
 export interface CarSummary {
-  in_use: Record<'cutter' | 'classifier' | 'road_type' | 'brain', string | null>;
-  on_car: Record<'cutter' | 'classifier' | 'road_type' | 'brain', string | null> | null;
+  in_use: Record<'cutter' | 'classifier' | 'brain', string | null>;
+  on_car: Record<'cutter' | 'classifier' | 'brain', string | null> | null;
   problem: string | null;
   build_pending: boolean;
 }
@@ -1126,7 +1116,7 @@ export interface CutterSize {
 // GET /api/panel/models and POST /api/panel/models/active (nnslr_tools.model_roles.ModelIndex): the Models tab.
 
 /** The three networks of the sign pipeline (docs/NEURAL_NETWORK.md), the road type from the camera, and the brain. */
-export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'road_type' | 'brain';
+export type ModelRole = 'cutter' | 'classifier' | 'decider' | 'brain';
 
 /** Signs of one width found by the cutter. */
 export interface WidthRecall {
@@ -1286,9 +1276,8 @@ export interface ClassifierStart {
   another_split: boolean;
 }
 
-/** The earlier run a SignNet, an applicability variant or a scene network went on from (--init-from): its run, that
- * run's epoch, and whether it learnt on another split (a scene network: was tested on other drives), so its test may
- * hold frames the start saw. */
+/** The earlier run a SignNet or an applicability variant went on from (--init-from): its run, that run's epoch, and
+ * whether it learnt on another split, so its test may hold frames the start saw. */
 export interface NetworkStart {
   run: string | null;
   epoch: number | null;
@@ -1307,116 +1296,6 @@ export interface DeciderModel extends ModelBase {
   /** The split it learnt on, and the run whose same variant it went on from (null: ImageNet or random weights). */
   split_sha256?: string | null;
   start?: NetworkStart | null;
-}
-
-/** A road-type network on one partition (nnslr_tools.model_roles.road_type_digest), over its frames of weight 1. */
-export interface RoadTypeNumbers {
-  macro_f1: number | null;
-  accuracy: number | null;
-  /** Its seconds (one frame a second). */
-  frames: number | null;
-  classes: Record<string, {f1: number | null; support: number}>;
-  /** The first 60 s on the motorway after each merge (a ramp, then motorway or expressway): the seconds said right. */
-  after_merge: {merges: number; seconds: number; accuracy: number | null; accuracy_debounced: number | null};
-  /** The changes of road type by kind: how many, how many it found within a minute, the median delay in seconds. */
-  transitions: Record<string, {count: number; found: number; median_delay: number | null}>;
-  false_switches_per_hour: number | null;
-  false_switches_per_hour_debounced: number | null;
-}
-
-/** The comma's rule on one partition (nnslr_tools.road_type_metrics.release_summary): for every merge (a ramp, then the
- * motorway or expressway), a number read on the ramp is held as the ramp's limit (the road type said ramp, or a motorway
- * sign was confirmed within 45 s) and ends after 8 s of motorway in a row: on the ramp (too early), in time (within
- * 60 s of the merge), late, or never held. */
-export interface RoadTypeRelease {
-  merges: number;
-  held: number;
-  on_ramp: number;
-  in_time: number;
-  late: number;
-  not_held: number;
-  /** Seconds after the merge, of the releases in time. */
-  median_release: number | null;
-}
-
-/** The junction head on one partition at the car's operating point (nnslr_tools.model_roles._junction_numbers). */
-export interface RoadTypeJunctionNumbers {
-  /** The intersections passed, the hours and km of the partition. */
-  passed: number | null;
-  hours: number | null;
-  km: number | null;
-  /** The "passed" events within 2 s of the label (one to one): F1, recall and precision; recall within 4 s. */
-  f1_2s: number | null;
-  recall_2s: number | null;
-  recall_4s: number | null;
-  precision_2s: number | null;
-  /** The false "passed" (none within 4 s: a limit lifted where no intersection was), per hour and per 10 km, and per
-   * hour in town and outside. */
-  false: number | null;
-  false_per_hour: number | null;
-  false_per_10km: number | null;
-  town_per_hour: number | null;
-  outside_per_hour: number | null;
-}
-export interface RoadTypeJunctions {
-  /** The car's rule, chosen on validation: "passed" (the passed output over the threshold) or "exit" (the inside
-   * output falls under it). */
-  decode: 'passed' | 'exit';
-  threshold: number;
-  validation: RoadTypeJunctionNumbers | null;
-  test: RoadTypeJunctionNumbers | null;
-  /** The intersections of the test with a number sign confirmed within 300 m before them, and those caught. */
-  needed: {junctions: number; needed: number; caught_2s: number; caught_4s: number} | null;
-  /** shared: on the road type's memory; separate: a memory of its own (since the fourth version); null before. */
-  branch?: 'shared' | 'separate' | null;
-  /** The best epoch of the junction head's own stage (since the fourth version). */
-  stage_epoch?: number | null;
-  /** The car's turn alone as a plain rule on the test, without the network (since the fourth version). */
-  turn_rule?: RoadTypeTurnRule | null;
-}
-/** A turn of at least degrees on a radius of at most radius_m taken as "passed" (nnslr_tools.model_roles._turn_rule):
- * its numbers on the test, the intersections the car turned in, and those the network caught, turned and straight. */
-export interface RoadTypeTurnRule {
-  degrees: number | null;
-  radius_m: number | null;
-  numbers: RoadTypeJunctionNumbers | null;
-  passed: number | null;
-  turned_60: number | null;
-  turned_30: number | null;
-  caught: Partial<Record<'turned' | 'straight', {passed: number; caught_2s: number; caught_4s: number}>> | null;
-}
-
-export interface RoadTypeModel extends ModelBase {
-  role: 'road_type';
-  /** The run whose same network it went on from (null: ImageNet). */
-  start?: NetworkStart | null;
-  /** gru: with memory; none: the same encoder one frame at a time, to compare. */
-  memory: 'gru' | 'none' | null;
-  /** It takes the seconds since a motorway sign (since the second version; trained with the sign where each entry ramp of
-   * the map starts, nnslr_tools.road_type_signs). */
-  signs: boolean;
-  /** It takes the car's own motion: the turn of each second, the steering wheel, the blinkers (since the fourth
-   * version; never the map). */
-  motion?: boolean;
-  /** Its speed input: carState.vEgo (since the fourth version) or the GPS speed. */
-  speed_source?: 'gps' | 'v_ego';
-  /** When the ramp's limit ends by the comma's rule; null for a version measured before it. */
-  release: {validation: RoadTypeRelease | null; test: RoadTypeRelease | null} | null;
-  /** The junction head (since the third version): where the car leaves an intersection, at its operating point; null
-   * without one. */
-  junctions: RoadTypeJunctions | null;
-  classes: string[] | null;
-  parameters: number | null;
-  flops_per_step: number | null;
-  /** One step at batch 1 on this server (a hint: the car's GPU is another). */
-  step_ms: number | null;
-  step_device: string | null;
-  /** Its ONNX step and contract are exported (the one with memory). */
-  onnx: boolean;
-  validation: RoadTypeNumbers | null;
-  test: RoadTypeNumbers | null;
-  /** The network without memory with a 5-second majority vote. */
-  test_smoothed: RoadTypeNumbers | null;
 }
 
 /** The speed a brain says against the labels of Speed review on one partition (nnslr_tools.model_roles.brain_digest). */
@@ -1442,7 +1321,7 @@ export interface BrainModel extends ModelBase {
   test: BrainNumbers | null;
 }
 
-export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | RoadTypeModel | BrainModel;
+export type ModelVersion = CutterModel | ClassifierModel | DeciderModel | BrainModel;
 
 /** The model in use for a role (models/active.json of the data root). */
 export interface ActiveModel {
@@ -1539,7 +1418,7 @@ export interface RoadDrive {
   /** In the order of the drive. */
   stretches: RoadStretch[];
 }
-/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Find the road types on Data › Speed review. */
+/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Read the map on Data › Speed review. */
 export interface RoadTypesPayload {
   /** Newest drive first. */
   routes: RoadDrive[];
@@ -1594,7 +1473,7 @@ export interface TrainSetting {
 }
 /** What a training keeps as it is: what the car needs (the cutter's band, grid, channels, fuse). */
 export interface TrainFixed {label: string; value: string; help: string}
-export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_road_type' | 'train_brain';
+export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';
 /** GET /api/panel/brain-labels: what the labels of Speed review give the brain's training today, per partition, and the drives
  * the training reads again first; problem instead when they cannot be read. */
 export interface BrainLabels {

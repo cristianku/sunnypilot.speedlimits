@@ -12,7 +12,7 @@ export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
 /** The group of each action (nnslr_tools.panel.ACTIONS): a terminal activity of the same group is that work. */
 export const ACTION_GROUP: Record<ActionName, string> = {
   fetch: 'fetch', prepare: 'prepare', prepare_again: 'prepare', measure_proposer: 'train', setup_vlm: 'train', dataset: 'train', train: 'train', train_continue: 'train', train_resume: 'train',
-  train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_road_type: 'train', train_brain: 'train', regression: 'train', update: 'update', ai_review: 'ai',
+  train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_brain: 'train', regression: 'train', update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
@@ -22,7 +22,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
 /** The icon of each action, on its button. */
 export const ACTION_ICON: Record<ActionName, IconName> = {
   fetch: 'download', prepare: 'prepare', prepare_again: 'resume', measure_proposer: 'train', setup_vlm: 'download', dataset: 'import', train: 'train', train_continue: 'train',
-  train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_road_type: 'train', train_brain: 'train', regression: 'train',
+  train_resume: 'resume', train_classifier: 'train', train_cutter: 'train', train_decider: 'train', train_brain: 'train', regression: 'train',
   update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
@@ -36,7 +36,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
 export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
   dataset: '/dataset', road_types: '/speed-review', review_box: '/reviewers',
-  train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_road_type: '/train', train_brain: '/train',
+  train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
   train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
   networks_prepare: '/publish', networks_publish: '/publish',
@@ -50,10 +50,10 @@ export const TRAIN_ACTIONS: ActionName[] = actionsOf('/train');
 export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's, the
- * road types (in the group of the preparation) are Speed review's, the Mapillary positions and windows Train's (its classifier
+ * map reading (in the group of the preparation) is Speed review's, the Mapillary positions and windows Train's (its classifier
  * and its cutter). */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
-  if (activity.label === 'road types') return '/speed-review';
+  if (activity.label === 'map reading') return '/speed-review';
   if (activity.group === 'mapillary') return '/train';
   if (activity.label === 'networks on the comma') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
@@ -76,7 +76,7 @@ export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[], activit
 }
 /** The trainings whose job shows its curves on the Train tab. */
 export const CHARTED_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_classifier', 'train_cutter', 'train_decider',
-  'train_road_type', 'train_brain'];
+  'train_brain'];
 /** The trainings of the whole pipeline (helpers/3_train.sh): a stopped one can be resumed on its run. */
 export const PIPELINE_ACTIONS: ActionName[] = ['train', 'train_continue', 'train_resume'];
 
@@ -148,7 +148,7 @@ export function terminalActivities(status: PanelStatus | null, groups?: string[]
 
 /** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings). */
 const GPU_ACTIONS: ActionName[] = ['prepare', 'prepare_again', 'measure_proposer', 'setup_vlm', 'train', 'train_continue',
-  'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_road_type', 'train_brain', 'regression'];
+  'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain', 'regression'];
 /** The same for work started from a terminal, by group ("other": the driving model of openpilot.distill). */
 const GPU_GROUPS = ['prepare', 'train', 'other'];
 

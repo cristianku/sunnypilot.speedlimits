@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Publish › Publish: the networks in use put into the comma's software in one go (scripts/send_to_car.sh): the SignNet
-// in use, the classifier in use and the scene network in use are prepared as ONNX and checked, published in
+// in use, the classifier in use and the brain in use are prepared as ONNX and checked, published in
 // speed-limits-models, the sunnypilot speed-limits branch moves to them and psa-torque-sunny-testing is built again;
 // then the comma's Check for updates finds them. Each network in use is shown next to the one the comma's software has
 // (models/on-car.json), and the job's steps while it runs.
@@ -17,7 +17,7 @@ const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: un
   stop: [job: Job]; details: [job: Job]}>();
 
 /** The networks the comma runs, in the order they work. */
-const CAR_ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'road_type', 'brain'];
+const CAR_ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'brain'];
 const versionsOf = (role: ModelRole): ModelVersion[] => props.models?.roles.find((item) => item.role === role)?.versions ?? [];
 const inUseOf = (role: ModelRole): ModelVersion | null => versionsOf(role).find((version) => version.in_use) ?? null;
 const whenOf = (version: ModelVersion): string => version.trained_at ? isoWhen(version.trained_at) : version.run;
@@ -26,12 +26,10 @@ const whenOf = (version: ModelVersion): string => version.trained_at ? isoWhen(v
  * two versions often have the same name). */
 const rows = computed(() => CAR_ROLES.map((role) => {
   const label = props.models?.roles.find((item) => item.role === role)?.label ?? role;
-  // With a brain in use the scene network stays chosen here but does not go.
-  const used = role === 'road_type' && inUseOf('brain') !== null ? null : inUseOf(role);
+  const used = inUseOf(role);
   const car = versionsOf(role).find((version) => version.on_car) ?? null;
   const same = used !== null && car !== null && used.id === car.id;
   const usedText = used ? used.label + ', ' + whenOf(used)
-    : role === 'road_type' ? (inUseOf('brain') ? 'Does not go: the brain takes its place' : 'None in use: the comma reads the signs alone')
     : role === 'brain' ? 'None in use: the comma runs the rules of the signs' : 'None in use';
   const older = car !== null && used?.trained_at && car.trained_at && Date.parse(car.trained_at) < Date.parse(used.trained_at);
   const carText = same ? 'In the branch: this one' : car ? 'In the branch: ' + (older ? 'an older one, ' : 'another one, ') + whenOf(car)
@@ -85,12 +83,12 @@ const blocked = computed((): string => {
   return state.value.allowed ? '' : state.value.reason.charAt(0).toUpperCase() + state.value.reason.slice(1) + '.';
 });
 
-/** Asks, naming the SignNet, the classifier and the scene network in use, then starts the job. */
+/** Asks, naming the SignNet, the classifier and the brain in use, then starts the job. */
 async function publish(): Promise<void> {
   const version = signnet.value;
   const current = state.value;
   if (version === null || current === null || blocked.value) return;
-  if (!await askConfirm(owed.value ? publishQuestion(version, inUseOf('classifier'), inUseOf('road_type'), inUseOf('brain'))
+  if (!await askConfirm(owed.value ? publishQuestion(version, inUseOf('classifier'), inUseOf('brain'))
     : rebuildQuestion())) return;
   emit('run', 'send_to_car', current, undefined, owed.value ? {signnet: version.run} : {signnet: version.run, rebuild: 'on'});
 }

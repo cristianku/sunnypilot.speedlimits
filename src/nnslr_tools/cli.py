@@ -1653,9 +1653,10 @@ def build_parser() -> argparse.ArgumentParser:
                             "now (after scripts/make_country_borders.py --gisco); the logs are not read")
     p_gps.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_gps.set_defaults(func=_cmd_gps)
-    p_road = sub.add_parser("road-types", help="the type of road of every frame (town, rural, expressway, motorway, "
-                                               "merge lane, parking, garage...) from its GPS position and the OpenStreetMap roads, "
-                                               "derived/road_types/<route>.jsonl: the labels of the road-type head")
+    p_road = sub.add_parser("road-types", help="the map road of every frame, its limit and its type (town, rural, "
+                                               "expressway, motorway, merge lane, parking, garage...) from its GPS "
+                                               "position and the OpenStreetMap roads, derived/road_types/<route>.jsonl: "
+                                               "the map's limit Speed review proposes (Read the map)")
     p_road.add_argument("--route", action="append", help="route id; repeat for more")
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1706,9 +1707,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_export.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_export.set_defaults(func=_cmd_export_brain)
     p_junctions = sub.add_parser("junctions", help="the intersections the car drives through, from its GPS track and "
-                                                   "the OpenStreetMap roads: derived/junctions/<route>.json, the "
-                                                   "labels of the junction head of the road-type network (in the "
-                                                   "intersection, and the first frame after it)")
+                                                   "the OpenStreetMap roads: derived/junctions/<route>.json (in the "
+                                                   "intersection, and the first frame after it); no training reads "
+                                                   "them today")
     p_junctions.add_argument("--route", action="append", help="route id; repeat for more")
     p_junctions.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_junctions.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
@@ -1795,57 +1796,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_box_fit.add_argument("--dry-run", action="store_true",
                            help="only count the boxes, cases and route groups: one JSON line, nothing written")
     p_box_fit.set_defaults(func=_cmd_train_box_fit)
-    p_road_net = sub.add_parser("train-road-type", help="train the road-type network with memory (town, rural, "
-                                                        "expressway, motorway, ramp, car parks from the camera, a GRU "
-                                                        "over the seconds) on the road types of the drives, with the "
-                                                        "junction head (inside an intersection, just passed it) when "
-                                                        "nnslr junctions has run; writes road-type-best.pt and "
-                                                        "result.json (GPU, .venv-gpu)")
-    p_road_net.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<name>/road-type/gru")
-    p_road_net.add_argument("--memory", default="gru", choices=("gru", "none"),
-                            help="gru: with memory; none: the same encoder per frame, to compare")
-    p_road_net.add_argument("--epochs", type=int, default=60)
-    p_road_net.add_argument("--patience", type=int, default=15)
-    p_road_net.add_argument("--batch-size", "--batch", dest="batch", type=int, default=12, help="sequences per step")
-    p_road_net.add_argument("--num-workers", "--workers", dest="workers", type=int, default=8,
-                            help="processes resizing the frames for the cache")
-    p_road_net.add_argument("--seed", type=int, default=0)
-    p_road_net.add_argument("--no-sign", action="store_true",
-                            help="without the sign input (the seconds since a motorway sign), to compare")
-    p_road_net.add_argument("--sign-source", default="map", choices=("map", "car"),
-                            help="where the motorway signs of the training come from: map (the start of every entry "
-                                 "ramp, where 4.01 stands; default) or car (those the car's code confirmed, nnslr "
-                                 "road-type-signs)")
-    p_road_net.add_argument("--no-junctions", action="store_true",
-                            help="without the junction head (the second version's network), to compare")
-    p_road_net.add_argument("--no-motion", action="store_true",
-                            help="without the car's own motion (yaw, steering, blinkers; the speed input stays vEgo), to "
-                                 "compare (default: with it when nnslr car-motion has read every drive)")
-    p_road_net.add_argument("--junction-epochs", type=int, default=30,
-                            help="the junction head's own stage after the road type's epoch is chosen (0: keep the "
-                                 "shared head of the joint training)")
-    p_road_net.add_argument("--init-from", default=None,
-                            help="the road-type-best.pt of the same network (same memory) of an earlier run to go on "
-                                 "from, instead of ImageNet: every layer of the same shape (a start without the board "
-                                 "input gets its columns as zeros); one trained before the labels were a person's alone "
-                                 "brings what it learned from the map's proposals, as the log says")
-    p_road_boards = p_road_net.add_mutually_exclusive_group()
-    p_road_boards.add_argument("--boards", action="store_true", default=None,
-                               help="with the board input: the seconds since the car's code confirmed a green board "
-                                    "towards a motorway (nnslr road-type-signs; refused while the classifier reads too "
-                                    "few). Default: with it when every drive was read with the boards and they were "
-                                    "confirmed on 3 drives at least")
-    p_road_boards.add_argument("--no-boards", dest="boards", action="store_false",
-                               help="without the board input")
-    p_road_net.add_argument("--dry-run", action="store_true",
-                            help="on the CPU, a few short sequences, one epoch of two steps: checks the pipeline")
-    p_road_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_road_net.set_defaults(func=_cmd_train_road_type)
-    p_road_signs = sub.add_parser("road-type-signs", help="read the motorway signs of the drives with road types as the "
-                                                          "comma does (its vision.py, SignNet and classifier from the "
-                                                          "sunnypilot clone, 4 frames a second of fcamera.hevc): "
-                                                          "derived/road_type_signs/<route>.json, the sign input of the "
-                                                          "road-type network (the GPU when there is one)")
+    p_road_signs = sub.add_parser("road-type-signs", help="read the signs of the drives as the comma does (its "
+                                                          "vision.py, SignNet and classifier from the sunnypilot clone, "
+                                                          "4 frames a second of fcamera.hevc): "
+                                                          "derived/road_type_signs/<route>.json, the signs the brain is "
+                                                          "given (the GPU when there is one)")
     p_road_signs.add_argument("--sunnypilot", help="the sunnypilot clone (default: NNSLR_SUNNYPILOT_CLONE or "
                                                    "/root/sunnypilot); read only")
     p_road_signs.add_argument("--num-workers", "--workers", dest="workers", type=int, default=0,
@@ -1868,7 +1823,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
                                                  "positions or road types, from their rlogs (deviceMotion/livePose yaw rate, carState "
                                                  "steering angle, blinkers and vEgo): derived/car_motion/<route>.json, "
-                                                 "the motion input of the road-type network (CPU; never the map)")
+                                                 "what nnslr road-types reads to tell a garage (CPU; never the map)")
     p_motion.add_argument("--route", action="append", help="a drive (repeatable)")
     p_motion.add_argument("--all", action="store_true", help="every drive with GPS positions or road types")
     p_motion.add_argument("--again", action="store_true", help="read the logs again even when cached")
@@ -1876,29 +1831,6 @@ def build_parser() -> argparse.ArgumentParser:
                           help="log readers at a time (default: a quarter of the cores)")
     p_motion.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_motion.set_defaults(func=_cmd_car_motion)
-    p_road_rel = sub.add_parser("release-road-type", help="the comma's rule with a road-type checkpoint: for every "
-                                                          "merge of validation and test, when the ramp's limit ends "
-                                                          "(release.json beside the checkpoint, or --output)")
-    p_road_rel.add_argument("--checkpoint", required=True, help="road-type-best.pt (any version)")
-    p_road_rel.add_argument("--output", help="default: release.json beside the checkpoint")
-    p_road_rel.add_argument("--sign-source", default="map", choices=("map", "car"),
-                            help="the motorway signs of the rule and of the sign input (the car's are measured too "
-                                 "when read)")
-    p_road_rel.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_road_rel.set_defaults(func=_cmd_release_road_type)
-    p_road_cmp = sub.add_parser("compare-road-type", help="the road-type network with and without memory on test: "
-                                                          "<run>/road-type/comparison.txt")
-    p_road_cmp.add_argument("--run-root", required=True, help="the run folder, e.g. data/runs/<name>")
-    p_road_cmp.set_defaults(func=_cmd_compare_road_type)
-    p_road_onnx = sub.add_parser("export-road-type", help="the road-type network as one ONNX step (image, speed, "
-                                                          "[sign,] [motion,] hidden[, junction_hidden] -> "
-                                                          "probabilities, hidden_out[, junction][, "
-                                                          "junction_hidden_out]) and its contract")
-    p_road_onnx.add_argument("--checkpoint", required=True, help="road-type-best.pt")
-    p_road_onnx.add_argument("--output", required=True, help="the .onnx file; the contract is <output>.contract.json")
-    p_road_onnx.add_argument("--no-verify", action="store_true", help="skip the onnxruntime parity check")
-    p_road_onnx.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data (for the rollout check)")
-    p_road_onnx.set_defaults(func=_cmd_export_road_type)
     p_mapillary = sub.add_parser("mapillary-crops", help="cut the signs of the Mapillary Traffic Sign Dataset that are "
                                                          "ours into <data root>/external/mapillary/crops and "
                                                          "crops.jsonl: extra train crops of the classifier "
@@ -2960,37 +2892,6 @@ def _cmd_train_box_fit(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_train_road_type(args: argparse.Namespace) -> int:
-    from nnslr_tools.preannotate import resolve_data_root
-    from nnslr_tools.road_type_net import train_road_type
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    if args.init_from and not Path(args.init_from).is_file():
-        raise ValueError(f"--init-from is not a file: {args.init_from}")
-    result = train_road_type(root, Path(args.run_dir), memory=args.memory, epochs=args.epochs, patience=args.patience,
-                             batch=args.batch, dry_run=args.dry_run, workers=args.workers, seed=args.seed,
-                             signs=not args.no_sign, sign_source=args.sign_source,
-                             junctions=False if args.no_junctions else None,
-                             motion=False if args.no_motion else None, junction_epochs=args.junction_epochs,
-                             init_from=Path(args.init_from) if args.init_from else None, boards=args.boards)
-    test = result["test"]
-    operating = result.get("junction_operating") or {}
-    junction_test = (test.get("junctions", {}).get("decodes", {}).get(operating.get("decode"), {})
-                     .get(f"{operating['threshold']:g}") if operating else None) or {}
-    print(json.dumps({"run_dir": args.run_dir, "memory": args.memory, "signs": not args.no_sign,
-                      "sign_source": args.sign_source, "junctions": result.get("junctions", False),
-                      "motion": result.get("motion", False), "boards": result.get("boards", False),
-                      "speed_source": result.get("speed_source"),
-                      "junction_branch": result.get("junction_branch"),
-                      "test_junction_f1": junction_test.get("f1_2s"),
-                      "test_false_passed_per_hour": junction_test.get("false_per_hour"),
-                      "best_epoch": result["best_epoch"],
-                      "parameters": result["parameters"], "flops_per_step": result["flops_per_step"],
-                      "test_macro_f1": test["weight_1"]["macro_f1"],
-                      "test_after_merge_accuracy": test["after_merge"]["accuracy"],
-                      "test_false_switches_per_hour": test["false_switches_per_hour"]}, sort_keys=True), flush=True)
-    return 0
-
-
 def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.brain_targets import read_labels
@@ -3043,34 +2944,6 @@ def _cmd_car_motion(args: argparse.Namespace) -> int:
         return 1
     for route in routes:
         print(coverage_text(records[route]), flush=True)
-    return 0
-
-
-def _cmd_release_road_type(args: argparse.Namespace) -> int:
-    from nnslr_tools.preannotate import resolve_data_root
-    from nnslr_tools.road_type_net import release_of_checkpoint, release_text
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    checkpoint = Path(args.checkpoint)
-    output = Path(args.output) if args.output else checkpoint.with_name("release.json")
-    result = release_of_checkpoint(root, checkpoint, output, sign_source=args.sign_source)
-    for key, title in (("release", f"{args.sign_source} signs"), ("release_car", "the car's signs")):
-        for partition in ("validation", "test") if result.get(key) else ():
-            print(f"{partition} ({title}): {release_text(result[key][partition])}", flush=True)
-    return 0
-
-
-def _cmd_compare_road_type(args: argparse.Namespace) -> int:
-    from nnslr_tools.road_type_net import compare_road_type
-    print(compare_road_type(Path(args.run_root)), end="", flush=True)
-    return 0
-
-
-def _cmd_export_road_type(args: argparse.Namespace) -> int:
-    from nnslr_tools.preannotate import resolve_data_root
-    from nnslr_tools.road_type_net import export_road_type_onnx
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    result = export_road_type_onnx(Path(args.checkpoint), Path(args.output), verify=not args.no_verify, data_root=root)
-    print(json.dumps(result, sort_keys=True), flush=True)
     return 0
 
 

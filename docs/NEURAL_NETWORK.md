@@ -193,6 +193,8 @@ It added two points, both taken: "Unclear" is taught as abstain rather than drop
 
 ## The road type with memory (29 October 2026)
 
+**Gone from the portal on 7 Nov 2026.** The brain decides the speed, and the map's road types are only the proposal of Speed review: Train › Scene, Models › Scene, `nnslr train-road-type`, `release-road-type`, `compare-road-type`, `export-road-type` and `scripts/run_road_type.sh` were removed, and a publication drops `road-type.onnx` from the models repository. The runs stay in `data/runs/`; the brain still uses the frame cache and the GRU step of `road_type_net.py`. What follows is the record of that network.
+
 **Why.** Mobileye, and today's sunnypilot, keep a sign's limit until another sign ends it. On a Swiss motorway on-ramp a 60 sign is never ended by a sign: the motorway's 120 starts where the ramp merges. The same holds for the end of a town (80 or 100 after the town's 50), for an expressway (100) and for a car park. The car needs the kind of road it is on, and the moment it changes, from the camera. One frame is often not enough (the first metres of a motorway look like a rural road), so the network (**Scene** on the site) has a memory of the seconds before.
 
 **The network** (`src/nnslr_tools/road_type_net.py`, `nnslr train-road-type`):
