@@ -150,6 +150,26 @@ def test_a_removed_block_gives_the_drivers_speed_back(store):
     assert (refused.value.status, refused.value.reason) == (400, 'bad_block') and store.revision(ROUTE) == 2
 
 
+def test_a_block_dragged_to_new_ends_moves_in_one_write(store):
+    store.set_block(ROUTE, at(0), at(100), 80, 'map', 0, 'a')
+    store.set_block(ROUTE, at(100), at(150), 50, '', 1, 'a')
+    # Shorter: nothing of it stays where it was.
+    assert store.set_block(ROUTE, at(10), at(90), 80, 'map', 2, 'b', moved_from=at(0)) == 3
+    assert blocks(store) == [(10, 90, 80), (100, 150, 50)]
+    # Longer, onto the next one: that one keeps what lies outside it.
+    store.set_block(ROUTE, at(10), at(120), 80, 'map', 3, 'b', moved_from=at(10))
+    assert blocks(store) == [(10, 120, 80), (120, 150, 50)]
+    row = store.history(ROUTE)[-1]
+    assert (row['action'], row['known_ns'], row['start_ns'], row['end_ns']) == ('block_moved', at(10), at(10), at(120))
+    # The edge two blocks share dragged back (a roll, as the page sends it): the one after grows, the one before is cut.
+    store.set_block(ROUTE, at(60), at(150), 50, '', 4, 'b', moved_from=at(120))
+    assert blocks(store) == [(10, 60, 80), (60, 150, 50)]
+    with pytest.raises(SpeedReviewError) as refused:
+        store.set_block(ROUTE, at(0), at(5), 80, '', 5, 'b', moved_from=at(3))
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_block') and store.revision(ROUTE) == 5
+    assert blocks(store) == [(10, 60, 80), (60, 150, 50)]
+
+
 def test_a_stale_revision_changes_nothing(store):
     store.set_block(ROUTE, at(0), at(100), 80, '', 0, 'a')
     with pytest.raises(SpeedReviewError) as refused:
@@ -164,10 +184,11 @@ def test_the_history_only_grows_and_rebuilds_the_blocks(store, tmp_path):
     writes = [(0, 100, 80), (40, 60, None), (50, 90, 120)]
     for revision, (start, end, kph) in enumerate(writes):
         store.set_block(ROUTE, at(start), at(end), kph, 'note' if kph is None else '', revision, 'a')
-    store.remove_block(ROUTE, at(0), 3, 'a')
+    store.set_block(ROUTE, at(60), at(95), 120, '', 3, 'a', moved_from=at(50))
+    store.remove_block(ROUTE, at(0), 4, 'a')
     history = store.history(ROUTE)
-    assert [row['revision'] for row in history] == [1, 2, 3, 4]
-    assert [row['action'] for row in history] == ['block_saved', 'block_saved', 'block_saved', 'block_removed']
+    assert [row['revision'] for row in history] == [1, 2, 3, 4, 5]
+    assert [row['action'] for row in history] == ['block_saved', 'block_saved', 'block_saved', 'block_moved', 'block_removed']
     assert history[0]['reviewer'] == 'a' and history[0]['at'] and history[1]['note'] == 'note'
     # Played again on an empty database, the history gives the same blocks.
     replay = SpeedReviewStore(tmp_path / 'replay')
@@ -175,7 +196,8 @@ def test_the_history_only_grows_and_rebuilds_the_blocks(store, tmp_path):
         if row['action'] == 'block_removed':
             replay.remove_block(ROUTE, row['start_ns'], row['revision'] - 1, row['reviewer'])
         else:
-            replay.set_block(ROUTE, row['start_ns'], row['end_ns'], row['kph'], row['note'], row['revision'] - 1, row['reviewer'])
+            replay.set_block(ROUTE, row['start_ns'], row['end_ns'], row['kph'], row['note'], row['revision'] - 1, row['reviewer'],
+                             row['known_ns'] if row['action'] == 'block_moved' else None)
     assert replay.blocks(ROUTE) == store.blocks(ROUTE)
     connection = sqlite3.connect(store.path)
     for sql in ('UPDATE speed_history SET kph = 1', 'DELETE FROM speed_history'):
@@ -554,9 +576,15 @@ def test_only_a_person_signed_in_writes_a_block(tmp_path, drives):
         assert (status, answer['error']) == (409, 'stale_revision')
         status, answer = post(session, {**body, 'kph': 201, 'base_revision': 1})
         assert (status, answer['error']) == (400, 'bad_value')
+        # Its ends dragged: the block that started at 0 s goes from 2 s to 8 s, and nothing stays where it was.
+        status, answer = post(session, {**body, 'start_ns': at(2), 'end_ns': at(8), 'from_start_ns': at(0), 'base_revision': 1})
+        assert status == 200 and [(row['start_ns'], row['end_ns']) for row in answer['blocks']] == [(at(2), at(8))]
+        for moved, reason in ((str(at(2)), 'bad_value'), (at(5), 'bad_block')):
+            status, answer = post(session, {**body, 'from_start_ns': moved, 'base_revision': 2})
+            assert (status, answer['error']) == (400, reason)
         # Reading is open to the token too.
         status, _response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=token)
-        assert status == 200 and json_of(data)['revision'] == 1
+        assert status == 200 and json_of(data)['revision'] == 2
         assert server.request('GET', path, headers=token)[0] == 405
         assert server.request('GET', '/api/speed-review/nothing', headers=token)[0] == 404
     finally:

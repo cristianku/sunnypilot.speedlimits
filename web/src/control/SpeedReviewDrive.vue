@@ -13,7 +13,9 @@
 // next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
 // is the right one. Where openpilot or the car's cruise held the speed (held) it is not his foot: the lane greys it and
 // ANSWER is a dash, as the training leaves it out, unless a block of his says a speed there. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
-// remove as any other. Every command has its key, listed under the card on a screen with a keyboard.
+// remove as any other. The kph of a block is stepped or typed; its ends are dragged on the lane, pulled as by a magnet onto
+// where the map's limit changes, the ends of the other blocks and the time shown, and the block is moved in one write.
+// Every command has its key, listed under the card on a screen with a keyboard.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -21,8 +23,8 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
-import {type Block, blockAt, canEndWorks, clampKph, heldAt, MIN_BLOCK_NS, ROADWORKS, type RoadKind, type SpeedDrive, speedAt,
-  speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
+import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROADWORKS, type RoadKind, type SpeedDrive,
+  speedAt, speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
 const RATES = [1, 2, 4] as const;
@@ -182,6 +184,40 @@ function step(delta: number): void {
     if (kph !== block.value.kph) setBlock(block.value, kph);
   }
 }
+// A kph typed in its field: kept as typed while the field is used (the card is drawn again at every frame), then given to
+// the block it was typed for, found by its start: the new block ('new'), or a saved one, whatever the time shown is by
+// then. Focusing the field stops the video. Only a whole number of the scale is taken; anything else is said and dropped.
+const draft = shallowRef<{key: number | 'new'; text: string; bad: boolean} | null>(null);
+const draftOf = (key: number | 'new'): string | null => draft.value?.key === key ? draft.value.text : null;
+function typing(key: number | 'new', event: Event): void {
+  const input = event.target as HTMLInputElement;
+  draft.value = {key, text: input.value, bad: input.validity.badInput};
+}
+async function typed(): Promise<void> {
+  const typed = draft.value;
+  if (!typed) return;
+  const key = typed.key;
+  const kph = Number(typed.text);
+  const good = !typed.bad && typed.text.trim() !== '' && Number.isInteger(kph) && kph >= 1 && kph <= maxKph.value;
+  if (!good) {
+    draft.value = null;
+    if (typed.bad || typed.text.trim() !== '') toast('A speed is a whole number from 1 to ' + maxKph.value + ' km/h.', true);
+    return;
+  }
+  if (key === 'new') {
+    if (pending.value !== null && !pendingOut.value) pendingKph.value = kph;
+    draft.value = null;
+    return;
+  }
+  const item = blocks.value.find((other) => other.start_ns === key);
+  // Shown as typed until the server answers: the old kph does not come back meanwhile.
+  if (item && item.kph !== null && kph !== item.kph) await send('/blocks', {start_ns: item.start_ns, end_ns: item.end_ns, kph, note: item.note});
+  if (draft.value === typed) draft.value = null;
+}
+/** The field left without a change: what was typed goes. */
+function untyped(): void {
+  if (!saving.value) draft.value = null;
+}
 const kphOf = (item: Block): number => speedAt(speed.value, item.start_ns) ?? FALLBACK_KPH;
 const blockText = (item: Block): string => item.kph === null ? 'left out' : item.kph + ' km/h';
 
@@ -283,6 +319,85 @@ onMounted(() => {
 });
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
 
+// -- a block's ends dragged on the lane -----------------------------------------------------------------------------------
+/** How near on screen an end is pulled onto an edge, and how far the pointer goes before a press is a drag (a tap moves
+ * nothing). */
+const MAGNET_PX = 8;
+const DEAD_PX = 3;
+/** A block's end being dragged: the lane's scale when it began, where the pointer and the end were then, the edges that
+ * pull it, and where it is now. Where two blocks touch, their shared edge is dragged as one (a roll): item is the block
+ * before it, side its end, and roll the block after it. */
+interface Drag {
+  item: Block; roll: Block | null; side: 'start' | 'end'; pointer: number; down: number; origin: number;
+  from: number; to: number; width: number; edges: number[]; ns: number; snapped: number | null; moved: boolean;
+}
+const dragging = shallowRef<Drag | null>(null);
+const canDrag = computed(() => !locked.value && !!drive.value?.span_ns);
+/** The block whose end is at a time, the one before an edge two blocks share. */
+const endingAt = (ns: number): Block | null => blocks.value.find((other) => other.end_ns === ns) ?? null;
+function dragDown(event: PointerEvent, key: number, side: 'start' | 'end', from: number, to: number, width: number): void {
+  const grabbed = blocks.value.find((other) => other.start_ns === key);
+  const handle = event.currentTarget as SVGElement;
+  if (!grabbed || event.button !== 0 || !canDrag.value || width <= 0) return;
+  event.preventDefault();
+  handle.setPointerCapture(event.pointerId);
+  player.value?.pause();
+  const before = side === 'start' ? endingAt(grabbed.start_ns) : null;
+  const item = before ?? grabbed;
+  const roll = before ? grabbed : side === 'end' ? blocks.value.find((other) => other.start_ns === grabbed.end_ns) ?? null : null;
+  const edge = before ? 'end' : side;
+  const origin = edge === 'start' ? item.start_ns : item.end_ns;
+  // Only the edges in the lanes shown pull: the end stays where it can be seen.
+  const inside = (ns: number): boolean => ns >= t0.value + from * 1e9 && ns <= t0.value + to * 1e9;
+  const edges = [...(player.value?.mapEdges() ?? []).map((second) => t0.value + second * 1e9), now.value].filter(inside);
+  dragging.value = {item, roll, side: edge, pointer: event.pointerId, down: event.clientX, origin, from, to, width, edges,
+    ns: origin, snapped: null, moved: false};
+}
+function dragMove(event: PointerEvent): void {
+  const drag = dragging.value;
+  const span = drive.value?.span_ns;
+  if (!drag || drag.pointer !== event.pointerId || !span) return;
+  if (!drag.moved && Math.abs(event.clientX - drag.down) < DEAD_PX) return;
+  // The end goes as far as the pointer, on the scale of the lanes when it began, and stays inside them: the time shown
+  // follows it, and the lanes do not move under it.
+  const scale = (drag.to - drag.from) / drag.width * 1e9;
+  const room: [number, number] = [Math.max(span[0], t0.value + drag.from * 1e9), Math.min(span[1], t0.value + drag.to * 1e9)];
+  const next = draggedEdge(drag.item, drag.side, drag.origin + (event.clientX - drag.down) * scale, blocks.value, room, drag.edges,
+    MAGNET_PX * scale, drag.roll);
+  if (next.ns === drag.ns && drag.moved) return;
+  dragging.value = {...drag, ns: next.ns, snapped: next.snapped, moved: true};
+  // The picture of the end: the first frame inside the block at its start, the last one at its end.
+  const second = secondOf(next.ns) + (drag.side === 'start' ? 0.001 : -0.001);
+  player.value?.seek(Math.min(drag.to, Math.max(drag.from, second)));
+}
+async function dragUp(event: PointerEvent): Promise<void> {
+  const drag = dragging.value;
+  if (!drag || drag.pointer !== event.pointerId) return;
+  const {item, roll, ns} = drag;
+  if (event.type === 'pointerup' && drag.moved && ns !== drag.origin) {
+    // Drawn where it was let go until the server answers: the block does not jump back meanwhile. A roll is one write
+    // too: the block that grows is moved, and the server cuts the other one where the grown one now covers it.
+    if (drag.side === 'start') await send('/blocks', {start_ns: ns, end_ns: item.end_ns, kph: item.kph, note: item.note, from_start_ns: item.start_ns});
+    else if (!roll || ns > item.end_ns) await send('/blocks', {start_ns: item.start_ns, end_ns: ns, kph: item.kph, note: item.note, from_start_ns: item.start_ns});
+    else await send('/blocks', {start_ns: ns, end_ns: roll.end_ns, kph: roll.kph, note: roll.note, from_start_ns: roll.start_ns});
+  }
+  if (dragging.value?.pointer === drag.pointer) dragging.value = null;
+}
+/** A block's ends as drawn: those being dragged where they are now. */
+function boundsOf(item: Block): [number, number] {
+  const drag = dragging.value;
+  if (drag?.roll?.start_ns === item.start_ns) return [drag.ns, item.end_ns];
+  if (drag?.item.start_ns !== item.start_ns) return [item.start_ns, item.end_ns];
+  return drag.side === 'start' ? [drag.ns, item.end_ns] : [item.start_ns, drag.ns];
+}
+/** The edge a dragged end is pulled onto, inside the time window: none or one. */
+function snapIn(from: number, to: number): number[] {
+  const snapped = dragging.value?.snapped;
+  if (snapped === null || snapped === undefined) return [];
+  const at = secondOf(snapped);
+  return at >= from && at <= to ? [at] : [];
+}
+
 // -- the lane --------------------------------------------------------------------------------------------------------------
 /** The scale of the lane: tens of km/h up to the fastest speed or block of the drive, the same at every zoom. */
 const top = computed(() => Math.ceil(Math.max(50, ...speed.value.map((point) => point[1] ?? 0),
@@ -329,10 +444,14 @@ function heldIn(from: number, to: number) {
 }
 function blocksIn(from: number, to: number) {
   return blocks.value.flatMap((item) => {
-    const first = Math.max(secondOf(item.start_ns), from);
-    const last = Math.min(secondOf(item.end_ns), to);
+    const [start, stop] = boundsOf(item).map(secondOf) as [number, number];
+    const first = Math.max(start, from);
+    const last = Math.min(stop, to);
     return first < last ? [{key: item.start_ns, from: first, to: last, kph: item.kph, text: item.kph === null ? 'left out' : String(item.kph),
-      current: item === block.value}] : [];
+      current: item === block.value, dragged: [dragging.value?.item.start_ns, dragging.value?.roll?.start_ns].includes(item.start_ns),
+      // An edge two blocks share has one handle, the end of the block before it: it drags both.
+      ends: [...start >= from && !endingAt(item.start_ns) ? [{side: 'start' as const, at: start}] : [],
+        ...stop <= to ? [{side: 'end' as const, at: stop}] : []]}] : [];
   });
 }
 /** The new block still on the page, from its start to the time shown, inside the time window: none or one. */
@@ -368,7 +487,7 @@ function worksIn(from: number, to: number) {
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
         <span class="dr-lane-name">Answer<small>km/h</small></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
@@ -381,7 +500,7 @@ function worksIn(from: number, to: number) {
           </g>
           <g v-for="run in blocksIn(from, to)" :key="run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" rx="3"
-                  :class="['sr-block', {'sr-block-out': run.kph === null, 'sr-block-current': run.current}]"/>
+                  :class="['sr-block', {'sr-block-out': run.kph === null, 'sr-block-current': run.current || run.dragged}]"/>
             <line v-if="run.kph !== null" :x1="x(run.from)" :x2="x(run.to)" :y1="y(run.kph)" :y2="y(run.kph)" class="sr-block-kph"/>
             <text v-if="fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="12" class="dr-run-text sr-block-text">{{ run.text }}</text>
           </g>
@@ -390,6 +509,17 @@ function worksIn(from: number, to: number) {
             <rect v-if="part.from < part.to" :x="x(part.from)" y="1" :width="w(part.from, part.to)" :height="PLOT - 1" rx="3" class="sr-block-new"/>
             <line v-if="part.start !== null" :x1="x(part.start)" :x2="x(part.start)" y1="0" :y2="PLOT" class="sr-block-start"/>
           </g>
+          <line v-for="at in snapIn(from, to)" :key="'snap' + at" :x1="x(at)" :x2="x(at)" y1="0" :y2="HEIGHT" class="sr-snap"/>
+          <template v-if="canDrag">
+            <template v-for="run in blocksIn(from, to)" :key="'ends' + run.key">
+              <g v-for="part in run.ends" :key="part.side" class="sr-end" :class="{dragging: run.dragged}"
+                 @pointerdown.stop="dragDown($event, run.key, part.side, from, to, width)" @pointermove.stop="dragMove"
+                 @pointerup.stop="dragUp" @pointercancel.stop="dragUp">
+                <rect :x="x(part.at) - 7" y="1" width="14" :height="PLOT - 1" class="sr-end-hit"/>
+                <line :x1="x(part.at)" :x2="x(part.at)" y1="3" :y2="PLOT - 2" class="sr-end-line"/>
+              </g>
+            </template>
+          </template>
           <rect v-for="mark in worksIn(from, to)" :key="mark.key" :x="x(mark.from)" :y="PLOT + 2" :width="w(mark.from, mark.to)" height="4"
                 :class="['sr-works', {'sr-works-open': mark.open, 'sr-road': !isWorks}]"/>
           <rect v-for="part in checkedIn(from, to)" :key="part.from" :x="x(part.from)" :y="HEIGHT - 2" :width="w(part.from, part.to)" height="2"
@@ -425,7 +555,10 @@ function worksIn(from: number, to: number) {
             <div class="sr-kph" role="group" aria-label="The speed of the new block">
               <button type="button" class="btn small" :disabled="pendingOut" title="Key −" @click="step(-5)">−5</button>
               <button type="button" class="btn small" :disabled="pendingOut" title="Key ↓" @click="step(-1)">−1</button>
-              <output class="sr-kph-value">{{ pendingOut ? 'left out' : pendingKph }}</output>
+              <input class="sr-kph-value" type="number" inputmode="numeric" min="1" :max="maxKph"
+                     :value="draftOf('new') ?? (pendingOut ? '' : pendingKph)" :placeholder="pendingOut ? 'left out' : ''" :disabled="pendingOut"
+                     aria-label="The speed of the new block, km/h" enterkeyhint="done" @focus="player?.pause()" @input="typing('new', $event)"
+                     @change="typed" @blur="untyped" @keydown.enter="($event.target as HTMLInputElement).blur()">
               <button type="button" class="btn small" :disabled="pendingOut" title="Key ↑" @click="step(1)">+1</button>
               <button type="button" class="btn small" :disabled="pendingOut" title="Key +" @click="step(5)">+5</button>
             </div>
@@ -437,14 +570,22 @@ function worksIn(from: number, to: number) {
             <button type="button" class="btn primary sr-wide" id="sr-block-end" :disabled="locked || !canEnd" title="Key b" @click="endBlock">Block to here</button>
             <p v-if="!canEnd" class="dr-hint">Go to the end of the block: it lasts at least 1 s.</p>
           </div>
-          <button v-else type="button" class="btn primary sr-wide" id="sr-block-start" :disabled="locked || !canStart" title="Key b"
-                  @click="startBlock">Block from here</button>
+          <template v-else>
+            <button type="button" class="btn primary sr-wide" id="sr-block-start" :disabled="locked || !canStart" title="Key b"
+                    @click="startBlock">Block from here</button>
+            <p v-if="!block" class="dr-hint">A block gives its own speed instead of yours: from here to where you go, with the speed typed or
+              stepped. A tap on a limit of the Map lane makes one with it; drag the ends of a box on the lane to move them.</p>
+          </template>
 
           <template v-if="block && pending === null">
             <div class="sr-kph" role="group" aria-label="The speed of this block">
               <button type="button" class="btn small" :disabled="locked || block.kph === null" title="Key −" @click="step(-5)">−5</button>
               <button type="button" class="btn small" :disabled="locked || block.kph === null" title="Key ↓" @click="step(-1)">−1</button>
-              <output class="sr-kph-value">{{ block.kph ?? 'left out' }}</output>
+              <input class="sr-kph-value" type="number" inputmode="numeric" min="1" :max="maxKph"
+                     :value="draftOf(block.start_ns) ?? block.kph ?? ''" :placeholder="block.kph === null ? 'left out' : ''"
+                     :disabled="locked || block.kph === null" aria-label="The speed of this block, km/h" enterkeyhint="done"
+                     @focus="player?.pause()" @input="typing(block.start_ns, $event)" @change="typed"
+                     @blur="untyped" @keydown.enter="($event.target as HTMLInputElement).blur()">
               <button type="button" class="btn small" :disabled="locked || block.kph === null" title="Key ↑" @click="step(1)">+1</button>
               <button type="button" class="btn small" :disabled="locked || block.kph === null" title="Key +" @click="step(5)">+5</button>
             </div>
@@ -486,7 +627,7 @@ function worksIn(from: number, to: number) {
               <button type="button" class="btn small" @click="adding = false; newLabel = ''">Cancel</button>
             </form>
             <div class="sr-tools">
-              <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMark" title="Key w" @click="mark">{{ markOpen ? 'End here' : 'Start here' }}</button>
+              <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMark" title="Key w" @click="mark">{{ pickedKind.label + (markOpen ? ' to here' : ' from here') }}</button>
               <button v-if="markHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapMark('remove')">Remove this mark</button>
               <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheck"
                       :title="'From the start of the drive to this frame every ' + pickedKind.label.toLowerCase() + ' is marked: no mark there means none (key c)'"

@@ -17,7 +17,8 @@ on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no
 block or removes one, in one transaction with the check of the revision the page read (a stale one is refused with 409,
 so two tabs cannot overwrite each other). The drive's revision is the number of the last write of that drive in
 speed_history, a table that only grows (triggers refuse the rest): a drive's speed_blocks can always be rebuilt by
-playing its history again (block_saved, block_removed).
+playing its history again (block_saved, block_moved, block_removed). A block whose ends a person drags on the page is
+moved in one write: block_moved, with the start it had in its column known_ns.
 
 Roadworks. Two taps of a person on the frame shown: here they start, here they end. A start with no end yet runs to the
 end of the drive. A mark says nothing of the speed: it lies next to the answers, so that the training can tell the brain
@@ -346,11 +347,15 @@ class SpeedReviewStore:
                             item['note'], reviewer, utc_now()))
 
     def set_block(self, route: str, start_ns: int, end_ns: int, kph: int | None, note: str, base_revision: int,
-                  reviewer: str) -> int:
+                  reviewer: str, moved_from: int | None = None) -> int:
         """Sets the block [start_ns, end_ns) to kph (None: left out), if the drive is still at base_revision; the blocks
         under it keep what stays outside it, a piece shorter than MIN_BLOCK_SECONDS goes (the page could only remove it).
-        Returns the new revision."""
+        With moved_from, the block that started there goes first: its ends dragged to these, in the same write. Returns
+        the new revision."""
         with self._writing(route, base_revision) as (connection, revision):
+            if moved_from is not None:
+                if connection.execute('DELETE FROM speed_blocks WHERE route = ? AND start_ns = ?', (route, moved_from)).rowcount != 1:
+                    raise SpeedReviewError(400, 'bad_block', 'No block starts here.')
             under = connection.execute('SELECT * FROM speed_blocks WHERE route = ? AND start_ns < ? AND end_ns > ?',
                                        (route, end_ns, start_ns)).fetchall()
             insert = 'INSERT INTO speed_blocks (route, start_ns, end_ns, kph, note, reviewer, revision) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -361,7 +366,8 @@ class SpeedReviewStore:
                     if last - first >= MIN_BLOCK_SECONDS * NS:
                         connection.execute(insert, (route, first, last, row['kph'], row['note'], row['reviewer'], row['revision']))
             connection.execute(insert, (route, start_ns, end_ns, kph, note, reviewer, revision))
-            self._log(connection, route, revision, 'block_saved', start_ns, end_ns, {**NO_LABEL, 'kph': kph, 'note': note}, reviewer)
+            self._log(connection, route, revision, 'block_saved' if moved_from is None else 'block_moved', start_ns, end_ns,
+                      {**NO_LABEL, 'kph': kph, 'note': note, 'known_ns': moved_from}, reviewer)
         return revision
 
     def remove_block(self, route: str, start_ns: int, base_revision: int, reviewer: str) -> int:
@@ -555,8 +561,8 @@ def frame_jpeg(root: Path, route: str, segment: int, decoded: int) -> bytes:
 
 
 def save_block(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
-    """A person's block, set ({start_ns, end_ns, kph, note}) or removed ({remove: true, start_ns}): checks it against the
-    drive, applies it, and answers with the drive as it is now."""
+    """A person's block, set ({start_ns, end_ns, kph, note}), moved (the same and from_start_ns, the start it had) or
+    removed ({remove: true, start_ns}): checks it against the drive, applies it, and answers with the drive as it is now."""
     span = _span_of(drives, route)
     if span is None:
         raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
@@ -565,7 +571,9 @@ def save_block(store: SpeedReviewStore, drives: DriveReviewStore, route: str, bo
                            reviewer)
     else:
         start, end, kph, note, base = block_of(body, span)
-        store.set_block(route, start, end, kph, note, base, reviewer)
+        moved = body.get('from_start_ns')
+        store.set_block(route, start, end, kph, note, base, reviewer,
+                        None if moved is None else _integer(moved, 'from_start_ns'))
     return drive_view(store, drives, route)
 
 

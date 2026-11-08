@@ -485,6 +485,8 @@ def _read_package(path: Path, route: str) -> dict:
             raise _Refused('a table of the package is malformed')
     if not all(_good_speed(row['kph']) for key in ('stretches', 'blocks') for row in speed.get(key, [])):
         raise _Refused('a speed of the package is out of range')
+    if not all(type(row['known_ns']) is int for row in speed['history'] if row['action'] == 'block_moved'):
+        raise _Refused('a moved block of the package says not where it started')
     for key in LINE_STORES:
         lines = package.get(key)
         if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):

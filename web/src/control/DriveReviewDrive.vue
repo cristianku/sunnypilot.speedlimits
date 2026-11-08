@@ -5,7 +5,8 @@
 // every frame (drive-review.ts videoTimeOf), never a file's date. On the picture the limit the comma's vision held; under
 // it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
 // at the time shown. The commands of the video lie on the picture, at its foot, and the zoom of the lanes next to the
-// title, so that the picture and the lanes keep the room. Review the signs here opens Sign review on the frame of the
+// title, so that the picture and the lanes keep the room; on a computer the grip under the picture makes it bigger or
+// smaller (StageGrip.vue), as in Sign review. Review the signs here opens Sign review on the frame of the
 // time shown, and Sign review links back (?segment=N&second=S opens the drive at that time). Without logs the video
 // plays all the same, with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
@@ -26,6 +27,8 @@ import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousCha
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
+import {stageHeight} from './stage-size';
+import StageGrip from './StageGrip.vue';
 import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
@@ -467,9 +470,11 @@ const now = computed(() => {
 });
 const change = computed(() => previousChange(atSign.value?.limit, cursor.value));
 const lanes = useTemplateRef<InstanceType<typeof DriveReviewLanes>>('lanes');
+const stage = useTemplateRef<HTMLDivElement>('stage');
 /** The whole run of the map's limit at a time, as a tap on the map's lane gives it (key m of Speed review). */
 const mapRunAt = (seconds: number): {from: number; to: number; kph: number} | null => lanes.value?.mapRunAt(seconds) ?? null;
-defineExpose({seek, pause, mapRunAt});
+const mapEdges = (): number[] => lanes.value?.mapEdges() ?? [];
+defineExpose({seek, pause, mapRunAt, mapEdges});
 /** The server today at the time shown: our networks' sign within a second, the map's road and limit now. */
 const today = computed(() => {
   const current = view.value;
@@ -581,7 +586,8 @@ watch(() => props.route, () => {
       <p v-if="sending" class="dr-hint">Sending the logs… {{ sending.done }} of {{ sending.total }}</p>
 
       <div class="dr-main">
-        <div class="dr-stage" :class="{empty: !ready}" @click="toggle">
+        <div ref="stage" class="dr-stage" :class="{empty: !ready, sized: stageHeight !== null}"
+             :style="stageHeight === null ? undefined : {'--stage-h': stageHeight + 'px'}" @click="toggle">
           <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"
                  @error="onVideoError" @playing="videoProblem = ''" @seeking="stillAt = null" @seeked="onStill" @pause="onStill"
                  @play="stillAt = null"></video>
@@ -625,6 +631,7 @@ watch(() => props.route, () => {
         </div>
 
         <div class="dr-time">
+          <StageGrip :stage="stage"/>
           <p class="dr-sync">{{ syncText }}</p>
           <svg ref="strip" class="dr-strip" viewBox="0 0 1000 20" preserveAspectRatio="none" role="slider" aria-label="The whole drive"
                :aria-valuemin="0" :aria-valuemax="Math.round(end)" :aria-valuenow="Math.round(cursor)" tabindex="0"

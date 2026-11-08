@@ -334,6 +334,20 @@ def test_a_speed_out_of_range_is_refused(pair):
     assert speed_review.SpeedReviewStore(pair.root).blocks(ROUTE) == []
 
 
+def test_a_moved_block_that_says_not_where_it_started_is_refused(pair):
+    pair.give('speed')
+    pair.round()
+    package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
+    package['speed']['blocks'] = [{'route': ROUTE, 'start_ns': 0, 'end_ns': 10, 'kph': 80, 'note': '', 'reviewer': GUEST,
+                                   'revision': 1}]
+    package['speed']['history'] = [{'route': ROUTE, 'revision': 1, 'action': 'block_moved', 'start_ns': 0, 'end_ns': 10,
+                                    'kph': 80, 'state': None, 'known_ns': None, 'note': '', 'reviewer': GUEST, 'at': 0}]
+    (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
+    state = sync(pair.root, log=lambda _: None)
+    assert 'moved block' in state['drives'][ROUTE]['problem']
+    assert speed_review.SpeedReviewStore(pair.root).blocks(ROUTE) == []
+
+
 def test_a_package_from_before_the_blocks_still_counts(pair):
     """A box not yet updated sends no blocks: those of this server stay, and its marks still come back, roadworks with no
     end yet too."""

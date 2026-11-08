@@ -1505,7 +1505,8 @@ def make_handler(app: ReviewApp):
 
         def _speed_review_post(self, path):
             """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
-            to leave the moments out; {"remove": true, "start_ns", "base_revision"} removes one), a tap on its roadworks
+            to leave the moments out, "from_start_ns" to move the block that started there to these ends; {"remove":
+            true, "start_ns", "base_revision"} removes one), a tap on its roadworks
             (/works: {"tap", "at_ns", "base_revision"}) or on a kind of road (/road: the same and "kind"), or a new kind of
             road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on the site (never the
             access token alone: an agent never writes these) and a panel that is not read-only."""

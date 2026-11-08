@@ -76,7 +76,11 @@ function mapRunAt(seconds: number): {from: number; to: number; kph: number} | nu
     .find((item) => item.from <= seconds && seconds < item.to);
   return run && run.value > 0 ? {from: run.from, to: run.to, kph: run.value} : null;
 }
-defineExpose({mapRunAt});
+/** Every time the map's limit changes, beyond the lanes shown: where a block's end is pulled when dragged near. */
+function mapEdges(): number[] {
+  return runsOf(mapSeries.value, -Infinity, Infinity, (value) => limitOf(value) ?? 0).flatMap((run) => [run.from, run.to]);
+}
+defineExpose({mapRunAt, mapEdges});
 const resolverSeries = computed(() => combine([series('res_limit'), series('res_source')], ([limit, source]) =>
   limit === undefined || limit === null ? null : (typeof limit === 'number' && limit > 0.5 ? Math.round(limit) : 0) + '|' + (source ?? '')));
 const resolver = computed(() => steps(resolverSeries.value, (value) => {

@@ -129,6 +129,29 @@ export function clampKph(kph: number, max: number): number {
   return Math.max(1, Math.min(max, Math.round(kph)));
 }
 
+/** One end of a block dragged to a time: kept inside the span given (the drive in the time window shown), off the blocks
+ * next to it and at least MIN_BLOCK_NS from its other end, and pulled onto the nearest edge within reach (where the map's
+ * limit changes, the ends of the other blocks, the time shown), as a magnet. With a block rolled (the one whose start
+ * touches the end of item, dragged with it as one edge) the end goes up to MIN_BLOCK_NS before the rolled block's end.
+ * snapped is the edge it was pulled onto, null when none was near. */
+export function draggedEdge(item: Block, side: 'start' | 'end', ns: number, blocks: readonly Block[], span: readonly [number, number],
+                            edges: readonly number[], reach: number, rolled: Block | null = null): {ns: number; snapped: number | null} {
+  const others = blocks.filter((other) => other.start_ns !== item.start_ns && other.start_ns !== rolled?.start_ns);
+  const low = Math.max(span[0], ...side === 'end' ? [item.start_ns + MIN_BLOCK_NS]
+    : others.filter((other) => other.end_ns <= item.start_ns).map((other) => other.end_ns));
+  const high = Math.min(span[1], ...side === 'start' ? [item.end_ns - MIN_BLOCK_NS] : rolled ? [rolled.end_ns - MIN_BLOCK_NS]
+    : others.filter((other) => other.start_ns >= item.end_ns).map((other) => other.start_ns));
+  // A window too short for the block to change in: it stays as it is.
+  if (low > high) return {ns: side === 'start' ? item.start_ns : item.end_ns, snapped: null};
+  let snapped: number | null = null;
+  for (const edge of [...edges, ...others.flatMap((other) => [other.start_ns, other.end_ns])]) {
+    if (edge >= low && edge <= high && Math.abs(edge - ns) <= reach && (snapped === null || Math.abs(edge - ns) < Math.abs(snapped - ns))) {
+      snapped = edge;
+    }
+  }
+  return {ns: Math.round(snapped ?? Math.min(high, Math.max(low, ns))), snapped};
+}
+
 /** The roadworks on a frame, null outside them. */
 export function worksAt(works: readonly Works[], ns: number): Works | null {
   return works.find((item) => item.start_ns <= ns && (item.end_ns === null || ns < item.end_ns)) ?? null;
