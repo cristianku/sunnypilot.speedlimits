@@ -423,6 +423,8 @@ class ReviewService:
     # ---------- routes and progress ----------
 
     def route_summary(self, snapshot: RouteSnapshot) -> dict:
+        from nnslr_tools import drive_review
+        from nnslr_tools.review import dashcam_of
         confirmed = 0
         by_ai = 0
         withdrawn = 0
@@ -453,6 +455,9 @@ class ReviewService:
             # The route as the drive it was, as the route list names it: title ("Herznach → Zürich"), when,
             # minutes, start, from, to (nnslr_tools.drives; None for what cannot be known).
             'drive': drive_of(self.root, snapshot.route),
+            # True for a dashcam drive (sunnypilot off in all of it, the brain's), False with sunnypilot on, None before
+            # its logs are read (review.dashcam_of): the site shows DASHCAM MODE on it.
+            'dashcam': dashcam_of(drive_review.store_for(self.root), snapshot.route),
         }
 
     def list_routes(self) -> list[dict]:

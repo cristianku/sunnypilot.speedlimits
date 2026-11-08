@@ -436,3 +436,9 @@ border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);animation:dialo
 }
 @media (prefers-reduced-motion:reduce){.dialog-backdrop,.dialog{animation:none}}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+/* DASHCAM MODE: a drive with sunnypilot off in all of it (speed_review.dashcam_drive), the brain's; on the drives of Sign
+   review and Speed review. One green in both themes, white letters, a soft black edge. A <b>, so that the lists' span
+   rules never reach it. */
+.dashcam-badge{display:inline-flex;align-items:center;flex:none;padding:2px 8px;border-radius:6px;background:#15803d;color:#fff;
+  font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;
+  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 6px 1px rgba(0,0,0,.45);text-shadow:0 1px 1px rgba(0,0,0,.35)}

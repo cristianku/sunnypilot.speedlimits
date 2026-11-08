@@ -107,3 +107,38 @@ def test_review_page_knows_who_proposed_the_signs_and_the_drive_apart(served):
     # The two lines of the route menu (nothing is known of the drive in the test).
     assert {'title', 'when', 'minutes', 'name'} <= set(link) and link['title'] is None
     assert payload_of(server.request('GET', f'/route/{OTHER_ROUTE}/')[2].decode())['proposer'] == 'vietnam'
+
+
+def scan(root, route, passive):
+    """A drive whose logs are read: sunnypilot off in all of it (passive True) or on."""
+    import sqlite3
+    from nnslr_tools import drive_review
+    path = drive_review.db_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    for statement in drive_review.SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.execute("INSERT INTO scans (route, state, summary) VALUES (?, 'done', ?)",
+                       (route, json.dumps({'t0_ns': 0, 'span_ns': [0, 40 * 10**9],
+                                           'meta': {'car': {'brand': 'psa', 'passive': passive}}})))
+    connection.commit()
+    connection.close()
+
+
+def test_a_dashcam_drive_says_dashcam_mode_on_the_list_and_in_the_route_menu(served):
+    server, root = served
+    scan(root, ROUTE, True)
+    scan(root, OTHER_ROUTE, False)
+    routes = json.loads(server.request('GET', '/api/routes')[2])['routes']
+    assert {r['route_id']: r['dashcam'] for r in routes} == {ROUTE: True, OTHER_ROUTE: False}
+    page = server.request('GET', '/routes')[2].decode()
+    assert 'DASHCAM MODE' in card_of(page, ROUTE) and 'DASHCAM MODE' not in card_of(page, OTHER_ROUTE)
+    links = {item['route_id']: item for item in payload_of(server.request('GET', f'/route/{ROUTE}/')[2].decode())['routes']}
+    assert links[ROUTE]['dashcam'] is True and links[OTHER_ROUTE]['dashcam'] is False
+
+
+def test_a_drive_whose_logs_are_not_read_has_no_dashcam_mode(served):
+    server, root = served
+    routes = json.loads(server.request('GET', '/api/routes')[2])['routes']
+    assert all(r['dashcam'] is None for r in routes)
+    assert 'class="dashcam-badge"' not in server.request('GET', '/routes')[2].decode()

@@ -65,6 +65,8 @@ box-shadow:inset 0 0 0 2px var(--surface)}
 .card-row.done .state-icon{border:0;background:var(--ok)}
 .route{grid-area:route;min-width:0;display:flex;flex-direction:column;gap:1px}
 .route .drive{font-size:16px;font-weight:600;letter-spacing:-.015em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.route .drive-line{display:flex;align-items:center;gap:8px;min-width:0}
+.route .drive-line .drive{min-width:0}
 .route .drive-when{font-size:12.5px;color:var(--muted)}
 .route .drive-when code{font-family:var(--font-data);font-size:11.5px}
 /* Each figure keeps its words together; the dot in front of the first figure of a line is clipped. */

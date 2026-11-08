@@ -186,6 +186,8 @@ def build_server(service, *, client: str, read_only: bool = False):
         hint_frames: int
         # title ("Herznach → Zürich"), when ("Fri 23 Oct 2026 · 08:01"), minutes, start, from, to; None if unknown.
         drive: dict[str, Any]
+        # True for a dashcam drive (sunnypilot off in all of it), False with sunnypilot on, None before its logs are read.
+        dashcam: bool | None
 
     class RouteList(TypedDict):
         routes: list[RouteSummary]

@@ -143,7 +143,7 @@ def test_routes_and_progress(api):
                      'confirmed_by_human': 0, 'confirmed_by_ai': 0, 'missing_count': 6, 'withdrawn_count': 0,
                      'suspicious_count': 0, 'frames_with_proposals': 3, 'hint_frames': 0,
                      'drive': {'when': None, 'minutes': None, 'start': None, 'from': None, 'to': None, 'title': None,
-                               'full_definition': False}}
+                               'full_definition': False}, 'dashcam': None}
     assert server.post_frame(ROUTE, '0/0', page_body(rows['0/0']))[0] == 200
     assert save(server, ROUTE, '1/3', ai_body())[0] == 200
     progress = get_json(server, f'/api/v1/routes/{ROUTE}')
@@ -160,7 +160,7 @@ def test_routes_and_progress(api):
     legacy = json_of(server.request('GET', '/api/routes')[2])['routes']
     assert set(next(r for r in legacy if r['route_id'] == ROUTE)) == {
         'route_id', 'run_id', 'frame_count', 'frames_with_proposals', 'confirmed_count', 'confirmed_by_ai',
-        'waiting_for_person', 'suspicious_count', 'hint_frames', 'url', 'drive', 'proposer'}
+        'waiting_for_person', 'suspicious_count', 'hint_frames', 'url', 'drive', 'proposer', 'dashcam'}
     assert next(r for r in legacy if r['route_id'] == ROUTE)['confirmed_by_ai'] == 1
     assert get(server, '/api/v1/routes/00000009--abcdef1234')[0] == 404
     assert get(server, '/api/v1/routes/not-a-route')[0] == 404

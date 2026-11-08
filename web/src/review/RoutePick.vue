@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // The drive under review, the menu to open another one, its count and who reviews (ReviewToolbar.vue), at the top
 // of the inspector (above the country of the frame): its name on two lines ("Basel → Mumpf", then "Wed 21 Oct 2026 ·
-// 13:55 · 38 min", review.route_links), so the time is never cut; the route's code only in the title. The menu is the
-// real select, invisible over those two lines.
+// 13:55 · 38 min", review.route_links), so the time is never cut; the route's code only in the title; under them
+// DASHCAM MODE on a dashcam drive (sunnypilot off in all of it, review.dashcam_of). The menu is the real select,
+// invisible over those lines.
 import {computed} from 'vue';
 import ReviewToolbar from './ReviewToolbar.vue';
 import {report} from './store';
@@ -12,7 +13,7 @@ const face = computed(() => {
   const link = report.routes.find((route) => route.route_id === report.routeId);
   const title = link?.title || link?.name || report.routeId || 'Local report';
   const when = link?.title ? [link.when, link.minutes ? link.minutes + ' min' : null].filter(Boolean).join(' · ') : '';
-  return {title, when, full: Boolean(link?.full_definition)};
+  return {title, when, full: Boolean(link?.full_definition), dashcam: link?.dashcam === true};
 });
 
 /** The routes of the server, this one chosen; offline only this report. */
@@ -38,7 +39,8 @@ function changeRoute(event: Event): void {
     <div class="route-face">
       <span class="route-face-text" aria-hidden="true"><span class="route-title">{{ face.title }}</span><span
         v-if="face.when || face.full" class="route-when">{{ face.when }}<template v-if="face.full"><template
-          v-if="face.when"> · </template><span title="Recorded at full definition, 2688 × 1520">HD</span></template></span></span>
+          v-if="face.when"> · </template><span title="Recorded at full definition, 2688 × 1520">HD</span></template></span><span
+        v-if="face.dashcam" class="route-badges"><b class="dashcam-badge">DASHCAM MODE</b></span></span>
       <select id="route" :disabled="report.routes.length <= 1" @change="changeRoute">
         <option v-for="option in options" :key="option.value + option.text" :value="option.value"
                 :selected="option.selected">{{ option.text }}</option>

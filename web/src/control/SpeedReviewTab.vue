@@ -2,8 +2,8 @@
 // Data › Speed review, the answers the brain learns from (speed_review.py): his own dashboard speed at every moment of a
 // drive is the answer, with nothing to confirm; a block corrects it from a time to a time, with another speed or left out
 // of the training, and roadworks are marked on the frames. Nothing here changes the car. Every drive the brain learns
-// from (sunnypilot off in all of it, speed_review.dashcam_drive, or not read yet), the newest first, with its blocks and
-// roadworks marks; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
+// from (sunnypilot off in all of it, speed_review.dashcam_drive, or not read yet: DASHCAM MODE on the first), the newest
+// first, with its blocks and roadworks marks; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
 // list, Read the logs reads the comma's logs of every drive (ReadLogsCard.vue), the list read again every 2 s while it
 // does: a drive has a speed only once its logs are read.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
@@ -77,7 +77,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
         <li v-for="drive in rows" :key="drive.route" class="rt-drive dr-drive">
           <a class="rt-open" :href="hrefOf(drive)">
             <div class="rt-name">
-              <strong>{{ drive.title ?? 'Places unknown' }}</strong>
+              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
               <span><template v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</template>{{
                 drive.minutes !== null ? ' · ' + drive.minutes + ' min' : '' }}</span>
             </div>

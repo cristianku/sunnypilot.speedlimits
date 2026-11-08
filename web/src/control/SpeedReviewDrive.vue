@@ -299,6 +299,7 @@ function worksIn(from: number, to: number) {
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
                     @pick-map="fromMap">
+    <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
     <template #hud>
       <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>

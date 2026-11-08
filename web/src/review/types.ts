@@ -115,6 +115,8 @@ export interface RouteLink {
   minutes?: number | null;
   /** Recorded at 2688 x 1520 (drives.full_definition): its pictures here are sharper than the frame's pixels. */
   full_definition?: boolean;
+  /** A dashcam drive, sunnypilot off in all of it (review.dashcam_of); null before its logs are read. */
+  dashcam?: boolean | null;
 }
 
 /** The JSON in <script id="payload">. server is false in the static index.html of write_review (offline). */

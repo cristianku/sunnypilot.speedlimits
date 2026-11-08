@@ -13,7 +13,7 @@
 // and a choice of playback speed (rates); Speed review also a lane of its own over the others (slot "lane"), only the
 // lanes a speed is judged on (simpleLanes), the switch HD (sharp: standing still, the frame at the comma's full
 // definition over the video), its controls at the top of the side (slot "side"), a box of its own on the picture after
-// the car's speed (slot "hud"), the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
+// the car's speed (slot "hud"), a label after the drive's name (slot "badge": DASHCAM MODE), the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
 // on a limit of the map's lane (pickMap); each follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
@@ -556,7 +556,7 @@ watch(() => props.route, () => {
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
       <div class="dr-view-top">
         <div class="rt-view-name">
-          <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }}</h2>
+          <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }} <slot name="badge"></slot></h2>
           <span>{{ facts }}</span>
           <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
         </div>

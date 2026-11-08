@@ -304,6 +304,10 @@ def route_state(confirmed: int, total: int) -> str:
     return 'doing'
 
 
+# A dashcam drive, sunnypilot off in all of it (review.dashcam_of): the label of Sign review's list, as Speed review's.
+DASHCAM_BADGE = '<b class="dashcam-badge" title="sunnypilot off in all of this drive: the brain learns from it">DASHCAM MODE</b>'
+
+
 def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
     total = summary['frame_count']
     confirmed = summary['confirmed_count']
@@ -350,7 +354,8 @@ def _route_row(summary: dict, *, ai_reviewer: bool = True) -> str:
     # [ai-reviewer] - END
     return ('<li><a class="card-row ' + state + '" href="' + html.escape(summary['url']) + '">'
             + '<span class="state-icon" aria-hidden="true">' + ('✓' if state == 'done' else '') + '</span>'
-            + '<span class="route" title="' + route + '"><span class="drive">' + name + '</span>'
+            + '<span class="route" title="' + route + '"><span class="drive-line"><span class="drive">' + name + '</span>'
+            + (DASHCAM_BADGE if summary.get('dashcam') else '') + '</span>'
             + '<span class="drive-when">' + detail + '</span></span>'
             + '<span class="count">' + f'{confirmed:,}' + ' of ' + f'{total:,}'
             + ' <span class="unit">confirmed</span>'

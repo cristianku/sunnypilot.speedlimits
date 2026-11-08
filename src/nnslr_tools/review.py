@@ -346,13 +346,15 @@ class ReviewApp(ReviewService):
         """Every route with a report, for the route menu of the review page, named as the drive it was
         ("Herznach → Zürich · Fri 23 Oct 2026 · 08:01", nnslr_tools.drives); its title and when apart, for the
         two lines of the menu."""
+        from nnslr_tools import drive_review
+        drives = drive_review.store_for(self.root)
         links = []
         for route, directory in list_reports(self.root):
             drive = drive_of(self.root, route)
             name = ' · '.join(part for part in (drive['title'], drive['when']) if part) or None
             links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name, 'title': drive['title'],
                           'when': drive['when'], 'minutes': drive['minutes'],
-                          'full_definition': drive['full_definition']})
+                          'full_definition': drive['full_definition'], 'dashcam': dashcam_of(drives, route)})
         return links
 
     # [guest-reviewers] - START
@@ -402,6 +404,8 @@ class ReviewApp(ReviewService):
     # [guest-reviewers] - END
 
     def route_summaries(self) -> list[dict]:
+        from nnslr_tools import drive_review
+        drives = drive_review.store_for(self.root)
         summaries = []
         for route, directory in list_reports(self.root):
             try:
@@ -432,8 +436,21 @@ class ReviewApp(ReviewService):
                 'drive': drive_of(self.root, route),
                 # Who proposed the signs of this report: vietnam, ours or qwen (run.json).
                 'proposer': _report_proposer(directory),
+                # A dashcam drive (sunnypilot off in all of it): the list shows DASHCAM MODE on it.
+                'dashcam': dashcam_of(drives, route),
             })
         return summaries
+
+
+def dashcam_of(drives, route: str) -> bool | None:
+    """Whether a drive is a dashcam drive, sunnypilot off in all of it (speed_review.dashcam_drive), by the scan of its
+    logs in drives (a DriveReviewStore); None before its logs are read. Sign review and Speed review show DASHCAM MODE
+    on it."""
+    from nnslr_tools.speed_review import dashcam_drive
+    summary = drives.summary(route)
+    if summary is None or not summary.get('span_ns') or summary['span_ns'][1] is None:
+        return None
+    return dashcam_drive(summary)
 
 
 def located(fresh: list[dict], by_key: dict) -> list[dict]:
