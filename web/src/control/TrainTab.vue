@@ -17,7 +17,7 @@ import type {ActionName, ActionOptions, ActionState, Activity, BrainLabels, Cutt
 import ActionList from './ActionList.vue';
 import {useBrainChoices} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
-import BrainInputs from './BrainInputs.vue';
+import BrainFlow from './BrainFlow.vue';
 import {useClassifierChoices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
 import {useCutterChoices} from './cutter-choices';
@@ -280,7 +280,7 @@ const numbers = computed(() => {
       <p class="role-what">The comma’s vision limit: one network with memory that says the speed to hold, four times a second, from the road
         camera and what the car reads, never the map. It learns how you drive: your own speed on every second of the drives with sunnypilot
         off, your blocks of Speed review the only corrections.</p>
-      <BrainInputs :driver="brainChoices.driver === 'on'"/>
+      <BrainFlow :driver="brainChoices.driver === 'on'"/>
     </template>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
