@@ -32,7 +32,7 @@ from pathlib import Path
 root = Path(sys.argv[sys.argv.index('--data-root') + 1])
 print('osm_roads ran')
 (root / 'derived' / 'osm').mkdir(parents=True, exist_ok=True)
-(root / 'derived' / 'osm' / 'roads.jsonl').write_text('{"maxspeed_type": null, "junction": null}\\n')
+(root / 'derived' / 'osm' / 'roads.jsonl').write_text('{"maxspeed_type": null, "junction": null, "tunnel": null}\\n')
 (root / 'derived' / 'osm' / 'parking.jsonl').write_text('')
 '''
 FAKE_PLACES = '''import sys
@@ -80,7 +80,8 @@ def test_a_first_run_without_a_map_downloads_the_maps_and_goes_on(tmp_path):
     lines = process.stdout.splitlines()
     steps = [line for line in lines if line.startswith('== ')]
     assert steps == ['== a. GPS of the drives', '== b. Maps the drives need', '== c. Speed of the drives',
-                     '== d. Map roads and car parks near the drives', '== e. Road type of every frame']
+                     '== d. Map roads and car parks near the drives', '== e. Road type of every frame',
+                     '== f. Tunnels']
     assert lines.index('Alsace: downloaded') < lines.index('osm_roads ran') < lines.index('osm_places ran')
     assert (tmp_path / 'data' / 'derived' / 'osm' / 'places.jsonl').exists()
     # Every step of the page's bar is reached by the log.
