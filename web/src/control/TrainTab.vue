@@ -17,6 +17,7 @@ import type {ActionName, ActionOptions, ActionState, Activity, BrainLabels, Cutt
 import ActionList from './ActionList.vue';
 import {useBrainChoices} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
+import BrainInputs from './BrainInputs.vue';
 import {useClassifierChoices} from './classifier-choices';
 import ClassifierChoices from './ClassifierChoices.vue';
 import {useCutterChoices} from './cutter-choices';
@@ -275,10 +276,12 @@ const numbers = computed(() => {
     <p v-if="section === 'cutter'" class="role-what">SignNet, the same network the comma runs: it finds every box that could be a sign at the top of the frame. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
-    <p v-else-if="section === 'brain'" class="role-what">Says the speed to hold, four times a second, from the camera, the signs it reads and
-      the car’s own motion, and whether it is in roadworks or on a kind of road. It learns your own speed on every drive with sunnypilot off whose logs
-      are read, with the blocks you set in Speed review as the corrections, the roadworks and the kinds of road you mark there, and the next limit
-      from the signs of Sign review.</p>
+    <template v-else-if="section === 'brain'">
+      <p class="role-what">The comma’s vision limit: one network with memory that says the speed to hold, four times a second, from the road
+        camera and what the car reads, never the map. It learns how you drive: your own speed on every second of the drives with sunnypilot
+        off, your blocks of Speed review the only corrections.</p>
+      <BrainInputs :driver="brainChoices.driver === 'on'"/>
+    </template>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
@@ -367,7 +370,7 @@ const numbers = computed(() => {
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. Sign review answers the next limit on
           <strong>{{ thousands(brainLabels.partitions.train.next) }}</strong> of the seconds to learn from.<template
           v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
-          v-if="brainLabels.types"> With Road types on, only the seconds with a road type (the map's, from Read the map in Data › Prepare) count:
+          v-if="brainLabels.types"> With Road types on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
           <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
           v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template
           v-if="brainRoads.length"> The kinds of road of Speed review, seconds to learn from on each and checked off it:<template
