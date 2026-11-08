@@ -207,7 +207,7 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
 /** What every drive with its logs read gives the brain today (his speed, the blocks of Speed review as its corrections, the
- * next limit of Sign review), asked when its section opens and when a training of it ends (a few seconds on the server:
+ * next limit of Sign review), asked when its section opens and when a training of it ends (about 10 s on the server:
  * never with the status). */
 const brainLabels = shallowRef<BrainLabels | null>(null);
 watch([section, () => jobFor('brain')?.state], async ([value]) => {

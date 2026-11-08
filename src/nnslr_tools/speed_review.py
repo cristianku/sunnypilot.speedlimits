@@ -9,8 +9,8 @@ the road there), or those moments are left out of the training (a speed that is 
 Nothing here runs on the car and nothing here trains: this only collects the corrections.
 
 A block holds on [start_ns, end_ns) of logMonoTime, the comma's clock, which stays the same if a new scan moves the start
-of the drive, at least MIN_BLOCK_SECONDS long. kph is a whole number from 0 to MAX_KPH, or None to leave the moments out.
-A new block over others clips them: what they say outside it stays.
+of the drive, at least MIN_BLOCK_SECONDS long. kph is a whole number from 1 to MAX_KPH, or None to leave the moments out.
+A new block over others clips them: what they say outside it stays, unless it is shorter than MIN_BLOCK_SECONDS.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
 on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI). One write sets a
@@ -145,8 +145,8 @@ def block_of(body: dict, span: tuple[int, int]) -> tuple[int, int, int | None, s
     if end - start < MIN_BLOCK_SECONDS * NS:
         raise SpeedReviewError(400, 'bad_block', f'A block lasts at least {MIN_BLOCK_SECONDS} s.')
     kph = body.get('kph')
-    if kph is not None and not 0 <= _integer(kph, 'kph') <= MAX_KPH:
-        raise SpeedReviewError(400, 'bad_value', f'kph is a whole number from 0 to {MAX_KPH}.')
+    if kph is not None and not 1 <= _integer(kph, 'kph') <= MAX_KPH:
+        raise SpeedReviewError(400, 'bad_value', f'kph is a whole number from 1 to {MAX_KPH}.')
     note = body.get('note', '')
     if not isinstance(note, str) or len(note) > MAX_NOTE:
         raise SpeedReviewError(400, 'bad_value', f'A note is text of up to {MAX_NOTE} characters.')
@@ -259,7 +259,8 @@ class SpeedReviewStore:
     def set_block(self, route: str, start_ns: int, end_ns: int, kph: int | None, note: str, base_revision: int,
                   reviewer: str) -> int:
         """Sets the block [start_ns, end_ns) to kph (None: left out), if the drive is still at base_revision; the blocks
-        under it keep what stays outside it. Returns the new revision."""
+        under it keep what stays outside it, a piece shorter than MIN_BLOCK_SECONDS goes (the page could only remove it).
+        Returns the new revision."""
         with self._writing(route, base_revision) as (connection, revision):
             under = connection.execute('SELECT * FROM speed_blocks WHERE route = ? AND start_ns < ? AND end_ns > ?',
                                        (route, end_ns, start_ns)).fetchall()
@@ -268,7 +269,7 @@ class SpeedReviewStore:
                                    [(route, row['start_ns']) for row in under])
             for row in under:
                 for first, last in ((row['start_ns'], start_ns), (end_ns, row['end_ns'])):
-                    if first < last:
+                    if last - first >= MIN_BLOCK_SECONDS * NS:
                         connection.execute(insert, (route, first, last, row['kph'], row['note'], row['reviewer'], row['revision']))
             connection.execute(insert, (route, start_ns, end_ns, kph, note, reviewer, revision))
             self._log(connection, route, revision, 'block_saved', start_ns, end_ns, {**NO_LABEL, 'kph': kph, 'note': note}, reviewer)

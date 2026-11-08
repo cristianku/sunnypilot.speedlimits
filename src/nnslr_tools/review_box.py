@@ -684,6 +684,9 @@ def _take_results(root: Path, state: dict, pulled: Path, log: Callable[[str], No
             log(f'{route}: {exc}')
             continue
         base = json.loads(base_path.read_text(encoding='utf-8'))
+        # A box on code from before 8 Nov 2026 sends no blocks: those sent to it stay in the base for the next round too,
+        # else that round finds them only here and takes every later change of the box for a conflict.
+        theirs['speed'] = {**{key: rows for key, rows in base['speed'].items() if key in SPEED_TABLES}, **theirs['speed']}
         if {key: theirs[key] for key in base} == base:
             continue
         try:

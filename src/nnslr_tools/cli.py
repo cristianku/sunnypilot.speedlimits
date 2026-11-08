@@ -2608,7 +2608,7 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
     drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route,
-                                   rate=brain_targets.RATE_HZ, need_pictures=False)
+                                   rate=brain_targets.RATE_HZ, need_pictures=False, inputs=False)
     found = brain_targets.summary(drives)
     print(json.dumps(found, indent=2) if args.json else brain_targets.summary_text(found))
     return 0

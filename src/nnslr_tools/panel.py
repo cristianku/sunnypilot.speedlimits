@@ -1087,7 +1087,8 @@ class Panel:
         """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed
         with the blocks of Speed review, the roadworks, the next limit of Sign review, as brain_targets.summary, with
         the drives the next training reads again first (not read, read by another reader than the car's of today, or
-        without the brain's pictures). A few seconds: asked when the section opens, never by the status."""
+        without the brain's pictures). Without the inputs, which it does not show: about 10 s over every drive, asked
+        when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
@@ -1096,7 +1097,7 @@ class Panel:
             # As the training will have them, once it has read again what it reads first.
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
-                                                                need_pictures=False))
+                                                                need_pictures=False, inputs=False))
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
         return {**found, 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}

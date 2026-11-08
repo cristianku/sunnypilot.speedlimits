@@ -289,7 +289,7 @@ function worksIn(from: number, to: number) {
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
                     @pick-map="fromMap">
     <template #hud>
-      <span class="dr-box sr-box-label" :class="{empty: label === null}"><small>ANSWER</small>
+      <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
@@ -325,14 +325,13 @@ function worksIn(from: number, to: number) {
         <p v-else-if="!drive.span_ns" class="dr-hint">No speed to show: the logs of this drive are not read yet.</p>
         <template v-else>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
+          <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one.</p>
           <div class="sr-value">
-            <span>{{ block ? 'Block' : 'Your speed here' }}</span><b>{{ label ?? '–' }}</b><span v-if="label !== null">km/h</span>
+            <span>{{ block ? 'Block' : 'Your dashboard speed' }}</span><b>{{ label ?? '–' }}</b><span v-if="label !== null">km/h</span>
             <span v-if="block" class="sr-tag" :class="{'sr-tag-out': block.kph === null}">{{ block.kph === null ? 'Left out' : 'Your block' }}</span>
           </div>
           <p v-if="block" class="dr-hint">{{ clockOf(secondOf(block.start_ns)) }}–{{ clockOf(secondOf(block.end_ns)) }} ·
-            your speed here {{ driverKph ?? '–' }} km/h<template v-if="block.reviewer"> · {{ block.reviewer }}</template></p>
-          <p v-else class="dr-hint">Your dashboard speed is what the brain learns here. A block from a time to a time gives another
-            speed, or leaves those moments out.</p>
+            your dashboard speed {{ driverKph ?? '–' }} km/h<template v-if="block.reviewer"> · {{ block.reviewer }}</template></p>
 
           <div v-if="pending !== null" class="sr-new" role="group" aria-labelledby="sr-new-title">
             <p id="sr-new-title" class="sr-new-title">New block from {{ clockOf(secondOf(pending)) }}<template v-if="canEnd && ends">
@@ -392,8 +391,9 @@ function worksIn(from: number, to: number) {
           </div>
           <p v-if="worksShown" class="dr-hint">Roadworks {{ clockOf(secondOf(worksShown.start_ns)) }}{{ worksShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(worksShown.end_ns)) }}</p>
           <p v-if="worksChecked !== null" class="dr-hint">Checked for roadworks up to {{ clockOf(secondOf(worksChecked)) }}</p>
-          <p v-if="!readOnly" class="dr-hint sr-keys"><b>Keys</b> b block from / to here · m block of the map · x remove the block ·
-            l leave out · ↑ ↓ ±1 · − + ±5 · Esc cancel · w roadworks · c checked to here · space play · ← → 1 s · ⇧ ← → a frame</p>
+          <details v-if="!readOnly" class="dr-more sr-keys"><summary>Keys</summary>
+            <p class="dr-hint">b block from / to here · m block of the map · x remove the block · l leave out · ↑ ↓ ±1 · − + ±5 ·
+              Esc cancel · w roadworks · c checked to here · space play · ← → 1 s · ⇧ ← → a frame</p></details>
         </template>
       </section>
     </template>

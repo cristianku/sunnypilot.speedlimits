@@ -347,6 +347,16 @@ def test_a_package_from_before_the_blocks_still_counts(pair):
     sync(pair.root, log=lambda _: None)
     assert [row['start_ns'] for row in speed_review.SpeedReviewStore(pair.root).works(ROUTE)] == [5]
     assert [(row['start_ns'], row['kph']) for row in speed_review.SpeedReviewStore(pair.root).blocks(ROUTE)] == [(0, 80)]
+    # The next round too: the blocks sent to the box stay in the base, so its next mark is no conflict.
+    speed_review.SpeedReviewStore(pair.data).tap_works(ROUTE, 'end', 8, 10, 2, GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
+    del package['speed']['blocks']
+    (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
+    state = sync(pair.root, log=lambda _: None)
+    assert [(row['start_ns'], row['end_ns']) for row in speed_review.SpeedReviewStore(pair.root).works(ROUTE)] == [(5, 8)]
+    assert [(row['start_ns'], row['kph']) for row in speed_review.SpeedReviewStore(pair.root).blocks(ROUTE)] == [(0, 80)]
+    assert state['drives'][ROUTE]['saved']['conflicts'] == 0
 
 
 def test_review_completed_takes_the_results_and_the_work_back(pair):

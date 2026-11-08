@@ -93,6 +93,9 @@ def test_a_block_clips_the_blocks_it_covers(store):
     assert blocks(store) == [(0, 30, 80), (30, 70, 50), (70, 100, 80)]
     # What a block keeps outside the new one is still its own writer's.
     assert [row['reviewer'] for row in store.blocks(ROUTE)] == ['a', 'b', 'a']
+    # A piece shorter than a block can be goes: the page could only remove it.
+    store.set_block(ROUTE, at(30.5), at(99.5), 60, '', 3, 'b')
+    assert blocks(store) == [(0, 30, 80), (30.5, 99.5, 60)]
 
 
 def test_a_removed_block_gives_the_drivers_speed_back(store):
@@ -170,6 +173,7 @@ def test_the_labels_are_readable_only_by_their_owner(store):
     ({'start_ns': True}, 'bad_value'),
     ({'base_revision': None}, 'bad_value'),
     ({'kph': -1}, 'bad_value'),
+    ({'kph': 0}, 'bad_value'),
     ({'kph': 201}, 'bad_value'),
     ({'kph': '80'}, 'bad_value'),
     ({'kph': 80.0}, 'bad_value'),
@@ -186,7 +190,7 @@ def test_a_block_that_does_not_fit_is_refused(change, reason):
 
 def test_the_blocks_that_fit():
     body = {'start_ns': at(10), 'end_ns': at(11), 'base_revision': 3}
-    assert speed_review.block_of({**body, 'kph': 0}, SPAN) == (at(10), at(11), 0, '', 3)
+    assert speed_review.block_of({**body, 'kph': 1}, SPAN) == (at(10), at(11), 1, '', 3)
     assert speed_review.block_of({**body, 'kph': 83, 'note': '  works  '}, SPAN) == (at(10), at(11), 83, 'works', 3)
     # No speed: the moments are left out of the training.
     assert speed_review.block_of(body, SPAN)[2] is None

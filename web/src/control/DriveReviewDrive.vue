@@ -646,20 +646,27 @@ watch(() => props.route, () => {
           <section v-if="now" class="dr-now" aria-labelledby="dr-now-title">
             <h3 id="dr-now-title">At {{ clockOf(cursor) }}, the comma had</h3>
             <dl>
-              <dt>Vision limit</dt><dd>{{ now.vision }}<small v-if="now.model"> · {{ now.model }}</small></dd>
-              <dt>Why</dt><dd>{{ now.why }}<small v-if="now.state"> · {{ now.state }}</small></dd>
-              <dt>Last sign read</dt><dd>{{ now.read }}<small v-if="now.signAhead"> · sign ahead in {{ now.signAhead }}</small></dd>
+              <dt>Vision limit</dt><dd>{{ now.vision }}<small v-if="now.model && !simpleLanes"> · {{ now.model }}</small></dd>
               <dt>Map limit</dt><dd>{{ now.map }}<small v-if="now.ahead"> · then {{ now.ahead }}</small><small v-if="now.road"> · {{ now.road }}</small></dd>
-              <dt>Resolver</dt><dd>{{ now.resolver }}<small v-if="now.sla"> · assist {{ now.sla }}</small></dd>
-              <dt>Speed</dt><dd>{{ ownSpeed ? (carKph === null ? 'not in the log' : carKph + ' km/h on the dashboard') : now.speed }}</dd>
-              <dt>Set speed</dt><dd>{{ now.set }}</dd>
-              <dt>Target</dt><dd>{{ now.target }}</dd>
-              <dt>openpilot</dt><dd>{{ now.openpilot }}</dd>
             </dl>
-            <p v-if="change" class="dr-hint">Last limit change: {{ change.from ?? '–' }} → {{ change.kph }},
-              {{ clockOf(cursor - change.at) }} ago.</p>
+            <!-- The rest of the logs: in Speed review folded away, since only the two limits help to judge a speed. -->
+            <component :is="simpleLanes ? 'details' : 'div'" class="dr-more">
+              <summary v-if="simpleLanes">More from the comma's logs</summary>
+              <dl>
+                <dt>Why</dt><dd>{{ now.why }}<small v-if="now.state"> · {{ now.state }}</small></dd>
+                <dt>Last sign read</dt><dd>{{ now.read }}<small v-if="now.signAhead"> · sign ahead in {{ now.signAhead }}</small></dd>
+                <dt>Resolver</dt><dd>{{ now.resolver }}<small v-if="now.sla"> · assist {{ now.sla }}</small></dd>
+                <template v-if="!ownSpeed"><dt>Speed</dt><dd>{{ now.speed }}</dd></template>
+                <dt>Set speed</dt><dd>{{ now.set }}</dd>
+                <dt>Target</dt><dd>{{ now.target }}</dd>
+                <dt>openpilot</dt><dd>{{ now.openpilot }}</dd>
+              </dl>
+              <p v-if="change" class="dr-hint">Last limit change: {{ change.from ?? '–' }} → {{ change.kph }},
+                {{ clockOf(cursor - change.at) }} ago.</p>
+            </component>
           </section>
-          <section v-if="today && (view.inference || view.map_today)" class="dr-now dr-today-card" aria-labelledby="dr-today-title">
+          <section v-if="today && (view.inference || view.map_today) && !simpleLanes" class="dr-now dr-today-card"
+                   aria-labelledby="dr-today-title">
             <h3 id="dr-today-title">On the server today</h3>
             <p class="dr-hint">Found now, not what the comma knew while driving.</p>
             <dl>
@@ -672,7 +679,7 @@ watch(() => props.route, () => {
           <section v-if="!guest" class="dr-signs" aria-labelledby="dr-signs-title">
             <h3 id="dr-signs-title">The signs at {{ clockOf(cursor) }}</h3>
             <template v-if="view.sign_review">
-              <p class="dr-hint">Sign review opens on the frame of this moment: confirm or correct the signs there.</p>
+              <p v-if="!simpleLanes" class="dr-hint">Sign review opens on the frame of this moment: confirm or correct the signs there.</p>
               <a class="btn primary" id="dr-sign-review" :href="signHref">Review the signs here</a>
             </template>
             <p v-else class="dr-hint">This drive has no frames in Sign review yet: prepare it in Drives first.</p>

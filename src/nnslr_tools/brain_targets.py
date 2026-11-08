@@ -56,12 +56,20 @@ review still waiting for a person (review_db.NOT_WAITING_SQL), and only those of
 
 A sign is passed at the zero a person marked in Sign distance (annotations/sign_distance/<route>.jsonl, the mark in effect
 of the vision's run on it), else PASSAGE_SECONDS after its last box. The metres are the car's own, plain vEgo integrated
-from the frame to the passing, never the dashboard's speed (it reads higher). Within AHEAD_METRES of the next sign: its
-number and its metres. No sign and nothing masked within AHEAD_MARGIN_METRES: none, and no metres, but only where every 1
-Hz frame of those metres was confirmed (covered: consecutive confirmed frames, a gap over COVER_GAP_SECONDS breaks it), since
-a part nobody went through may hide a sign. Anything else, between the two or before an end: out of the loss. The next is
-the next sign, a repeat of the limit in force too (the car hides an ahead equal to the limit it holds). Only on frames
-with an answer of the speed.
+from the frame to the passing, never the dashboard's speed (it reads higher).
+
+The next is the first sign whose number is not the limit in force, the number of the last sign passed: a repeat is no
+next, since the car holds the driver's own speed to the km/h and would publish a repeat as a limit ahead. An end is
+always a next. At the start, after an end or after a masked sign nothing is in force and the first sign of all is the
+next. Within AHEAD_METRES of it: its number and its metres. No such sign and nothing masked within AHEAD_MARGIN_METRES:
+none, and no metres. Anything else, between the two or before an end: out of the loss.
+
+Both need what a person went through (covered: consecutive confirmed 1 Hz frames, a gap over COVER_GAP_SECONDS breaks
+it), since a part nobody went through may hide a sign: a number only where one span holds the frame, the sign it
+answers and the sign that put the limit in force; none only where every frame of the AHEAD_MARGIN_METRES ahead was
+confirmed. Where a gap lies between the last sign and the frame, what is in force is not known and a repeat cannot be
+told from a change: no number, and none only with no sign at all within the margin. Only on frames with an answer of
+the speed.
 
 The split (frame_partitions) is the frozen one, data/splits/speed-brain-split.json, never computed again: a drive of the
 freeze joins it frame by frame through speed-brain-frames.json, and one whose frames changed is left out of the dataset with
@@ -130,8 +138,9 @@ The numbers swapped (swap_passages, swapped). On a few drives the picture tells 
 speed, so the network has no reason to read the sign: the second run said 50 past a 60, and took no notice of the signs. So
 every epoch half of the passages (the frames in a row with one number) whose answers all stay within SWAP_TOLERANCE_KPH of the
 number go with that number changed to the other of its family (SWAPS), and those answers, and a next limit of that number,
-move by the same difference: the same place with two limits, and only the sign tells which. A family is numbers the same kind
-of road can have, so that no scene turns absurd. Only answers of train count, and a passage with a block in it stays: a person
+move by the same difference: the same place with two limits, and only the sign tells which. A next limit of the other
+number becomes a repeat of the one in force, no next: those frames say nothing of the limit ahead. A family is numbers the
+same kind of road can have, so that no scene turns absurd. Only answers of train count, and a passage with a block in it stays: a person
 said the speed there. A passage with an answer off the number stays as it is: the sign was wrong there, or he drove another
 speed, and that too is for the brain to learn. A frame with no number in force keeps its answer, since the road alone says
 it there, and an end read keeps the answer after it. Besides the number, the single readings equal to it change, on the
@@ -713,24 +722,48 @@ def ahead_from_signs(ns: np.ndarray, reviewed: dict, metres_at, asked: np.ndarra
         return which, there, left
 
     signs = sorted(reviewed['signs'], key=lambda sign: sign[0])
-    which, has, left = first_after([at for at, _kph in signs])
-    kph = np.array([-1 if value is None else value for _at, value in signs] or [-1], dtype=np.int64)[which]
-    passed = np.array([at for at, _kph in signs] or [0], dtype=np.int64)[which]
+    times = np.array([at for at, _kph in signs], dtype=np.int64)
+    values = np.array([-1 if value is None else value for _at, value in signs], dtype=np.int64)
     masked = sorted(reviewed['masked'], key=lambda span: span[1])
-    hidden, hidden_has, hidden_left = first_after([end for _start, end in masked])
-    hidden_end = np.array([end for _start, end in masked] or [0], dtype=np.int64)[hidden]
+    ends = np.array([end for _start, end in masked], dtype=np.int64)
+    hidden, hidden_has, hidden_left = first_after(ends.tolist())
+    hidden_end = np.append(ends, 0)[hidden]
     inside = np.zeros(len(t), dtype=bool)
     for start, end in masked:
         inside |= (t >= start) & (t < end)
-    numbered = has & (left <= AHEAD_METRES) & (kph > 0) & ~(hidden_has & (hidden_end < passed))
+    # The limit in force: the number of the last sign passed, none at the start, after an end or after a masked sign.
+    last = np.searchsorted(times, t, side='right') - 1
+    last_masked = np.searchsorted(ends, t, side='right') - 1
+    last_passed = np.where(last >= 0, np.append(times, 0)[last], -1)
+    masked_passed = np.where(last_masked >= 0, np.append(ends, 0)[last_masked], -1)
+    in_force = np.where((last >= 0) & (masked_passed < last_passed), np.append(values, -1)[last], -1)
+    # The next: the first sign whose number is not the one in force (an end always is), the first of all with none.
+    changes = np.flatnonzero(values[1:] != values[:-1]) + 1
+    changed = np.append(changes, len(times))[np.searchsorted(changes, np.maximum(last, 0), side='right')]
+    nearest = np.searchsorted(times, t, side='right')
     spans = sorted(reviewed['covered'])
-    reach = np.zeros(len(t))
+    reach, held, stop = np.zeros(len(t)), np.zeros(len(t), dtype=bool), np.zeros(len(t), dtype=np.int64)
+    certain = np.maximum(last_passed, masked_passed) < 0
     if spans:
         starts, stops = np.array([span[0] for span in spans], dtype=np.int64), np.array([span[1] for span in spans],
                                                                                         dtype=np.int64)
         span = np.maximum(np.searchsorted(starts, t, side='right') - 1, 0)
         held = (t >= starts[span]) & (t <= stops[span])
+        # A passing is a little after the box it comes from: as near the span as its frames are to one another.
+        stop = stops[span] + int(COVER_GAP_SECONDS * NS)
         reach[held] = np.asarray(metres_at(stops[span[held]]), dtype=np.float64) - here[held]
+        # What is in force is known only where a person went through everything since the sign that put it there.
+        certain |= held & (np.maximum(last_passed, masked_passed) >= starts[span] - int(COVER_GAP_SECONDS * NS))
+    # Where it is not known a repeat cannot be told from a change: no number, and none only with no sign at all ahead.
+    upcoming = np.where(certain & (in_force > 0), changed, nearest)
+    has = upcoming < len(times)
+    kph = np.append(values, -1)[upcoming]
+    passed = np.append(times, 0)[upcoming]
+    left = np.full(len(t), np.inf)
+    if has.any():
+        left[has] = np.asarray(metres_at(passed[has]), dtype=np.float64) - here[has]
+    numbered = (certain & has & (left <= AHEAD_METRES) & (kph > 0) & ~(hidden_has & (hidden_end < passed)) &
+                held & (passed <= stop))
     none = (left > AHEAD_MARGIN_METRES) & (hidden_left > AHEAD_MARGIN_METRES) & ~inside & (reach >= AHEAD_MARGIN_METRES)
     following[rows[numbered]] = speed_class(kph[numbered])
     next_weight[rows[numbered]] = 1
@@ -819,7 +852,7 @@ def memory_cuts(ns: np.ndarray) -> set[int]:
 
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict, *, rate: float = 1.0,
-                  need_pictures: bool = True) -> dict:
+                  need_pictures: bool = True, inputs: bool = True) -> dict:
     """A drive for the training at rate frames a second (1 or RATE_HZ): frames, ns, partitions, cells, cuts (memory_cuts),
     speed (class per frame), speed_out (why a frame is out of the loss, 0 when in), speed_weight, blocks (Speed review's),
     blocked (a block with a speed holds there), works, works_weight, next, next_weight, metres, metres_weight
@@ -829,7 +862,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     them), pictures (at RATE_HZ, the brain's pictures are there), no_picture_s (seconds of the drive with an answer of the
     speed and no frame with its picture: prepare keeps only the slow ones at the start and the end of a drive).
     labels: read_labels' of the drive, NO_LABELS without a block or a mark. need_pictures=False (a dry run): a frame
-    without its picture keeps its answers."""
+    without its picture keeps its answers. inputs=False (only what the answers are, for summary): inputs is None, since
+    the country of every frame is most of the time a drive takes."""
     frames = drive_frames(root, route, merged)
     partitions = frame_partitions(route, frames, split)
     cells = frame_cells(frames)
@@ -872,7 +906,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'sign_review': reviewed,
             'measured': np.array([not frame.get('step') for frame in frames], dtype=bool),
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
-            'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None),
+            'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None)
+            if inputs else None,
             'signs_read': readings is not None,
             'reader': record.get('fingerprint') if record else None,
             'pictures': rate == 1.0 or pictures_ready(root, record),
@@ -903,8 +938,8 @@ def _say(text: str) -> None:
 
 
 def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *, rate: float = 1.0,
-            need_pictures: bool = True) -> list[dict]:
-    """Every drive of training_routes (or only routes), as drive_targets at rate with its labels, each with
+            need_pictures: bool = True, inputs: bool = True) -> list[dict]:
+    """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs as there), each with
     reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
     drive of the frozen split whose frames changed is left out with a line in log. Sites stay whole only across the
     drives asked for."""
@@ -924,7 +959,7 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
             continue
         try:
             drive = drive_targets(root, route, labels.get(route, NO_LABELS), merged, split, rate=rate,
-                                  need_pictures=need_pictures)
+                                  need_pictures=need_pictures, inputs=inputs)
         except FramesChanged as error:
             log(f'{error}, left out')
             continue
@@ -1075,6 +1110,7 @@ def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) ->
     """The drive with the number of these passages, and what says it, as the other of its family: see the module's text."""
     signs, speed, label = drive['inputs']['signs'].copy(), drive['speed'].copy(), class_kph(drive['speed'])
     following = drive['next'].copy() if 'next' in drive else None
+    weights = (drive['next_weight'].copy(), drive['metres_weight'].copy()) if 'next_weight' in drive else None
     scale = BRAIN_INPUTS.SIGN_KPH_SCALE
     for passage in passages:
         number = int(sign_kph(signs[passage[:1]])[0])
@@ -1086,11 +1122,17 @@ def swapped(drive: dict, passages: list[np.ndarray], groups: tuple[str, ...]) ->
         speed[said] = speed_class(np.clip(label[said] + SWAPS[number] - number, 1, BRAIN_MAX_KPH))
         if following is not None:
             ahead = passage[following[passage] == speed_class(number)]
+            # A next of the other number is now a repeat of the one in force, which is no next: what is after it unknown.
+            repeat = passage[following[passage] == speed_class(SWAPS[number])]
             following[ahead] = speed_class(SWAPS[number])
+            if weights is not None:
+                weights[0][repeat] = weights[1][repeat] = 0
     inputs = {**drive['inputs'], 'signs': signs}
     found = {**drive, 'inputs': inputs, 'speed': speed, 'extra': pack_inputs(inputs, groups)}
     if following is not None:
         found['next'] = following
+    if weights is not None:
+        found['next_weight'], found['metres_weight'] = weights
     return found
 
 

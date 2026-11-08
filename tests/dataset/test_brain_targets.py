@@ -731,9 +731,49 @@ def test_a_frame_not_asked_learns_no_next_limit():
     _following, weight, _metres, metres_weight = ahead((21, 25), signs=[(30 * NS, 60)], asked=[False, True])
     assert weight.tolist() == [0, 1] and metres_weight.tolist() == [0, 1]
     numpy, targets = _np(), _targets()
-    found = targets.ahead_from_signs(numpy.array([-1, 21 * NS]), {'signs': [(30 * NS, 60)], 'covered': [], 'masked': []},
+    found = targets.ahead_from_signs(numpy.array([-1, 21 * NS]), {'signs': [(30 * NS, 60)], 'covered': [(0, 40 * NS)],
+                                                                 'masked': []},
                                      targets.metres_driven([[0, 36.0]]), numpy.ones(2, dtype=bool))
     assert found[1].tolist() == [0, 1]
+
+
+def test_a_repeat_of_the_limit_in_force_is_no_next_and_the_change_after_it_is():
+    targets = _targets()
+    following, weight, metres, metres_weight = ahead((25, 32, 44, 52), signs=[(20 * NS, 50), (30 * NS, 50),
+                                                                              (40 * NS, 50), (55 * NS, 80)])
+    # Past the first 50 the next 50s, 50 and 80 m on, are repeats: none ahead, then the margin, then the 80 30 m on.
+    assert following.tolist() == [targets.NONE_AHEAD] * 3 + [targets.speed_class(80)] and metres[-1] == pytest.approx(.3)
+    assert weight.tolist() == [1, 1, 0, 1] and metres_weight.tolist() == [0, 0, 0, 1]
+    # An end is always a next, after it the first sign of all is, whatever its number, and past that one its repeat is not.
+    following, weight, _metres, _metres_weight = ahead((12, 22, 32), signs=[(10 * NS, 50), (15 * NS, None), (25 * NS, 50),
+                                                                              (35 * NS, 50)])
+    assert weight.tolist() == [0, 1, 1] and following.tolist()[1:] == [targets.speed_class(50), targets.NONE_AHEAD]
+
+
+def test_a_masked_sign_passed_leaves_nothing_in_force():
+    targets = _targets()
+    following, weight, _metres, _metres_weight = ahead((18, 32), signs=[(10 * NS, 50), (40 * NS, 50)],
+                                                       masked=[(14 * NS, 15 * NS)])
+    # Before the masked sign the 50 is a repeat; past it nothing is in force and the 50 is the next.
+    assert weight.tolist() == [1, 1] and following[0] == targets.NONE_AHEAD and following[1] == targets.speed_class(50)
+
+
+def test_a_number_ahead_needs_a_person_through_the_way_to_it_and_back_to_the_limit_in_force():
+    targets = _targets()
+    # The way from the frame to the 60 crosses frames nobody confirmed: no number.
+    _following, weight, _metres, metres_weight = ahead((25,), signs=[(30 * NS, 60)], covered=[(0, 27 * NS)])
+    assert weight.tolist() == [0] and metres_weight.tolist() == [0]
+    # A gap since the 50 in force: the 50 ahead may be a change, nothing is said of it.
+    _following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (30 * NS, 50)],
+                                                        covered=[(0, 10 * NS), (20 * NS, 100 * NS)])
+    assert weight.tolist() == [0]
+    # Without the gap it is a repeat, and with no other sign within the margin the answer is none.
+    following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (30 * NS, 50)])
+    assert weight.tolist() == [1] and following[0] == targets.NONE_AHEAD
+    # Not known what is in force, and no sign at all within the margin: none is still sure.
+    following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (60 * NS, 50)],
+                                                       covered=[(0, 10 * NS), (20 * NS, 100 * NS)])
+    assert weight.tolist() == [1] and following[0] == targets.NONE_AHEAD
 
 
 def test_a_drive_takes_its_next_limit_from_sign_review(tmp_path):
@@ -1068,6 +1108,16 @@ def test_the_next_limit_of_the_number_moves_with_it_and_another_stays():
     assert seen['next'].tolist() == [targets.speed_class(120), targets.speed_class(80), targets.NONE_AHEAD,
                                      targets.speed_class(100)]
     assert drive['next'][0] == targets.speed_class(100)
+
+
+def test_a_next_limit_of_the_other_number_is_a_repeat_once_swapped_and_says_nothing():
+    np, targets = _np(), _targets()
+    drive = numbered([100, 100, 0], [100, 100, 90])
+    drive['next'] = np.array([targets.speed_class(120), targets.speed_class(80), targets.speed_class(120)])
+    drive['next_weight'], drive['metres_weight'] = np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
+    seen = all_swapped(drive)
+    assert seen['next_weight'].tolist() == [0, 1, 1] and seen['metres_weight'].tolist() == [0, 1, 1]
+    assert drive['next_weight'].tolist() == [1, 1, 1]
 
 
 def test_a_number_with_hours_gives_its_number_and_its_plate():
