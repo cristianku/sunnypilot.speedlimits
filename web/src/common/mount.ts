@@ -2,6 +2,7 @@
 import {createApp, type Component} from 'vue';
 import AccountMenu from '../components/AccountMenu.vue';
 import ConfirmDialog from '../components/ConfirmDialog.vue';
+import ReviewSwitch from '../components/ReviewSwitch.vue';
 import ToastHost from '../components/ToastHost.vue';
 import TopComma from '../components/TopComma.vue';
 import TopMachine from '../components/TopMachine.vue';
@@ -18,8 +19,9 @@ function mountHost(id: string, part: Component): void {
 
 /**
  * The parts every signed-in page shares: the Account menu in the top bar rendered by pages.py (#account-menu;
- * data-current marks the Account page), the comma (#comma-pill) and the server (#tabs-machine) of the top bar, the
- * confirm dialog and the toast (so the comma and the server can tell how an action went on any page).
+ * data-current marks the Account page), the comma (#comma-pill), Speed ⇄ Sign review before it and the server
+ * (#tabs-machine) of the top bar, the confirm dialog and the toast (so the comma and the server can tell how an action
+ * went on any page).
  */
 export function mountSiteParts(): void {
   mountHost('dialog-host', ConfirmDialog);
@@ -29,7 +31,15 @@ export function mountSiteParts(): void {
   const machine = document.getElementById('tabs-machine');
   if (machine !== null) createApp(TopMachine, {feed: machine.dataset['feed'] ?? 'system'}).mount(machine);
   const comma = document.getElementById('comma-pill');
-  if (comma !== null) createApp(TopComma).mount(comma);
+  if (comma !== null) {
+    createApp(TopComma).mount(comma);
+    // Speed review ⇄ Sign review, before the comma: shown only on those two pages (common/review-switch.ts).
+    const reviews = document.createElement('div');
+    reviews.className = 'tabs-machine';
+    reviews.id = 'review-switch';
+    comma.before(reviews);
+    createApp(ReviewSwitch).mount(reviews);
+  }
 }
 
 /** The page's own app in #app, plus the Account menu and the confirm dialog. */

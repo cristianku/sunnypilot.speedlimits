@@ -442,3 +442,12 @@ border:1px solid var(--line-strong);box-shadow:var(--pop-shadow);animation:dialo
 .dashcam-badge{display:inline-flex;align-items:center;flex:none;padding:2px 8px;border-radius:6px;background:#15803d;color:#fff;
   font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;
   box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 6px 1px rgba(0,0,0,.45);text-shadow:0 1px 1px rgba(0,0,0,.35)}
+/* Speed review ⇄ Sign review of the drive shown, before the comma (ReviewSwitch.vue): the page shown lit. */
+.review-switch{display:inline-flex;align-items:center;gap:2px;padding:2px;border-radius:999px;background:var(--seg-bg)}
+.rs-item{display:inline-flex;align-items:center;min-height:24px;padding:0 10px;border-radius:999px;font-size:12px;font-weight:600;
+color:var(--muted);text-decoration:none;white-space:nowrap}
+a.rs-item{color:var(--accent)}a.rs-item:hover{background:var(--btn-2-hover)}
+.rs-item.rs-on{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.25)}
+@media (pointer:coarse){.rs-item{min-height:32px}}
+@media (max-width:560px){.rs-item{padding:0 9px}.rs-item.rs-on{display:none}}
+@media (max-width:420px){.bar-end:has(.review-switch){gap:5px}.bar-end:has(.review-switch) .tm-pill{padding:0 8px;gap:6px}}

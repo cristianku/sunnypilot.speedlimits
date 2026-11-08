@@ -2,8 +2,9 @@
 // The inspector, docked on the right on a computer and under the photo on a phone: the drive, the boxes of the
 // frame, the second reading, the editor of the selected one, "More", the confirm block. What the car's networks read
 // and the AI reviewer are under the photo (StageBar.vue), so the editor comes right under the boxes.
-import {computed} from 'vue';
+import {computed, onBeforeUnmount, watch} from 'vue';
 import {isGuest} from '../common/guest';
+import {setReviewSwitch} from '../common/review-switch';
 import BoxEditor from './BoxEditor.vue';
 import BoxList from './BoxList.vue';
 import AiLiveBanner from './AiLiveBanner.vue';
@@ -31,6 +32,9 @@ const carryHint = computed(() => carry.value.enabled
 // On the server: what the car did at this moment (its limit, the map's, the vision's), in the drive's player of Speed review.
 const driveHref = computed(() => report.apiBase === null || isGuest() ? null : '/speed-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
+// The same address in the top bar's switch, always at the same place (common/review-switch.ts).
+watch(driveHref, (href) => setReviewSwitch(href === null ? null : 'signs', href), {immediate: true});
+onBeforeUnmount(() => setReviewSwitch(null, null));
 </script>
 
 <template>

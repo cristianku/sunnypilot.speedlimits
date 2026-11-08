@@ -20,6 +20,7 @@ import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, w
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
+import {setReviewSwitch} from '../common/review-switch';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
 import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
@@ -393,6 +394,10 @@ const signHref = computed((): string => {
   const base = '/route/' + encodeURIComponent(props.route) + '/';
   return minute ? base + '?segment=' + minute.segment + '&second=' + Math.max(0, Math.round((cursor.value - minute.start) * 10) / 10) : base;
 });
+// The same address in the top bar's switch, always at the same place (common/review-switch.ts).
+watch(() => props.tab === 'speedreview' && !guest && view.value?.sign_review ? signHref.value : null,
+  (href) => setReviewSwitch(href === null ? null : 'speed', href), {immediate: true});
+onBeforeUnmount(() => setReviewSwitch(null, null));
 
 // -- the window of the lanes ------------------------------------------------------------------------------------------------
 type Zoom = 'one' | 'two' | 'ten' | 'all';
