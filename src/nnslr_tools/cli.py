@@ -1738,6 +1738,41 @@ def build_parser() -> argparse.ArgumentParser:
                                                                     "nothing is learned, nothing written outside --run-dir")
     p_brain_net.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_net.set_defaults(func=_cmd_train_brain)
+    p_labeler = sub.add_parser("road-labeler-train", help="train the road labeler, an offline network that prepares "
+                                                          "the labels of Speed review (road type, kinds of road, "
+                                                          "roadworks) from the camera at high definition, the map, the "
+                                                          "GPS and the speed; never on the car (GPU, .venv-gpu). Writes "
+                                                          "road-labeler.pt and result.json into --run-dir")
+    p_labeler.add_argument("--run-dir", required=True, help="the folder of this run")
+    p_labeler.add_argument("--route", action="append", help="route id; repeat for more. Default: every scanned drive "
+                                                            "with its frames")
+    p_labeler.add_argument("--epochs", type=int, default=None)
+    p_labeler.add_argument("--seed", type=int, default=0)
+    p_labeler.add_argument("--device", help="default: cuda; the CPU for a dry run")
+    p_labeler.add_argument("--dry-run", action="store_true", help="a couple of steps on the CPU with a tiny encoder on "
+                                                                  "the start of one or two drives: the chain works, "
+                                                                  "nothing is learned, nothing written outside --run-dir")
+    p_labeler.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_labeler.set_defaults(func=_cmd_road_labeler_train)
+    p_labeler_predict = sub.add_parser("road-labeler-predict", help="the road labeler of a run along drives: "
+                                                                    "derived/road_labeler/<route>.jsonl, and where it "
+                                                                    "is sure the marks of the kinds of road in Speed "
+                                                                    "review (reviewer net/<run>; a person's marks, "
+                                                                    "removals and checks win)")
+    p_labeler_predict.add_argument("--run-dir", required=True, help="the folder of the run with road-labeler.pt")
+    p_labeler_predict.add_argument("--route", action="append", help="route id; repeat for more")
+    p_labeler_predict.add_argument("--all", action="store_true", help="every scanned drive with its frames")
+    p_labeler_predict.add_argument("--no-marks", action="store_true", help="the proposals only, no mark in Speed review")
+    p_labeler_predict.add_argument("--write", action="store_true", help="also the roadworks and the road types where it "
+                                                                        "is sure (a road type written counts as a "
+                                                                        "person's for the brain and the road-type net)")
+    p_labeler_predict.add_argument("--out-dir", help="default: <data root>/derived/road_labeler")
+    p_labeler_predict.add_argument("--device", help="default: cuda when there is one")
+    p_labeler_predict.add_argument("--dry-run", action="store_true", help="the start of the drives on the CPU, the "
+                                                                          "proposals into <run>/proposals, nothing "
+                                                                          "written into Speed review")
+    p_labeler_predict.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_labeler_predict.set_defaults(func=_cmd_road_labeler_predict)
     p_brain_export = sub.add_parser("export-brain", help="the brain of a run as the car runs it: one step a second as ONNX with "
                                                          "its contract, checked against PyTorch and along a real drive (CPU, "
                                                          ".venv-gpu). Writes <run>/export/brain.onnx")
@@ -2711,6 +2746,46 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))
+    return 0
+
+
+def _cmd_road_labeler_train(args: argparse.Namespace) -> int:
+    from nnslr_tools import road_labeler
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    result = road_labeler.train_labeler(root, Path(args.run_dir), lambda route: store.merged(route, keep=False),
+                                        routes=args.route, epochs=args.epochs or road_labeler.EPOCHS,
+                                        device=args.device, dry_run=args.dry_run, seed=args.seed)
+    print(json.dumps({part: result[part] for part in ('train', 'validation', 'test')}, indent=2))
+    return 0
+
+
+def _cmd_road_labeler_predict(args: argparse.Namespace) -> int:
+    from nnslr_tools import road_labeler, road_labeler_data
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    store = DriveReviewStore(root)
+    routes = list(args.route or [])
+    if args.all:
+        routes += [route for route in road_labeler_data.labeler_routes(root) if route not in routes]
+    if not routes:
+        print("nnslr road-labeler-predict: name a --route or use --all", file=sys.stderr)
+        return 2
+
+    def span_of(route: str):
+        summary = store.summary(route)
+        if not summary or not summary.get('span_ns') or summary['span_ns'][1] is None:
+            return None
+        return summary['t0_ns'], summary['span_ns'][1]
+
+    found = road_labeler.predict_labeler(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), span_of,
+                                         routes, out_dir=Path(args.out_dir) if args.out_dir else None,
+                                         marks=not args.no_marks, write=args.write, dry_run=args.dry_run,
+                                         device=args.device)
+    print(json.dumps({'drives': len(found)}))
     return 0
 
 
