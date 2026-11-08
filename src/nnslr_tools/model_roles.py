@@ -846,6 +846,8 @@ class ModelIndex:
                       'architecture': 'mobilenet_v3_small+gru', 'initialization': 'ImageNet', 'best_epoch': None,
                       'seed': seed, 'works': trained.get('works'), 'plates': bool(trained.get('plates')),
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
+                      # How the car steps it and what it says (Models › How it works, model-flow.ts).
+                      **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test')})
         return entry
