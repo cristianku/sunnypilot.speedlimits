@@ -749,9 +749,10 @@ function worksIn(from: number, to: number) {
             <p v-else-if="drive.road_type_names && !readOnly && !isGuest()" class="dr-hint">No road types for this drive yet: Read the map in Data › Prepare.</p>
             <div class="sr-kinds" role="radiogroup" aria-label="What the taps mark">
               <button v-for="item in kinds" :key="item.kind" type="button" role="radio" class="sr-kind"
-                      :class="{'sr-kind-works': item.kind === ROADWORKS}" :aria-checked="item.kind === pickedKind.kind"
-                      :title="inside.has(item.kind) ? 'The frame shown is inside a mark of it' : 'Key k: the next one'"
-                      @click="picked = item.kind">{{ item.label }}<i v-if="inside.has(item.kind)" class="sr-kind-dot" aria-label="here"/></button>
+                      :class="{'sr-kind-works': item.kind === ROADWORKS, 'sr-kind-here': inside.has(item.kind)}"
+                      :aria-checked="item.kind === pickedKind.kind"
+                      :title="(inside.has(item.kind) ? 'Marked at the frame shown' : 'No mark at the frame shown') + ' · a tap picks it for the buttons below (key k)'"
+                      @click="picked = item.kind">{{ item.label }}<span v-if="inside.has(item.kind)" class="sr-hidden"> (here)</span></button>
               <button v-if="canAdd && !adding" type="button" class="sr-kind sr-kind-add" id="sr-kind-add" aria-label="Add a kind of road"
                       @click="adding = true">+</button>
             </div>

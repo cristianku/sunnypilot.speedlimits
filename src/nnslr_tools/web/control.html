@@ -1594,9 +1594,13 @@ input.sr-kph-value:disabled{color:var(--muted);opacity:.8}
 .sr-kinds{display:flex;flex-wrap:wrap;gap:6px}
 .sr-kind{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border-radius:999px;border:1px solid var(--line);
 background:var(--surface-2);color:var(--fg);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
-.sr-kind[aria-checked="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-.sr-kind.sr-kind-works[aria-checked="true"]{background:var(--warn);border-color:var(--warn)}
-.sr-kind-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+/* A kind of road: the one picked for the buttons under it is ringed; solid only where the frame shown is inside a mark of it,
+   so it goes off on the next stretch. */
+.sr-kind[aria-checked="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);color:var(--accent);font-weight:600}
+.sr-kind.sr-kind-works[aria-checked="true"]{border-color:var(--warn);box-shadow:inset 0 0 0 1px var(--warn);color:var(--warn)}
+.sr-kind.sr-kind-here{background:var(--accent);border-color:var(--accent);color:#fff}
+.sr-kind.sr-kind-works.sr-kind-here{background:var(--warn);border-color:var(--warn);color:#fff}
+.sr-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .sr-kind.sr-kind-add{font-size:17px;font-weight:600;color:var(--accent)}
 .sr-kind-new{display:flex;flex-wrap:wrap;gap:6px}
 .sr-kind-new input{flex:1 1 160px;min-width:0;font:inherit;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;
