@@ -11,8 +11,9 @@
 // with "+") are marked the same way, each with its own marks and its own "checked to here": a chip picks what the taps
 // mark, the lane draws the one picked, and a dot on a chip says the frame shown is inside one of its marks. The road type
 // (town, rural, motorway…) is the map's, one a second, drawn on a lane of its own, light, and solid where he corrected it:
-// a chip sets a type, or "can't tell", on the whole stretch of the frame shown, or from a frame kept with "From here" to
-// the frame shown (speed_review.save_road_type), kept as a correction over the map's (road_types.correct). The picture
+// a chip sets a type, or "can't tell", on the whole stretch of the frame shown, on its part before or after the frame
+// shown (✂ Before / After, the stretch cut there), or from a frame kept with "From here" to the frame shown
+// (speed_review.save_road_type), kept as a correction over the map's (road_types.correct). The picture
 // shows the answer (its square named ANSWER, as the lane) next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
 // is the right one. Where openpilot or the car's cruise held the speed (held) it is not his foot: the lane greys it and
 // ANSWER is a dash, as the training leaves it out, unless a block of his says a speed there. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
@@ -26,6 +27,7 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
+import Segmented from './Segmented.vue';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
   roadTypeAt, roadTypeLabel, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
 
@@ -314,16 +316,35 @@ const typeFrom = ref<number | null>(null);
 /** Whether a chip is the type in force at the frame shown: "can't tell" only where he said it, not where the map has none. */
 const typeOn = (type: string | null): boolean => !!typeHere.value && typeHere.value.road_type === type
   && (type !== null || typeHere.value.reviewer !== null);
+/** Which part of the stretch shown a chip sets: all of it, its start up to the frame shown, or from it to its end, so a
+ * stretch is cut where the picture shows the change. */
+type TypePart = 'all' | 'before' | 'after';
+const typePart = ref<TypePart>('all');
+const TYPE_PARTS: {key: TypePart; label: string}[] = [{key: 'all', label: 'Whole stretch'}, {key: 'before', label: '✂ Before'},
+  {key: 'after', label: '✂ After'}];
+// Another stretch: the whole of it again.
+watch(() => typeHere.value?.from_ns, () => { typePart.value = 'all'; });
+/** The stretch can be cut when the frame shown is inside it, half a second from its ends, and no "From here" is kept. */
+const typeCuttable = computed(() => canType.value && typeFrom.value === null && !!typeHere.value
+  && now.value > typeHere.value.from_ns + 5e8 && now.value < typeHere.value.to_ns - 5e8);
+const typeCut = computed((): TypePart => typeCuttable.value ? typePart.value : 'all');
 async function setType(type: string | null): Promise<void> {
   if (!canType.value) return;
   const from = typeFrom.value;
-  if (from === null && !typeHere.value) {
+  const here = typeHere.value;
+  if (from === null && !here) {
     toast('The map has no frame here: “From here” sets a type from one frame to another.');
     return;
   }
   const at = within(now.value);
-  if (await send('/road-type', from === null ? {road_type: type, at_ns: at} : {road_type: type, from_ns: from, to_ns: at})) {
+  // A part of the stretch: its ends are the frames of the map at those times, the frame shown in both parts.
+  const body = from !== null ? {road_type: type, from_ns: from, to_ns: at}
+    : here && typeCut.value === 'before' ? {road_type: type, from_ns: here.from_ns, to_ns: at}
+    : here && typeCut.value === 'after' ? {road_type: type, from_ns: at, to_ns: here.to_ns - 1}
+    : {road_type: type, at_ns: at};
+  if (await send('/road-type', body)) {
     typeFrom.value = null;
+    typePart.value = 'all';
   }
 }
 function startType(): void {
@@ -341,6 +362,15 @@ function typesIn(from: number, to: number, fits: (from: number, to: number, text
       none: item.road_type === null && item.reviewer === null, current: typeFrom.value === null && item === typeHere.value,
       text: names.find((name) => name && fits(first, last, name)) ?? ''}];
   });
+}
+/** The part of the stretch shown that a chip sets when it is cut, inside the time window: none or one. */
+function typeCutIn(from: number, to: number) {
+  const here = typeHere.value;
+  if (!here || typeCut.value === 'all') return [];
+  const [first, last] = typeCut.value === 'before' ? [secondOf(here.from_ns), seconds.value] : [seconds.value, secondOf(here.to_ns)];
+  const start = Math.max(first, from);
+  const stop = Math.min(last, to);
+  return start <= stop ? [{from: start, to: Math.max(stop, start + 0.5)}] : [];
 }
 /** The span "From here" keeps, to the frame shown, inside the time window: none or one. */
 function typeFromIn(from: number, to: number) {
@@ -600,6 +630,8 @@ function worksIn(from: number, to: number) {
           </g>
           <rect v-for="part in typeFromIn(from, to)" :key="'from'" :x="x(part.from)" y="1" :width="w(part.from, part.to)"
                 :height="TYPE_HEIGHT - 2" rx="2" class="sr-type-new"/>
+          <rect v-for="part in typeCutIn(from, to)" :key="'cut'" :x="x(part.from)" y="1" :width="w(part.from, part.to)"
+                :height="TYPE_HEIGHT - 2" rx="2" class="sr-type-new"/>
         </svg>
       </div>
     </template>
@@ -691,17 +723,23 @@ function worksIn(from: number, to: number) {
             <div v-if="roadTypes.length" class="sr-type-row">
               <p class="sr-type-now">Road type <b>{{ typeHere ? typeName(typeHere) : '–' }}</b><span v-if="typeHere"
                 class="sr-tag" :class="{'sr-tag-out': !typeHere.reviewer}">{{ typeHere.reviewer ? 'Yours' : 'Map' }}</span></p>
+              <template v-if="typeCuttable">
+                <p class="sr-cut-head"><strong>✂ Cut here?</strong> The stretch goes on before and after this frame: a type sets
+                  the whole of it, or only the part before or after the frame.</p>
+                <Segmented v-model="typePart" :options="TYPE_PARTS" label="Cut the stretch at this frame" class="sr-type-part"/>
+              </template>
               <div v-if="canType" class="sr-kinds sr-types" role="group" aria-label="The road type">
                 <button v-for="(type, index) in typeChoices" :key="type ?? 'none'" type="button" class="sr-kind sr-type-chip"
                         :disabled="locked" :aria-current="typeOn(type) ? 'true' : undefined"
-                        :title="(typeFrom === null ? 'Sets it on the whole stretch of the frame shown' : 'Sets it from ' + clockOf(secondOf(typeFrom)) + ' to the frame shown') + ' (key ' + (type === null ? 0 : index + 1) + ')'"
+                        :title="(typeFrom !== null ? 'Sets it from ' + clockOf(secondOf(typeFrom)) + ' to the frame shown' : typeCut === 'before' ? 'Sets it from the start of the stretch to the frame shown' : typeCut === 'after' ? 'Sets it from the frame shown to the end of the stretch' : 'Sets it on the whole stretch of the frame shown') + ' (key ' + (type === null ? 0 : index + 1) + ')'"
                         @click="setType(type)"><i class="sr-type-dot" :class="'rt-' + (type ?? 'unknown')"/>{{ roadTypeLabel(type) }}</button>
                 <button type="button" class="sr-kind sr-type-from" id="sr-type-from" :aria-pressed="typeFrom !== null" :disabled="locked"
                         title="Key t: then a type sets it from here to the frame you go to" @click="startType">{{ typeFrom === null ? 'From here…' : 'Cancel' }}</button>
               </div>
               <p class="dr-hint"><template v-if="typeFrom !== null">From {{ clockOf(secondOf(typeFrom)) }} to the frame shown: tap its type.</template><template
                 v-else-if="typeHere">{{ typeName(typeHere) }} {{ clockOf(secondOf(typeHere.from_ns)) }}–{{ clockOf(secondOf(typeHere.to_ns)) }}<template
-                v-if="typeHere.reviewer"> · {{ typeHere.reviewer }}</template><template v-if="canType"> · a type sets it on this stretch</template></template><template
+                v-if="typeHere.reviewer"> · {{ typeHere.reviewer }}</template><template v-if="canType"> · a type sets it {{ typeCut === 'before' ? 'from its start to ' + clockOf(seconds)
+                : typeCut === 'after' ? 'from ' + clockOf(seconds) + ' to its end' : 'on this stretch' }}</template></template><template
                 v-else>The map has no type here.</template></p>
             </div>
             <p v-else-if="drive.road_type_names && !readOnly && !isGuest()" class="dr-hint">No road types for this drive yet: Read the map in Data › Prepare.</p>
