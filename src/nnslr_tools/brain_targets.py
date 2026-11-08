@@ -31,9 +31,8 @@ each with its reason:
 
 - no_speed: the logs give no speed there (before the first carState, a hole);
 - stopped: the answer is below 1 km/h, which has no class;
-- cruise: a machine held the speed, not his foot: openpilot's longitudinal (carControl.longActive), the car's cruise
-  (carState.cruiseState.enabled) with the gas not pressed, or on the Peugeot its own ACC and limiter, which carState
-  hides on a dashcam drive (speed_review.machine_held). A block of his still answers there;
+- cruise: a machine held the speed, not his foot: openpilot's longitudinal (carControl.longActive), or the car's cruise
+  (carState.cruiseState.enabled) with the gas not pressed (speed_review.machine_held). A block of his still answers there;
 - left_out: inside a block with no speed, a person took those moments out;
 - boundary: EDGE_SECONDS around the edge of a block where the answer jumps, since a tap is only so exact (a block with the
   dashboard's own speed at its edge is no jump, and the dashboard's speed changing from step to step is never one);

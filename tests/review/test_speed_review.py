@@ -93,19 +93,14 @@ def test_openpilot_or_the_cruise_held_the_speed_unless_his_foot_was_on_the_gas()
     assert speed_review.machine_held(None, times[:2]) == [False, False]
 
 
-def test_the_peugeots_own_acc_and_limiter_are_held_though_carstate_says_the_cruise_is_off():
-    # 0-10 s ACC at 100 (available, set speed), the gas pressed at 5-10 s; 10-20 s nothing set (255); 20-40 s the
-    # limiter at 80 (not available), the car at 70, at 79, then over it at 90 (his kick-down); 40-50 s nothing known.
-    series = {'cruise_enabled': [[at(0), False]],
-              'cruise_available': [[at(0), True], [at(10), False], [at(40), None]],
-              'cruise_speed': [[at(0), 100.0], [at(10), 255.0], [at(20), 80.0], [at(40), None]],
-              'gas': [[at(0), False], [at(5), True], [at(10), False]],
-              'v_ego': [[at(0), 100.0], [at(20), 70.0], [at(30), 79.0], [at(37), 90.0]]}
-    times = [at(2), at(7), at(15), at(25), at(35), at(38), at(45)]
+def test_a_set_speed_alone_is_never_held_the_answer_is_how_he_drove():
+    # The Peugeot's set speed (cruise_speed) and its cruise_available say nothing of his foot: only openpilot's
+    # longitudinal or the cruise on in carState take a moment out.
+    series = {'cruise_enabled': [[at(0), False]], 'cruise_available': [[at(0), True], [at(10), False]],
+              'cruise_speed': [[at(0), 100.0], [at(10), 117.0]], 'gas': [[at(0), False]],
+              'v_ego': [[at(0), 100.0], [at(10), 116.5]]}
     peugeot = {'series': series, 'meta': {'car': {'brand': 'psa'}}}
-    assert speed_review.machine_held(peugeot, times) == [True, False, False, False, True, False, False]
-    # The rule is the Peugeot's: another car's cruise says itself in cruiseState.enabled.
-    assert speed_review.machine_held({'series': series, 'meta': {'car': {'brand': 'subaru'}}}, times) == [False] * 7
+    assert speed_review.machine_held(peugeot, [at(5), at(15)]) == [False, False]
 
 
 def test_a_dashcam_drive_is_passive_in_every_carparams_and_never_engaged():

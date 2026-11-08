@@ -59,11 +59,6 @@ MAX_NOTE = 500
 MIN_BLOCK_SECONDS = 1
 WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
-# carState.cruiseState.speed (cruise_speed, km/h) at or above it is no set speed: the Peugeot's 255.
-CRUISE_SPEED_OFF = 254.5
-# The Peugeot's limiter holds the car about 1 km/h under its set speed: this close, it is the limiter's speed; further
-# above it is his kick-down or a downhill, his foot (on the 27 dashcam drives of 8 Nov 2026 the car is rarely above it).
-LIMITER_MARGIN_KPH = 2.0
 # openpilot driving, any of them True once: selfdriveState, MADS, carControl.
 ENGAGED_SERIES = ('sd_enabled', 'sd_active', 'mads_active', 'lat_active', 'long_active')
 
@@ -140,16 +135,8 @@ def machine_held(merged: dict | None, ns) -> list[bool]:
     """Whether a machine held the speed at each of the times ns, not his foot: openpilot's longitudinal was active
     (carControl.longActive), or the car's cruise was on (carState.cruiseState.enabled) with the gas not pressed, since his
     foot over the cruise is his speed. The brain learns no speed of his there; a block still says one. Unknown is not
-    held.
-
-    On a Peugeot (brand psa) also its own ACC and limiter, which carState never shows as on: opendbc psa/interface.py
-    sets cruiseState.enabled False while openpilot's radar session is off, as it is on every dashcam drive, and the limiter
-    is no cruise at all there (psa/carstate.py). Its ACC is a set speed (cruise_speed under CRUISE_SPEED_OFF) with the
-    cruise available (regulation type 1 or 3), the gas not pressed: the same moments as the ACC bit of the car's 0x452,
-    all but 18 of 4 million frames on 8 Nov 2026. Its limiter is a set speed with the cruise not available (type 2) and
-    the car within LIMITER_MARGIN_KPH of it, gas or not: there the car capped his foot."""
+    held."""
     series = (merged or {}).get('series') or {}
-    psa = (((merged or {}).get('meta') or {}).get('car') or {}).get('brand') == 'psa'
 
     def values(name: str) -> list:
         points = series.get(name) or []
@@ -160,15 +147,8 @@ def machine_held(merged: dict | None, ns) -> list[bool]:
             found.append(points[at][1] if at >= 0 else None)
         return found
     out = []
-    for active, on, gas, available, setpoint, v_ego in zip(
-            values('long_active'), values('cruise_enabled'), values('gas'), values('cruise_available'),
-            values('cruise_speed'), values('v_ego')):
+    for active, on, gas in zip(values('long_active'), values('cruise_enabled'), values('gas')):
         held = active is True or (on is True and gas is not True)
-        if psa and not held and setpoint is not None and 0 < setpoint < CRUISE_SPEED_OFF:
-            if available is True:
-                held = gas is not True
-            elif available is False:
-                held = v_ego is not None and abs(v_ego - setpoint) <= LIMITER_MARGIN_KPH
         out.append(held)
     return out
 

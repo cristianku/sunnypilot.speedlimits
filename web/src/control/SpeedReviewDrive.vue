@@ -342,8 +342,8 @@ function worksIn(from: number, to: number) {
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
           <p v-if="drive.dashcam === false" class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the brain
             does not learn from it.</strong> It learns only drives with sunnylink › Toggles › Enable sunnypilot off.</p>
-          <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one. Where openpilot,
-            the car's cruise or its limiter held the speed it is a dash: not your foot, not learnt.</p>
+          <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one. Where openpilot or
+            the cruise held the speed it is a dash: not your foot, not learnt.</p>
           <div class="sr-value">
             <span>{{ block ? 'Block' : 'Your dashboard speed' }}</span><b>{{ (machine ? driverKph : label) ?? '–' }}</b>
             <span v-if="(machine ? driverKph : label) !== null">km/h</span>
@@ -352,7 +352,7 @@ function worksIn(from: number, to: number) {
           </div>
           <p v-if="block" class="dr-hint">{{ clockOf(secondOf(block.start_ns)) }}–{{ clockOf(secondOf(block.end_ns)) }} ·
             your dashboard speed {{ driverKph ?? '–' }} km/h<template v-if="block.reviewer"> · {{ block.reviewer }}</template></p>
-          <p v-else-if="machine" class="dr-hint">openpilot, the car's cruise or its limiter held the speed here, not your foot:
+          <p v-else-if="machine" class="dr-hint">openpilot or the car's cruise held the speed here, not your foot:
             the training leaves it out, unless a block of yours says a speed.</p>
 
           <div v-if="pending !== null" class="sr-new" role="group" aria-labelledby="sr-new-title">
