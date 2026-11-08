@@ -122,9 +122,12 @@ def test_the_frozen_split_is_read_without_the_sunnypilot_clone(root):
     (root / 'splits' / 'speed-brain-split.json').write_text(json.dumps({'partitions': {ROUTE: ['train', 'val']}}))
     (root / 'splits' / 'speed-brain-frames.json').write_text(json.dumps({'frames': {ROUTE: ['0/1', '0/2']}}))
     split = regression.frozen_split(root)
-    stretches = [{'start_ns': T0, 'end_ns': T0 + 10 * NS, 'kph': 80}]
-    assert regression._labelled_in_train(ROUTE, stretches, T0, split) == 1.0
-    assert regression._labelled_in_train(OTHER, stretches, T0, split) is None
+    assert regression._labelled_in_train(ROUTE, [], T0, split) == 1.0
+    blocks = [{'start_ns': T0, 'end_ns': T0 + 2 * NS, 'kph': 80}]
+    assert regression._labelled_in_train(ROUTE, blocks, T0, split) == 1.0
+    left_out = [{'start_ns': T0, 'end_ns': T0 + 2 * NS, 'kph': None}]
+    assert regression._labelled_in_train(ROUTE, left_out, T0, split) == 0.0
+    assert regression._labelled_in_train(OTHER, blocks, T0, split) is None
 
 
 def test_the_progress_goes_drive_by_drive_and_segment_by_segment():

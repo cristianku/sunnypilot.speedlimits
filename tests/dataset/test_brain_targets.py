@@ -1,11 +1,12 @@
-"""What a label of Speed review becomes for the training: the answers, what stays out of the loss, the split, the inputs.
-numpy comes in only inside the tests: collecting them must leave it out (tests/cli/test_import_isolation.py)."""
+"""What Speed review and Sign review become for the training: the answers, what stays out of the loss, the split, the
+inputs. numpy comes in only inside the tests: collecting them must leave it out (tests/cli/test_import_isolation.py)."""
 import json
 import sqlite3
 
 import pytest
 
 NS = 1_000_000_000
+ROUTE = '00000001--abcdef0123'
 
 
 def _np():
@@ -18,9 +19,8 @@ def _targets():
     return brain_targets
 
 
-def stretch(start, end, kph, state='confirmed', known=None):
-    return {'start_ns': start * NS, 'end_ns': end * NS, 'kph': kph, 'state': state,
-            'known_ns': None if known is None else known * NS}
+def block(start, end, kph):
+    return {'start_ns': start * NS, 'end_ns': end * NS, 'kph': kph}
 
 
 def mark(start, end):
@@ -28,40 +28,69 @@ def mark(start, end):
 
 
 def seconds(*values):
-    return _np().array(values, dtype=_np().int64) * NS
+    return (_np().array(values, dtype=_np().float64) * NS).astype(_np().int64)
 
 
-def test_a_label_is_a_class_of_five_kilometres():
+def test_a_label_is_a_class_of_one_kilometre_and_below_one_there_is_none():
+    np, targets = _np(), _targets()
+    assert targets.speed_class(1) == 0 and targets.speed_class(100) == 99 and targets.speed_class(200) == 199
+    assert targets.speed_class(250) == 199 and targets.speed_class(52.6) == 52
+    assert targets.speed_class(0) == -1 and targets.speed_class(0.6) == -1 and targets.speed_class(None) == -1
+    assert targets.class_kph(targets.speed_class(123)) == 123
+    assert targets.speed_class(np.array([0, 1, 1.4, 50, 300, np.nan])).tolist() == [-1, 0, 0, 49, 199, -1]
+    assert targets.class_kph(np.arange(3)).tolist() == [1, 2, 3]
+    assert targets.SPEED_CLASSES == 200 and targets.NONE_AHEAD == 200 and not hasattr(targets, 'GRID_KPH')
+
+
+def test_the_kph_of_the_classes_come_out_of_a_tensor_too():
+    torch = pytest.importorskip('torch')
+    assert _targets().class_kph(torch.arange(3)).tolist() == [1, 2, 3]
+
+
+def test_his_speed_is_the_answer_where_no_block_says_otherwise():
     targets = _targets()
-    assert targets.speed_class(5) == 0
-    assert targets.speed_class(100) == 19
-    assert targets.class_kph(targets.speed_class(120)) == 120
-    assert targets.SPEED_CLASSES == 40
+    classes, out = targets.speed_answers(seconds(5, 15, 25, 35), [80, None, 0, 120], [])
+    assert list(classes) == [79, -1, -1, 119]
+    assert list(out) == [0, targets.NO_SPEED, targets.STOPPED, 0]
 
 
-def test_only_a_frame_a_person_looked_at_gives_a_speed():
+def test_a_block_says_the_speed_and_the_moments_around_its_edges_are_out():
     targets = _targets()
-    classes, out = targets.speed_answers(seconds(5, 15, 25, 35), [stretch(0, 20, 100), stretch(20, 30, None, 'undetermined')])
-    assert list(classes) == [19, 19, -1, -1]
-    assert list(out) == [0, 0, targets.UNDETERMINED, targets.NOT_EXAMINED]
+    classes, out = targets.speed_answers(seconds(5, 8, 9, 11, 15, 19, 21, 22), [80] * 8, [block(10, 20, 100)])
+    assert list(classes) == [79, 79, -1, -1, 99, -1, -1, 79]
+    boundary = targets.BOUNDARY
+    assert list(out) == [0, 0, boundary, boundary, 0, boundary, boundary, 0]
 
 
-def test_a_speed_not_known_yet_is_not_an_answer_before_it_can_be_known():
+def test_a_block_with_no_speed_takes_its_moments_out():
     targets = _targets()
-    classes, out = targets.speed_answers(seconds(5, 15), [stretch(0, 20, 100, known=10)])
-    assert list(classes) == [-1, 19]
-    assert out[0] == targets.NOT_KNOWN_YET
+    classes, out = targets.speed_answers(seconds(5, 9, 15, 21, 25), [80] * 5, [block(10, 20, None)])
+    assert list(classes) == [79, -1, -1, -1, 79]
+    assert list(out) == [0, targets.BOUNDARY, targets.BLOCKED_OUT, targets.BOUNDARY, 0]
 
 
-def test_the_frames_around_a_change_of_speed_are_out_and_a_cut_with_the_same_speed_is_no_change():
+def test_a_block_of_his_own_speed_is_no_jump_and_neither_is_his_speed_changing():
     targets = _targets()
-    classes, out = targets.speed_answers(seconds(9, 11, 19, 21, 29, 31),
-                                         [stretch(0, 10, 100), stretch(10, 20, 100), stretch(20, 40, 120)])
-    assert list(classes) == [19, 19, -1, -1, 23, 23]
-    assert list(out)[2:4] == [targets.BOUNDARY, targets.BOUNDARY]
-    # The first frame and the last one are on the edge of what was examined.
-    _classes, out = targets.speed_answers(seconds(1, 3), [stretch(0, 10, 100)])
-    assert list(out) == [targets.BOUNDARY, 0]
+    classes, out = targets.speed_answers(seconds(9, 11, 19, 21), [100, 100, 100, 100], [block(10, 20, 100)])
+    assert list(out) == [0, 0, 0, 0] and list(classes) == [99] * 4
+    classes, out = targets.speed_answers(seconds(9, 10, 11), [80, 90, 100], [])
+    assert list(out) == [0, 0, 0] and list(classes) == [79, 89, 99]
+    # Two blocks of one speed side by side are one, and an edge with no moment on one side of it is no jump.
+    _classes, out = targets.speed_answers(seconds(1, 9, 11, 19), [80] * 4, [block(0, 10, 100), block(10, 20, 100)])
+    assert list(out) == [0, 0, 0, 0]
+
+
+def test_a_block_of_naught_is_a_car_that_stands_and_has_no_class():
+    targets = _targets()
+    classes, out = targets.speed_answers(seconds(5, 15), [80, 80], [block(10, 30, 0)])
+    assert list(classes) == [79, -1] and out[1] == targets.STOPPED
+
+
+def test_a_moment_with_no_time_has_no_answer_from_a_block_either():
+    targets = _targets()
+    ns = _np().array([-1, 15 * NS], dtype=_np().int64)
+    classes, out = targets.speed_answers(ns, [None, 80], [block(0, 20, 100)])
+    assert list(classes) == [-1, 99] and list(out) == [targets.NO_SPEED, 0]
 
 
 def test_no_mark_is_no_answer_at_all():
@@ -95,11 +124,11 @@ def test_a_tap_is_only_so_exact():
 def test_the_end_of_works_leaves_the_speed_alone():
     targets = _targets()
     ns = seconds(20, 60)
-    labelled = [stretch(0, 100, 80)]
-    classes, _out = targets.speed_answers(ns, labelled)
+    classes, _out = targets.speed_answers(ns, [80, 80], [])
     target, _weight = targets.works_answers(ns, [mark(10, 50)], 100 * NS)
     assert list(target) == [1, 0]
     assert list(classes) == [targets.speed_class(80)] * 2
+
 
 
 SPLIT = {'cells': {'10,10': 'train', '20,20': 'test', '30,30': 'validation'},
@@ -362,16 +391,13 @@ def write_drive(root, route, frames):
             (folder / f'frame_{i:08d}.png').write_bytes(b'x')
 
 
-def label_db(root, stretches=(), works=(), checked=()):
+def label_db(root, blocks=(), works=(), checked=()):
     from nnslr_tools.speed_review import SpeedReviewStore, db_path
     SpeedReviewStore(root)
     connection = sqlite3.connect(db_path(root))
-    columns = {row[1] for row in connection.execute('PRAGMA table_info(speed_stretches)')}
-    for route, start, end, kph, state in stretches:
-        row = {'route': route, 'start_ns': start, 'end_ns': end, 'kph': kph, 'state': state, 'known_ns': None, 'note': '',
-               'reviewer': 'a', 'revision': 1}
-        row = {key: value for key, value in row.items() if key in columns}
-        connection.execute(f"INSERT INTO speed_stretches ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    for route, start, end, kph in blocks:
+        connection.execute('INSERT INTO speed_blocks (route, start_ns, end_ns, kph, note, reviewer, revision) '
+                           'VALUES (?, ?, ?, ?, ?, ?, ?)', (route, start, end, kph, '', 'a', 1))
     for route, start, end in works:
         connection.execute('INSERT INTO speed_works (route, start_ns, end_ns, reviewer, revision) VALUES (?, ?, ?, ?, ?)',
                            (route, start, end, 'a', 1))
@@ -381,73 +407,354 @@ def label_db(root, stretches=(), works=(), checked=()):
     connection.close()
 
 
-def test_a_piece_clipped_off_before_the_known_time_gives_no_answer(tmp_path):
+def encoded(seconds, missing=()):
+    """The encode index of one segment, an exposure every decoded frame (20 a second), without the decoded frames missing."""
+    ids = [i for i in range(seconds * 20) if i not in missing]
+    return {'0': {'sof': [i * NS // 20 for i in ids], 'ids': ids}}
+
+
+def test_a_block_set_on_top_of_another_clips_it_and_the_answers_follow(tmp_path):
     from nnslr_tools.speed_review import SpeedReviewStore
-    targets, route = _targets(), '00000001--abcdef0123'
+    targets = _targets()
     store = SpeedReviewStore(tmp_path)
-    wrong = {'kph': 120, 'state': 'corrected', 'known_ns': 30 * NS, 'note': ''}
-    store.apply(route, 0, 100 * NS, wrong, 0, 'a')
-    store.apply(route, 10 * NS, 20 * NS, {**wrong, 'kph': 80, 'known_ns': None}, 1, 'a')
-    _classes, out = targets.speed_answers(seconds(5, 25, 40), store.stretches(route))
-    assert list(out) == [targets.NOT_KNOWN_YET, targets.NOT_KNOWN_YET, 0]
+    revision = store.set_block(ROUTE, 0, 100 * NS, 120, '', 0, 'a')
+    store.set_block(ROUTE, 10 * NS, 20 * NS, None, '', revision, 'a')
+    classes, out = targets.speed_answers(seconds(5, 15, 40), [80] * 3, targets.read_labels(tmp_path)[ROUTE]['blocks'])
+    assert list(classes) == [119, -1, 119] and out[1] == targets.BLOCKED_OUT
 
 
 def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     targets = _targets()
     borders = []
     monkeypatch.setattr(targets, 'frame_country', lambda _latitude, _longitude, root: borders.append(root) or 'CH')
-    route = '00000001--abcdef0123'
     frames = [(0, i) for i in range(40)]
-    write_drive(tmp_path, route, frames)
+    write_drive(tmp_path, ROUTE, frames)
     for second in (22, 30):
-        (tmp_path / 'derived' / 'frames' / route / '0' / f'frame_{second:08d}.png').unlink()
-    label_db(tmp_path, stretches=[(route, 0, 20 * NS, 100, 'corrected'), (route, 20 * NS, 40 * NS, 120, 'confirmed')],
-             works=[(route, 5 * NS, 15 * NS)], checked=[(route, 25 * NS)])
-    encoded = [i for i in range(800) if i != 23 * 20]
-    merged = {'frames': {'0': {'sof': [i * NS // 20 for i in encoded], 'ids': encoded}}, 'series': {},
+        (tmp_path / 'derived' / 'frames' / ROUTE / '0' / f'frame_{second:08d}.png').unlink()
+    label_db(tmp_path, blocks=[(ROUTE, 10 * NS, 20 * NS, 100), (ROUTE, 25 * NS, 28 * NS, None)],
+             works=[(ROUTE, 5 * NS, 15 * NS)], checked=[(ROUTE, 25 * NS)])
+    # His speed from the third second on: vEgo + 3 km/h on a Peugeot log without its own vEgoCluster, 80 on the dashboard.
+    merged = {'frames': encoded(40, missing={23 * 20}), 'series': {'v_ego': [[3 * NS, 77.0]]},
+              'meta': {'car': {'fingerprint': 'PSA_PEUGEOT_3008'}}, 'span': [0, 40 * NS],
               'gps': [[1 * NS, 47.0, 8.0, 1_750_000_000_000]]}
     split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
     labels = targets.read_labels(tmp_path)
-    assert labels[route]['checked_ns'] == 25 * NS
-    drive = targets.drive_targets(tmp_path, route, labels[route], merged, split)
+    assert labels[ROUTE]['checked_ns'] == 25 * NS and len(labels[ROUTE]['blocks']) == 2
+    drive = targets.drive_targets(tmp_path, ROUTE, labels[ROUTE], merged, split)
     assert [frame['key'] for frame in drive['frames']][:2] == ['0/0', '0/1']
-    assert drive['speed'][10] == 19 and drive['speed'][25] == 23
-    assert drive['speed_out'][20] == targets.BOUNDARY
+    assert list(drive['speed_out'][:3]) == [targets.NO_SPEED] * 3
+    assert drive['speed'][5] == 79 and drive['speed'][15] == 99 and drive['speed'][35] == 79
+    assert drive['speed_out'][8] == 0 and drive['speed_out'][9] == drive['speed_out'][10] == targets.BOUNDARY
+    assert drive['speed_out'][26] == targets.BLOCKED_OUT
     assert drive['speed_out'][30] == targets.NO_FRAME
+    assert drive['blocked'][15] and not drive['blocked'][26] and not drive['blocked'][5]
     assert drive['works'][10] == 1 and drive['works_weight'][10] == 1
     assert drive['works'][20] == 0 and drive['works_weight'][20] == 1
     assert drive['works_weight'][30] == 0
-    # Inside what a person went through too, a frame with no picture or no time teaches nothing.
+    # A frame with no picture or no time teaches nothing.
     assert drive['speed_out'][22] == drive['speed_out'][23] == targets.NO_FRAME
     assert drive['works_weight'][22] == drive['works_weight'][23] == 0 and drive['works_weight'][21] == 1
     assert borders == [tmp_path]
     assert drive['partitions'] == ['buffer'] * 40
-    assert len(drive['own_kph']) == 40 and all(kph != kph for kph in drive['own_kph'])
+    # The car's speed of the measure is the dashboard's, in the labels' units; the speed input stays vEgo, as the car
+    # gives it.
+    assert {kph for kph in drive['own_kph'].tolist() if kph == kph} == {80.0} and drive['ns'][23] == -1
+    assert drive['inputs']['speed'][10].tolist() == _np().float32(targets.BRAIN_INPUTS.speed_row(77 / 3.6)).tolist()
+    # No Sign review: no next limit to learn, and nothing to trace.
+    assert not drive['next_weight'].any() and drive['sign_review']['fingerprint'] is None
+    # Seconds with his speed and no picture: 22 and 30 without one, 23 without its time.
+    assert drive['no_picture_s'] == 3
     found = targets.summary([drive])
     assert found['drives'][0]['works_in'] == drive['works'][drive['works_weight'] > 0].sum()
     assert found['partitions']['buffer']['speed'] == found['drives'][0]['speed']
-    assert 'signs NOT read' in targets.summary_text(found)
+    assert found['drives'][0]['blocks'] == 2 and found['drives'][0]['out']['left_out'] == 3
+    text = targets.summary_text(found)
+    assert 'signs NOT read' in text and '3 seconds with a speed and no picture' in text and '2 blocks' in text
     assert drive['cuts'] == set() and drive['reader'] is None
     found['drives'][0].update(signs_read=True, reader_current=False)
     assert 'signs read by ANOTHER reader' in targets.summary_text(found)
-    # The car's speed of the measure is the dashboard's, in the labels' units: vEgo + 3 on a Peugeot log without its own.
-    merged.update(series={'v_ego': [[0, 50.0]]}, meta={'car': {'fingerprint': 'PSA_PEUGEOT_3008'}})
-    drive = targets.drive_targets(tmp_path, route, labels[route], merged, split)
-    assert {kph for kph in drive['own_kph'].tolist() if kph == kph} == {53.0} and drive['ns'][23] == -1
-    # The speed input stays vEgo, as the car gives it.
-    assert drive['inputs']['speed'][10].tolist() == _np().float32(targets.BRAIN_INPUTS.speed_row(50 / 3.6)).tolist()
 
 
 def test_reading_the_labels_changes_nothing(tmp_path):
     from nnslr_tools.speed_review import db_path
-    label_db(tmp_path, works=[('00000001--abcdef0123', 1, 2)])
+    label_db(tmp_path, works=[(ROUTE, 1, 2)])
     before = db_path(tmp_path).read_bytes()
-    assert _targets().read_labels(tmp_path)['00000001--abcdef0123']['works'][0]['start_ns'] == 1
+    assert _targets().read_labels(tmp_path)[ROUTE]['works'][0]['start_ns'] == 1
     assert db_path(tmp_path).read_bytes() == before
 
 
-def test_no_labels_yet_is_no_drive(tmp_path):
-    assert _targets().read_labels(tmp_path) == {}
+def test_a_database_of_before_the_blocks_still_reads(tmp_path):
+    from nnslr_tools.speed_review import db_path
+    path = db_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    connection = sqlite3.connect(path)
+    connection.execute('CREATE TABLE speed_works (route TEXT, start_ns INTEGER, end_ns INTEGER, reviewer TEXT, revision INTEGER)')
+    connection.execute('INSERT INTO speed_works VALUES (?, 1, 2, ?, 1)', (ROUTE, 'a'))
+    connection.commit()
+    connection.close()
+    assert _targets().read_labels(tmp_path) == {ROUTE: {'blocks': [], 'works': [{'route': ROUTE, 'start_ns': 1, 'end_ns': 2,
+                                                                                    'reviewer': 'a', 'revision': 1}],
+                                                        'checked_ns': None}}
+    assert _targets().read_labels(tmp_path / 'nothing') == {}
+
+
+def scanned(root, route, summary=None):
+    from nnslr_tools import drive_review
+    path = drive_review.db_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    for statement in drive_review.SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    summary = {'t0_ns': 0, 'span_ns': [0, 40 * NS]} if summary is None else summary
+    connection.execute("INSERT INTO scans (route, state, summary) VALUES (?, 'done', ?)", (route, json.dumps(summary)))
+    connection.commit()
+    connection.close()
+
+
+def frozen(root, partitions=(), frame_keys=()):
+    folder = root / 'splits'
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'speed-brain-split.json').write_text(json.dumps({'sha256': 'x', 'cells': {}, 'partitions': dict(partitions)}))
+    (folder / 'speed-brain-frames.json').write_text(json.dumps({'split_sha256': 'x', 'frames': dict(frame_keys)}))
+
+
+def test_the_drives_are_those_scanned_with_their_frames_with_a_block_or_not(tmp_path):
+    targets = _targets()
+    other, unfinished, bare = '00000002--abcdef0123', '00000003--abcdef0123', '00000004--abcdef0123'
+    for route in (ROUTE, other, unfinished):
+        write_drive(tmp_path, route, [(0, i) for i in range(3)])
+    scanned(tmp_path, ROUTE)
+    scanned(tmp_path, other)
+    scanned(tmp_path, unfinished, {'t0_ns': 0, 'span_ns': [0, None]})
+    scanned(tmp_path, bare)
+    assert targets.training_routes(tmp_path) == [ROUTE, other]
+    assert targets.training_routes(tmp_path / 'nothing') == []
+    # Labels of a drive with no frames: said, and left out.
+    label_db(tmp_path, blocks=[(bare, 0, NS, 50)])
+    frozen(tmp_path, partitions={other: ['train', 'train']}, frame_keys={other: ['0/0', '0/1']})
+    said = []
+    merged = {'frames': encoded(3), 'series': {'v_ego': [[0, 50.0]]}, 'span': [0, 3 * NS], 'gps': []}
+    drives = targets.dataset(tmp_path, lambda route: merged, log=said.append)
+    # A drive with no block is a drive; one of the frozen split with other frames is left out with a word.
+    assert [drive['route'] for drive in drives] == [ROUTE]
+    assert drives[0]['speed'].tolist() == [49, 49, 49] and drives[0]['blocks'] == []
+    assert any(other in line and 'frames changed' in line and 'left out' in line for line in said)
+    assert any(bare in line and 'left out' in line for line in said)
+    assert targets.dataset(tmp_path, lambda route: None, routes=[ROUTE], log=said.append) == []
+    assert said[-1] == f'{ROUTE}: no scan, left out'
+
+
+def test_a_frozen_drive_whose_frames_changed_is_named():
+    with pytest.raises(_targets().FramesChanged, match='frames changed'):
+        _targets().frame_partitions('old', [at_cell('0/0', (10, 10))], SPLIT)
+
+
+def test_a_second_of_a_drive_is_its_frame_and_the_readings_after_it(tmp_path):
+    from nnslr_tools.road_type_signs import picture_path
+    targets = _targets()
+    picture = picture_path(tmp_path, ROUTE, 0)
+    picture.parent.mkdir(parents=True)
+    picture.write_bytes(b'x')
+    frames = [{'route': ROUTE, 'key': f'0/{second}', 'segment': 0, 'index': second, 'decoded': second * 20,
+               'seconds': float(second), 'present': True} for second in (0, 1)]
+    merged = {'frames': encoded(2, missing={10})}
+    found, partitions, cells = targets.brain_frames(tmp_path, frames, ['train', 'test'], [(1, 1), None], merged,
+                                                    {'pictures': {'0': 6}})
+    assert [frame['key'] for frame in found] == ['0/0', '0/0.25', '0/0.5', '0/0.75', '0/1', '0/1.25', '0/1.5', '0/1.75']
+    assert [frame['step'] for frame in found] == [0, 1, 2, 3] * 2 and [frame['picture'] for frame in found] == list(range(8))
+    assert [frame['ns'] for frame in found][:4] == [0, NS // 4, None, 3 * NS // 4]
+    assert [frame['present'] for frame in found] == [True] * 6 + [False] * 2
+    assert partitions == ['train'] * 4 + ['test'] * 4 and cells == [(1, 1)] * 4 + [None] * 4
+    assert not any(frame['present'] for frame in targets.brain_frames(tmp_path, frames, ['train'] * 2, [None] * 2,
+                                                                       merged, None)[0])
+    with pytest.raises(ValueError, match='off the readings'):
+        targets.brain_frames(tmp_path, [{**frames[0], 'decoded': 7}], ['train'], [None], merged, None)
+
+
+RUN = '20261108T120000Z-0123abcd'
+
+
+def sign_box(family='maximum_speed', kph=None, where='own_road', panel='none', sign_type=None):
+    return {'family': family, 'value_kph': kph, 'applicability': where, 'supplementary_panel': panel,
+            'sign_type': sign_type, 'bbox_xyxy': [0, 0, 10, 10]}
+
+
+def frame_review(second, *boxes, read=False, reviewer='cristian', kind='human', run=RUN, confirmed=1, revision=1):
+    """A frame of Sign review: a 1 Hz picture at a whole second, or a reading of the comma (read) at any step."""
+    decoded = int(round(second * 20))
+    output = 1000 + decoded if read else int(second)
+    payload = {'segment_index': 0, 'output_index': output, 'decoded_frame_index': decoded, 'detections': list(boxes)}
+    return (ROUTE, run, f'0/{output}', 0, output, json.dumps(payload), reviewer, confirmed, revision,
+            '2026-11-08T10:00:00', kind, 'web')
+
+
+def sign_review_db(root, rows, run=RUN):
+    from nnslr_tools.review_db import SCHEMA_STATEMENTS, db_path
+    report = root / 'derived' / 'preannotations' / ROUTE
+    (report / run).mkdir(parents=True, exist_ok=True)
+    (report / run / 'index.html').write_text('<html></html>', encoding='utf-8')
+    (report / 'latest.json').write_text(json.dumps({'run_id': run}), encoding='utf-8')
+    db_path(root).parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path(root))
+    for statement in SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.executemany('INSERT OR REPLACE INTO frame_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
+    connection.commit()
+    connection.close()
+
+
+def distance_marks(root, lines):
+    folder = root / 'annotations' / 'sign_distance'
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f'{ROUTE}.jsonl').write_text(''.join(json.dumps(line) + '\n' for line in lines), encoding='utf-8')
+
+
+def zero_at(second, sign='999'):
+    return {'sign': sign, 'mark': 'zero', 'segment': 0, 'frame': int(second * 20), 't_ns': int(second * NS),
+            'sign_t_ns': None, 'sync': None, 'reviewer': 'a', 'at': '2026-11-08T10:00:00+01:00'}
+
+
+def sign_merged(seconds_long=120, kph=36.0):
+    return {'frames': encoded(seconds_long), 'series': {'v_ego': [[0, kph]]}, 'span': [0, seconds_long * NS], 'meta': {},
+            'gps': []}
+
+
+def reviewed_drive(root):
+    """A drive gone through in Sign review from 0 to 61 s, but for 30 s, which the site's AI reviewer still holds."""
+    special = {
+        10: [sign_box(kph=60)], 11: [sign_box(kph=60)], 12: [sign_box(kph=60)],
+        20: [sign_box(kph=50)], 21: [sign_box(kph=50), sign_box(kph=70, where='other_road')],
+        40: [sign_box('cancellation')], 41: [sign_box('cancellation')],
+        50: [sign_box('zone', 30)], 51: [sign_box('zone', 30)],
+        55: [sign_box(kph=80, panel='time')],
+        58: [sign_box('other_sign', sign_type='town_entry')],
+    }
+    rows = [frame_review(second, *special.get(second, [])) for second in range(61) if second != 30]
+    rows += [frame_review(30, sign_box(kph=80), reviewer='ai/llama/qwen', kind='ai'),
+             frame_review(61, sign_box(kph=100), reviewer='ai/Claude Code', kind='ai'),
+             frame_review(12.25, sign_box(kph=60), read=True),
+             frame_review(45, sign_box(kph=90), run='20261101T120000Z-0123abcd'),
+             frame_review(62, sign_box(kph=120), confirmed=0)]
+    sign_review_db(root, rows)
+    # A zero mark of Sign distance just after the 50, and one taken back by an Undo after the end.
+    distance_marks(root, [zero_at(21.8), zero_at(41.2, '777'), {'sign': '777', 'mark': 'undo', 'undoes': 1,
+                                                                 'reviewer': 'a', 'at': '2026-11-08T10:01:00+01:00'}])
+
+
+def test_the_signs_of_a_drive_are_the_ones_a_person_confirmed_on_its_current_run(tmp_path):
+    targets = _targets()
+    reviewed_drive(tmp_path)
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    # The 60 passed half a second after its last box (a reading of the comma's), the 50 at its zero mark, the end of
+    # the limit with no mark in effect, and the 100 of an AI assistant: the site's AI reviewer, another run, a draft and
+    # another road's sign are not there.
+    assert found['signs'] == [(12_750_000_000, 60), (21_800_000_000, 50), (41_500_000_000, None), (61_500_000_000, 100)]
+    assert found['masked'] == [(50 * NS, 51_500_000_000), (55 * NS, 55_500_000_000), (58 * NS, 58_500_000_000)]
+    # The pictures gone through: the one still waiting for a person breaks them.
+    assert found['covered'] == [(0, 29 * NS), (31 * NS, 61 * NS)]
+    assert isinstance(found['fingerprint'], str) and len(found['fingerprint']) == 16
+    again = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert again == found
+    distance_marks(tmp_path, [zero_at(22.0)])
+    moved = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert moved['signs'][1] == (22 * NS, 50) and moved['fingerprint'] != found['fingerprint']
+
+
+def test_two_numbers_on_one_sign_are_two_signs_and_a_mark_goes_to_one_sign(tmp_path):
+    targets = _targets()
+    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=60)), frame_review(11, sign_box(kph=50)),
+                              frame_review(12, sign_box(kph=50)), frame_review(13, sign_box(kph=None))])
+    # A mark long after the sign is not its passing.
+    distance_marks(tmp_path, [zero_at(19.0)])
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert found['signs'] == [(10_500_000_000, 60), (12_500_000_000, 50)] and found['masked'] == []
+    # A sign nobody could read the number of says a limit with no number: its approach is masked.
+    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=None)), frame_review(11, sign_box('unreadable')),
+                              frame_review(12, sign_box(kph=None)), frame_review(13, sign_box(kph=None))])
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert found['signs'] == [] and found['masked'] == [(10 * NS, 13_500_000_000), (11 * NS, 11_500_000_000)]
+
+
+def test_no_sign_review_is_no_sign_and_nothing_gone_through(tmp_path):
+    empty = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None}
+    assert _targets().reviewed_signs(tmp_path, ROUTE, sign_merged()) == empty
+    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=60))])
+    (tmp_path / 'derived' / 'preannotations' / ROUTE / 'latest.json').unlink()
+    assert _targets().reviewed_signs(tmp_path, ROUTE, sign_merged()) == empty
+
+
+def test_reading_sign_review_changes_nothing(tmp_path):
+    from nnslr_tools.review_db import db_path
+    reviewed_drive(tmp_path)
+    before = db_path(tmp_path).read_bytes()
+    _targets().reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert db_path(tmp_path).read_bytes() == before
+
+
+def ahead(times, signs=(), covered=((0, 100 * NS),), masked=(), asked=None):
+    """The next limit at these seconds, at 36 km/h: 10 m a second."""
+    targets = _targets()
+    ns = seconds(*times)
+    reviewed = {'signs': list(signs), 'covered': list(covered), 'masked': list(masked)}
+    asked = _np().ones(len(ns), dtype=bool) if asked is None else _np().array(asked)
+    return targets.ahead_from_signs(ns, reviewed, targets.metres_driven([[0, 36.0]]), asked)
+
+
+def test_within_a_hundred_metres_the_next_sign_and_its_metres_beyond_the_margin_none():
+    targets = _targets()
+    following, weight, metres, metres_weight = ahead((10, 15, 18, 19, 21, 25, 29, 31, 60, 95), signs=[(30 * NS, 60)])
+    none = targets.NONE_AHEAD
+    assert following.tolist() == [none, none, none, none, 59, 59, 59, none, none, none]
+    assert weight.tolist() == [1, 1, 0, 0, 1, 1, 1, 1, 1, 0]
+    assert metres.tolist() == pytest.approx([0, 0, 0, 0, .9, .5, .1, 0, 0, 0])
+    assert metres_weight.tolist() == [0, 0, 0, 0, 1, 1, 1, 0, 0, 0]
+
+
+def test_an_end_ahead_has_no_number_to_learn():
+    following, weight, _metres, metres_weight = ahead((10, 18, 21), signs=[(30 * NS, None)])
+    assert weight.tolist() == [1, 0, 0] and not metres_weight.any() and following[0] == _targets().NONE_AHEAD
+
+
+def test_none_ahead_only_where_a_person_went_through_the_metres_ahead():
+    _following, weight, _metres, _metres_weight = ahead((5, 10, 25), covered=[(0, 20 * NS)])
+    assert weight.tolist() == [1, 0, 0]
+
+
+def test_a_masked_sign_ahead_says_nothing_and_neither_does_a_sign_behind_it():
+    _following, weight, _metres, _metres_weight = ahead((31, 38, 45, 55, 68), masked=[(40 * NS, 50 * NS)])
+    assert weight.tolist() == [1, 0, 0, 1, 1]
+    following, weight, _metres, metres_weight = ahead((46, 51), signs=[(55 * NS, 80)], masked=[(40 * NS, 50 * NS)])
+    assert weight.tolist() == [0, 1] and metres_weight.tolist() == [0, 1] and following[1] == 79
+
+
+def test_a_frame_not_asked_learns_no_next_limit():
+    _following, weight, _metres, metres_weight = ahead((21, 25), signs=[(30 * NS, 60)], asked=[False, True])
+    assert weight.tolist() == [0, 1] and metres_weight.tolist() == [0, 1]
+    numpy, targets = _np(), _targets()
+    found = targets.ahead_from_signs(numpy.array([-1, 21 * NS]), {'signs': [(30 * NS, 60)], 'covered': [], 'masked': []},
+                                     targets.metres_driven([[0, 36.0]]), numpy.ones(2, dtype=bool))
+    assert found[1].tolist() == [0, 1]
+
+
+def test_a_drive_takes_its_next_limit_from_sign_review(tmp_path):
+    targets = _targets()
+    write_drive(tmp_path, ROUTE, [(0, i) for i in range(70)])
+    reviewed_drive(tmp_path)
+    merged = sign_merged(70)
+    drive = targets.drive_targets(tmp_path, ROUTE, targets.NO_LABELS, merged, {'cells': {}, 'partitions': {},
+                                                                              'frame_keys': {}})
+    assert drive['next'][5] == targets.speed_class(60) and drive['metres'][5] == pytest.approx(.775)
+    assert drive['next_weight'][5] == drive['metres_weight'][5] == 1
+    assert drive['next'][14] == targets.speed_class(50) and drive['next_weight'][14] == 1
+    # 127.5 m from the 60: in the margin. 40 m from the end of what a person went through: nothing said of what is beyond.
+    assert drive['next_weight'][0] == 0 and drive['next_weight'][25] == 0
+    assert drive['sign_review']['fingerprint'] is not None
+    found = targets.summary([drive])['drives'][0]
+    assert found['signs'] == 4 and found['covered_s'] == 59 and found['next'] == int(drive['next_weight'].sum())
+    # Without vEgo the car drives no metres: no frame has a limit ahead.
+    merged['series'] = {'v_ego_cluster': [[0, 36.0]]}
+    assert not targets.drive_targets(tmp_path, ROUTE, targets.NO_LABELS, merged,
+                                     {'cells': {}, 'partitions': {}, 'frame_keys': {}})['next_weight'].any()
 
 
 GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
@@ -615,6 +922,24 @@ def test_a_frame_that_falls_after_the_night_has_no_answer():
         assert list(night['speed_weight']) == [1, 0]
 
 
+@pytest.mark.parametrize('label, copied', [(32, False), (28, False), (35, False), (36, True)])
+def test_a_label_within_a_few_kilometres_of_the_number_is_the_number(label, copied):
+    """His speed is the dashboard's to the kilometre: 32 past a 30 said the 30 holds by day too."""
+    assert _targets().night_frames(plated(label=label))[0].all() == copied
+
+
+def test_a_label_two_off_the_number_takes_its_whole_passage_out():
+    targets = _targets()
+    drive = plated(hours=(14.0,) * 4)
+    drive['speed'][2] = targets.speed_class(32)
+    assert not targets.night_frames(drive)[0].any()
+
+
+@pytest.mark.parametrize('number', [32, 4, 205])
+def test_a_number_no_sign_has_has_no_night_copy(number):
+    assert not _targets().night_frames(plated(number=number, label=number + 20))[0].any()
+
+
 def numbered(kphs, labels, *, singles=None, ended=None, partitions=None, plate=None):
     """A drive with this number in force on each frame (0: none) and these answers."""
     np, targets = _np(), _targets()
@@ -713,6 +1038,36 @@ def test_the_night_copy_takes_no_swap_and_the_day_of_its_drive_does():
     seen = [in_an_epoch(drive, seed) for seed in range(40)]
     assert all(len(epoch) == 2 and numbers(epoch[1]) == [30, 30, 60, 60] for epoch in seen)
     assert {tuple(numbers(epoch[0])) for epoch in seen} == {(30, 30, 60, 60), (30, 30, 50, 50)}
+
+
+def test_answers_a_few_kilometres_off_the_number_move_with_it_by_as_much():
+    seen = all_swapped(numbered([100, 100, 100, 0], [98, 102, 100, 90]))
+    assert numbers(seen) == [120, 120, 120, 0] and answers(seen) == [118, 122, 120, 90]
+    assert answers(all_swapped(numbered([30, 30], [27, 32]))) == [37, 42]
+
+
+@pytest.mark.parametrize('label, swaps', [(105, True), (95, True), (106, False), (94, False)])
+def test_an_answer_off_the_number_by_more_than_the_tolerance_keeps_the_passage(label, swaps):
+    assert passages(numbered([100, 100, 100], [100, label, 100])) == ([[0, 1, 2]] if swaps else [])
+
+
+def test_a_passage_with_a_block_of_speed_review_stays():
+    np = _np()
+    drive = numbered([100, 100, 60, 60], [100, 100, 60, 60])
+    drive['blocked'] = np.array([False, True, False, False])
+    assert passages(drive) == [[2, 3]]
+    assert answers(all_swapped(drive)) == [100, 100, 50, 50]
+
+
+def test_the_next_limit_of_the_number_moves_with_it_and_another_stays():
+    np, targets = _np(), _targets()
+    drive = numbered([100, 100, 100, 0], [100, 100, 100, 90])
+    drive['next'] = np.array([targets.speed_class(100), targets.speed_class(80), targets.NONE_AHEAD,
+                              targets.speed_class(100)])
+    seen = all_swapped(drive)
+    assert seen['next'].tolist() == [targets.speed_class(120), targets.speed_class(80), targets.NONE_AHEAD,
+                                     targets.speed_class(100)]
+    assert drive['next'][0] == targets.speed_class(100)
 
 
 def test_a_number_with_hours_gives_its_number_and_its_plate():

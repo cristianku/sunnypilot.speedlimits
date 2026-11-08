@@ -11,8 +11,8 @@
 // or rlog/qlog files named with their drive and segment). Each page gives its own tab and back label (tab, backLabel)
 // and a choice of playback speed (rates); Speed review also a lane of its own over the others (slot "lane"), only the
 // lanes a speed is judged on (simpleLanes), the switch HD (sharp: standing still, the frame at the comma's full
-// definition over the video) and its controls at the top of the side (slot "side"); each follows the time shown through
-// the event time and moves it with seek.
+// definition over the video), its controls at the top of the side (slot "side") and a box of its own on the picture after
+// the car's speed (slot "hud"); each follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -457,7 +457,6 @@ const now = computed(() => {
       : 'not in the log',
     openpilot: at('sd_state') === undefined || at('sd_state') === null ? 'not in the log'
       : String(at('sd_state')) + (at('long_active') === true ? ' · speed and steering' : at('lat_active') === true ? ' · steering' : ''),
-    scene: typeof at('vis_road') === 'string' && at('vis_road') ? ROAD_LABEL[at('vis_road') as keyof typeof ROAD_LABEL] ?? String(at('vis_road')) : 'not in the log',
   };
 });
 const change = computed(() => previousChange(atSign.value?.limit, cursor.value));
@@ -588,6 +587,7 @@ watch(() => props.route, () => {
             <span class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
             <span class="dr-box dr-box-car"><svg viewBox="2 4 20 18"><path :d="HUD_ICONS.car" fill="currentColor"/></svg>
               <b>{{ now.carKph ?? '–' }}</b></span>
+            <slot name="hud"></slot>
           </div>
         </div>
 
@@ -640,7 +640,6 @@ watch(() => props.route, () => {
               <dt>Set speed</dt><dd>{{ now.set }}</dd>
               <dt>Target</dt><dd>{{ now.target }}</dd>
               <dt>openpilot</dt><dd>{{ now.openpilot }}</dd>
-              <dt>Road (vision)</dt><dd>{{ now.scene }}</dd>
             </dl>
             <p v-if="change" class="dr-hint">Last limit change: {{ change.from ?? '–' }} → {{ change.kph }},
               {{ clockOf(cursor - change.at) }} ago.</p>

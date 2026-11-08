@@ -19,7 +19,7 @@ per segment, every frame with a sign read sure enough (time in seconds from the 
 'boxes', in the same order, their boxes in the frame's pixels, what vision.SignDistance measures the sign by) and the
 road signs SpeedLimitMemory confirms (time, road).
 
-The brain's pictures come from the same pass (pictures=True: the drives of Speed review and the certified ones): each
+The brain's pictures come from the same pass (pictures=True: every drive the brain learns from and the certified ones): each
 frame read through the car's vision.BrainInput, the same class and the same NV12 frame as speedvisiond, saved per segment
 as data/derived/brain_frames/<route>/<segment>.npy, uint8 (frames read, BRAIN_HEIGHT, BRAIN_WIDTH, 3), and their count
 per segment in the record ('pictures'). A drive asked with pictures and without them is read again; a drive that has them

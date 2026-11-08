@@ -73,11 +73,11 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
-# scripts/run_brain.sh: the signs of the drives of Speed review as the car reads them today, then its three seeds (their
+# scripts/run_brain.sh: the signs of every drive it learns from as the car reads them today, then its three seeds (their
 # epoch lines name them: brain_s0, brain_s1, brain_s2).
 BRAIN_STEPS = (
     ('checks', 'Checks and GPU smoke test', 6),
-    ('signs', 'Read the signs of the labelled drives', 22),
+    ('signs', 'Read the signs of the drives', 22),
     ('brain_s0', 'Seed 0', 24),
     ('brain_s1', 'Seed 1', 24),
     ('brain_s2', 'Seed 2', 24),

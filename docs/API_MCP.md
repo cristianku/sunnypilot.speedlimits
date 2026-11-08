@@ -98,7 +98,7 @@ What the car's networks read on a frame (the page only, **Car networks**, key T)
 
 Sign distance (Data › Sign distance: how late the comma's countdown to the sign ahead reaches zero, against the frame a person marks as zero) is **read only** for the REST API: `GET /api/v1/sign-distance` and `GET /api/v1/sign-distance/{route}` above, with the same Bearer token. `late_s` is the main figure (vision's zero minus the person's, in seconds: + late, − early); `late_m` is secondary and includes speedvisiond's processing delay times the speed. **An agent never sets a zero**: the marks are made only by a person on the site (the page's `POST /api/sign-distance/drives/{route}/marks` and `.../undo`): signed in, with the session cookie and never the token alone, or the person at the server itself on a site served only on 127.0.0.1 without sign-in (reviewer `local`). There is no REST write and no MCP tool for them: a `POST` under `/api/v1/sign-distance` answers 404. The marks are kept in `data/annotations/sign_distance/<route>.jsonl`, a file only ever added to.
 
-Speed review (Data › Speed review: the speed to hold, stretch by stretch of a drive) is **not** in the REST API or in MCP: only a person signed in on the site writes those labels, and the token alone is refused.
+Speed review (Data › Speed review: the blocks that correct the driver's own speed, the brain's answer, from a time to a time of a drive, and the roadworks marked on it) is **not** in the REST API or in MCP: only a person signed in on the site writes them, and the token alone is refused.
 
 ### Ordine, cursori e ripresa
 

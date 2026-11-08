@@ -2,12 +2,14 @@
 reading of the car since 7 Nov 2026) as ONNX with its contract (<output>.contract.json).
 
 The step: image (1, 3, 144, 256) 0..1, extra (1, inputs) the groups of the checkpoint side by side (brain_inputs.pack_inputs)
-and hidden (1, hidden), zeros at the start -> speed (1, SPEED_CLASSES) logits and hidden_out, given back as hidden at the next
-step. The speed said is contract['output']['kph'][argmax(speed)]; no softmax, nothing is read from how sure it is. The GRU is
-written out with matrix products as the road-type network's (gru_step): no GRU node in the graph the comma compiles. A brain
-with the limit ahead also gives next (1, SPEED_CLASSES + 1), kph[argmax] or none for the last class, and metres (1, 1), the
-metres to it over output.metres_scale. The contract's step says how the car steps it: rate_hz, clock ("schedule": on the
-grid of the rate, as the training's frames) and picture ("brain": vision.BrainInput; "road_type": the PIL picture).
+and hidden (1, hidden), zeros at the start -> speed (1, classes) logits and hidden_out, given back as hidden at the next
+step. The speed said is contract['output']['kph'][argmax(speed)]; no softmax, nothing is read from how sure it is. The table
+is the network's own (its class_kph, kept in the checkpoint): 200 classes of a km/h for the brains since 8 Nov 2026, 40 of 5
+km/h for those before, which load and export as they were. The GRU is written out with matrix products as the road-type
+network's (gru_step): no GRU node in the graph the comma compiles. A brain with the limit ahead also gives next (1, classes +
+1), kph[argmax] or none for the last class, and metres (1, 1), the metres to it over output.metres_scale. The contract's
+step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
+("brain": vision.BrainInput; "road_type": the PIL picture).
 
 works_head stays out (brain_net.car_weights). What comes out of the export is checked twice: against PyTorch with onnxruntime
 on random inputs, and along a whole real drive against what training measured (brain_train.predict), the memory fed back as
@@ -22,8 +24,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import build_brain_net, car_weights
-from nnslr_tools.brain_targets import (BRAIN_INPUTS, INPUT_SIZES, METRES_SCALE, SPEED_CLASSES, class_kph, dataset,
-                                       inputs_sha256, pack_inputs)
+from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, METRES_SCALE, dataset, inputs_sha256, pack_inputs
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
 from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
 
@@ -35,11 +36,14 @@ RTOL, ATOL = 1e-4, 1e-4
 
 
 def load_brain(checkpoint: Path):
-    """(the network on the CPU in eval mode, without works_head; what the checkpoint says of itself)."""
+    """(the network on the CPU in eval mode, without works_head; what the checkpoint says of itself). The network has the
+    table of its checkpoint (class_kph): a brain of 5 km/h classes stays one."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
+    table = saved['weights'].get('class_kph')
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
-                            pretrained=False, features=saved['features'], hidden=saved['hidden'])
+                            pretrained=False, features=saved['features'], hidden=saved['hidden'],
+                            kph=None if table is None else table.tolist())
     weights = {name: value for name, value in saved['weights'].items() if name in car_weights(model)}
     model.load_state_dict(weights, strict=True)
     return model.eval(), saved
@@ -81,11 +85,17 @@ def _random_inputs(torch, width: int, hidden: int, generator) -> tuple:
             torch.rand(1, width, generator=generator), torch.rand(1, hidden, generator=generator) * 2 - 1)
 
 
+def table_of(model) -> list[int]:
+    """The km/h of each class of the network, as the contract says them to the car."""
+    return [int(round(value)) for value in model.class_kph.detach().cpu().tolist()]
+
+
 def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu') -> dict:
     """A whole drive by step_run(image, extra, hidden) -> the step's outputs (speed logits first, hidden_out last), numpy,
     against brain_train.predict: the frames and how many of them say another speed, or another limit ahead. The memory
     starts again where the car's does (drive['cuts'])."""
     expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
+    table = table_of(model)
     hidden = np.zeros((1, model.gru.hidden_size), dtype=np.float32)
     said = np.zeros(len(expected['kph']), dtype=np.int64)
     ahead = np.zeros(len(expected['kph']), dtype=np.int64)
@@ -95,7 +105,7 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
         image = store.batch([(drive['route'], [frame])])[0].cpu().numpy()
         outputs = step_run(image, drive['extra'][frame:frame + 1], hidden)
         hidden = outputs[-1]
-        said[frame] = int(class_kph(int(np.argmax(outputs[0]))))
+        said[frame] = table[int(np.argmax(outputs[0]))]
         ahead[frame] = int(np.argmax(outputs[1])) if 'next' in expected else 0
     found = {'route': drive['route'], 'frames': len(said), 'other_speed': int((said != expected['kph']).sum()),
              'said': sorted({int(v) for v in said})}
@@ -178,9 +188,10 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
               if brain_picture else
               {'method': 'PIL BILINEAR (antialiased), vision.resize', 'from': list(data.SOURCE_SIZE),
                'to': [data.FRAME_WIDTH, data.FRAME_HEIGHT], 'crop': 'none, the whole frame'})
-    outputs = [{'name': 'speed', 'shape': [1, SPEED_CLASSES], 'dtype': 'float32'}]
+    table = table_of(model)
+    outputs = [{'name': 'speed', 'shape': [1, len(table)], 'dtype': 'float32'}]
     if model.ahead:
-        outputs += [{'name': 'next', 'shape': [1, SPEED_CLASSES + 1], 'dtype': 'float32',
+        outputs += [{'name': 'next', 'shape': [1, len(table) + 1], 'dtype': 'float32',
                      'meaning': 'the next limit: kph[argmax], none for the last class'},
                     {'name': 'metres', 'shape': [1, 1], 'dtype': 'float32', 'meaning': 'the metres to it over metres_scale'}]
     outputs.append({'name': 'hidden_out', 'shape': [1, hidden], 'dtype': 'float32', 'meaning': 'give it back as hidden'})
@@ -194,7 +205,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
                   'source': ('narrow road camera NV12 -> vision.BrainInput' if brain_picture else
                              'narrow road camera NV12 -> vision.yuv_to_rgb -> vision.resize')},
         'inputs': [{'name': name, 'shape': shapes[name], 'dtype': 'float32'} for name in INPUT_NAMES],
-        'output': {'name': 'speed', 'shape': [1, SPEED_CLASSES], 'kph': [int(class_kph(index)) for index in range(SPEED_CLASSES)],
+        'output': {'name': 'speed', 'shape': [1, len(table)], 'kph': table,
                    'decode': 'kph[argmax(speed)]', **({'metres_scale': METRES_SCALE} if model.ahead else {})},
         'outputs': outputs,
         'step': {'rate_hz': rate, 'clock': 'last' if rate == 1.0 else 'schedule',

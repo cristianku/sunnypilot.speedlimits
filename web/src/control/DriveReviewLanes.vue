@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // The lanes of a drive under its video (DriveReviewDrive.vue), between two times of the logs: what the comma recorded
 // (its vision limit and the signs it read, every sign read with the reason the limit holds, the map's limit, the resolver's limit and source, the speeds, openpilot and
-// the interventions, the kind of road its vision saw), what the server finds today (our networks' signs on its frames,
-// the map as it is now), and the episodes found in the logs. A stretch the log does not have is
-// hatched: missing data is never a value. A tap or a drag goes to that time. The slot "top" is a lane of the page that
-// shows them (Speed review's speed to hold), first of all, drawn with the scale of the others. Simple (Speed review)
-// keeps only the vision's limit, the map's and the car's speed under it: what a speed to hold is judged on.
+// the interventions), what the server finds today (our networks' signs on its frames, the map as it is now), and the
+// episodes found in the logs. A stretch the log does not have is hatched: missing data is never a value. A tap or a drag
+// goes to that time. The slot "top" is a lane of the page that shows them (Speed review's answer, his speed and his
+// blocks), first of all, drawn with the scale of the others. Simple (Speed review) keeps only the vision's limit, the
+// map's and the car's speed under it: what the answer is checked against.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {combine, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value, visionAtSign} from './drive-review';
@@ -89,8 +89,6 @@ const openpilotSeries = computed(() => combine([series('sd_enabled'), series('lo
 const OP_TEXT: Record<string, string> = {long: 'speed and steering', lat: 'steering', on: 'engaged', cruise: 'car\'s cruise', off: 'off'};
 const openpilot = computed(() => steps(openpilotSeries.value, (value) =>
   value === null || value === undefined ? ['dr-gap', ''] : ['dr-op-' + String(value), OP_TEXT[String(value)] ?? String(value)]));
-const scene = computed(() => steps(series('vis_road'), (value) =>
-  value === null || value === undefined ? ['dr-gap', ''] : value === '' || value === 'none' ? ['rt-unknown', ''] : ['rt-' + String(value), String(value)]));
 
 // The speeds: the car's (solid), the set speed (dashed), openpilot's target (dotted), on a scale from 0.
 const SPEED_HEIGHT = 46;
@@ -283,13 +281,6 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
           <line :x1="x(mark.at)" :x2="x(mark.at)" y1="11" y2="26"/>
           <text :x="x(mark.at)" y="10">{{ mark.text }}</text>
         </g>
-      </svg>
-    </div>
-    <div v-if="!simple" class="dr-lane" title="The kind of road the comma's vision saw (speedVisionSP.roadType)">
-      <span class="dr-lane-name">Scene<small>comma</small></span>
-      <svg :width="width" height="12" :viewBox="`0 0 ${width} 12`" aria-hidden="true">
-        <rect v-for="(run, index) in scene" :key="index" :x="x(run.from)" y="2" :width="w(run.from, run.to)" height="9" rx="2" :class="run.cls">
-          <title>{{ run.text }}</title></rect>
       </svg>
     </div>
     <div v-if="!simple" class="dr-lane dr-lane-server" title="Found on the server today, not what the comma knew: our networks' signs on its frames (ticks), the map as it is now (strip, with its limit)">

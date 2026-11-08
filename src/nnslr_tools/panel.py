@@ -83,11 +83,12 @@ CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
-# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'on'|'off', 'pool': 'grid'|'mean'}, the variables
-# of the script, the first of each the usual one.
+# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'off'|'on', 'pool': 'grid'|'mean'}, the
+# variables of the script, the first of each the usual one (the driver's inputs off since 8 Nov 2026: his speed is the
+# answer).
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
-BRAIN_DRIVER = {'on': '1', 'off': '0'}
+BRAIN_DRIVER = {'off': '0', 'on': '1'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
 REGRESSION_SCRIPT = 'scripts/run_regression.sh'
@@ -255,10 +256,13 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(epochs + ' epochs')
     if flags.get('--patience'):
         chips.append('patience ' + flags['--patience'])
-    # The brain's choices (scripts/run_brain.sh), when not the usual ones.
+    # The brain's choices (scripts/run_brain.sh), when not the usual ones. The driver's inputs are off by default since
+    # 8 Nov 2026 (--driver turns them on); a run of before that left them out said --no-driver.
     if '--no-works' in flags:
         chips.append('no roadworks')
-    if '--no-driver' in flags:
+    if '--driver' in flags:
+        chips.append('driver’s inputs')
+    elif '--no-driver' in flags:
         chips.append('no driver’s inputs')
     if flags.get('--pool') == 'mean':
         chips.append('picture as a mean')
@@ -992,12 +996,13 @@ class Panel:
                 reason = DECIDER_SCRIPT + ' is missing in this installation'
             elif name == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
                 reason = BRAIN_SCRIPT + ' is missing in this installation'
-            elif name == 'train_brain' and not self._speed_labels_found():
-                reason = 'no speeds marked yet: Data › Speed review'
+            elif name == 'train_brain' and (missing := self._brain_drives_missing()):
+                reason = missing
             elif name == 'train_brain' and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
             elif name == 'train_brain':
-                # Its labels are the speeds of Speed review: it needs no confirmed sign.
+                # Its labels are his own speed on every drive with its logs read (the blocks of Speed review correct
+                # it): it needs no confirmed sign, Sign review only gives it the next limit where it has one.
                 pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
@@ -1066,24 +1071,23 @@ class Panel:
             return "no Mapillary token: add MAPILLARY_TOKEN to the server's .env"
         return ''
 
-    def _speed_labels_found(self) -> bool:
-        """Whether a person marked a drive in Speed review (its database; what the labels give: brain_labels)."""
-        from nnslr_tools.speed_review import db_path
-        path = db_path(self.root)
-        if not path.is_file():
-            return False
-        connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+    def _brain_drives_missing(self) -> str:
+        """Why the brain has no drive to learn from now, or '': a drive is one with its logs read to the end and its
+        frames (brain_targets.training_routes, the one rule of the training; what they give: brain_labels). A drive is
+        labelled by being driven, so no mark of Speed review is needed."""
         try:
-            return connection.execute('SELECT 1 FROM speed_stretches LIMIT 1').fetchone() is not None
-        except sqlite3.Error:
-            return False
-        finally:
-            connection.close()
+            # It loads the car's brain_inputs.py from the sunnypilot clone (once a process).
+            from nnslr_tools import brain_targets
+            found = brain_targets.training_routes(self.root)
+        except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
+            return str(exc) or 'the drives of the brain cannot be read'
+        return '' if found else 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
 
     def brain_labels(self) -> dict:
-        """Train › Brain, what the labels of Speed review give a training today: brain_targets.summary, with the drives the
-        next training reads again first (not read, read by another reader than the car's of today, or without the brain's
-        pictures). A few seconds: asked when the section opens, never by the status."""
+        """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed
+        with the blocks of Speed review, the roadworks, the next limit of Sign review, as brain_targets.summary, with
+        the drives the next training reads again first (not read, read by another reader than the car's of today, or
+        without the brain's pictures). A few seconds: asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
@@ -1093,7 +1097,7 @@ class Panel:
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
                                                                 need_pictures=False))
-        except (ImportError, OSError, ValueError) as exc:
+        except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
         return {**found, 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
 
@@ -1586,7 +1590,7 @@ class Panel:
         rows = regression.route_rows(
             self.root, speed_review.drives_list(store, drives), drive_logs.videos_dir(), distill_root(),
             [model['key'] for model in models], [brain['key'] for brain in brains], regression.frozen_split(self.root),
-            store.stretches, lambda route: (drives.summary(route) or {}).get('t0_ns'))
+            store.blocks, lambda route: (drives.summary(route) or {}).get('t0_ns'))
         return {'ok': True, 'routes': rows, 'models': models, 'brains': brains, 'horizons': list(regression.HORIZONS_S),
                 'horizon': regression.DEFAULT_HORIZON_S}
 
@@ -1609,8 +1613,8 @@ class Panel:
 
     def _brain_choices(self, options: dict) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'driver', 'pool'}), the usual
-        ones when not given."""
-        works, driver, pool = options.get('works', 'on'), options.get('driver', 'on'), options.get('pool', BRAIN_POOLS[0])
+        ones when not given: the roadworks on, the driver's inputs off, the picture as a grid."""
+        works, driver, pool = options.get('works', 'on'), options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
         if not all(isinstance(value, str) for value in (works, driver, pool)) or works not in BRAIN_WORKS \
                 or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
             raise PanelError(400, 'bad_option', 'Roadworks and the driver’s inputs are on or off, the picture mean or grid.')

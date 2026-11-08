@@ -74,14 +74,14 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
   const proposers = status.proposers;
   const chosen = proposers?.chosen ?? null;
   const missing = chosen === 'ours' ? proposers?.ours ?? '' : chosen === 'qwen' ? proposers?.qwen ?? proposers?.qwen_gpu ?? '' : '';
-  // Prepared, but not read on the map yet (Data › Speed review, Read the map): that is the work of the row until it is done.
+  // Prepared, but not read on the map yet (Drives, Read the map): that is the work of the row until it is done.
   const roads = !count ? status.road_types_missing ?? 0 : 0;
   if (roads && status.actions.road_types) {
     return {
-      key: 'drives', label: 'Drives', href: '/speed-review', kind: 'prepare',
+      key: 'drives', label: 'Drives', href: '/prepare', kind: 'prepare',
       big: plural(roads, 'drive') + ' not read on the map',
-      note: 'Prepared: the map still has to give the limit of each picture.', warn: '',
-      more: {href: '/speed-review', label: 'Speed review'}, waiting: true, ok: false, running: running(status, 'drives'),
+      note: 'Prepared: the map still has to give the road and the limit of each picture.', warn: '',
+      more: null, waiting: true, ok: false, running: running(status, 'drives'),
       action: {name: 'road_types', state: status.actions.road_types, label: 'Read the map'},
     };
   }

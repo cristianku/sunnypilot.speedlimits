@@ -13,10 +13,10 @@ from nnslr_tools.brain_targets import inputs_sha256  # noqa: E402
 GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
 
 
-def checkpoint(path, monkeypatch, **changes):
+def checkpoint(path, monkeypatch, ahead=False, **changes):
     """load_brain giving an untrained network, and what a checkpoint says of itself."""
     from nnslr_tools.brain_net import build_brain_net
-    model = build_brain_net(GROUPS, works=False, pretrained=False).eval()
+    model = build_brain_net(GROUPS, works=False, ahead=ahead, pretrained=False).eval()
     saved = {'groups': GROUPS, 'hidden': model.gru.hidden_size, 'inputs_sha256': inputs_sha256(), 'epoch': 0, 'split': 'x',
              'reader': None, **changes}
     path.write_bytes(b'weights')
@@ -43,7 +43,74 @@ def test_the_contract_says_what_the_car_reads(tmp_path, monkeypatch):
     assert done['verification']['passed']
     assert contract['inputs_sha256'] == inputs_sha256()
     assert contract['step']['groups'] == list(GROUPS) and contract['step']['rate_hz'] == 1.0
-    assert contract['output']['kph'][:2] == [5, 10]
+    assert contract['output']['kph'] == list(range(1, 201)) and contract['output']['shape'] == [1, 200]
+
+
+def test_the_limit_ahead_has_none_after_the_last_speed(tmp_path, monkeypatch):
+    path = checkpoint(tmp_path / 'brain-last.pt', monkeypatch, ahead=True)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    shapes = {output['name']: output['shape'] for output in contract['outputs']}
+    assert shapes['speed'] == [1, 200] and shapes['next'] == [1, 201] and shapes['metres'] == [1, 1]
+
+
+def saved_brain(path, kph=None, ahead=True):
+    """A checkpoint as brain_train writes it, works_head and its table of the speeds among the weights."""
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net
+    torch.manual_seed(0)
+    model = build_brain_net(GROUPS, pool='grid', works=True, ahead=ahead, pretrained=False, kph=kph)
+    torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True, 'features': 128,
+                'hidden': 128, 'ahead': ahead, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x', 'reader': None,
+                'inputs_sha256': inputs_sha256()}, path)
+    return model
+
+
+def test_a_brain_of_5_km_h_classes_loads_with_its_own_table_and_says_it_to_the_car(tmp_path):
+    import torch
+    path = tmp_path / 'brain-last.pt'
+    trained = saved_brain(path, kph=list(range(5, 205, 5)))
+    model, saved = brain_export.load_brain(path)
+    assert model.class_kph.tolist() == [float(kph) for kph in range(5, 205, 5)]
+    assert (model.speed_head.out_features, model.next_head.out_features) == (40, 41)
+    assert torch.equal(model.speed_head.weight, trained.speed_head.weight) and model.works_head is None
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    assert contract['output']['kph'] == list(range(5, 205, 5)) and contract['output']['shape'] == [1, 40]
+    assert {output['name']: output['shape'] for output in contract['outputs']}['next'] == [1, 41]
+
+
+def test_a_brain_of_today_loads_with_a_class_a_km_h(tmp_path):
+    path = tmp_path / 'brain-last.pt'
+    saved_brain(path)
+    model, _saved = brain_export.load_brain(path)
+    assert brain_export.table_of(model) == list(range(1, 201)) and model.next_head.out_features == 201
+
+
+def test_along_a_drive_the_step_of_a_brain_of_before_says_its_own_km_h(tmp_path):
+    import numpy
+
+    from nnslr_tools.brain_targets import INPUT_SIZES
+    from nnslr_tools.road_type_net import FrameStore
+    path = tmp_path / 'brain-last.pt'
+    saved_brain(path, kph=list(range(5, 205, 5)))
+    model, _saved = brain_export.load_brain(path)
+    step = brain_export.step_module(model)
+    frames = 5
+    pictures = numpy.random.default_rng(0).integers(0, 255, (frames, 144, 256, 3), dtype=numpy.uint8)
+    width = sum(INPUT_SIZES[name] for name in GROUPS)
+    drive = {'route': 'r', 'frames': [{}] * frames, 'partitions': ['test'] * frames, 'cuts': {3},
+             'extra': numpy.random.default_rng(1).random((frames, width), dtype=numpy.float32)}
+
+    def run(image, extra, memory):
+        import torch
+        with torch.no_grad():
+            return [value.numpy() for value in step(*(torch.from_numpy(value) for value in (image, extra, memory)))]
+
+    found = brain_export.drive_rollout(model, run, drive, FrameStore({'r': pictures}, 'cpu'))
+    assert found['other_speed'] == 0 and found['other_ahead'] == 0 and found['frames'] == frames
+    assert found['said'] and all(kph % 5 == 0 for kph in found['said'])
 
 
 def test_a_network_of_an_earlier_file_with_the_same_groups_exports_with_its_own_hash(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Prepare: from the drives copied from the comma (the comma pill of the top bar downloads them) to frames with the
 // proposed signs: who proposes (with its measure), the actions, the download or preparation running (or the last
-// one), the routes.
+// one), the map's road and limit of the prepared drives (Read the map, RoadTypesCard.vue), the routes.
 import {computed, onMounted, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural, sentence, thousands} from '../common/format';
@@ -15,6 +15,7 @@ import {activityTab, JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalAct
 import PrepRoutes from './PrepRoutes.vue';
 import {networksText, PROPOSER_LABELS, proposerText} from './proposer-words';
 import {reviewSummary} from './review-routes';
+import RoadTypesCard from './RoadTypesCard.vue';
 import RouteTable from './RouteTable.vue';
 import TerminalActivity from './TerminalActivity.vue';
 import SectionHead from './SectionHead.vue';
@@ -120,9 +121,9 @@ const COUNTS: [RouteState, string][] = [['collegare', 'waiting for their videos'
   ['preannotare', 'waiting for their signs']];
 
 const job = computed(() => jobOf(props.status, PREPARE_ACTIONS));
-// The road types share the group of the preparation: they are on Speed review.
+// The map reading shares the group of the preparation: its card shows it (RoadTypesCard.vue), with its job.
 const activities = computed(() => terminalActivities(props.status, ['fetch', 'prepare'])
-  .filter((activity) => activityTab(activity) === '/prepare'));
+  .filter((activity) => activityTab(activity) === '/prepare' && activity.label !== 'map reading'));
 const counts = computed(() => COUNTS.map(([state, label]) => ({state, label,
   count: (props.status?.routes ?? []).filter((row) => row.state === state).length})));
 const total = computed(() => counts.value.reduce((sum, item) => sum + item.count, 0));
@@ -198,6 +199,10 @@ function openComma(): void {
   </section>
   <p v-else-if="job" class="last-line">Last: {{ job.label }}, {{ startedWhen(job) }} · {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
     <button type="button" class="link-button" @click="$emit('details', job)">Details</button></p>
+
+  <!-- The map's road and limit of the prepared drives: Map now and the Server today lane of the drive player. -->
+  <RoadTypesCard :status="status" @run="(name, state) => emit('run', name, state)" @stop="emit('stop', $event)"
+                 @details="emit('details', $event)"/>
 
   <!-- The routes still on their way; the ready ones are on the Review tab, as drives. -->
   <RouteTable v-if="notReady.length" :routes="notReady"/>

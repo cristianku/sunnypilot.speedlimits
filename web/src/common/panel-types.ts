@@ -1418,7 +1418,7 @@ export interface RoadDrive {
   /** In the order of the drive. */
   stretches: RoadStretch[];
 }
-/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Read the map on Data › Speed review. */
+/** GET /api/panel/road-types (nnslr_tools.road_types.summary), for Read the map on Data › Drives. */
 export interface RoadTypesPayload {
   /** Newest drive first. */
   routes: RoadDrive[];
@@ -1474,12 +1474,20 @@ export interface TrainSetting {
 /** What a training keeps as it is: what the car needs (the cutter's band, grid, channels, fuse). */
 export interface TrainFixed {label: string; value: string; help: string}
 export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';
-/** GET /api/panel/brain-labels: what the labels of Speed review give the brain's training today, per partition, and the drives
- * the training reads again first; problem instead when they cannot be read. */
+/** Why a second of a drive is out of the brain's speed loss (brain_targets.OUT_REASONS): no speed in the logs, below 1 km/h,
+ * inside a block left out, at the edge of a block, no picture. */
+export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame';
+/** GET /api/panel/brain-labels (brain_targets.summary): what the brain's training gets today from every drive with its logs
+ * read and its frames, in seconds of the drives. speed: his own speed, or a block's of Speed review; works_in/works_out:
+ * the roadworks answers; next: the next limit from Sign review; sites: the roadworks sites. Per drive the same, with why
+ * the rest is out; to_read: the drives the training reads again first; problem instead when they cannot be read. */
 export interface BrainLabels {
   problem?: string;
-  partitions?: Record<'train' | 'validation' | 'test' | 'buffer', {speed: number; works_in: number; works_out: number; sites: number}>;
-  drives?: {route: string}[];
+  partitions?: Record<'train' | 'validation' | 'test' | 'buffer',
+    {speed: number; works_in: number; works_out: number; sites: number; next: number}>;
+  drives?: {route: string; frames: number; speed: number; out: Record<BrainOut, number>; works_in: number;
+    works_out: number; marks: number; blocks: number; signs: number; covered_s: number; next: number; signs_read: boolean;
+    reader_current: boolean; pictures: boolean; no_picture_s: number}[];
   to_read?: number;
 }
 export interface TrainSettings {

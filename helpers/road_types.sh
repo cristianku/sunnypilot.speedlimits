@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # The map's limit of every frame of the prepared drives, from the GPS and the speed of the comma and the OpenStreetMap
-# roads and car parks, read offline (nnslr road-types; the button "Read the map" on top of Data › Speed review starts
-# this): the proposal of each stretch there, which a person confirms or corrects. Nothing here touches the reviews of
-# the signs, and the comma never reads any of it.
+# roads and car parks, read offline (nnslr road-types; the button "Read the map" on Data › Drives starts this): Map now
+# and the Server today lane of the drive player, the map as it is today. Nothing learns from it, nothing here touches the
+# reviews of the signs, and the comma never reads any of it.
 #
 #   a. the precise position of the road camera's frames from openpilot.distill's localizer, for the segments without
 #      it (nnslr localize --all; about 20 s of a core a segment, 6 side by side; skipped without distill's .venv),
 #      then the GPS position of the frames of the drives prepared without it or localized since (nnslr gps --all
 #      --missing)
 #   b. the maps the drives need: the Geofabrik extracts that hold a drive's positions and are not in raw/osm yet,
-#      downloaded (scripts/osm_maps.py, at most 5 GB a run; derived/osm/maps.json for Data › Speed review). Only Geofabrik's
+#      downloaded (scripts/osm_maps.py, at most 5 GB a run; derived/osm/maps.json for Read the map in Data › Drives). Only Geofabrik's
 #      index and the extracts are fetched: no position of the drives leaves the server. A download that fails leaves
 #      the maps present, and the job goes on: the drives outside them stay without the map's limit
 #   c. the car's speed of every second, from the drives' logs: a stretch without GPS at a drive's start or end, or by a

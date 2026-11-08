@@ -1,17 +1,16 @@
 <script setup lang="ts">
-// Read the map: the map's limits of the prepared drives (helpers/road_types.sh, the panel action "road_types"), at the
-// top of Data › Speed review: the OpenStreetMap limit it finds is the proposal of each stretch there.
-// The button, or its job running; then the drives still without, the maps of the server and those the drives still need
-// (the reading downloads them first, scripts/osm_maps.py), from GET /api/panel/road-types, read when the page opens and
-// again when a reading ends.
+// Read the map: the OpenStreetMap road and limit of the prepared drives (helpers/road_types.sh, the panel action
+// "road_types"), on Drives (PrepareTab.vue): what the drive player shows as Map now and in its Server today lane, the map
+// as it is today, never what the comma knew while driving. The button, or its job running; then the drives still
+// without, the maps of the server and those the drives still need (the reading downloads them first, scripts/osm_maps.py),
+// from GET /api/panel/road-types, read when the page opens and again when a reading ends.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, plural, sentence} from '../common/format';
 import type {ActionName, ActionState, Job, PanelStatus, RoadMapNeed, RoadTypesPayload} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import JobProgress from './JobProgress.vue';
-import {activityTab, JOB_STATE, jobOf, startedWhen, terminalActivities} from './jobs';
-import {goTo} from './tabs';
+import {JOB_STATE, jobOf, startedWhen, terminalActivities} from './jobs';
 import TerminalActivity from './TerminalActivity.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
@@ -22,7 +21,7 @@ const job = computed(() => jobOf(props.status, ['road_types']));
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 const state = computed(() => props.status?.actions.road_types ?? null);
 /** The search started from a terminal: shown here, stopped there. */
-const activities = computed(() => terminalActivities(props.status, ['prepare']).filter((activity) => activityTab(activity) === '/speed-review'));
+const activities = computed(() => terminalActivities(props.status, ['prepare']).filter((activity) => activity.label === 'map reading'));
 /** Nothing searching now: the button, and why it cannot start. */
 const idle = computed(() => !bigJob.value && !activities.value.length);
 
@@ -89,13 +88,13 @@ const outsideText = computed(() => {
       <div class="import-what">
         <strong>{{ payload === null ? 'The map\'s limits' : !fresh ? 'The map is read for every drive' : onlyMaps ? 'Maps to download'
           : 'Drives to read on the map' }}</strong>
-        <span v-if="payload !== null && !fresh">Every prepared drive has the map's limits{{ madeAt ? ' · ' + madeAt : '' }}: the
-          proposals below.</span>
+        <span v-if="payload !== null && !fresh">Every prepared drive has the map's road and limit{{ madeAt ? ' · ' + madeAt : '' }}:
+          Map now in the drive player.</span>
         <span v-else-if="onlyMaps">Some drives went where the server has no map: the reading downloads it first, then reads them
           there.</span>
         <span v-else-if="error">{{ error }}</span>
-        <span v-else>Reads where the car was and the limit there on the map, for every picture of the prepared drives: the proposal of each
-          stretch below.</span>
+        <span v-else>Reads where the car was and the road and limit there on the map, for every picture of the prepared drives: Map
+          now and the Server today lane of the drive player.</span>
       </div>
       <button type="button" class="btn" :class="{primary: fresh}" id="find-road-types" :disabled="!state?.allowed"
               @click="state && emit('run', 'road_types', state)">{{ fresh ? 'Read the map' : 'Read again' }}</button>
@@ -103,7 +102,7 @@ const outsideText = computed(() => {
     <p v-if="idle && without > 0" class="import-why" id="rt-without">{{ plural(without, 'prepared drive has', 'prepared drives have') }}
       not been read on the map yet.</p>
     <p v-if="idle && waiting > 0" class="import-why" id="rt-waiting">{{ plural(waiting, 'new drive needs', 'new drives need') }} their pictures
-      first: <button type="button" class="link-button" @click="goTo('prepare')">Prepare new drives</button> in Drives.</p>
+      first: Prepare new drives, above.</p>
     <p v-if="idle && maps && maps.checked_at && maps.names.length" class="import-why" id="rt-maps">Maps: {{ maps.names.join(', ') }}.</p>
     <p v-if="idle && maps && maps.outside > 0" class="import-why" id="rt-outside">{{ outsideText }}</p>
     <p v-if="idle && maps && maps.nowhere > 0" class="import-why" id="rt-nowhere">{{ plural(maps.nowhere, 'drive has', 'drives have') }}

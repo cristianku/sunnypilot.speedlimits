@@ -2,15 +2,17 @@
 its log (nnslr_tools.job_progress), what the labels give it, and which brains can be chosen for the car. Nothing is trained: the script is a stand-in, the log has the lines nnslr_tools.brain_train writes."""
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
+import sys
 
 import pytest
 
+from nnslr_tools import drive_review
 from nnslr_tools.job_progress import progress
 from nnslr_tools.model_roles import selectable
 from nnslr_tools.panel import Panel, PanelError, _run_of, _settings_of
-from nnslr_tools.speed_review import db_path
 from review_helpers import RunningServer, json_of
 from test_panel import checkout, finished, full_log, root  # noqa: F401  (fixtures and helpers)
 
@@ -22,7 +24,7 @@ settings:     --epochs 40 --pool mean
 == 1/6 Check the labels, the split and the training (CPU-only) ==
 dry_run epoch 1/1 train_loss 2.8000 val_error_kph - val_accuracy - on 0 frames (always 120: 31.2, the sign: 12.4), says [] 5s
 == 2/6 Explicit CUDA smoke test ==
-== 3/6 Read the signs of the labelled drives as the car does today ==
+== 3/6 Read the signs of the drives as the car does today ==
 == 4/6 Train seed 0 ==
 brain_s0 epoch 1/40 train_loss 2.5000 val_error_kph 11.32 val_accuracy 0.4120 on 357 frames (always 120: 31.2, the sign: 12.4), says [80, 120] 4s
 brain_s0 epoch 2/40 train_loss 2.1000 val_error_kph 9.75 val_accuracy 0.5012 on 357 frames (always 120: 31.2, the sign: 12.4), says [50, 80, 120] 4s
@@ -43,14 +45,25 @@ def brain_script(checkout):
     return script
 
 
-def speed_marked(root):
-    path = db_path(root)
+NS = 1_000_000_000
+
+
+def scanned(root, route='r1', frames=True):
+    """A drive the brain can learn from (brain_targets.training_routes): its logs read to the end and, with frames, its
+    frames. No mark of Speed review: the driver's own speed is the answer."""
+    path = drive_review.db_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
-    connection.execute('CREATE TABLE IF NOT EXISTS speed_stretches (route TEXT)')
-    connection.execute("INSERT INTO speed_stretches VALUES ('r1')")
+    for statement in drive_review.SCHEMA_STATEMENTS:
+        connection.execute(statement)
+    connection.execute("INSERT INTO scans (route, state, summary) VALUES (?, 'done', ?)",
+                       (route, json.dumps({'t0_ns': 0, 'span_ns': [0, 40 * NS]})))
     connection.commit()
     connection.close()
+    if frames:
+        listed = root / 'derived' / 'frames' / route / '0' / 'frames.jsonl'
+        listed.parent.mkdir(parents=True, exist_ok=True)
+        listed.write_text('{}\n')
 
 
 # -- its progress -------------------------------------------------------------------------------------------------
@@ -84,15 +97,19 @@ def test_a_seed_already_trained_is_a_step_done():
 
 
 # -- "Train the brain" --------------------------------------------------------------------------------------------
-def test_the_brain_is_trained_from_the_train_tab_once_a_speed_is_marked(root, checkout, monkeypatch):
+def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     assert panel._action_states(ready_payload(), [])['train_brain'] == {
         'label': 'Train the brain', 'allowed': False, 'reason': 'scripts/run_brain.sh is missing in this installation'}
     brain_script(checkout)
-    assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == 'no speeds marked yet: Data › Speed review'
-    speed_marked(root)
+    nothing = 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
+    assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == nothing
+    # Its logs read but not its frames: still nothing to learn from.
+    scanned(root, frames=False)
+    assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == nothing
+    scanned(root, 'r2')
     assert panel._action_states(ready_payload(gpu_processes=1), [])['train_brain']['reason'] == 'the GPU is busy with another process'
-    # Its labels are the speeds of Speed review: no reviewed drive of signs needed.
+    # Its labels are the driver's own speed: no mark of Speed review and no reviewed drive of signs needed.
     assert panel._action_states(ready_payload(), [])['train_brain']['allowed'] is True
 
     monkeypatch.setattr(panel, 'activities', lambda: [])
@@ -103,31 +120,45 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_speed_is_marked(root, ch
     assert first[:2] == ['==', 'scripts/run_brain.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-brain', first[2])
     assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the brain')
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_brain') == first[2]
-    assert 'choices: 1 1 grid' in lines
+    # The usual choices: the roadworks on, the driver's inputs off (since 8 Nov 2026), the picture as a grid.
+    assert 'choices: 1 0 grid' in lines
 
 
 def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
-    speed_marked(root)
+    scanned(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
     job = panel.start('train_brain', {'works': 'off', 'driver': 'off', 'pool': 'mean'})
     done = finished(panel, job['id'])
     assert 'choices: 0 0 mean' in full_log(panel, job['id']).splitlines()
     assert done['state'] == 'ok'
-    # The job's chips, from the settings line of the script.
+    # The job's chips, from the settings line of the script: the driver's inputs when a run had them (--driver), and
+    # the runs of before 8 Nov 2026 that left them out (--no-driver) still say so.
     log = root / 'brain.log'
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean --no-works --no-driver\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs', 'no roadworks', 'no driver’s inputs', 'picture as a mean']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --driver\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'driver’s inputs']
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs']
+
+
+def test_the_drivers_inputs_are_only_there_when_asked(root, checkout, monkeypatch):
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    job = panel.start('train_brain', {'driver': 'on'})
+    finished(panel, job['id'])
+    assert 'choices: 1 1 grid' in full_log(panel, job['id']).splitlines()
 
 
 @pytest.mark.parametrize('options', [{'works': 'x'}, {'driver': 'maybe'}, {'pool': 'max'}, {'works': ['on']}, {'pool': {'a': 1}}])
 def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, options):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
-    speed_marked(root)
+    scanned(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
     with pytest.raises(PanelError) as refused:
         panel.start('train_brain', options)
@@ -145,7 +176,7 @@ def test_its_choices_are_refused_on_another_training(root, checkout, key, value)
 def test_it_is_a_step_of_the_pipeline_with_its_choices(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
-    speed_marked(root)
+    scanned(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
     with pytest.raises(PanelError) as refused:
         panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'pool': 'max'}}]}, None)
@@ -154,7 +185,7 @@ def test_it_is_a_step_of_the_pipeline_with_its_choices(root, checkout, monkeypat
     assert view['steps'][0]['action'] == 'train_brain'
     job = next(item for item in panel.jobs() if item['action'] == 'train_brain')
     finished(panel, job['id'])
-    assert 'choices: 0 1 mean' in full_log(panel, job['id']).splitlines()
+    assert 'choices: 0 0 mean' in full_log(panel, job['id']).splitlines()
 
 
 def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_log(root, checkout):
@@ -176,16 +207,41 @@ def test_a_brain_can_be_chosen_for_the_car_with_or_without_the_drivers_inputs():
 
 
 # -- the signs it reads -------------------------------------------------------------------------------------------
-def test_road_type_signs_labelled_reads_the_drives_of_speed_review(root, monkeypatch, capsys):
+def test_road_type_signs_labelled_reads_every_drive_the_brain_learns_from(root, monkeypatch, capsys):
     from nnslr_tools import brain_targets, cli, road_type_signs
     asked = []
     monkeypatch.setattr(road_type_signs, 'build_signs', lambda data, routes, **kwargs: asked.append(routes) or {})
-    monkeypatch.setattr(brain_targets, 'read_labels', lambda data: {})
+    monkeypatch.setattr(brain_targets, 'training_routes', lambda data: [])
     assert cli.main(['road-type-signs', '--labelled', '--data-root', str(root)]) == 2
-    assert 'no drive with labels' in capsys.readouterr().err and asked == []
-    monkeypatch.setattr(brain_targets, 'read_labels', lambda data: {'r2': {}, 'r1': {}})
+    assert 'no drive to learn from' in capsys.readouterr().err and asked == []
+    # A drive is the brain's without a mark of Speed review (read_labels is not asked).
+    monkeypatch.setattr(brain_targets, 'read_labels', lambda data: pytest.fail('read_labels asked'))
+    monkeypatch.setattr(brain_targets, 'training_routes', lambda data: ['r1', 'r2'])
     assert cli.main(['road-type-signs', '--labelled', '--data-root', str(root)]) == 0
     assert asked == [['r1', 'r2']]
+
+
+# -- the command line ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize('flags,driver', [([], False), (['--driver'], True), (['--no-driver'], False)])
+def test_train_brain_leaves_the_drivers_inputs_out_unless_asked(tmp_path, monkeypatch, capsys, flags, driver):
+    """nnslr train-brain: the driver's inputs out by default since 8 Nov 2026, --driver the comparison, --no-driver (the
+    opt-out of before) still the same. Nothing is trained: brain_train is a stand-in."""
+    import types
+
+    import nnslr_tools
+    from nnslr_tools import cli
+    asked = []
+    measure = {'speed': 1.0, 'speeds_said': [80], 'one_speed': 2.0, 'follow_the_sign': 3.0}
+
+    def train_brain(*args, **kwargs):
+        asked.append(kwargs)
+        return {'train': measure, 'validation': measure, 'test': measure,
+                'validation_swapped': measure, 'test_swapped': measure}
+    fake = types.SimpleNamespace(EPOCHS=40, train_brain=train_brain)
+    monkeypatch.setitem(sys.modules, 'nnslr_tools.brain_train', fake)
+    monkeypatch.setattr(nnslr_tools, 'brain_train', fake, raising=False)
+    cli.main(['train-brain', '--data-root', str(tmp_path / 'data'), '--run-dir', str(tmp_path / 'out'), *flags])
+    assert [kwargs['driver'] for kwargs in asked] == [driver]
 
 
 # -- what the labels give it --------------------------------------------------------------------------------------
@@ -206,7 +262,7 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
 def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypatch):
     from nnslr_tools import brain_targets
     brain_script(checkout)
-    speed_marked(root)
+    scanned(root)
     monkeypatch.setattr(brain_targets, 'dataset', lambda *args, **kwargs: [])
     server = RunningServer(root)
     server.app.panel = Panel(root, repo=checkout)
@@ -219,7 +275,7 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         assert status == 200, data
         job = json_of(data)['id']
         finished(server.app.panel, job)
-        assert 'choices: 0 1 mean' in full_log(server.app.panel, job).splitlines()
+        assert 'choices: 0 0 mean' in full_log(server.app.panel, job).splitlines()
         status, _, data = server.request('GET', '/api/panel/brain-labels')
         assert status == 200 and json_of(data)['to_read'] == 0
     finally:

@@ -35,7 +35,8 @@ def batch(t=T):
 
 
 def answers(t=T, speed_on=(), works_on=()):
-    speed = torch.full((1, t), 19, dtype=torch.long)
+    from nnslr_tools.brain_targets import speed_class
+    speed = torch.full((1, t), speed_class(100), dtype=torch.long)
     speed_weight, works_weight = torch.zeros(1, t), torch.zeros(1, t)
     speed_weight[0, list(speed_on)] = 1
     works_weight[0, list(works_on)] = 1
@@ -63,6 +64,79 @@ def test_the_network_says_a_speed_and_works_on_every_frame():
     assert speed.shape == (1, T, SPEED_CLASSES)
     assert works.shape == (1, T)
     assert state.shape == (1, 128)
+
+
+def test_the_table_of_today_is_a_class_a_km_h_with_none_ahead_after_it():
+    from nnslr_tools.brain_targets import NONE_AHEAD, SPEED_CLASSES
+    model = net(ahead=True)
+    assert SPEED_CLASSES == 200 and NONE_AHEAD == 200
+    assert model.class_kph.tolist() == [float(kph) for kph in range(1, 201)]
+    assert (model.speed_head.out_features, model.next_head.out_features) == (200, 201)
+    assert model.near_kph == pytest.approx(0.5)
+
+
+def test_a_brain_of_5_km_h_classes_keeps_its_table():
+    model = net(ahead=True, kph=list(range(5, 205, 5)))
+    assert model.class_kph.tolist() == [float(kph) for kph in range(5, 205, 5)]
+    assert (model.speed_head.out_features, model.next_head.out_features) == (40, 41)
+    assert model.near_kph == pytest.approx(2.5)
+    trusting(model, 3.0)
+    assert model(batch(2)[0], number_row(50))[0].argmax(dim=-1).tolist() == [[9, 9]]
+    assert 'near_kph' not in model.state_dict()
+
+
+@pytest.mark.parametrize('kph', [[], [5, 5, 10], [10, 5]])
+def test_a_table_is_km_h_going_up(kph):
+    from nnslr_tools.brain_net import build_brain_net
+    with pytest.raises(ValueError):
+        build_brain_net(GROUPS, pretrained=False, kph=kph)
+
+
+def test_his_speed_is_a_bell_around_its_class():
+    import math
+
+    from nnslr_tools.brain_net import SPEED_SIGMA_KPH, speed_targets
+    from nnslr_tools.brain_targets import speed_class
+    targets = speed_targets(torch.tensor([speed_class(52), speed_class(1), speed_class(200)]))
+    assert targets.shape == (3, 200)
+    assert targets.sum(dim=-1).tolist() == pytest.approx([1.0, 1.0, 1.0])
+    assert targets.argmax(dim=-1).tolist() == [speed_class(52), 0, 199]
+    near = targets[0, speed_class(54)] / targets[0, speed_class(52)]
+    assert float(near) == pytest.approx(math.exp(-0.5 * (2 / SPEED_SIGMA_KPH) ** 2))
+    assert float(targets[0, speed_class(50)]) == pytest.approx(float(targets[0, speed_class(54)]))
+    assert float(targets[0, speed_class(120)]) < 1e-12
+
+
+def test_on_the_table_of_before_the_bell_is_almost_the_class_alone():
+    from nnslr_tools.brain_net import speed_targets
+    targets = speed_targets(torch.tensor([9]), kph=torch.arange(5, 205, 5, dtype=torch.float32))
+    assert targets.shape == (1, 40)
+    assert float(targets[0, 9]) > 0.85
+    assert float(targets[0, 8]) == pytest.approx(float(targets[0, 10]))
+
+
+def test_a_near_speed_costs_less_than_a_far_one():
+    from nnslr_tools.brain_net import brain_loss
+    from nnslr_tools.brain_targets import speed_class
+    speed, speed_weight, works, works_weight = answers(1, speed_on=[0])
+    speed[0, 0] = speed_class(52)
+
+    def said(kph):
+        logits = torch.zeros(1, 1, 200)
+        logits[0, 0, speed_class(kph)] = 10
+        return float(brain_loss(logits, None, speed, speed_weight, works, works_weight))
+    assert said(52) < said(53) < said(120)
+    assert said(51) == pytest.approx(said(53))
+
+
+def test_a_frame_without_a_class_and_no_weight_adds_nothing():
+    from nnslr_tools.brain_net import brain_loss
+    speed_logits, works_logit, _state = net()(*batch())
+    speed, speed_weight, works, works_weight = answers(speed_on=[0, 1])
+    without = speed.clone()
+    without[0, 3] = -1
+    assert float(brain_loss(speed_logits, None, without, speed_weight, works, works_weight)) == pytest.approx(
+        float(brain_loss(speed_logits, None, speed, speed_weight, works, works_weight)))
 
 
 @pytest.mark.parametrize('pool', ['mean', 'grid'])
@@ -129,7 +203,8 @@ def test_with_the_frames_of_a_piece_an_answer_weighs_the_same_in_a_piece_with_fe
     both = brain_loss(speed_logits, None, speed, speed_weight, works, works_weight, frames=T)
     first = brain_loss(speed_logits, None, speed, alone, works, works_weight, frames=T)
     assert float(first) < float(both)
-    errors = torch.nn.functional.cross_entropy(speed_logits[0], speed[0], reduction='none')
+    from nnslr_tools.brain_net import speed_targets
+    errors = torch.nn.functional.cross_entropy(speed_logits[0], speed_targets(speed[0]), reduction='none')
     assert float(first) == pytest.approx(float(errors[0]) / T)
 
 

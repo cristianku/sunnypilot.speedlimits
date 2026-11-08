@@ -1,18 +1,21 @@
 """The training loop on a tiny drive, and the measure by hand. The measure needs only numpy: the rest is skipped without
 torch (see test_brain_net.py for how to run it)."""
 import random
+import re
 
 import pytest
 
 NS = 1_000_000_000
 T = 8
-# What a brain learns by default (brain_train.LEARNED_INPUTS): every group of the car but engaged.
+# What a brain learns with the driver's inputs (brain_train.LEARNED_INPUTS, driver=True): every group of the car but engaged.
 GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed', 'plate_wet', 'sign_distance')
 
 
-def fake_drive(partitions, *, speed=19, works=None, marks=(), route='00000001--abcdef0123'):
+def fake_drive(partitions, *, speed=None, works=None, marks=(), route='00000001--abcdef0123'):
+    """A drive of brain_targets.drive_targets: his speed 100 km/h (speed: a class) everywhere, unless speed says another."""
     import numpy
-    from nnslr_tools.brain_targets import INPUT_SIZES, pack_inputs
+    from nnslr_tools.brain_targets import INPUT_SIZES, pack_inputs, speed_class
+    speed = speed_class(100) if speed is None else speed
     count = len(partitions)
     inputs = {name: numpy.zeros((count, size), dtype=numpy.float32) for name, size in INPUT_SIZES.items()}
     drive = {'route': route, 'frames': [{}] * count, 'ns': numpy.arange(count, dtype=numpy.int64) * NS, 'partitions': list(partitions),
@@ -39,6 +42,38 @@ def test_the_measure_counts_only_the_frames_of_its_partition():
     assert found['speed']['mean_error_kph'] == pytest.approx(10 / 3)
 
 
+def test_a_speed_within_2_km_h_of_his_is_right():
+    from nnslr_tools.brain_train import RIGHT_KPH, measure
+    drive = fake_drive(['test'] * 5)
+    found = measure([drive], [said([100, 102, 98, 103, 97])], 'test')['speed']
+    assert RIGHT_KPH == 2
+    assert found == {'frames': 5, 'right': pytest.approx(3 / 5), 'mean_error_kph': pytest.approx(10 / 5)}
+
+
+def test_inside_a_block_the_network_is_measured_against_the_block_and_against_the_car():
+    import numpy
+    from nnslr_tools.brain_targets import speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 6)
+    drive['speed'][:4] = speed_class(80)
+    drive['own_kph'][:] = 100, 100, 81, numpy.nan, 100, 100
+    drive['blocked'] = numpy.array([True, True, True, True, False, False])
+    found = measure([drive], [said([101, 80, 81, 80, 100, 100])], 'test')['in_blocks']
+    assert found == {'frames': 4, 'right': pytest.approx(3 / 4), 'mean_error_kph': pytest.approx(22 / 4),
+                     'copy_own_speed': pytest.approx(1 / 2)}
+
+
+def test_with_no_block_apart_from_the_car_there_is_no_copy_to_count():
+    import numpy
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 2)
+    drive['own_kph'][:] = 101
+    drive['blocked'] = numpy.ones(2, dtype=bool)
+    assert measure([drive], [said([100, 100])], 'test')['in_blocks']['copy_own_speed'] is None
+    assert measure([fake_drive(['test'] * 2)], [said([100, 100])], 'test')['in_blocks'] == {
+        'frames': 0, 'right': None, 'mean_error_kph': None, 'copy_own_speed': None}
+
+
 def test_the_frames_without_gas_are_measured_apart():
     from nnslr_tools.brain_train import measure
     drive = fake_drive(['test'] * 3)
@@ -51,7 +86,8 @@ def test_the_frames_without_gas_are_measured_apart():
 def test_a_network_that_follows_the_car_shows_where_the_car_is_far_from_the_label():
     import numpy
     from nnslr_tools.brain_train import measure
-    drive = fake_drive(['test'] * 4, speed=23)
+    from nnslr_tools.brain_targets import speed_class
+    drive = fake_drive(['test'] * 4, speed=speed_class(120))
     drive['own_kph'][:] = 90, 90, 115, numpy.nan
     found = measure([drive], [said([90, 120, 115, 120])], 'test')
     assert found['speed']['frames'] == 4
@@ -60,7 +96,8 @@ def test_a_network_that_follows_the_car_shows_where_the_car_is_far_from_the_labe
 
 def test_with_the_car_near_the_label_the_measure_is_empty():
     from nnslr_tools.brain_train import measure
-    drive = fake_drive(['test'] * 2, speed=23)
+    from nnslr_tools.brain_targets import speed_class
+    drive = fake_drive(['test'] * 2, speed=speed_class(120))
     drive['own_kph'][:] = 118
     assert measure([drive], [said([120, 120])], 'test')['far_from_own_speed']['nearer_own_speed'] is None
 
@@ -84,6 +121,27 @@ def test_a_site_says_how_late_the_speed_came_back_and_how_much_was_said_too_earl
     assert len(found) == 1
     assert found[0]['above_label'] == pytest.approx(.25)
     assert found[0]['end_delay_s'] == pytest.approx(2)
+
+
+def test_the_speed_after_works_is_the_one_he_reaches_not_the_first_on_the_way_up():
+    from nnslr_tools.brain_targets import speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 20, marks=[{'start_ns': 2 * NS, 'end_ns': 6 * NS}])
+    drive['speed'][:6] = speed_class(60)
+    drive['speed'][6:] = [speed_class(kph) for kph in (63, 70, 80, 90, 100, 110, 118, 119, 120, 120, 120, 120, 120, 120)]
+    kph = [60] * 6 + [64, 70, 80, 90, 100, 110, 118, 119, 120, 120, 120, 120, 120, 120]
+    found = measure([drive], [said(kph)], 'test')['sites'][0]
+    assert found['end_delay_s'] == pytest.approx(6)
+    assert measure([drive], [said([60] * 6 + [64] * 14)], 'test')['sites'][0]['end_delay_s'] is None
+
+
+def test_a_site_whose_speed_after_is_his_inside_within_2_km_h_has_no_end():
+    from nnslr_tools.brain_targets import speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 10, marks=[{'start_ns': 2 * NS, 'end_ns': 6 * NS}])
+    drive['speed'][:6] = speed_class(80)
+    drive['speed'][6:] = speed_class(82)
+    assert measure([drive], [said([80] * 6 + [82] * 4)], 'test')['sites'][0]['end_delay_s'] is None
 
 
 def test_a_site_where_the_restriction_goes_on_has_no_delay():
@@ -116,6 +174,13 @@ def test_the_measure_says_which_speeds_the_network_said():
     from nnslr_tools.brain_train import measure
     drive = fake_drive(['test', 'test', 'test', 'train'], speed=speed_class(100))
     assert measure([drive], [said([100, 120, 100, 80])], 'test')['speeds_said'] == [100, 120]
+
+
+def test_the_log_says_how_many_speeds_and_from_where_to_where():
+    from nnslr_tools.brain_train import _spoken
+    assert _spoken([52, 60, 61, 118]) == '4 speeds, 52-118 km/h'
+    assert _spoken([100]) == '1 speed, 100-100 km/h'
+    assert _spoken([]) == 'nothing'
 
 
 def test_the_network_has_to_beat_the_sign_on_the_frames_with_a_number_in_force():
@@ -174,6 +239,24 @@ def test_a_site_of_another_partition_is_not_here():
     assert measure([drive], [said([100] * 10)], 'test')['sites'] == []
 
 
+def test_the_limit_ahead_is_right_on_its_class_and_false_where_none_is_ahead_and_it_says_one():
+    import numpy
+    from nnslr_tools.brain_targets import NONE_AHEAD, speed_class
+    from nnslr_tools.brain_train import measure
+    drive = fake_drive(['test'] * 6)
+    drive['next'] = numpy.array([speed_class(80)] * 3 + [NONE_AHEAD] * 3)
+    drive['next_weight'] = numpy.ones(6, dtype=numpy.float32)
+    drive['metres'] = numpy.array([.5, .4, .3, 0, 0, 0], dtype=numpy.float32)
+    drive['metres_weight'] = numpy.array([1, 1, 1, 0, 0, 0], dtype=numpy.float32)
+    answer = {**said([100] * 6), 'next': numpy.array([speed_class(80), speed_class(80), speed_class(50), NONE_AHEAD,
+                                                      NONE_AHEAD, speed_class(100)]),
+              'metres': numpy.array([50.0, 30.0, 0, 0, 0, 0]), 'none': NONE_AHEAD}
+    found = measure([drive], [answer], 'test')['ahead']
+    assert found['frames'] == 6 and found['right'] == pytest.approx(4 / 6)
+    assert found['changes'] == 3 and found['changes_right'] == pytest.approx(2 / 3)
+    assert found['false_ahead'] == pytest.approx(1 / 3)
+
+
 def test_no_frames_is_no_measure():
     from nnslr_tools.brain_train import measure
     assert measure([], [], 'test')['speed'] == {'frames': 0, 'right': None, 'mean_error_kph': None}
@@ -184,10 +267,10 @@ def torch_or_skip():
     return pytest.importorskip('torch')
 
 
-def tiny(torch, works=True):
+def tiny(torch, works=True, groups=GROUPS, **options):
     from nnslr_tools.brain_net import build_brain_net
     torch.manual_seed(0)
-    model = build_brain_net(GROUPS, pretrained=False, works=works)
+    model = build_brain_net(groups, pretrained=False, works=works, **options)
     for layer in model.modules():
         if isinstance(layer, torch.nn.Dropout):
             layer.p = 0.0
@@ -365,8 +448,9 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
     assert (plain == other).all()
 
 
-def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
-    """Every epoch's validation scores what scores says: nothing may follow from it."""
+def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None, driver=True):
+    """Every epoch's validation scores what scores says: nothing may follow from it. driver: train_brain's, None its
+    default."""
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
     change(drive)
@@ -374,7 +458,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
-    model = tiny(torch)
+    model = tiny(torch, groups=brain_train.LEARNED_INPUTS if driver else brain_train.ROAD_INPUTS)
     monkeypatch.setattr(brain_train, 'build_brain_net', lambda *_args, **_options: model)
     real, left = brain_train.measure, list(scores)
 
@@ -386,7 +470,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
 
     monkeypatch.setattr(brain_train, 'measure', scripted)
     result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), chunk=4, device='cpu',
-                                     log=lambda _text: None)
+                                     log=lambda _text: None, **({} if driver is None else {'driver': driver}))
     return result, torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False), model
 
 
@@ -398,6 +482,33 @@ def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_
     assert saved['split'] == 'split' and saved['reader'] == {'vision': 'abc'}
     assert saved['features'] == 128 and saved['hidden'] == 128
     assert {'validation_cold', 'test_cold'} <= set(result)
+    assert saved['weights']['class_kph'].tolist() == [float(kph) for kph in range(1, 201)]
+    assert result['right_kph'] == 2 and 'in_blocks' in result['test']
+
+
+def test_a_brain_learns_without_the_driver_unless_asked(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import LEARNED_INPUTS, ROAD_INPUTS
+    _result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], driver=None)
+    assert tuple(saved['groups']) == ROAD_INPUTS and not {'pedals', 'speed'} & set(saved['groups'])
+    _result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], driver=True)
+    assert tuple(saved['groups']) == LEARNED_INPUTS
+
+
+def test_the_epoch_line_keeps_what_the_site_reads_and_says_the_speeds_in_short(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    from nnslr_tools import brain_train
+    lines = []
+    real = brain_train.train_brain
+
+    def logged(*args, **options):
+        return real(*args, **{**options, 'log': lines.append})
+
+    monkeypatch.setattr(brain_train, 'train_brain', logged)
+    run_training(torch, tmp_path, monkeypatch, [1.0])
+    epoch = next(line for line in lines if ' epoch 1/1 ' in line)
+    assert 'val_error_kph 1.00 ' in epoch and ' val_accuracy ' in epoch
+    assert re.search(r' says (nothing|\d+ speeds?, \d+-\d+ km/h) \d+s$', epoch), epoch
 
 
 def at_two_in_the_afternoon(drive):
@@ -533,6 +644,29 @@ def test_a_network_deaf_to_the_sign_can_be_right_on_a_swap_and_moves_nothing(mon
     assert found['network']['right'] == 1.0 and found['moved'] == 0
 
 
+def test_a_passage_his_speed_keeps_within_5_km_h_of_the_number_is_swapped_with_his_answers(monkeypatch):
+    import numpy
+    from nnslr_tools.brain_targets import sign_kph, speed_class
+    drive = signed_drive()
+    drive['speed'][:3] = [speed_class(kph) for kph in (98, 102, 103)]
+    follows = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), drive)
+    assert follows['network'] == {'frames': 3, 'right': pytest.approx(2 / 3), 'mean_error_kph': pytest.approx(7 / 3)}
+    assert follows['moved'] == 3
+    drive['speed'][2] = speed_class(106)
+    assert swapped_measure(monkeypatch, lambda seen: numpy.full(7, 100), drive)['network']['frames'] == 0
+
+
+def test_an_answer_that_moves_2_km_h_has_not_moved(monkeypatch):
+    import numpy
+    from nnslr_tools.brain_targets import BRAIN_INPUTS
+    found = swapped_measure(monkeypatch, lambda seen: numpy.where(
+        seen['inputs']['signs'][:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE > 110, 102, 100), signed_drive())
+    assert found['moved'] == 0
+    found = swapped_measure(monkeypatch, lambda seen: numpy.where(
+        seen['inputs']['signs'][:, 0] * BRAIN_INPUTS.SIGN_KPH_SCALE > 110, 103, 100), signed_drive())
+    assert found['moved'] == 3
+
+
 @pytest.mark.parametrize('partitions, frames', [(['validation'] * 7, 3), (['validation'] * 2 + ['test'] * 5, 2)])
 def test_the_swap_asks_the_frames_of_its_partition_alone(monkeypatch, partitions, frames):
     from nnslr_tools.brain_targets import sign_kph
@@ -543,8 +677,9 @@ def test_the_swap_asks_the_frames_of_its_partition_alone(monkeypatch, partitions
 
 def test_each_drive_is_compared_with_its_own_answers(monkeypatch):
     from nnslr_tools.brain_targets import BRAIN_INPUTS, sign_kph
+    from nnslr_tools.brain_targets import speed_class
     plain = signed_drive()
-    plain['speed'][:] = 16
+    plain['speed'][:] = speed_class(85)
     plain['inputs']['signs'][:3, 0] = 120 / BRAIN_INPUTS.SIGN_KPH_SCALE
     found = swapped_measure(monkeypatch, lambda seen: sign_kph(seen['inputs']['signs']), plain, signed_drive())
     assert found['network']['frames'] == 3 and found['moved'] == 3
@@ -571,8 +706,9 @@ def test_the_swap_is_measured_on_validation_and_on_test_each_on_its_own(tmp_path
 
 def test_test_swapped_with_no_passage_to_change_has_no_frames(monkeypatch):
     import numpy
+    from nnslr_tools.brain_targets import speed_class
     drive = signed_drive()
-    drive['speed'][:] = 16
+    drive['speed'][:] = speed_class(85)
     assert swapped_measure(monkeypatch, lambda seen: numpy.zeros(7), drive)['network']['frames'] == 0
 
 
@@ -584,8 +720,25 @@ def test_the_network_goes_through_a_whole_drive_as_on_the_car():
     store = FrameStore({drive['route']: pictures(drive)}, torch.device('cpu'))
     found = predict(tiny(torch), drive, store, chunk=3, device=torch.device('cpu'))
     assert found['kph'].shape == (T,) and found['works'].shape == (T,)
-    assert found['kph'].min() >= 5 and found['kph'].max() <= 200
+    assert found['kph'].min() >= 1 and found['kph'].max() <= 200
     assert predict(tiny(torch, works=False), drive, store, chunk=3, device=torch.device('cpu'))['works'] is None
+
+
+def test_a_brain_of_before_says_its_speeds_in_its_own_table():
+    import numpy
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import predict
+    from nnslr_tools.road_type_net import FrameStore
+    drive = fake_drive(['test'] * T)
+    store = FrameStore({drive['route']: pictures(drive)}, torch.device('cpu'))
+    model = tiny(torch, ahead=True, kph=list(range(5, 205, 5)))
+    with torch.no_grad():
+        model.speed_head.bias[9] = 100
+        model.next_head.bias[40] = 100
+    found = predict(model, drive, store, chunk=3, device=torch.device('cpu'))
+    assert found['kph'].tolist() == [50] * T and (found['kph'] % 5 == 0).all()
+    assert found['next'].tolist() == [40] * T and found['none'] == 40
+    assert numpy.issubdtype(found['kph'].dtype, numpy.integer)
 
 
 def test_no_brain_learns_engaged():

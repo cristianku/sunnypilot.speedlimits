@@ -790,7 +790,7 @@ def make_handler(app: ReviewApp):
                 return
             # [sign-distance] - END
             # [speed-review] - START
-            # Data › Speed review (nnslr_tools.speed_review): the drives, a drive's stretches.
+            # Data › Speed review (nnslr_tools.speed_review): the drives, a drive's speed, blocks and roadworks.
             if path.startswith('/api/speed-review/'):
                 self._speed_review_get(path)
                 return
@@ -1404,7 +1404,7 @@ def make_handler(app: ReviewApp):
 
         # [speed-review] - START
         def _speed_review_get(self, path):
-            """Data › Speed review, reading only: the drives with how much of each is examined, a drive's stretches, a
+            """Data › Speed review, reading only: the drives with their blocks, a drive's speed, blocks and roadworks, a
             frame of its road video at full definition (the HD switch)."""
             from nnslr_tools import drive_review, speed_review
             store = speed_review.store_for(app.root)
@@ -1431,7 +1431,7 @@ def make_handler(app: ReviewApp):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if re.fullmatch(drive + '/(stretches|works)', path):
+            if re.fullmatch(drive + '/(blocks|works)', path):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Not found.', True)
@@ -1486,10 +1486,10 @@ def make_handler(app: ReviewApp):
         # [regression] - END
 
         def _speed_review_post(self, path):
-            """A person's speed on a stretch of a drive (/stretches: {"start_ns", "end_ns", "kph", "state", "known_ns",
-            "note", "base_revision"}; state null clears it) or a tap on its roadworks (/works: {"tap", "at_ns",
-            "base_revision"}): same origin, JSON, a person signed in on the site (never the access token alone: an agent
-            never writes these) and a panel that is not read-only."""
+            """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
+            to leave the moments out; {"remove": true, "start_ns", "base_revision"} removes one) or a tap on its roadworks
+            (/works: {"tap", "at_ns", "base_revision"}): same origin, JSON, a person signed in on the site (never the access
+            token alone: an agent never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1501,7 +1501,7 @@ def make_handler(app: ReviewApp):
             self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(stretches|works)', path)
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works)', path)
             if match is None:
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
@@ -1509,7 +1509,7 @@ def make_handler(app: ReviewApp):
             who, _via = self._who()
             reviewer = who or 'local'
             route = match.group(1)
-            write = speed_review.save if match.group(2) == 'stretches' else speed_review.save_works
+            write = speed_review.save_block if match.group(2) == 'blocks' else speed_review.save_works
             try:
                 answer = write(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body, reviewer)
             except speed_review.SpeedReviewError as exc:

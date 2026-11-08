@@ -21,7 +21,6 @@ from review_helpers import OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, jso
 
 GUEST = 'guest/ana'
 LATITUDE, LONGITUDE = 47.3769, 8.5417
-LABEL = {'kph': 80, 'state': 'limit', 'known_ns': None, 'note': ''}
 
 
 class Pair:
@@ -232,14 +231,14 @@ def test_every_store_comes_back(pair):
     for kind in ('speed', 'distance'):
         pair.give(kind)
     pair.round()
-    speed_review.SpeedReviewStore(pair.data).apply(ROUTE, 0, 10, LABEL, 0, GUEST)
+    speed_review.SpeedReviewStore(pair.data).set_block(ROUTE, 0, 10, 80, '', 0, GUEST)
     line = json.dumps({'reviewer': GUEST, 'sign': 1}) + '\n'
     path = sign_distance.marks_path(pair.data, ROUTE)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(line)
     tick(pair.data, pair.box, log=lambda _: None)
     pair.round()
-    assert [row['kph'] for row in speed_review.SpeedReviewStore(pair.root).stretches(ROUTE)] == [80]
+    assert [row['kph'] for row in speed_review.SpeedReviewStore(pair.root).blocks(ROUTE)] == [80]
     assert len(speed_review.SpeedReviewStore(pair.root).history(ROUTE)) == 1
     assert sign_distance.marks_path(pair.root, ROUTE).read_text() == line
 
@@ -260,10 +259,10 @@ def test_a_frame_under_another_name_is_refused(pair, reviewer, kind, channel):
 def test_a_kind_not_given_is_refused(pair):
     pair.give('signs')
     pair.round()
-    speed_review.SpeedReviewStore(pair.data).apply(ROUTE, 0, 10, LABEL, 0, GUEST)
+    speed_review.SpeedReviewStore(pair.data).set_block(ROUTE, 0, 10, 80, '', 0, GUEST)
     tick(pair.data, pair.box, log=lambda _: None)
     pair.round()
-    assert speed_review.SpeedReviewStore(pair.root).stretches(ROUTE) == []
+    assert speed_review.SpeedReviewStore(pair.root).blocks(ROUTE) == []
 
 
 def test_what_was_saved_just_before_the_work_ended_still_counts(pair):
@@ -327,11 +326,27 @@ def test_a_speed_out_of_range_is_refused(pair):
     pair.give('speed')
     pair.round()
     package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
-    package['speed']['stretches'] = [{'route': ROUTE, 'start_ns': 0, 'end_ns': 10, 'kph': 900, 'state': 'limit',
-                                      'known_ns': None, 'note': '', 'reviewer': GUEST, 'revision': 1}]
+    package['speed']['blocks'] = [{'route': ROUTE, 'start_ns': 0, 'end_ns': 10, 'kph': 900, 'note': '', 'reviewer': GUEST,
+                                   'revision': 1}]
     (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
     sync(pair.root, log=lambda _: None)
-    assert speed_review.SpeedReviewStore(pair.root).stretches(ROUTE) == []
+    assert speed_review.SpeedReviewStore(pair.root).blocks(ROUTE) == []
+
+
+def test_a_package_from_before_the_blocks_still_counts(pair):
+    """A box not yet updated sends no blocks: those of this server stay, and its marks still come back, roadworks with no
+    end yet too."""
+    speed_review.SpeedReviewStore(pair.root).set_block(ROUTE, 0, 3, 80, '', 0, 'cristianku')
+    pair.give('speed')
+    pair.round()
+    speed_review.SpeedReviewStore(pair.data).tap_works(ROUTE, 'start', 5, 10, 1, GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
+    del package['speed']['blocks']
+    (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
+    sync(pair.root, log=lambda _: None)
+    assert [row['start_ns'] for row in speed_review.SpeedReviewStore(pair.root).works(ROUTE)] == [5]
+    assert [(row['start_ns'], row['kph']) for row in speed_review.SpeedReviewStore(pair.root).blocks(ROUTE)] == [(0, 80)]
 
 
 def test_review_completed_takes_the_results_and_the_work_back(pair):

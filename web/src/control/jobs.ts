@@ -35,7 +35,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
  */
 export const ACTION_TAB: Record<ActionName, string | null> = {
   fetch: '/prepare', prepare: '/prepare', prepare_again: '/prepare', setup_vlm: '/prepare',
-  dataset: '/dataset', road_types: '/speed-review', review_box: '/reviewers',
+  dataset: '/dataset', road_types: '/prepare', review_box: '/reviewers',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
   train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
@@ -44,16 +44,16 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
-/** The actions whose jobs the Prepare, Train and Evaluate tabs show. */
-export const PREPARE_ACTIONS: ActionName[] = actionsOf('/prepare');
+/** The actions whose jobs the Prepare, Train and Evaluate tabs show; the map reading is on Prepare too, in a card of its
+ * own (RoadTypesCard.vue) that shows its job. */
+export const PREPARE_ACTIONS: ActionName[] = actionsOf('/prepare').filter((name) => name !== 'road_types');
 export const TRAIN_ACTIONS: ActionName[] = actionsOf('/train');
 export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's, the
- * map reading (in the group of the preparation) is Speed review's, the Mapillary positions and windows Train's (its classifier
- * and its cutter). */
+ * map reading is Prepare's like the rest of its group (in its own card there, RoadTypesCard.vue), the Mapillary positions
+ * and windows Train's (its classifier and its cutter). */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
-  if (activity.label === 'map reading') return '/speed-review';
   if (activity.group === 'mapillary') return '/train';
   if (activity.label === 'networks on the comma') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';

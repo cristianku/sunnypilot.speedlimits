@@ -1,5 +1,5 @@
-"""Speed review (Data › Speed review, nnslr_tools.speed_review): the proposals from the map and the signs the comma
-read, the writes of a person, and who may write them.
+"""Speed review (Data › Speed review, nnslr_tools.speed_review): the driver's speed as the answer, the blocks of a person
+that correct it, the roadworks, and who may write them.
 
 Every drive and label here is SYNTHETIC: made up by these tests. Nothing here is a real drive or a person's label.
 """
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import inspect
 import io
-import json
 import shutil
 import sqlite3
 import stat
@@ -31,7 +30,7 @@ SPAN = (T0, END)
 
 
 class FakeDrives:
-    """What the store needs of a drive review: the span of a drive, its joined logs."""
+    """What the store needs of a drive review: the span of a drive, its joined logs with the car's speed in km/h."""
 
     def __init__(self, points=((T0, 80.0),)):
         self.points = [list(point) for point in points]
@@ -40,24 +39,20 @@ class FakeDrives:
         return {'t0_ns': T0, 'span_ns': [T0, END]}
 
     def merged(self, route):
-        return {'t0': T0, 'span': [T0, END], 'series': {'vis_limit': self.points}}
+        return merged(self.points)
 
 
-def merged(points):
-    return {'t0': T0, 'span': [T0, END], 'series': {'vis_limit': [list(point) for point in points]}}
+def merged(points, cluster=()):
+    return {'t0': T0, 'span': [T0, END], 'series': {'v_ego': [list(point) for point in points],
+                                                    'v_ego_cluster': [list(point) for point in cluster]}}
 
 
 def at(seconds: float) -> int:
     return T0 + round(seconds * NS)
 
 
-def label(kph=100, state='corrected', known_ns=None, note=''):
-    return {'kph': kph, 'state': state, 'known_ns': known_ns, 'note': note}
-
-
-def spans(store, route=ROUTE):
-    return [((row['start_ns'] - T0) / NS, (row['end_ns'] - T0) / NS, row['kph'], row['state'])
-            for row in store.stretches(route)]
+def blocks(store, route=ROUTE):
+    return [((row['start_ns'] - T0) / NS, (row['end_ns'] - T0) / NS, row['kph']) for row in store.blocks(route)]
 
 
 @pytest.fixture
@@ -65,244 +60,99 @@ def store(tmp_path):
     return SpeedReviewStore(tmp_path)
 
 
-# ---------- the proposals ----------
+# ---------- the driver's speed ----------
 
-def test_a_limit_rounds_to_the_grid_and_a_flicker_joins_the_stretch_before():
-    found = speed_review.sign_runs(merged([(at(0), 79.99), (at(100), 121.0), (at(102), 80.0), (at(200), 0.0)]))
-    assert found == [{'start_ns': at(0), 'end_ns': at(200), 'kph': 80},
-                     {'start_ns': at(200), 'end_ns': END, 'kph': None}]
-
-
-def test_a_limit_covers_the_drive_from_its_first_second_even_with_nothing_held():
-    # Before the first message nothing is known; a drive without the series has one stretch with no value.
-    assert speed_review.sign_runs(merged([(at(50), 60.0)])) == [
-        {'start_ns': T0, 'end_ns': at(50), 'kph': None}, {'start_ns': at(50), 'end_ns': END, 'kph': 60}]
-    assert speed_review.sign_runs(merged([])) == [{'start_ns': T0, 'end_ns': END, 'kph': None}]
-    assert speed_review.sign_runs(None) == []
-    assert speed_review.sign_runs({'t0': None, 'span': [None, None], 'series': {}}) == []
+def test_the_answer_is_the_dashboard_speed_in_whole_km_h():
+    drive = merged([(at(0), 51.49), (at(1), 51.5), (at(2), 0.3), (at(3), 250.0)])
+    times = [at(0) - 1, at(0), at(1.5), at(2), at(3)]
+    # Half up, at most MAX_KPH, 0 below the dashboard's floor, None before the logs say a speed.
+    assert speed_review.driver_speed(drive, times) == [None, 51, 52, 0, 200]
 
 
-def test_a_flicker_at_the_start_of_a_drive_joins_the_stretch_after():
-    # The first message comes a moment after the start of the logs: no stretch of a tenth of a second to answer for.
-    assert speed_review.sign_runs(merged([(at(0.1), 80.0), (at(100), 60.0)])) == [
-        {'start_ns': T0, 'end_ns': at(100), 'kph': 80}, {'start_ns': at(100), 'end_ns': END, 'kph': 60}]
+def test_the_cluster_speed_of_the_car_is_the_answer_where_the_car_has_its_own():
+    # The cluster says another speed than vEgo while moving: it is real, so it is the dashboard's.
+    drive = merged([(at(0), 50.0)], cluster=[(at(0), 53.4)])
+    assert speed_review.driver_speed(drive, [at(5)]) == [53]
 
 
-def read_signs(reads, once=(), brain_limit=130.0):
-    """A drive with the brain: its vision limit is the brain's answer, the signs are the signReads with their frame's
-    raw reading. Each of reads is logged twice, 0.2 s apart, as a sign is read again as the car comes to it; each of once
-    in one frame alone."""
-    logged = sorted([(seconds + again, name, kph) for seconds, name, kph in reads for again in (0, 0.2)] + list(once))
-    series = {'vis_limit': [[T0, brain_limit]], 'vis_raw_class': [[at(seconds), name] for seconds, name, _ in logged],
-              'vis_raw_speed': [[at(seconds), kph] for seconds, _, kph in logged]}
-    return {'t0': T0, 'span': [T0, END], 'series': series,
-            'events': [[at(seconds), 'sign', brain_limit] for seconds, _, _ in logged]}
+def test_the_curve_is_the_speed_at_the_brains_steps_where_it_changes():
+    drive = merged([(at(0), 80.2), (at(10.1), 80.4), (at(20), 79.6), (at(30), 100.0)])
+    curve = speed_review.speed_curve(drive, (at(0), at(40)))
+    # 80.2, 80.4 and 79.6 are all 80: one point.
+    assert curve == [[at(0), 80], [at(30), 100]]
+    assert speed_review.speed_curve(merged([(at(0.1), 30.0)]), (at(0), at(1))) == [[at(0), None], [at(0.25), 30]]
 
 
-def test_the_signs_are_the_numbers_read_until_the_next_an_end_or_a_minute_unseen():
-    reads = [(10, 'maximum_speed:80', 80.0), (40, 'maximum_speed:80', 80.0), (90, 'cancellation', None),
-             (120, 'variable_display:100', 100.0), (200, 'minimum_speed:60', 60.0), (210, 'maximum_speed_hours:30', 30.0)]
-    # The brain's 130 is never a sign; the 80 read again at 40 s holds to the end; the 100 a minute after it was seen.
-    assert speed_review.sign_runs(read_signs(reads)) == [run(0, 10, None), run(10, 90, 80), run(90, 120, None),
-                                                          run(120, 180.2, 100), run(180.2, None, None)]
-    # A raw reading with no signRead is not a sign.
-    unconfirmed = read_signs([(10, 'maximum_speed:80', 80.0)])
-    unconfirmed['events'] = []
-    assert speed_review.sign_runs(unconfirmed) == [run(0, None, None)]
+# ---------- the blocks ----------
+
+def test_a_block_clips_the_blocks_it_covers(store):
+    assert store.set_block(ROUTE, at(0), at(100), 80, '', 0, 'a') == 1
+    store.set_block(ROUTE, at(40), at(60), None, 'queue', 1, 'a')
+    assert blocks(store) == [(0, 40, 80), (40, 60, None), (60, 100, 80)]
+    store.set_block(ROUTE, at(30), at(70), 50, '', 2, 'b')
+    assert blocks(store) == [(0, 30, 80), (30, 70, 50), (70, 100, 80)]
+    # What a block keeps outside the new one is still its own writer's.
+    assert [row['reviewer'] for row in store.blocks(ROUTE)] == ['a', 'b', 'a']
 
 
-def test_a_number_read_once_is_a_misreading():
-    # One frame of 20 between two reads of 80, no second 20 near it.
-    drive = read_signs([(10, 'maximum_speed:80', 80.0), (30, 'maximum_speed:80', 80.0)], once=[(20, 'maximum_speed:20', 20.0)])
-    assert speed_review.sign_runs(drive) == [run(0, 10, None), run(10, 90.2, 80), run(90.2, None, None)]
-
-
-def test_a_drive_from_before_the_raw_reading_takes_the_vision_limit():
-    assert speed_review.sign_runs(merged([(at(0), 80.0), (at(100), 60.0)])) == [run(0, 100, 80), run(100, None, 60)]
-
-
-def drive_with_frames(held=()):
-    """A drive of two segments: segment 0 with an encode index whose frame 0 is exposed 2 s after the start of the
-    logs, segment 1 without one."""
-    ids = list(range(0, 1200, 20))
-    return {'t0': T0, 'span': [T0, END], 'series': {'vis_limit': [list(point) for point in held]}, 'segments': [0, 1],
-            'frames': {0: {'ids': ids, 'sof': [at(2 + frame / 20) for frame in ids]}},
-            'spans': {0: [T0, at(60)], 1: [at(60), at(120)]}}
-
-
-def map_rows(segment, seconds, maxspeed):
-    return [{'frame_key': f'{segment}/{second}', 'segment_index': segment, 'output_index': second, 'maxspeed': maxspeed}
-            for second in seconds]
-
-
-def test_the_map_limit_is_placed_on_the_frames_of_the_video_and_only_a_number_is_a_limit():
-    rows = (map_rows(0, range(0, 30), '80') + map_rows(0, range(30, 40), '30 mph') + map_rows(0, range(40, 44), 'FR:urban')
-            + map_rows(0, range(44, 47), 'none') + map_rows(0, range(47, 50), None) + map_rows(1, range(0, 10), '120'))
-    # Segment 0 on its frame line (a second 2 s after the logs' start), segment 1 from its start in the logs; the hole
-    # between the two and the end of the rows say nothing.
-    assert speed_review.map_runs(drive_with_frames(), rows) == [
-        {'start_ns': T0, 'end_ns': at(32), 'kph': 80}, {'start_ns': at(32), 'end_ns': at(42), 'kph': 50},
-        {'start_ns': at(42), 'end_ns': at(60), 'kph': None}, {'start_ns': at(60), 'end_ns': at(70), 'kph': 120},
-        {'start_ns': at(70), 'end_ns': END, 'kph': None}]
-    assert speed_review.map_runs(drive_with_frames(), []) == []
-    assert speed_review.map_runs(None, rows) == []
-
-
-def run(first, last, kph):
-    return {'start_ns': at(first), 'end_ns': END if last is None else at(last), 'kph': kph}
-
-
-def test_the_proposal_is_the_map_and_the_signs_only_where_the_map_has_no_number():
-    mapped = [run(0, 100, 80), run(100, 103, None), run(103, 150, 80), run(150, None, None)]
-    laid = speed_review.proposed(speed_review.sign_runs(merged([(T0, 100.0)])), mapped, SPAN)
-    # Three seconds of the signs between two of the map join the stretch before.
-    assert laid == [{**run(0, 150, 80), 'source': 'map'}, {**run(150, None, 100), 'source': 'signs'}]
-
-
-def test_a_stretch_of_one_speed_says_where_most_of_it_comes_from():
-    mapped = [run(0, 50, 80), run(50, None, None)]
-    laid = speed_review.proposed(speed_review.sign_runs(merged([(T0, 80.0)])), mapped, SPAN)
-    assert laid == [{**run(0, None, 80), 'source': 'signs'}]
-    assert speed_review.proposed(speed_review.sign_runs(merged([(T0, 80.0)])), [], SPAN) == [
-        {**run(0, None, 80), 'source': 'signs'}]
-
-
-def test_the_signs_and_the_map_differ_only_both_known_and_for_long():
-    signs = [run(0, 100, 80), run(100, 200, 120), run(200, 250, 100), run(250, None, None)]
-    mapped = [run(0, 106, 80), run(106, None, 120)]
-    # The 120 read 6 s before the map's way of 120 is a sign and the end of a way at two places, not a disagreement.
-    assert speed_review.differences(signs, mapped) == [
-        {'start_ns': at(200), 'end_ns': at(250), 'map_kph': 120, 'sign_kph': 100}]
-
-
-def test_a_sign_is_passed_half_a_second_after_its_last_read():
-    reads = [10, 10.4, 11, 12.5, 30, 30.3]
-    drive = {'t0': T0, 'span': [T0, END], 'series': {}, 'events': [[at(seconds), 'sign', 80.0] for seconds in reads]}
-    assert speed_review.sign_passages(drive) == [(at(10), at(13)), (at(30), at(30.8))]
-    assert speed_review.sign_passages(merged([])) == [] and speed_review.sign_passages(None) == []
-
-
-def test_every_change_of_the_proposal_moves_to_its_sign():
-    proposal = [run(0, 100, 80), run(100, 200, 120), run(200, 230, 100), run(230, None, 60)]
-    passages = [(at(96), at(104.5)), (at(160), at(162)), (at(239), at(241))]
-    # The map's 120 starts 4.5 s before the car passes its sign; the 100 has no sign within 10 s and stays; the 60 moves
-    # 11 s on, as the reads of its sign began 9 s after it.
-    assert speed_review.at_the_signs(proposal, passages) == [
-        run(0, 104.5, 80), run(104.5, 200, 120), run(200, 241, 100), run(241, None, 60)]
-    # A move that would leave a stretch less than a second is not made.
-    short = [run(0, 100, 80), run(100, None, 120)]
-    assert speed_review.at_the_signs(short, [(at(99), at(299.5))]) == short
-    assert speed_review.at_the_signs(proposal, []) == proposal
-
-
-def test_the_drive_proposes_its_changes_at_the_signs_and_never_moves_a_saved_cut(store):
-    drives = FakeDrives()
-    drives.merged = lambda route: {**merged([(T0, 80.0), (at(100), 120.0)]),
-                                   'events': [[at(seconds), 'sign', 120.0] for seconds in (100, 100.3, 101)]}
-    view = speed_review.drive_view(store, drives, ROUTE)
-    assert [(item['start_ns'], item['kph']) for item in view['stretches']] == [(T0, 80), (at(101.5), 120)]
-    body = {'start_ns': T0, 'end_ns': at(100), 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
-    view = speed_review.save(store, drives, ROUTE, body, 'someone')
-    assert [(item['start_ns'], item['end_ns'], item['state']) for item in view['stretches']] == [
-        (T0, at(100), 'confirmed'), (at(100), at(101.5), 'not_examined'), (at(101.5), END, 'not_examined')]
-
-
-def test_a_map_proposal_is_shown_stored_nowhere_and_a_person_confirms_it(store):
-    path = store.root / 'derived' / 'road_types' / (ROUTE + '.jsonl')
-    path.parent.mkdir(parents=True)
-    path.write_text(''.join(json.dumps(row) + '\n' for row in map_rows(0, range(0, 58), '80')), encoding='utf-8')
-    drives = FakeDrives()
-    drives.merged = lambda route: drive_with_frames([(T0, 120.0)])
-    view = speed_review.drive_view(store, drives, ROUTE)
-    assert view['map_read'] is True and view['map'] == [run(0, 60, 80), run(60, None, None)]
-    assert view['signs'] == [run(0, None, 120)]
-    assert view['differ'] == [{'start_ns': T0, 'end_ns': at(60), 'map_kph': 80, 'sign_kph': 120}]
-    assert [(item['kph'], item['source'], item['state']) for item in view['stretches']] == [
-        (80, 'map', 'not_examined'), (120, 'signs', 'not_examined')]
-    assert store.stretches(ROUTE) == [] and store.revision(ROUTE) == 0 and view['examined_s'] == 0
-    body = {'start_ns': T0, 'end_ns': at(60), 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
-    view = speed_review.save(store, drives, ROUTE, body, 'someone')
-    saved = view['stretches'][0]
-    assert (saved['kph'], saved['state'], saved['reviewer']) == (80, 'confirmed', 'someone') and 'source' not in saved
-
-
-def test_a_drive_without_the_map_read_is_proposed_from_the_signs(store):
-    view = speed_review.drive_view(store, FakeDrives(), ROUTE)
-    assert view['map_read'] is False and view['map'] == [] and view['differ'] == []
-    assert [(item['kph'], item['source']) for item in view['stretches']] == [(80, 'signs')]
-
-
-def test_saved_stretches_cut_the_proposals_and_the_whole_drive_stays_covered():
-    proposed = speed_review.sign_runs(merged([(at(0), 80.0), (at(100), 120.0)]))
-    saved = [{'start_ns': at(50), 'end_ns': at(150), 'kph': 100, 'state': 'corrected', 'known_ns': None, 'note': '',
-              'reviewer': 'a'}]
-    whole = speed_review.partition(proposed, saved, SPAN)
-    assert [(item['start_ns'], item['end_ns'], item['kph'], item['state']) for item in whole] == [
-        (at(0), at(50), 80, 'not_examined'), (at(50), at(150), 100, 'corrected'), (at(150), END, 120, 'not_examined')]
-
-
-# ---------- the writes ----------
-
-def test_a_write_clips_what_it_covers_and_a_clear_brings_the_proposal_back(store):
-    first = store.apply(ROUTE, at(0), at(100), label(80, 'confirmed'), 0, 'a')
-    assert first == 1
-    # Split inside a saved stretch: the other side stays as it was, with the revision that wrote it.
-    assert store.apply(ROUTE, at(60), at(100), label(120), first, 'a') == 2
-    assert spans(store) == [(0, 60, 80, 'confirmed'), (60, 100, 120, 'corrected')]
-    assert [row['revision'] for row in store.stretches(ROUTE)] == [1, 2]
-    # A write in the middle leaves two sides.
-    store.apply(ROUTE, at(10), at(20), label(90), 2, 'a')
-    assert spans(store) == [(0, 10, 80, 'confirmed'), (10, 20, 90, 'corrected'), (20, 60, 80, 'confirmed'),
-                            (60, 100, 120, 'corrected')]
-    # A write over several removes the ones inside.
-    store.apply(ROUTE, at(5), at(70), label(100), 3, 'a')
-    assert spans(store) == [(0, 5, 80, 'confirmed'), (5, 70, 100, 'corrected'), (70, 100, 120, 'corrected')]
-    store.apply(ROUTE, at(5), at(70), None, 4, 'a')
-    assert spans(store) == [(0, 5, 80, 'confirmed'), (70, 100, 120, 'corrected')]
-    assert store.revision(ROUTE) == 5
-    assert store.examined()[ROUTE] == 35 * NS
-
-
-def test_a_clipped_stretch_stays_not_known_up_to_its_time(store):
-    store.apply(ROUTE, at(0), at(100), label(120, known_ns=at(70)), 0, 'a')
-    store.apply(ROUTE, at(50), at(60), label(80), 1, 'a')
-    left, _middle, right = store.stretches(ROUTE)
-    # Before the time nothing of it is known, up to its last instant, and the time stays inside the piece.
-    assert left['known_ns'] == at(50) - 1 and right['known_ns'] == at(70)
-    store.apply(ROUTE, at(60), at(80), label(90), 2, 'a')
-    assert store.stretches(ROUTE)[-1]['known_ns'] is None
-
+def test_a_removed_block_gives_the_drivers_speed_back(store):
+    store.set_block(ROUTE, at(0), at(100), 80, '', 0, 'a')
+    assert store.remove_block(ROUTE, at(0), 1, 'a') == 2 and blocks(store) == []
+    with pytest.raises(SpeedReviewError) as refused:
+        store.remove_block(ROUTE, at(5), 2, 'a')
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_block') and store.revision(ROUTE) == 2
 
 
 def test_a_stale_revision_changes_nothing(store):
-    store.apply(ROUTE, at(0), at(100), label(80, 'confirmed'), 0, 'a')
+    store.set_block(ROUTE, at(0), at(100), 80, '', 0, 'a')
     with pytest.raises(SpeedReviewError) as refused:
-        store.apply(ROUTE, at(0), at(100), label(120), 0, 'b')
+        store.set_block(ROUTE, at(0), at(100), 120, '', 0, 'b')
     assert (refused.value.status, refused.value.reason) == (409, 'stale_revision')
-    assert spans(store) == [(0, 100, 80, 'confirmed')] and store.revision(ROUTE) == 1
+    assert blocks(store) == [(0, 100, 80)] and store.revision(ROUTE) == 1
     # The revision is the drive's own: another drive starts from 0.
-    assert store.apply('00000000--0000000000', at(0), at(10), label(), 0, 'a') == 1
+    assert store.set_block('00000000--0000000000', at(0), at(10), 80, '', 0, 'a') == 1
 
 
-def test_the_history_only_grows_and_rebuilds_the_stretches(store, tmp_path):
-    writes = [(0, 100, label(80, 'confirmed')), (40, 60, label(120, known_ns=at(50))), (50, 90, None),
-              (0, 30, label(None, 'undetermined'))]
-    for revision, (start, end, value) in enumerate(writes):
-        store.apply(ROUTE, at(start), at(end), value, revision, 'a')
+def test_the_history_only_grows_and_rebuilds_the_blocks(store, tmp_path):
+    writes = [(0, 100, 80), (40, 60, None), (50, 90, 120)]
+    for revision, (start, end, kph) in enumerate(writes):
+        store.set_block(ROUTE, at(start), at(end), kph, 'note' if kph is None else '', revision, 'a')
+    store.remove_block(ROUTE, at(0), 3, 'a')
     history = store.history(ROUTE)
     assert [row['revision'] for row in history] == [1, 2, 3, 4]
-    assert [row['action'] for row in history] == ['saved', 'saved', 'cleared', 'saved']
-    assert history[0]['reviewer'] == 'a' and history[0]['at']
-    # Played again on an empty database, the history gives the same stretches.
+    assert [row['action'] for row in history] == ['block_saved', 'block_saved', 'block_saved', 'block_removed']
+    assert history[0]['reviewer'] == 'a' and history[0]['at'] and history[1]['note'] == 'note'
+    # Played again on an empty database, the history gives the same blocks.
     replay = SpeedReviewStore(tmp_path / 'replay')
     for row in history:
-        value = None if row['action'] == 'cleared' else {key: row[key] for key in ('kph', 'state', 'known_ns', 'note')}
-        replay.apply(ROUTE, row['start_ns'], row['end_ns'], value, row['revision'] - 1, row['reviewer'])
-    assert replay.stretches(ROUTE) == store.stretches(ROUTE)
+        if row['action'] == 'block_removed':
+            replay.remove_block(ROUTE, row['start_ns'], row['revision'] - 1, row['reviewer'])
+        else:
+            replay.set_block(ROUTE, row['start_ns'], row['end_ns'], row['kph'], row['note'], row['revision'] - 1, row['reviewer'])
+    assert replay.blocks(ROUTE) == store.blocks(ROUTE)
     connection = sqlite3.connect(store.path)
     for sql in ('UPDATE speed_history SET kph = 1', 'DELETE FROM speed_history'):
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute(sql)
+    connection.close()
+
+
+def test_an_old_file_keeps_its_stretches_and_takes_the_blocks(tmp_path):
+    path = speed_review.db_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    connection = sqlite3.connect(path)
+    connection.executescript('''CREATE TABLE schema_version (version INTEGER PRIMARY KEY); INSERT INTO schema_version VALUES (1);
+        CREATE TABLE speed_stretches (route TEXT NOT NULL, start_ns INTEGER NOT NULL, end_ns INTEGER NOT NULL, kph INTEGER,
+        state TEXT NOT NULL, known_ns INTEGER, note TEXT NOT NULL DEFAULT '', reviewer TEXT NOT NULL, revision INTEGER NOT NULL,
+        PRIMARY KEY (route, start_ns));''')
+    connection.execute('INSERT INTO speed_stretches VALUES (?, 0, 10, 80, ?, NULL, ?, ?, 1)', (ROUTE, 'confirmed', '', 'a'))
+    connection.commit()
+    connection.close()
+    store = SpeedReviewStore(tmp_path)
+    store.set_block(ROUTE, at(0), at(10), 70, '', 0, 'a')
+    connection = sqlite3.connect(path)
+    assert connection.execute('SELECT COUNT(*) FROM speed_stretches').fetchone()[0] == 1
+    assert connection.execute('SELECT MAX(version) FROM schema_version').fetchone()[0] == 2
     connection.close()
 
 
@@ -312,62 +162,57 @@ def test_the_labels_are_readable_only_by_their_owner(store):
 
 
 @pytest.mark.parametrize('change, reason', [
-    ({'start_ns': T0 - 1}, 'bad_stretch'),
-    ({'end_ns': END + 1}, 'bad_stretch'),
-    ({'end_ns': at(10)}, 'bad_stretch'),
+    ({'start_ns': T0 - 1}, 'bad_block'),
+    ({'end_ns': END + 1}, 'bad_block'),
+    ({'end_ns': at(10)}, 'bad_block'),
+    ({'end_ns': at(10.5)}, 'bad_block'),
     ({'start_ns': float(T0)}, 'bad_value'),
     ({'start_ns': True}, 'bad_value'),
     ({'base_revision': None}, 'bad_value'),
-    ({'state': 'not_examined'}, 'bad_state'),
-    ({'kph': 82}, 'bad_value'),
-    ({'kph': 0}, 'bad_value'),
-    ({'kph': 205}, 'bad_value'),
-    ({'kph': None}, 'bad_value'),
+    ({'kph': -1}, 'bad_value'),
+    ({'kph': 201}, 'bad_value'),
     ({'kph': '80'}, 'bad_value'),
     ({'kph': 80.0}, 'bad_value'),
-    ({'state': 'undetermined'}, 'bad_value'),
-    ({'kph': None, 'state': 'undetermined', 'known_ns': at(20)}, 'bad_value'),
-    ({'known_ns': at(10) - 1}, 'bad_value'),
-    ({'known_ns': at(20)}, 'bad_value'),
+    ({'kph': True}, 'bad_value'),
     ({'note': 'x' * 501}, 'bad_value'),
     ({'note': 5}, 'bad_value'),
 ])
-def test_a_label_that_does_not_fit_is_refused(change, reason):
-    body = {'start_ns': at(10), 'end_ns': at(20), 'kph': 80, 'state': 'confirmed', 'known_ns': None, 'note': '',
-            'base_revision': 0, **change}
+def test_a_block_that_does_not_fit_is_refused(change, reason):
+    body = {'start_ns': at(10), 'end_ns': at(20), 'kph': 80, 'note': '', 'base_revision': 0, **change}
     with pytest.raises(SpeedReviewError) as refused:
-        speed_review.checked(body, SPAN)
+        speed_review.block_of(body, SPAN)
     assert (refused.value.status, refused.value.reason) == (400, reason)
 
 
-def test_the_labels_that_fit():
-    body = {'start_ns': at(10), 'end_ns': at(20), 'base_revision': 3}
-    assert speed_review.checked({**body, 'state': None}, SPAN)[2] is None
-    assert speed_review.checked({**body, 'state': 'undetermined'}, SPAN)[2]['kph'] is None
-    start, end, value, base = speed_review.checked({**body, 'state': 'corrected', 'kph': 130, 'known_ns': at(15),
-                                                    'note': '  works  '}, SPAN)
-    assert (start, end, base) == (at(10), at(20), 3)
-    assert value == {'kph': 130, 'state': 'corrected', 'known_ns': at(15), 'note': 'works'}
+def test_the_blocks_that_fit():
+    body = {'start_ns': at(10), 'end_ns': at(11), 'base_revision': 3}
+    assert speed_review.block_of({**body, 'kph': 0}, SPAN) == (at(10), at(11), 0, '', 3)
+    assert speed_review.block_of({**body, 'kph': 83, 'note': '  works  '}, SPAN) == (at(10), at(11), 83, 'works', 3)
+    # No speed: the moments are left out of the training.
+    assert speed_review.block_of(body, SPAN)[2] is None
 
 
-def test_a_drive_without_a_scan_has_no_stretches_and_takes_no_label(store):
+def test_a_drive_without_a_scan_has_no_speed_and_takes_no_block(store):
     class NoLogs(FakeDrives):
         def summary(self, route):
             return None
     view = speed_review.drive_view(store, NoLogs(), ROUTE)
-    assert view['stretches'] == [] and view['revision'] == 0
+    assert view['speed'] == [] and view['blocks'] == [] and view['revision'] == 0 and view['total_s'] == 0
+    assert view['span_ns'] is None
     with pytest.raises(SpeedReviewError) as refused:
-        speed_review.save(store, NoLogs(), ROUTE, {}, 'a')
+        speed_review.save_block(store, NoLogs(), ROUTE, {}, 'a')
     assert refused.value.status == 404
 
 
 def test_a_save_answers_with_the_drive_as_it_is_now(store):
     drives = FakeDrives([(at(0), 80.0), (at(100), 120.0)])
-    body = {'start_ns': at(100), 'end_ns': at(200), 'kph': 120, 'state': 'confirmed', 'base_revision': 0}
-    view = speed_review.save(store, drives, ROUTE, body, 'a')
-    assert view['revision'] == 1 and view['examined_s'] == 100 and view['total_s'] == 300
-    assert [(item['kph'], item['state']) for item in view['stretches']] == [
-        (80, 'not_examined'), (120, 'confirmed'), (120, 'not_examined')]
+    body = {'start_ns': at(100), 'end_ns': at(200), 'kph': 100, 'base_revision': 0}
+    view = speed_review.save_block(store, drives, ROUTE, body, 'a')
+    assert view['revision'] == 1 and view['total_s'] == 300 and view['max_kph'] == 200 and view['span_ns'] == [T0, END]
+    assert view['speed'] == [[at(0), 80], [at(100), 120]]
+    assert [(row['kph'], row['reviewer']) for row in view['blocks']] == [(100, 'a')]
+    view = speed_review.save_block(store, drives, ROUTE, {'remove': True, 'start_ns': at(100), 'base_revision': 1}, 'a')
+    assert view['revision'] == 2 and view['blocks'] == []
 
 
 # ---------- the roadworks ----------
@@ -393,13 +238,13 @@ def test_two_taps_mark_roadworks_and_a_start_alone_runs_to_the_end_of_the_drive(
     assert [(row['start_ns'], row['end_ns']) for row in store.history(ROUTE)][:2] == [(at(50), END), (at(50), at(80))]
 
 
-def test_roadworks_cut_no_stretch_and_share_the_revision_of_the_drive(store):
-    store.apply(ROUTE, at(0), at(100), label(80, 'confirmed'), 0, 'a')
+def test_roadworks_cut_no_block_and_share_the_revision_of_the_drive(store):
+    store.set_block(ROUTE, at(0), at(100), 80, '', 0, 'a')
     store.tap_works(ROUTE, 'start', at(50), END, 1, 'a')
-    assert spans(store) == [(0, 100, 80, 'confirmed')] and store.revision(ROUTE) == 2
+    assert blocks(store) == [(0, 100, 80)] and store.revision(ROUTE) == 2
     # Two tabs: a write from before the tap is refused, and so is a tap from before a write.
     with pytest.raises(SpeedReviewError) as refused:
-        store.apply(ROUTE, at(0), at(100), label(120), 1, 'a')
+        store.set_block(ROUTE, at(0), at(100), 120, '', 1, 'a')
     assert refused.value.status == 409
     with pytest.raises(SpeedReviewError) as refused:
         store.tap_works(ROUTE, 'end', at(60), END, 1, 'a')
@@ -448,7 +293,7 @@ def test_a_tap_outside_the_drive_is_refused(change, reason):
 
 def test_a_tap_answers_with_the_drive_as_it_is_now(store):
     view = speed_review.save_works(store, FakeDrives(), ROUTE, {'tap': 'start', 'at_ns': at(50), 'base_revision': 0}, 'a')
-    assert view['revision'] == 1 and view['examined_s'] == 0
+    assert view['revision'] == 1 and view['blocks'] == []
     assert view['works'] == [{'start_ns': at(50), 'end_ns': None, 'reviewer': 'a', 'revision': 1}]
 
 
@@ -487,14 +332,15 @@ def test_a_drive_without_a_scan_takes_no_roadworks(store):
     assert refused.value.status == 404
 
 
-def test_the_drives_say_which_to_review_first(store, monkeypatch):
-    routes = ['00000170--aaaaaaaaaa', *speed_review.FIRST_DRIVES]
+def test_the_drives_say_their_blocks_and_roadworks(store, monkeypatch):
+    routes = ['00000170--aaaaaaaaaa', '00000171--bbbbbbbbbb']
     monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': route} for route in routes])
-    store.apply(speed_review.FIRST_DRIVES[0], at(0), at(30), label(), 0, 'a')
+    store.set_block(routes[1], at(0), at(30), 70, '', 0, 'a')
+    store.set_block(routes[1], at(40), at(50), None, '', 1, 'a')
+    store.tap_works(routes[1], 'start', at(60), END, 2, 'a')
     rows = speed_review.drives_list(store, FakeDrives())
-    assert [row['route'] for row in rows] == routes
-    assert [row['first'] for row in rows] == [False] + [True] * 5
-    assert rows[1]['examined_s'] == 30 and rows[1]['total_s'] == 300
+    assert [(row['route'], row['blocks'], row['works'], row['total_s']) for row in rows] == [
+        (routes[0], 0, 0, 300), (routes[1], 2, 1, 300)]
 
 
 # ---------- who writes ----------
@@ -508,10 +354,10 @@ def drives(monkeypatch):
     return fake
 
 
-def test_only_a_person_signed_in_writes_a_speed(tmp_path, drives):
+def test_only_a_person_signed_in_writes_a_block(tmp_path, drives):
     make_report(tmp_path)
-    path = f'/api/speed-review/drives/{ROUTE}/stretches'
-    body = {'start_ns': at(0), 'end_ns': at(10), 'kph': 80, 'state': 'confirmed', 'base_revision': 0}
+    path = f'/api/speed-review/drives/{ROUTE}/blocks'
+    body = {'start_ns': at(0), 'end_ns': at(10), 'kph': 80, 'base_revision': 0}
     server = RunningServer(tmp_path, token=TOKEN, require_token=True)
     token = {'X-Review-Token': TOKEN}
 
@@ -535,7 +381,7 @@ def test_only_a_person_signed_in_writes_a_speed(tmp_path, drives):
         assert speed_review.store_for(tmp_path).history(ROUTE)[0]['reviewer'] == 'admin'
         status, answer = post(session)
         assert (status, answer['error']) == (409, 'stale_revision')
-        status, answer = post(session, {**body, 'kph': 82, 'base_revision': 1})
+        status, answer = post(session, {**body, 'kph': 201, 'base_revision': 1})
         assert (status, answer['error']) == (400, 'bad_value')
         # Reading is open to the token too.
         status, _response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=token)

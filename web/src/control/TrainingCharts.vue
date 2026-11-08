@@ -203,7 +203,7 @@ const beforeEpochs = computed(() => running.value && ['import', 'split', 'gpu_en
 const beforeText = computed(() => shows('reader')
   ? 'First the training imports the reviews, checks the dataset and prepares the GPU: a few minutes.'
   : deciderCards.value.length ? 'First it checks the dataset and the GPU: a minute or two.'
-  : brainCards.value.length ? 'First it checks the labels and the GPU, then reads the signs of the drives of Speed review as the car does: a few minutes.'
+  : brainCards.value.length ? 'First it checks the labels and the GPU, then reads the signs of the drives it learns from as the car does: a few minutes.'
   : shows('detector') || shows('signnet') ? 'First it checks the frames of the training and of the evaluation, and the GPU: a few minutes.'
     : 'First it checks the dataset, the split and the cutter in use, then runs the cutter on every frame to mine its false boxes.');
 const isRunning = (net: Net): boolean => running.value && current.value === net;

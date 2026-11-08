@@ -18,8 +18,10 @@ carries it: never its picture, never its answer.
 The measure (measure), at the end on train, validation and test, frames with an answer only; train against test is the gap
 between roads seen and not seen:
 
-- speed: right, and the mean error in km/h, on all of them and on those without gas in the last second: the frames where
-  the driver gives nothing away, so a network that follows the pedal shows here;
+- speed: right (within RIGHT_KPH of the answer: at a km/h a class nobody says the dashboard's speed to the km/h, and on the
+  5 km/h table of the brains before it is the same as the class itself), and the mean error in km/h, on all of them and on
+  those without gas in the last second: the frames where the driver gives nothing away, so a network that follows the pedal
+  shows here;
 - speeds_said: every speed the network said there: one alone is a network that learned only how often each speed comes;
 - one_speed: the error of the speed most frames have, said everywhere: what the network has to beat;
 - follow_the_sign: on the frames with a number in force, the error of that number and the network's own there: the other
@@ -29,27 +31,36 @@ between roads seen and not seen:
   enough: the video shows how fast the car goes, and at the end of works the label and the car's speed rise together, so
   a network that follows the car looks right there. Here following the car is the wrong answer;
 - in_works: the same inside the marks;
+- in_blocks: the same inside the blocks of Speed review with a speed, the only frames whose answer is a person's correction
+  and not the speed he drove: everywhere else his speed is the answer, and a network that only knows how fast the car goes
+  is right there. copy_own_speed: of those frames, where the car's speed is more than RIGHT_KPH from the block's, the share
+  where the network said the car's speed (within RIGHT_KPH) and not the block's;
 - works: precision and recall of works_head, on the frames with an answer of its own, None where the partition has no
   frame to tell them by: with no "no" a constant yes would read 1.0;
-- sites: per mark of the partition, how long after his end tap the speed reaches what he labelled after it, and how much
-  of the mark was above his label: said too early, the end of works that is not there.
+- sites: per mark of the partition, how long after his end tap the speed reaches (within RIGHT_KPH) the speed he drove
+  after it, and how much of the mark was above his label: said too early, the end of works that is not there. The speed
+  after is the 90th percentile of his answers in END_WINDOW_S after the tap, the one he reaches, not his first answer there,
+  which is still on the way up; there is an end only where it is more than RIGHT_KPH above his median inside the mark.
 
 predict goes through a whole drive as on the car, so a held-out stretch starts from the memory of the train frames before it,
 and a network that only holds its last speed scores well there. So the result has each partition twice: as on the car, and
 cold, with the memory starting again where the stretch out of train begins.
 
 test_swapped and validation_swapped ask the network what the swap asks in training, on roads it never saw: the frames whose
-passage says its number, with that number changed to the other of its family. A network deaf to the sign is still right on the
-frames that go to the speed it says, so moved counts the answers that changed: the network reads the sign when they follow it.
+passage says its number (brain_targets.swap_passages: within SWAP_TOLERANCE_KPH), with that number changed to the other of its
+family and his answers moved as much. A network deaf to the sign is still right on the frames that go to the speed it says, so
+moved counts the answers that changed by more than RIGHT_KPH: the network reads the sign when they follow it.
 
 The brain steps at RATE_HZ, every reading of the car (brain_targets): its pictures are those vision.BrainInput makes on the
 car, kept while the signs are read. Each measure counts one frame a second, the frames of the old 1 Hz brains, so that the
 numbers of a brain of today and of one before read the same. ahead, the limit ahead on frames with its answer: right (none
 included), changes (of the frames before a change, those that say its speed), false_ahead (of the frames with none, those
-that say another limit than the speed), metres_error (mean, where the limit is right).
+that say a limit), metres_error (mean, where the limit is right). The next limit is a sign's number: right is its class,
+exact.
 
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. The driver's
-inputs are in unless driver=False: see brain_targets.
+inputs (brain_targets.DRIVER_INPUTS, his pedals and the car's speed) are out unless driver=True, since 8 Nov 2026: the
+answer is his own speed, and with the car's among the inputs the network learns to say it back, on the car its own.
 """
 from __future__ import annotations
 
@@ -77,6 +88,8 @@ CHECKPOINT = 'brain-last.pt'
 RESULT = 'result.json'
 END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
+RIGHT_KPH = 2  # a speed said this near the answer is right (the site says "within 2 km/h")
+AFTER_PERCENTILE = 90  # the speed he reaches after the end of works (_site)
 DRY_FRAMES = 12
 DRY_STEPS = 2
 LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT)
@@ -133,7 +146,7 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
                                                (drive['next'], ahead[0], drive['metres'].astype(np.float32), ahead[1])))
             loss = brain_loss(speed_logits, works_logit,
                               *(piece(values) for values in (drive['speed'], speed_weight, drive['works'], works_weight)),
-                              frames=chunk, ahead=found)
+                              frames=chunk, ahead=found, kph=model.class_kph)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP)
@@ -148,9 +161,10 @@ def _stretches_out_of_train(partitions: list[str]) -> set[int]:
 
 
 def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: bool = False) -> dict:
-    """What the network says along a whole drive, as on the car: {'kph': per frame, 'works': chance per frame, or None};
-    a network with the limit ahead also 'next' (a class per frame, NONE_AHEAD for none) and 'metres'. cold: the memory also
-    starts again where a stretch out of train begins."""
+    """What the network says along a whole drive, as on the car: {'kph': per frame, the km/h of its class in the network's
+    own table (class_kph), 'works': chance per frame, or None}; a network with the limit ahead also 'next' (a class of that
+    table per frame, 'none' for none: the last one, len(class_kph)) and 'metres'. cold: the memory also starts again where a
+    stretch out of train begins."""
     torch = _torch()
     model.eval()
     ahead = getattr(model, 'ahead', False)
@@ -169,16 +183,18 @@ def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: 
             speed.append(logits[0].argmax(dim=-1).cpu().numpy())
             if works_logit is not None:
                 works.append(torch.sigmoid(works_logit[0]).cpu().numpy())
-    found = {'kph': class_kph(np.concatenate(speed)), 'works': np.concatenate(works) if works else None}
+    table = np.rint(model.class_kph.detach().cpu().numpy()).astype(np.int64)
+    found = {'kph': table[np.concatenate(speed)], 'works': np.concatenate(works) if works else None}
     if ahead:
-        found['next'], found['metres'] = np.concatenate(following), np.concatenate(metres)
+        found['next'], found['metres'], found['none'] = np.concatenate(following), np.concatenate(metres), len(table)
     return found
 
 
 def _speed_measure(said: np.ndarray, truth: np.ndarray) -> dict:
     if not len(truth):
         return {'frames': 0, 'right': None, 'mean_error_kph': None}
-    return {'frames': int(len(truth)), 'right': float((said == truth).mean()), 'mean_error_kph': float(np.abs(said - truth).mean())}
+    error = np.abs(said - truth)
+    return {'frames': int(len(truth)), 'right': float((error <= RIGHT_KPH).mean()), 'mean_error_kph': float(error.mean())}
 
 
 def _one_speed(truth: np.ndarray) -> dict:
@@ -204,18 +220,29 @@ def _far_from_own_speed(said: np.ndarray, truth: np.ndarray, own: np.ndarray) ->
     return {**_speed_measure(said, truth), 'nearer_own_speed': nearer}
 
 
+def _in_blocks(said: np.ndarray, truth: np.ndarray, own: np.ndarray) -> dict:
+    """The frames inside a block with a speed: the network against the block's, and how often it said the car's instead,
+    where the two are apart. An unknown speed of the car (NaN) is not among those."""
+    apart = np.abs(own - truth) > RIGHT_KPH
+    copied = (np.abs(said - own) <= RIGHT_KPH) & (np.abs(said - truth) > RIGHT_KPH)
+    return {**_speed_measure(said, truth), 'copy_own_speed': float(copied[apart].mean()) if apart.any() else None}
+
+
 def _site(drive: dict, said: dict, mark: dict, truth: np.ndarray, asked: np.ndarray) -> dict:
-    """A mark: the frames inside it above his label, and how long after its end the speed reaches what he said after it."""
+    """A mark: the frames inside it above his label, and how long after its end the speed reaches the one he drove after it
+    (see the module's text)."""
     ns = drive['ns']
     inside = (ns >= mark['start_ns']) & (ns < mark['end_ns']) & asked
-    after = np.flatnonzero((ns >= mark['end_ns']) & (ns < mark['end_ns'] + END_WINDOW_S * NS) & asked)
+    window = (ns >= mark['end_ns']) & (ns < mark['end_ns'] + END_WINDOW_S * NS)
+    after = window & asked
     site = {'route': drive['route'], 'frames': int(inside.sum()),
             'above_label': float((said['kph'][inside] > truth[inside]).mean()) if inside.any() else None, 'end_delay_s': None}
-    if len(after) and inside.any() and truth[after[0]] > truth[inside][-1]:
-        late = ns < mark['end_ns'] + END_WINDOW_S * NS
-        reached = np.flatnonzero((ns >= mark['end_ns']) & late & (said['kph'] >= truth[after[0]]))
-        if len(reached):
-            site['end_delay_s'] = float((ns[reached[0]] - mark['end_ns']) / NS)
+    if after.any() and inside.any():
+        reached_kph = float(np.percentile(truth[after], AFTER_PERCENTILE))
+        if reached_kph > float(np.median(truth[inside])) + RIGHT_KPH:
+            reached = np.flatnonzero(window & (said['kph'] >= reached_kph - RIGHT_KPH))
+            if len(reached):
+                site['end_delay_s'] = float((ns[reached[0]] - mark['end_ns']) / NS)
     return site
 
 
@@ -230,7 +257,7 @@ def _measured(drive: dict) -> np.ndarray:
 
 def _ahead_measure(drives: list[dict], answers: list[dict], partition: str) -> dict | None:
     """The limit ahead: see the module's text. None for a network without it."""
-    said, truth, metres, said_metres, speed = [], [], [], [], []
+    said, truth, metres, said_metres, other = [], [], [], [], []
     for drive, answer in zip(drives, answers):
         weights = ahead_weights(drive, partition)
         if 'next' not in answer or weights is None:
@@ -238,15 +265,16 @@ def _ahead_measure(drives: list[dict], answers: list[dict], partition: str) -> d
         asked = (weights[0] > 0) & _measured(drive)
         said.append(answer['next'][asked])
         truth.append(drive['next'][asked])
-        speed.append(answer['kph'][asked])
+        # Its none is the last class of the network's table (predict); the speed said is no limit to compare it with: it is
+        # his speed, the next limit a sign's number.
+        other.append(answer['next'][asked] != answer.get('none', NONE_AHEAD))
         timed = (weights[1] > 0) & _measured(drive) & (answer['next'] == drive['next'])
         metres.append(drive['metres'][timed] * METRES_SCALE)
         said_metres.append(answer['metres'][timed])
     if not said:
         return None
-    said, truth, speed, metres, said_metres = (np.concatenate(part) for part in (said, truth, speed, metres, said_metres))
+    said, truth, metres, said_metres, other = (np.concatenate(part) for part in (said, truth, metres, said_metres, other))
     change, none = truth != NONE_AHEAD, truth == NONE_AHEAD
-    other = (said != NONE_AHEAD) & (class_kph(said) != speed)
     return {'frames': int(len(truth)), 'right': float((said == truth).mean()) if len(truth) else None,
             'changes': int(change.sum()), 'changes_right': float((said[change] == truth[change]).mean()) if change.any() else None,
             'false_ahead': float(other[none].mean()) if none.any() else None,
@@ -255,7 +283,7 @@ def _ahead_measure(drives: list[dict], answers: list[dict], partition: str) -> d
 
 def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
     """What the network is worth on one partition: see the module's text."""
-    said_all, truth_all, own_all, number_all, free, works_frames, sites = [], [], [], [], [], [], []
+    said_all, truth_all, own_all, number_all, free, works_frames, blocked, sites = [], [], [], [], [], [], [], []
     hits = {'true_positive': 0, 'false_positive': 0, 'false_negative': 0}
     told = {'yes': 0, 'no': 0}
     for drive, said in zip(drives, answers):
@@ -269,6 +297,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
         number_all.append(np.where(_in_force(signs), sign_kph(signs), -1))
         free.append(drive['inputs']['pedals'][asked, 0] == 0)
         works_frames.append(drive['works'][asked] > 0)
+        blocked.append(drive['blocked'][asked] if 'blocked' in drive else np.zeros(int(asked.sum()), dtype=bool))
         if said['works'] is not None:
             known = (works_weight > 0) & _measured(drive)
             yes, real = said['works'][known] >= .5, drive['works'][known] > 0
@@ -283,7 +312,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
                 sites.append(_site(drive, said, mark, truth, (drive['speed_weight'] > 0) & _measured(drive)))
     said_all, truth_all, own_all, number_all = (np.concatenate(part or [[]]) for part in
                                                 (said_all, truth_all, own_all, number_all))
-    free, works_frames = np.concatenate(free or [[]]).astype(bool), np.concatenate(works_frames or [[]]).astype(bool)
+    free, works_frames, blocked = (np.concatenate(part or [[]]).astype(bool) for part in (free, works_frames, blocked))
     found = hits['true_positive']
     ahead = _ahead_measure(drives, answers, partition)
     return {**({'ahead': ahead} if ahead else {}),
@@ -292,6 +321,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
             'no_gas': _speed_measure(said_all[free], truth_all[free]),
             'far_from_own_speed': _far_from_own_speed(said_all, truth_all, own_all),
             'in_works': _speed_measure(said_all[works_frames], truth_all[works_frames]),
+            'in_blocks': _in_blocks(said_all[blocked], truth_all[blocked], own_all[blocked]),
             'works': {**hits, 'precision': found / max(found + hits['false_positive'], 1) if told['no'] else None,
                       'recall': found / max(found + hits['false_negative'], 1) if told['yes'] else None}, 'sites': sites}
 
@@ -302,7 +332,7 @@ def _short(drive: dict, length: int) -> dict:
     part = slice(first, first + length)
     cut = {name: drive[name][part] for name in ('frames', 'ns', 'partitions', 'cells', 'speed', 'speed_out', 'speed_weight',
                                                 'works', 'works_weight', 'own_kph', 'measured', 'next', 'next_weight',
-                                                'metres', 'metres_weight') if name in drive}
+                                                'metres', 'metres_weight', 'blocked') if name in drive}
     return {**drive, **cut, 'inputs': {name: value[part] for name, value in drive['inputs'].items()},
             'cuts': {at - first for at in drive['cuts'] if first < at < first + length}}
 
@@ -379,15 +409,23 @@ def _swapped_measure(model, drives: list[dict], answers: list[dict], partition: 
             held.append({**swapped(drive, passages, groups), 'speed_weight': drive['speed_weight'] * inside})
             said.append(predict(model, held[-1], store, chunk=chunk, device=device))
             asked = (loss_weights(held[-1], partition)[0] > 0) & _in_force(held[-1]['inputs']['signs']) & _measured(drive)
-            moved += int((said[-1]['kph'][asked] != before['kph'][asked]).sum())
+            moved += int((np.abs(said[-1]['kph'][asked] - before['kph'][asked]) > RIGHT_KPH).sum())
     return {**measure(held, said, partition)['follow_the_sign'], 'moved': moved}
 
 
-def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True, driver: bool = True,
+def _spoken(speeds: list[int]) -> str:
+    """The speeds said, for the log: how many and from where to where (the whole list is in result.json)."""
+    if not speeds:
+        return 'nothing'
+    return f'{len(speeds)} speed{"s" if len(speeds) > 1 else ""}, {speeds[0]}-{speeds[-1]} km/h'
+
+
+def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True, driver: bool = False,
                 epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None, dry_run: bool = False, seed: int = 0,
                 log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes brain-last.pt and result.json into run_dir; the checkpoint
-    says what it came from. Refuses what would train wrong: brain_targets.check_drives."""
+    says what it came from, its table of the speeds too (the class_kph of its weights). Refuses what would train wrong:
+    brain_targets.check_drives. driver: with his pedals and the car's speed among the inputs, the comparison."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -431,17 +469,17 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         score = validation['speed']['mean_error_kph']
         history.append({'epoch': epoch, 'error': error, 'validation': validation['speed']})
         # Read by nnslr_tools.job_progress: the seed's curve in Train › Brain.
-        right = validation['speed']['right']
+        right, spoken = validation['speed']['right'], validation['speeds_said']
         log(f'{name} epoch {epoch + 1}/{epochs} train_loss {error:.4f} val_error_kph {"-" if score is None else f"{score:.2f}"} '
             f'val_accuracy {"-" if right is None else f"{right:.4f}"} on {validation["speed"]["frames"]} frames '
             f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
-            f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {validation["speeds_said"]} '
+            f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {_spoken(spoken)} '
             f'{time.monotonic() - started:.0f}s')
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
     result = {'groups': list(groups), 'pool': pool, 'works': works, 'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
-              'seed': seed, 'history': history,
+              'seed': seed, 'right_kph': RIGHT_KPH, 'history': history,
               'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),

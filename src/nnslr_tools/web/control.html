@@ -1353,10 +1353,11 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
 .dr-episode.current{opacity:1}
 @media (max-width:560px){.dr-lanes{--dr-name:62px}.dr-lane-name{font-size:11px}}
 /* Data › Speed review (SpeedReviewTab.vue, SpeedReviewDrive.vue): the drives, then one drive in the drive player (DriveReviewDrive.vue)
-   with the lane of the speed to hold over the others and the commands at the top of the side. On the lane a stretch nobody
-   looked at is a dashed box, never filled, so a proposal left alone does not look approved; "?" a person could not tell,
-   filled unlike the hatch of what the log does not have. Under 860 px the commands come right under the picture and its
-   Play: one screen to watch a stretch and answer. */
+   with the lane of the answer over the others and the commands at the top of the side. On the lane his dashboard speed is
+   the line, in the colour of his own speed in Regression; a block is a box over it with its kph as a line of the accent,
+   one left out a grey box; the new block still on the page is dashed. On the picture the answer has a box of its own next
+   to the car's speed. Under 860 px the commands come right under the picture and its Play: one screen to watch and
+   correct. */
 .sr-drives{display:flex;flex-direction:column;gap:12px}
 /* Models › Regression: one line per model, the same colour on its row of the side. */
 :root{--rg-1:#3987e5;--rg-2:#d95926;--rg-3:#199e70;--rg-4:#9085e9;--rg-5:#d55181;--rg-6:#008300;--rg-7:#c98500}
@@ -1397,36 +1398,42 @@ button.rg-row{cursor:pointer}
 .rg-horizon{margin-top:12px}
 .rg-horizon p{margin:6px 0 0}
 .rg-out{margin-top:12px}
-.sr-bar{height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden}
-.sr-bar i{display:block;height:100%;border-radius:2px;background:var(--ok)}
 .dr-rate button{padding-left:10px;padding-right:10px}
-.dr-lanes rect.sr-not_examined{fill:transparent;stroke:var(--line-strong);stroke-dasharray:4 3}
-.dr-lanes rect.sr-confirmed{fill:var(--ok-soft)}
-.dr-lanes rect.sr-corrected{fill:var(--accent-soft)}
-.dr-lanes rect.sr-undetermined{fill:var(--surface-3)}
-.dr-lanes rect.sr-current{stroke:var(--fg);stroke-width:1.5;stroke-dasharray:none}
-.dr-run-text.sr-text-not_examined{fill:var(--muted);font-weight:500}
-.sr-known{stroke:var(--rev);stroke-width:2}
+.sr-lane svg{overflow:hidden}
+.dr-lanes .sr-speed{stroke:var(--fg);stroke-width:2}
+.dr-lanes rect.sr-block{fill:var(--accent-soft);stroke:none}
+.dr-lanes rect.sr-block-out{fill:var(--surface-3)}
+.dr-lanes rect.sr-block-current{stroke:var(--accent);stroke-width:1.5}
+.dr-lanes rect.sr-block-new{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3}
+.dr-lanes .sr-block-kph{stroke:var(--accent);stroke-width:2.5}
+.dr-lanes .sr-block-start{stroke:var(--accent);stroke-width:2;stroke-dasharray:3 2}
+.dr-run-text.sr-block-text{fill:var(--accent);font-weight:700}
 .dr-lanes rect.sr-works{fill:var(--warn)}
 .dr-lanes rect.sr-works-open{fill-opacity:.55}.dr-lanes rect.sr-works-checked{fill:var(--muted);stroke:none}
-.dr-lanes rect.sr-differ{fill:var(--bad);stroke:none}
-.sr-compare{margin:0;font-size:14px;color:var(--muted)}.sr-compare b{color:var(--fg);font-variant-numeric:tabular-nums}
-.sr-compare-differ,.sr-compare-differ b{color:var(--bad)}
+.sr-box-label{background:rgba(52,199,89,.45);border-color:rgba(130,230,150,.9)}
+.sr-box-label.empty{border-color:rgba(52,199,89,.45);color:#919b95}
 .sr-card{display:flex;flex-direction:column;gap:8px}
-.sr-value{display:flex;align-items:baseline;gap:6px;font-size:14px;color:var(--muted)}
+.sr-card h3{margin:0}
+.sr-value{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px;font-size:14px;color:var(--muted)}
 .sr-value b{font-size:34px;font-weight:700;line-height:1.1;letter-spacing:-.02em;color:var(--fg);font-variant-numeric:tabular-nums}
-.sr-tag{margin-left:auto;align-self:center;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--surface-3);color:var(--fg)}
-.sr-tag-not_examined{background:none;box-shadow:inset 0 0 0 1px var(--line-strong);color:var(--muted)}
-.sr-tag-confirmed{background:var(--ok-soft);color:var(--ok)}
-.sr-tag-corrected{background:var(--accent-soft);color:var(--accent)}
-.sr-yes{width:100%}
-.sr-steps{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.sr-speeds{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px}
-.sr-speeds .btn{padding-left:0;padding-right:0;font-variant-numeric:tabular-nums}
-.sr-speeds .btn[aria-pressed="true"]{background:var(--accent);color:#fff}
+.sr-tag{margin-left:auto;align-self:center;padding:3px 10px;border-radius:999px;font-size:12.5px;font-weight:600;background:var(--accent-soft);color:var(--accent)}
+.sr-tag.sr-tag-out{background:var(--surface-3);color:var(--fg)}
+.sr-wide{width:100%}
+.sr-new{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;box-shadow:inset 0 0 0 1.5px var(--accent)}
+.sr-new-title{margin:0;font-size:14px;font-weight:600}
+.sr-kph{display:grid;grid-template-columns:1fr 1fr minmax(76px,1.4fr) 1fr 1fr;gap:6px;align-items:center}
+.sr-kph .btn{padding-left:0;padding-right:0;font-variant-numeric:tabular-nums}
+.sr-kph-value{text-align:center;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
 .sr-tools{display:flex;flex-wrap:wrap;gap:6px}
-.sr-note input{box-sizing:border-box;width:100%;min-height:36px;padding:6px 12px;font:inherit;font-size:14px;color:var(--fg);background:var(--surface-2);
-border:1px solid var(--line);border-radius:10px}
+.sr-tools .btn[aria-pressed="true"]{background:var(--accent);color:#fff}
+.sr-blocks-title{margin:4px 0 0;font-size:12.5px;font-weight:600;color:var(--muted)}
+.sr-blocks ul{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
+.sr-blocks li{display:flex;align-items:center;gap:6px}
+.sr-blocks li+li{border-top:1px solid var(--line)}
+.sr-block-go{flex:1;min-width:0;display:flex;justify-content:space-between;gap:8px;min-height:40px;padding:6px 0;border:0;background:none;
+color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;font-variant-numeric:tabular-nums}
+.sr-block-go b{font-weight:600}
+.sr-blocks li.current .sr-block-go{color:var(--accent)}
 @media (max-width:860px){
   .sr-view .dr-main{display:flex;flex-direction:column;align-items:stretch}
   .sr-view .dr-side,.sr-view .dr-time{display:contents}
@@ -1434,7 +1441,7 @@ border:1px solid var(--line);border-radius:10px}
   .sr-view .dr-now,.sr-view .dr-signs{order:5}
 }
 @media (max-width:860px),(pointer:coarse){
-  .sr-speeds .btn,.sr-steps .btn,.sr-tools .btn{min-height:44px}
+  .sr-kph .btn,.sr-tools .btn,.sr-wide,.sr-block-go,.sr-block-x{min-height:44px}
 }
 /* Data › Sign distance (SignDistanceTab.vue, SignDistanceDrive.vue): the median of how late vision's zero comes, the
    drives with signs to mark, then one sign at a time: the road frame as large as the column leaves with what the car's

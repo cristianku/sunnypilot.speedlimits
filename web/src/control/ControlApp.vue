@@ -62,8 +62,7 @@ watch(busyPaths, markBusy);
               @pipeline="startPipeline" @stop-pipeline="stopPipeline"/>
     <EvaluateTab v-else-if="currentTab === 'evaluate'" :status="status" @run="run" @stop="stop" @details="details"/>
     <DatasetTab v-else-if="currentTab === 'dataset'" :status="status" @run="run" @stop="stop" @details="details"/>
-    <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false" :status="status" @run="run"
-                    @stop="stop" @details="details"/>
+    <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false"/>
     <RegressionTab v-else-if="currentTab === 'regression'" :status="status" @run="run" @stop="stop" @details="details"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>

@@ -1661,11 +1661,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
-    p_brain = sub.add_parser("brain-targets", help="what the labels of Speed review give the brain's training today: per "
-                                                   "partition and per drive the frames with a speed and with an answer on "
-                                                   "roadworks, and why the others are out. Reads only: it writes nothing and "
+    p_brain = sub.add_parser("brain-targets", help="what the brain's training gets today from every drive with its "
+                                                   "logs read and its frames: per partition and per drive the frames "
+                                                   "with a speed (the driver's own, or a block's of Speed review), "
+                                                   "with an answer on roadworks and with the next limit (Sign review), "
+                                                   "and why the others are out. Reads only: it writes nothing and "
                                                    "trains nothing")
-    p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive with a label")
+    p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the brain "
+                                                          "can learn from (its logs read to the end and its frames)")
     p_brain.add_argument("--json", action="store_true", help="the same as JSON")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
@@ -1682,14 +1685,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_regression_brain.add_argument("--device", default="cuda", help="cuda or cpu")
     p_regression_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_regression_brain.set_defaults(func=_cmd_regression_brain)
-    p_brain_net = sub.add_parser("train-brain", help="train the brain on the labels of Speed review (GPU, .venv-gpu): the speed "
-                                                     "to hold, with the roadworks as a second task of the same network, "
-                                                     "measured on sites it never learned. Writes brain-last.pt and "
-                                                     "result.json into --run-dir")
+    p_brain_net = sub.add_parser("train-brain", help="train the brain on every drive with its logs read (GPU, "
+                                                     ".venv-gpu): the speed to hold, the driver's own corrected by the "
+                                                     "blocks of Speed review, with the roadworks as a second task of "
+                                                     "the same network and the next limit of Sign review, measured on "
+                                                     "sites it never learned. Writes brain-last.pt and result.json "
+                                                     "into --run-dir")
     p_brain_net.add_argument("--run-dir", required=True, help="the folder of this run")
     p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
-    p_brain_net.add_argument("--no-driver", action="store_true", help="the comparison: without the gas, the brake and the "
-                                                                      "car's speed as inputs")
+    # The driver's inputs are out by default since 8 Nov 2026 (his speed is the answer); --no-driver, the opt-out of
+    # before, still says the same.
+    p_brain_net.add_argument("--driver", dest="driver", action="store_true", default=False,
+                             help="the comparison: also the gas, the brake and the car's speed as inputs")
+    p_brain_net.add_argument("--no-driver", dest="driver", action="store_false", default=False,
+                             help="without the driver's inputs: the default")
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
@@ -1813,8 +1822,9 @@ def build_parser() -> argparse.ArgumentParser:
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
     p_road_signs.add_argument("--labelled", action="store_true",
-                              help="the drives of Speed review instead of those with road types, with the brain's "
-                                   "pictures: what the brain needs (scripts/run_brain.sh)")
+                              help="every drive the brain learns from (its logs read to the end and its frames) "
+                                   "instead of those with road types, with the brain's pictures: what the brain "
+                                   "needs (scripts/run_brain.sh)")
     p_road_signs.add_argument("--certified", action="store_true",
                               help="the drives certified in Models › Regression, those prepared, with the brain's "
                                    "pictures: what its brains need (scripts/run_regression.sh)")
@@ -2635,7 +2645,8 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
-                                     works=not args.no_works, driver=not args.no_driver, device=args.device, dry_run=args.dry_run,
+                                     works=not args.no_works, driver=args.driver, device=args.device,
+                                     dry_run=args.dry_run,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
@@ -2896,7 +2907,7 @@ def _cmd_train_box_fit(args: argparse.Namespace) -> int:
 
 def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     from nnslr_tools.preannotate import resolve_data_root
-    from nnslr_tools.brain_targets import read_labels
+    from nnslr_tools.brain_targets import training_routes
     from nnslr_tools.road_type_data import road_type_routes
     from nnslr_tools.road_type_signs import board_times, build_signs, package_path, sign_times
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
@@ -2909,10 +2920,11 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
             print("nnslr road-type-signs: no certified drive is prepared", flush=True)
             return 0
     else:
-        routes = sorted(read_labels(root)) if args.labelled else road_type_routes(root)
+        routes = training_routes(root) if args.labelled else road_type_routes(root)
     if not routes:
-        print("nnslr road-type-signs: " + ("no drive with labels (Speed review)" if args.labelled
-                                           else "no drive with road types (nnslr road-types)"), file=sys.stderr)
+        print("nnslr road-type-signs: " + ("no drive to learn from (its logs read to the end and its frames)"
+                                           if args.labelled else "no drive with road types (nnslr road-types)"),
+              file=sys.stderr)
         return 2
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
                           workers=args.workers or None, device=args.device,

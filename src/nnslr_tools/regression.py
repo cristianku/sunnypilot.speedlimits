@@ -219,17 +219,18 @@ def frames_ready(root: Path, route: str) -> bool:
 
 
 # -- the page -----------------------------------------------------------------------------------------------------------
-def _labelled_in_train(route: str, stretches: list[dict], start_ns: int, split: dict) -> float | None:
-    """The seconds of a drive the brain learned from: labelled and in train. None for a drive of no frozen split, where
-    only the labels are known. A frame key is <segment>/<second>, a second of the drive."""
+def _labelled_in_train(route: str, blocks: list[dict], start_ns: int, split: dict) -> float | None:
+    """The seconds of a drive the brain learned from: in train and not in a block left out (since 8 Nov 2026 his speed
+    is the answer on every frame, a block only corrects it). None for a drive of no frozen split, where only the labels
+    are known. A frame key is <segment>/<second>, a second of the drive."""
     if route not in split['partitions']:
         return None
-    spans = [((row['start_ns'] - start_ns) / NS, (row['end_ns'] - start_ns) / NS) for row in stretches if row.get('kph')]
+    out = [((row['start_ns'] - start_ns) / NS, (row['end_ns'] - start_ns) / NS) for row in blocks if row.get('kph') is None]
     seconds = 0
     for key, partition in zip(split['frame_keys'][route], split['partitions'][route]):
         segment, second = key.split('/')
         at = int(segment) * 60 + int(second)
-        seconds += partition == 'train' and any(first <= at < last for first, last in spans)
+        seconds += partition == 'train' and not any(first <= at < last for first, last in out)
     return float(seconds)
 
 
@@ -255,9 +256,9 @@ def frozen_split(root: Path) -> dict | None:
 
 
 def route_rows(root: Path, drives: list[dict], videos: Path, distill: Path, specs: list[str], brains: list[str],
-               split: dict | None, stretches_of, start_of) -> list[dict]:
+               split: dict | None, blocks_of, start_of) -> list[dict]:
     """Every drive for the list (speed_review.drives_list); a certified one also with what has run on it and how much of
-    it the models learned from. stretches_of(route), start_of(route): its labels and its first ns."""
+    it the models learned from. blocks_of(route), start_of(route): its blocks of Speed review and its first ns."""
     chosen = certified(root)
     distilled = distill_segments(distill)
     wides = wide_index(videos)
@@ -270,7 +271,7 @@ def route_rows(root: Path, drives: list[dict], videos: Path, distill: Path, spec
             ready = frames_ready(root, route)
             learned = None
             if split is not None and start_of(route) is not None:
-                learned = _labelled_in_train(route, stretches_of(route), start_of(route), split)
+                learned = _labelled_in_train(route, blocks_of(route), start_of(route), split)
             row.update({'frames': ready, 'brain_learned_s': learned,
                         'distill_segments': distilled.get(route.replace('--', ''), 0),
                         'results': {**{spec: driving_state(root, route, spec, wide) for spec in specs},
@@ -379,8 +380,9 @@ def route_view(root: Path, route: str, merged: dict | None, models: list[dict], 
 
 # -- the brain along a drive (.venv-gpu) ----------------------------------------------------------------------------------
 def brain_drive(root: Path, route: str, merged: dict, rate: float = 1.0) -> dict:
-    """A drive for brain_train.predict at a brain's rate, labels or not: brain_targets.dataset() only knows the labelled
-    ones."""
+    """A drive for brain_train.predict at a brain's rate, in the split or not: brain_targets.dataset() makes the answers
+    too, needs the split and leaves out a drive whose frames changed since it was frozen. Whatever the brain's table of
+    the speeds, predict says them in km/h."""
     import numpy as np
 
     from nnslr_tools.brain_targets import RATE_HZ, brain_frames, drive_frames, drive_inputs, memory_cuts

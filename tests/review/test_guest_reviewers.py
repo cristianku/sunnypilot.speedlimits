@@ -419,14 +419,14 @@ def test_sign_distance_and_speed_review_take_the_name_of_the_guest(outside, monk
         return {'revision': 1}
 
     monkeypatch.setattr(sign_distance, 'mark', mark)
-    monkeypatch.setattr(speed_review, 'save', save)
+    monkeypatch.setattr(speed_review, 'save_block', save)
     assert server.request('POST', f'/api/sign-distance/drives/{ROUTE}/marks', body={}, headers=proof())[0] == 200
-    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/stretches', body={}, headers=proof())[0] == 200
+    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/blocks', body={}, headers=proof())[0] == 200
     assert who == ['guest/ana', 'guest/ana']
     # The token alone still writes neither: as always, only a person.
     keys = {'X-Review-Token': TOKEN}
     assert server.request('POST', f'/api/sign-distance/drives/{ROUTE}/marks', body={}, headers=keys)[0] == 403
-    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/stretches', body={}, headers=keys)[0] == 403
+    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/blocks', body={}, headers=keys)[0] == 403
 
 
 # ---------- where the drive was ----------

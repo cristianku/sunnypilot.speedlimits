@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, once a second, from the picture and the
-# car's own signals, learnt from the speeds and the roadworks of Speed review. On one GPU, one step after the other:
+# The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, four times a second, from the picture and the
+# car's own signals, learnt from every drive with its logs read: the driver's own speed, corrected by the blocks of
+# Speed review, the roadworks marked there and the next limit of the signs of Sign review. On one GPU, one step after
+# the other:
 #
 #   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run);
 #   2. a CUDA smoke test;
-#   3. reads the signs of the drives of Speed review as the car does today (nnslr road-type-signs --labelled; a drive
+#   3. reads the signs of every drive it learns from as the car does today (nnslr road-type-signs --labelled; a drive
 #      already read by the car's reader of today is not read again: a new vision.py or a new network reads them all
 #      again, and the training refuses anything else), then says what the labels give (nnslr brain-targets);
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
@@ -21,7 +23,8 @@ set -euo pipefail
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
 # (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
-# roadworks; 0: not), NNSLR_BRAIN_DRIVER (1: also the pedals, the speed and openpilot engaged; 0: not),
+# roadworks; 0: not), NNSLR_BRAIN_DRIVER (0, the usual since 8 Nov 2026: without the driver's inputs; 1: also the gas,
+# the brake and the car's speed),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
@@ -35,7 +38,7 @@ CORES="$(nproc 2>/dev/null || echo 8)"
 SIGN_WORKERS_DEFAULT=$(( CORES / 2 > 1 ? CORES / 2 : 1 ))
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
-DRIVER="${NNSLR_BRAIN_DRIVER:-1}"
+DRIVER="${NNSLR_BRAIN_DRIVER:-0}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
 SEEDS=(0 1 2)
 
@@ -124,8 +127,8 @@ SETTINGS=(--epochs "$EPOCHS" --pool "$POOL")
 if [[ "$WORKS" == "0" ]]; then
   SETTINGS+=(--no-works)
 fi
-if [[ "$DRIVER" == "0" ]]; then
-  SETTINGS+=(--no-driver)
+if [[ "$DRIVER" == "1" ]]; then
+  SETTINGS+=(--driver)
 fi
 
 echo "== Brain =="
@@ -142,7 +145,7 @@ CUDA_VISIBLE_DEVICES="" "$NN" train-brain --dry-run --run-dir "$RUN_ROOT/dry-run
 echo "== 2/6 Explicit CUDA smoke test =="
 "$NN" env --gpu-smoke --gpu-device 0
 
-echo "== 3/6 Read the signs of the labelled drives as the car does today =="
+echo "== 3/6 Read the signs of the drives as the car does today =="
 # The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"

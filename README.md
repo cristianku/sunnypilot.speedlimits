@@ -8,7 +8,7 @@
 
 > **Status: research.** A research build of sunnypilot runs these networks on Cristian's comma 4. **Smartspeed**, a mode in sunnylink next to the factory ones, turns them on. The brain then chooses the speed, the map fills in where vision has none, and the car's set speed is only on and off. Details: [what runs on the comma now](docs/NN_VISION_SPEED_LIMIT_REMAINING_WORK.md#60-what-runs-on-the-comma-now-28-oct-2026).
 
-> **Reviewers wanted.** We're looking for people to help label the drives: confirming the speed signs and marking the speed that makes sense on a stretch. It all happens in the browser, on the drives you're given. Sign up at [smartspeed.14bodhi.com](https://smartspeed.14bodhi.com).
+> **Reviewers wanted.** We're looking for people to help label the drives: confirming the speed signs and correcting the speed of a drive, from a time to a time, where it should have been another. It all happens in the browser, on the drives you're given. Sign up at [smartspeed.14bodhi.com](https://smartspeed.14bodhi.com).
 
 [Why](#why) · [The brain](#the-brain) · [How it works](#how-it-works) · [Daily use](#daily-use) · [Install](#install) · [More](#more) · [Details](#details)
 
@@ -27,14 +27,14 @@ flowchart TD
   cam["Road camera"] --> read["SignNet + classifier<br/>read the signs"]
   cam --> brain
   read --> brain
-  car["The car<br/>gas, brake, speed, car ahead,<br/>openpilot on or off"] --> brain
+  car["The car<br/>car ahead; gas, brake, speed<br/>if trained with them"] --> brain
   gps["Hour and country<br/>from GPS"] --> brain
-  brain(["The brain<br/>sees, remembers, decides"]) --> out["Speed to hold<br/>once a second"]
+  brain(["The brain<br/>sees, remembers, decides"]) --> out["Speed to hold"]
   classDef hero fill:#0071e3,stroke:#0071e3,color:#ffffff
   class brain hero
 ```
 
-It learns from people, not from the map: in **Speed review** a person marks the speed really worth holding, stretch by stretch, and those speeds are its answers. The aim is what fixed rules cannot do, such as letting go of a roadworks limit that never gets an end sign.
+It learns from people, not from the map. Its answer is the speed the driver held, as the dashboard showed it, at every moment of every drive whose logs are read: there is nothing to confirm. In **Speed review** a person corrects it with a block, from a time to a time, where it should have been another speed, or leaves a block out of training. A brain trained since 8 Nov 2026 also learns the next limit and the metres to it, from the signs confirmed in Sign review. The aim is what fixed rules cannot do, such as letting go of a roadworks limit that never gets an end sign.
 
 Where it stands: the first brain is in the release on Cristian's comma. On places kept out of training it gets 83-90 % of the frames right, on a small test of 438 frames, and for now it mostly says what the sign says. Roadworks need more labelled sites. [How it is built and measured](docs/NEURAL_NETWORK.md#the-brain-4-november-2026).
 
@@ -55,7 +55,7 @@ flowchart TD
 ```
 
 - **Prepare** takes one picture a second from each drive. A model proposes a box around each sign it sees.
-- **Review** is the only step done by hand. Every label the networks learn from is confirmed here.
+- **Review** is the only step done by hand. Every sign the networks learn from is confirmed here; the brain's speed is the driver's own, corrected in Speed review only where it should have been another.
 - **Import reviews** copies the confirmed labels (the boxes and what each sign says) into the training dataset ([what it does](#4-import-the-reviews)).
 - **Train** teaches the networks on a GPU on the server. The car never trains anything.
 - **Publish** puts the networks in use into sunnypilot. The comma gets them with its next software update.
@@ -70,7 +70,7 @@ flowchart TD
   sn --> cl["Classifier<br/>reads each box"]
   cl --> br["Brain<br/>the speed to hold"]
   cam --> br
-  sig["Car signals<br/>speed, gas, brake, openpilot on"] --> br
+  sig["Car signals<br/>speed, gas, brake"] --> br
   br --> lim["Vision limit"]
   lim --> res["sunnypilot resolver<br/>Smartspeed: the vision limit alone"]
   osm["Map<br/>OpenStreetMap"] --> res
@@ -78,7 +78,7 @@ flowchart TD
 
 - **SignNet** looks only at a band at the top of the picture, where signs stand (896 × 288 pixels, a grid of 8 pixels). It keeps up to 5 boxes per picture.
 - The **classifier** reads each box: a speed and its value, end of limit, another kind of sign, or "not a sign". A number counts once it is read in 2 pictures within 1.5 s.
-- The **brain** says the speed itself, once a second, from the picture, the signs read and the car's own signals ([the brain](#the-brain)).
+- The **brain** says the speed itself, once a second for the brain of this release, from the picture, the signs read and the car's own signals ([the brain](#the-brain), [its rules](#the-rules-on-the-car)).
 - Everything runs inside the comma 4, on its own GPU, next to the driving model.
 - **Full definition, for far signs and plates.** Two Developer switches, both off by default. **Record road at full resolution** writes `fcamera.hevc` at 2688 × 1520, and the server then keeps that frame beside each picture for Sign review and the classifier's training ([the guide](docs/GUIDE.md#drives-at-full-definition)). **Read signs at full resolution** has the cutter search the 1344 × 760 frame as always and cuts the classifier's crop from the 2688 × 1520 one. With either one on, the road camera goes through the BPS: the driving model then reads that picture too.
 - **The vision side never reads the map.** It uses only the camera and the car's own signals. With **Smartspeed** (Speed Limit Source 6) sunnypilot's resolver takes the vision limit alone, never the map; the map stays only for the factory sources. Map Data + Vision (5) is gone since 7 Nov 2026: a stored 5 becomes 6.
@@ -87,7 +87,11 @@ flowchart TD
 
 How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
 
-**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, once a second, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). Smartspeed is the one choice in sunnylink and the resolver does not change; the map is never used. What it gets: the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, and by default gas, brake, the car's speed and whether openpilot is engaged (how long ago it went off, and whether the brake, the gas or something else turned it off: a driver who brakes once and then lets the car roll still shows); never the map. It gets the plates of hours only if its training had them (`plates` in its contract, shown in Models › Brain). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
+**The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). Smartspeed is the one choice in sunnylink and the resolver does not change; the map is never used. How often it steps, which speeds it can say and what it gets come from its contract (`brain.onnx.contract.json`, shown in Models › Brain), so the car follows the brain it was given:
+
+- The brain of the 7 Nov 2026 release (`2026-11-06_0619-brain-s2`) steps once a second and says a multiple of 5 km/h, 5 to 200. It gets the picture, the signs read (`brain_inputs.py`), the car ahead, the local hour and the country from GPS, gas, brake and the car's speed; never the map. It says no limit ahead.
+- A brain trained since 8 Nov 2026 steps 4 times a second and says any whole km/h from 1 to 200. By default it gets the same inputs without gas, brake and the car's speed (Train › Brain, **Driver's inputs**). It also says the next limit and the metres to it, which speedvisiond publishes as `speedLimitAhead` and `speedLimitAheadDistance`, counted down with the metres driven, and the resolver takes as any limit ahead (below). An ahead equal to the speed it says is not published, and nothing else is filtered: a sign repeating the limit in force is published as a limit ahead whenever the speed said differs from it (52 said under a 50), which with speeds of 1 km/h is most of the time.
+- No brain gets whether openpilot is engaged. It gets the plates of hours only if its training had them (`plates` in its contract). If it does not load, or was trained with another `brain_inputs.py`, speedvisiond sends nothing and the resolver falls to the map. A release without a brain runs the rules below.
 
 **Signs**
 
@@ -149,7 +153,7 @@ On the site: **Data › Drives**, then **Prepare new drives**. In a terminal: `h
 
 It takes one picture a second, lets a model propose sign boxes, and reads the GPS position and country of each picture. **It takes a while and uses many CPU cores and the GPU.** You choose the model that proposes the boxes under **Found by**: Vietnamese YOLO (the default before any choice), Our networks, or Qwen3-VL (about 17 GB of GPU memory).
 
-**Read the map**, on top of **Data › Speed review** (`helpers/road_types.sh`), reads the kind of each road and its limit from OpenStreetMap, offline. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. These are proposals: the map's limit is the proposal of Speed review, a label only once a person confirms or corrects it there, and the car never sees the map.
+**Read the map**, on **Data › Drives** (`helpers/road_types.sh`), reads the kind of each road and its limit from OpenStreetMap, offline, for **Map now** and the **Server today** lane of the drive player: the map as it is today, to compare with what the comma did. The maps a drive needs (a US state, a neighbouring region) are downloaded from Geofabrik by that same button, and no position of a drive leaves the server. Nothing learns from it, and the car never sees the map.
 
 ### 3. Review
 
@@ -172,7 +176,7 @@ On each picture you:
 
 An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
-**Data › Speed review** is the other review, for the network that will decide the speed: along a whole drive you say the speed the car should really hold, stretch by stretch, starting from the OpenStreetMap limit, shown next to the limit the comma read from the signs, with the places where the two disagree in red (confirm, correct, or split it where it should have changed). These labels only collect the target: nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
+**Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, and you mark the roadworks. Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
 
 ### 4. Import the reviews
 
@@ -197,7 +201,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 
 - **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours, chosen at first once the windows are cut; the classifier's switch starts on it too).
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
-- **Train the brain**: three networks that differ only by their seed, from the speeds marked in Data › Speed review; compare them in Models › Brain.
+- **Train the brain**: three networks that differ only by their seed, from your own speed on every drive with its logs read and the blocks of Data › Speed review, and the next limit from Sign review; it reads the signs of those drives again first. Compare them in Models › Brain.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
 <img src="docs/images/panel-train.png" alt="Training page, Cutter tab: the Train the cutter button, the latest SignNet 896 by 288 (in use, 74.9% of the speed signs) and the curves of its last training, validation recall and loss over 40 epochs." width="100%">
@@ -384,7 +388,7 @@ The 1344 × 760 Detector by sign width: 11 of 18 under 12 px, 30 of 45 at 12–2
 ### How you can help
 
 - **Drives** on new roads, in other countries, at dusk, at night, in rain, or from a comma 3X. Recordings are private, so please [open an issue](https://github.com/cristianku/sunnypilot.speedlimits/issues) first.
-- **Reviewing.** Confirmations by a person are the most valuable labels: signs and the speed of each stretch. [Sign up here](https://smartspeed.14bodhi.com).
+- **Reviewing.** Confirmations by a person are the most valuable labels: the signs, and the blocks that correct the speed of a drive. [Sign up here](https://smartspeed.14bodhi.com).
 - **The load on the comma 4.** Measuring how much room the networks leave next to the driving model.
 - **Country rules.** How signs are read where you drive (town entries, motorway defaults, zones).
 - **Code and ideas.** Issues and pull requests are welcome.

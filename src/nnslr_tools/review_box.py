@@ -69,7 +69,7 @@ REMOVAL = re.compile(DRIVE + r'\.remove')
 AS_THEY_ARE = ('derived/preannotations/{route}', 'derived/frames/{route}', 'derived/road_type_frames/{route}',
                'derived/car_motion/{route}.json', 'derived/road_type_signs/{route}.json', 'derived/video/{route}.mp4',
                'derived/video/{route}.json')
-# The map's road types and limits of the frames, for the proposals of Speed review.
+# The map's road types and limits of the frames: Map now and the Server today lane of the player.
 ROADS = 'derived/road_types/{route}.jsonl'
 # The map's junctions, sent until Roads went (7 Nov 2026): still deleted with a drive.
 JUNCTIONS = 'derived/junctions/{route}.json'
@@ -91,8 +91,11 @@ REVIEW_COLUMNS = ('route_id', 'run_id', 'frame_key', 'segment_index', 'output_in
                   'revision', 'updated_at', 'reviewer_kind', 'channel')
 REVIEW_HISTORY_COLUMNS = ('route_id', 'run_id', 'frame_key', 'revision', 'payload', 'reviewer', 'confirmed', 'saved_at',
                           'client', 'reviewer_kind', 'channel')
+# A package from before 8 Nov 2026 has no blocks: none. The stretches are read by nothing since, and still go with their
+# drive.
 SPEED_TABLES = {'stretches': ('speed_stretches', ('route', 'start_ns', 'end_ns', 'kph', 'state', 'known_ns', 'note',
                                                   'reviewer', 'revision')),
+                'blocks': ('speed_blocks', ('route', 'start_ns', 'end_ns', 'kph', 'note', 'reviewer', 'revision')),
                 'works': ('speed_works', ('route', 'start_ns', 'end_ns', 'reviewer', 'revision')),
                 'checked': ('speed_works_checked', ('route', 'end_ns', 'reviewer', 'revision'))}
 SPEED_HISTORY_COLUMNS = ('route', 'revision', 'action', 'start_ns', 'end_ns', 'kph', 'state', 'known_ns', 'note',
@@ -102,6 +105,7 @@ LINE_STORES = {'distance': 'distance'}
 DRIVE_TABLES = ('scans', 'log_files', 'episodes')
 # The columns that must be numbers in a package from the box, whatever else it holds.
 INTEGERS = frozenset({'revision', 'start_ns', 'end_ns'})
+OPEN_ENDED = SPEED_TABLES['works'][1]
 
 
 class BoxError(RuntimeError):
@@ -346,7 +350,7 @@ def install_drive(root: Path, package: dict) -> None:
 def _replace_speed(connection: sqlite3.Connection, route: str, speed: dict) -> None:
     for key, (table, columns) in SPEED_TABLES.items():
         connection.execute(f'DELETE FROM {table} WHERE route = ?', (route,))
-        _insert(connection, table, columns, speed[key])
+        _insert(connection, table, columns, speed.get(key, []))
 
 
 def remove_drive(root: Path, route: str) -> None:
@@ -427,14 +431,15 @@ class _Refused(ValueError):
 
 
 def _is_row(row, columns: tuple[str, ...], key: str, route: str) -> bool:
+    # Roadworks with no end yet have none.
     return (isinstance(row, dict) and all(name in row for name in columns) and row[key] == route
-            and all(type(row[name]) is int for name in columns if name in INTEGERS)
+            and all(type(row[name]) is int or (columns is OPEN_ENDED and name == 'end_ns' and row[name] is None)
+                    for name in columns if name in INTEGERS)
             and ('reviewer' not in columns or isinstance(row['reviewer'], str)))
 
 
 def _good_speed(kph) -> bool:
-    return kph is None or (type(kph) is int and speed_review.GRID_KPH <= kph <= speed_review.MAX_KPH
-                           and kph % speed_review.GRID_KPH == 0)
+    return kph is None or (type(kph) is int and 0 <= kph <= speed_review.MAX_KPH)
 
 
 def _read_package(path: Path, route: str) -> dict:
@@ -449,11 +454,11 @@ def _read_package(path: Path, route: str) -> dict:
     signs, speed = package['signs'], package['speed']
     tables = ((signs.get('reviews'), REVIEW_COLUMNS, 'route_id'), (signs.get('history'), REVIEW_HISTORY_COLUMNS, 'route_id'),
               (speed.get('history'), SPEED_HISTORY_COLUMNS, 'route'),
-              *((speed.get(key), columns, 'route') for key, (_, columns) in SPEED_TABLES.items()))
+              *((speed.get(key, []), columns, 'route') for key, (_, columns) in SPEED_TABLES.items()))
     for rows, columns, key in tables:
         if not isinstance(rows, list) or not all(_is_row(row, columns, key, route) for row in rows):
             raise _Refused('a table of the package is malformed')
-    if not all(_good_speed(row['kph']) for row in speed['stretches']):
+    if not all(_good_speed(row['kph']) for key in ('stretches', 'blocks') for row in speed.get(key, [])):
         raise _Refused('a speed of the package is out of range')
     for key in LINE_STORES:
         lines = package.get(key)
@@ -503,15 +508,17 @@ def _merge_signs(root: Path, connection: sqlite3.Connection, route: str, theirs:
 
 
 def _speed_rows(speed: dict) -> dict:
-    return {key: speed[key] for key in SPEED_TABLES}
+    return {key: speed.get(key, []) for key in SPEED_TABLES}
 
 
 def _new_names(speed: dict, base: dict) -> set:
-    return {row['reviewer'] for key in SPEED_TABLES for row in speed[key] if row not in base[key]}
+    return {row['reviewer'] for key in SPEED_TABLES for row in speed.get(key, []) if row not in base.get(key, [])}
 
 
 def _merge_speed(connection: sqlite3.Connection, route: str, theirs: dict, base: dict, allowed: set[str]) -> str:
-    """The stretches of a drive tile it, so they move together: all of the box's, or none."""
+    """The blocks and marks of a drive move together: all of the box's, or none. A box on code from before 8 Nov 2026
+    sends no blocks: they stay as they were sent to it."""
+    theirs = {**{key: base.get(key, []) for key in SPEED_TABLES}, **theirs}
     ours = _speed_of(connection, route)
     if _speed_rows(theirs) == _speed_rows(base) or _speed_rows(theirs) == _speed_rows(ours):
         return 'same'
