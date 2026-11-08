@@ -1492,3 +1492,21 @@ def test_the_server_gives_a_number_with_hours_the_speed_of_the_car():
     from nnslr_tools import comma_trial
     for name in ('maximum_speed_hours:30', 'maximum_speed:30', 'cancellation', 'other_sign:give_way', 'not_a_sign'):
         assert comma_trial.speed_of(name) == _targets().VISION.class_speed(name), name
+
+
+def proposed(start, end, run='net/run'):
+    return {**mark(start, end), 'reviewer': run}
+
+
+def test_a_mark_of_the_labeler_is_no_answer_until_a_person_checked_past_it():
+    targets = _targets()
+    ns = seconds(5, 20, 30, 60, 80, 90, 120)
+    marks = [proposed(10, 40), proposed(70, 110), {**mark(50, 65), 'reviewer': 'osm'}]
+    target, weight = targets.works_answers(ns, marks, 100 * NS)
+    # Kept (ends before the check): an answer. Across the check: its steps say nothing, nor are they a "no".
+    assert list(target) == [0, 1, 1, 1, 0, 0, 0]
+    assert list(weight) == [1, 1, 1, 1, 0, 0, 0]
+    _target, weight = targets.works_answers(ns, marks, None)
+    assert list(weight) == [0, 0, 0, 1, 0, 0, 0]
+    assert targets.kept_proposal(proposed(10, 40), 40 * NS) and not targets.kept_proposal(proposed(10, None), 100 * NS)
+    assert [row['start_ns'] // NS for row in targets.answer_marks(marks, 100 * NS)] == [10, 50]

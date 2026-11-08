@@ -97,6 +97,14 @@ REGRESSION_SCRIPT = 'scripts/run_regression.sh'
 # The map's limit of every frame (Read the map, on Data › Speed review): the GPS of the drives, the maps they need, the
 # map roads near them and the way each frame is on.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
+# The road labeler (docs/ROAD_LABELER.md), an offline network that prepares Speed review, never on the car: trained and
+# run along the drives with the GPU of .venv-gpu (Models › Versions, the Road labeler card). Its options: {'dry': 'on'}
+# a dry run on the CPU; Prepare Speed review takes the run it uses ({'labeler': run with road-labeler.pt}) and
+# {'marks': 'off'} for the proposals alone. --write (the roadworks and the road types) is never started from here.
+ROAD_LABELER_SCRIPT = 'helpers/road_labeler.sh'
+ROAD_LABELER_NNSLR = '.venv-gpu/bin/nnslr'
+ROAD_LABELER_ACTIONS = ('road_labeler_train', 'road_labeler_predict')
+ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
 # Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
 LOCATIONS_SCRIPT = 'helpers/mapillary_locations.sh'
@@ -114,6 +122,9 @@ RUN_LINES = {
                      re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_brain': (re.compile(r'^== scripts/run_brain\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    # helpers/road_labeler.sh: "run:          <name>" (the run trained, or the run predict uses).
+    'road_labeler_train': (RUN_ARGUMENT_LINE,),
+    'road_labeler_predict': (RUN_ARGUMENT_LINE,),
     # The SignNet being published ("== Send to the car: SignNet <run>, classifier <id>", scripts/send_to_car.sh).
     'send_to_car': (re.compile(r'^== Send to the car: SignNet ([^\s,]+)', re.MULTILINE),),
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
@@ -144,6 +155,7 @@ QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool'),
                   'regression': ('openpilot', 'brains'),
+                  'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
@@ -361,6 +373,11 @@ ACTIONS = {
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
     'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
+    # The road labeler (ROAD_LABELER_SCRIPT): trained on the GPU on the corrections of Speed review, and run along every
+    # drive to propose the kinds of road there ({'labeler': run}). In the train group: the GPU.
+    'road_labeler_train': {'label': 'Train the road labeler', 'group': 'train', 'command': [ROAD_LABELER_SCRIPT, 'train']},
+    'road_labeler_predict': {'label': 'Prepare Speed review', 'group': 'train',
+                             'command': [ROAD_LABELER_SCRIPT, 'predict']},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -411,6 +428,9 @@ ACTIVITIES = (
     ('train', 'brain training', 'run_brain.sh'),
     ('train', 'brain training', 'nnslr train-brain'),
     ('train', 'regression', 'run_regression.sh'),
+    ('train', 'road labeler', ROAD_LABELER_SCRIPT),
+    ('train', 'road labeler', 'nnslr road-labeler-train'),
+    ('train', 'road labeler', 'nnslr road-labeler-predict'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -435,6 +455,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_brain': 'a brain training', 'regression': 'a regression run',
+                 'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'update': 'a code update', 'review_box': 'a copy with the review machine',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
@@ -448,6 +469,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training', 'regression': 'a regression run',
+                  'road labeler': 'a road labeler run',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -853,8 +875,10 @@ class Panel:
         trainings = [item for item in payload['activities'] if item['group'] == 'train']
         if from_panel or not trainings:
             return
+        # The road labeler started from a terminal has no log of its own to read: no progress, and not the
+        # whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'brain training': 'train_brain'}
+                    'brain training': 'train_brain', 'road labeler': 'road_labeler'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
                     ('train_brain', ('runs/*/brain.log',)))
@@ -1010,6 +1034,13 @@ class Panel:
                 # Its labels are his own speed on every drive with its logs read (the blocks of Speed review correct
                 # it): it needs no confirmed sign; the next limit is our networks' reading, his Sign review over it.
                 pass
+            elif name in ROAD_LABELER_ACTIONS and (missing := self._road_labeler_missing(name)):
+                reason = missing
+            elif name in ROAD_LABELER_ACTIONS:
+                # Its answers are the corrections of Speed review and the map: it needs no confirmed sign. The GPU is
+                # checked when it starts (start() and the helper), so a dry run on the CPU stays possible while another
+                # process has the GPU.
+                pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
             elif name == 'regression' and gpu is not None and gpu['processes']:
@@ -1067,6 +1098,51 @@ class Panel:
                 reason = self.models_index.in_use('cutter')[1]
             states[name] = {'label': action['label'], 'allowed': not reason, 'reason': reason}
         return states
+
+    def _road_labeler_missing(self, name: str) -> str:
+        """Why the road labeler cannot be trained or run now, or '': its helper and .venv-gpu, a drive with a finished
+        scan and its frames, and for Prepare Speed review a trained run."""
+        if not (self.repo / ROAD_LABELER_SCRIPT).is_file():
+            return ROAD_LABELER_SCRIPT + ' is missing in this installation'
+        if not (self.repo / ROAD_LABELER_NNSLR).is_file():
+            return 'no .venv-gpu: install it with scripts/setup_v100_training_env.sh'
+        from nnslr_tools.road_labeler_data import labeler_routes
+        try:
+            if not labeler_routes(self.root):
+                return 'no drive with its logs read and its frames'
+        except Exception:  # the store being written: start() and the helper say it
+            pass
+        if name == 'road_labeler_predict':
+            from nnslr_tools import labeler_runs
+            if not labeler_runs.trained_runs(self.root):
+                return 'no road labeler trained yet'
+        return ''
+
+    def _road_labeler_arguments(self, action: str, options: dict) -> list[str]:
+        """The arguments of helpers/road_labeler.sh from the options (strings, checked by start()): --dry-run, and
+        for Prepare Speed review the run (--run-dir), every drive (--all) and --no-marks. A real run, not a dry one, is
+        refused while another process has the GPU (the helper checks it again, with its memory)."""
+        dry = options.get('dry')
+        if dry not in (None, 'on'):
+            raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
+        arguments = ['--dry-run'] if dry else []
+        if action == 'road_labeler_predict':
+            from nnslr_tools import labeler_runs
+            name = options.get('labeler')
+            if not labeler_runs.trained(self.root, name):
+                raise PanelError(400, 'bad_option', 'Unknown road labeler run: choose a trained one in Models.')
+            marks = options.get('marks')
+            if marks not in (None, 'on', 'off'):
+                raise PanelError(400, 'bad_option', 'The marks are on or off.')
+            arguments += ['--run-dir=' + str(self.root / 'runs' / name), '--all']
+            if marks == 'off':
+                arguments.append('--no-marks')
+        if not dry:
+            gpu = self.system().get('gpu')
+            if gpu is not None and gpu.get('processes'):
+                raise PanelError(409, 'gpu_taken', 'The GPU is busy with another process: wait for it to finish, or '
+                                 'start a dry run on the CPU.')
+        return arguments
 
     def _locations_missing(self) -> str:
         """Why the Mapillary positions cannot be fetched now, or ''."""
@@ -1695,6 +1771,18 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
         if action in AI_ACTIONS:
             start_args += self._ai_arguments(action, options or {})
+        # [ai-reviewer] - END
+        for key in ROAD_LABELER_OPTIONS:
+            value = (options or {}).get(key)
+            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take ' + key + '.')
+            if value is not None and not isinstance(value, str):
+                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
+        if action in ROAD_LABELER_ACTIONS:
+            if not (self.repo / ROAD_LABELER_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', ROAD_LABELER_SCRIPT + ' is missing in this installation.')
+            start_args += self._road_labeler_arguments(action, options or {})
+        # [ai-reviewer] - START
         if action == 'fetch':
             # The address set in the comma panel of the top bar; without one the script's ssh host "comma".
             from nnslr_tools.comma_link import configured

@@ -224,10 +224,180 @@ def test_road_types_are_written_only_where_the_map_differs_and_no_person_set_one
         [('0/0', '0/6', 'rural', 'net/run')]
 
 
-def test_only_heads_trained_with_both_sides_write():
+def test_only_heads_trained_with_both_sides_and_through_the_gate_write():
     sides = {'tunnel': {'inside': 1960, 'outside': 0}, 'narrow': {'inside': 3, 'outside': 9},
              'works': {'inside': 0, 'outside': 0}}
-    checkpoint = {'kinds': ['narrow', 'tunnel'], 'trained': road_labeler.trained_heads(sides)}
+    passed = {'why': None}
+    earned = {'narrow': passed, 'tunnel': passed, 'works': passed, 'type:rural': passed,
+              **{f'type:{name}': {'why': 'too few'} for name in ROAD_TYPES if name != 'rural'}}
+    checkpoint = {'kinds': ['narrow', 'tunnel'], 'trained': road_labeler.trained_heads(sides), 'earned': earned}
     # A tunnel head masked in train says chances from its first weights: never a mark, even at chance 1.
-    assert road_labeler.writable(checkpoint) == (['narrow'], False)
-    assert road_labeler.writable({'kinds': ['tunnel']}) == ([], False)
+    assert road_labeler.writable(checkpoint) == (['narrow'], False, ['rural'])
+    held = road_labeler.held_back(checkpoint)
+    assert held['tunnel'] == held['works'] == 'not trained with both sides' and held['type:town'] == 'too few'
+    # A head that failed its gate writes nothing, and a checkpoint made before the gate writes nothing at all.
+    assert road_labeler.writable({**checkpoint, 'earned': {**earned, 'narrow': {'why': 'right on 50%'}}})[0] == []
+    assert road_labeler.writable({'kinds': ['narrow'], 'trained': ['narrow', 'works']}) == ([], False, [])
+    assert road_labeler.held_back({'kinds': ['narrow'], 'trained': ['narrow']})['narrow'] == \
+        'no gate of validation in the checkpoint'
+
+
+def gate_drive(length: int, inside: int, said_right: int, said_wrong: int) -> tuple[dict, dict]:
+    """A drive all of validation with one kind: the first `inside` steps inside, the network sure on said_right of them
+    and on said_wrong steps outside."""
+    truth = (np.arange(length) < inside).astype(np.float32)
+    chance = np.zeros(length, dtype=np.float32)
+    chance[:said_right] = 0.95
+    chance[inside:inside + said_wrong] = 0.95
+    drive = {'partitions': ['validation'] * length, 'kind_names': ['tunnel'], 'kinds': truth[:, None],
+             'kinds_weight': np.ones((length, 1), dtype=np.float32), 'works': np.zeros(length, dtype=np.float32),
+             'works_weight': np.zeros(length, dtype=np.float32), 'type': np.zeros(length, dtype=np.int64),
+             'type_weight': np.ones(length, dtype=np.float32), 'type_person': np.ones(length, dtype=bool),
+             'map_type': np.ones(length, dtype=np.int64)}
+    types = np.full((length, len(ROAD_TYPES)), 0.01, dtype=np.float32)
+    types[:, 0] = 0.95      # town everywhere, the map says rural: a write would go everywhere, and it is right
+    return drive, {'kinds': chance[:, None], 'works': np.zeros(length, dtype=np.float32), 'types': types}
+
+
+def test_a_head_writes_only_with_enough_answers_on_each_side_and_a_high_precision():
+    need = road_labeler.GATE_MIN_ANSWERS
+    drive, said = gate_drive(3 * need, need, road_labeler.GATE_MIN_SAID, 0)
+    gate = road_labeler.earned_heads([drive], [said])
+    assert gate['tunnel']['why'] is None and gate['tunnel']['precision'] == 1.0
+    assert gate['tunnel']['inside'] == need and gate['tunnel']['outside'] == 2 * need
+    # Too few steps inside.
+    drive, said = gate_drive(3 * need, need - 1, road_labeler.GATE_MIN_SAID, 0)
+    assert 'needed' in road_labeler.earned_heads([drive], [said])['tunnel']['why']
+    # Sure too rarely to tell.
+    drive, said = gate_drive(3 * need, need, road_labeler.GATE_MIN_SAID - 1, 0)
+    assert road_labeler.earned_heads([drive], [said])['tunnel']['why'].startswith('sure on')
+    # Wrong too often where it is sure.
+    drive, said = gate_drive(3 * need, need, road_labeler.GATE_MIN_SAID, road_labeler.GATE_MIN_SAID)
+    gate = road_labeler.earned_heads([drive], [said])
+    assert gate['tunnel']['precision'] == 0.5 and gate['tunnel']['why'].startswith('right on 50%')
+    # Answers of less than full weight (the map's) do not count, nor do the steps of train.
+    drive, said = gate_drive(3 * need, need, road_labeler.GATE_MIN_SAID, 0)
+    drive['kinds_weight'][need:] = data.TUNNEL_FREE_WEIGHT
+    assert road_labeler.earned_heads([drive], [said])['tunnel']['outside'] == 0
+    drive['partitions'] = ['train'] * len(drive['partitions'])
+    assert road_labeler.earned_heads([drive], [said])['tunnel']['inside'] == 0
+    # A road type: inside where a person set it, sure where it says it against the map; works with no answer at all.
+    drive, said = gate_drive(3 * need, need, road_labeler.GATE_MIN_SAID, 0)
+    drive['type'][2 * need:] = 1
+    gate = road_labeler.earned_heads([drive], [said])
+    assert gate['type:town']['inside'] == 2 * need and gate['type:town']['outside'] == need
+    assert gate['type:town']['precision'] == pytest.approx(2 / 3, abs=1e-3) and gate['type:town']['why'].startswith('right on')
+    assert gate['type:rural']['said'] == 0 and gate['works']['why'] is not None
+
+
+# ---------- a start and its end are one write ----------
+
+def refusing(store, monkeypatch, *taps):
+    """The store refuses these taps (as a revision changed meanwhile)."""
+    from nnslr_tools.speed_review import SpeedReviewError
+    for name in ('tap_road', 'tap_works'):
+        real = getattr(store, name)
+
+        def tap(*args, real=real):
+            if any(arg in taps for arg in args if isinstance(arg, str)):
+                raise SpeedReviewError(409, 'stale', 'The drive changed.')
+            return real(*args)
+
+        monkeypatch.setattr(store, name, tap)
+
+
+def test_a_mark_whose_end_is_refused_is_taken_back(store, monkeypatch):
+    kind = tunnel_of(store)
+    refusing(store, monkeypatch, 'end')
+    assert road_labeler.write_marks(store, ROUTE, kind, [(at(10), at(20))], SPAN, 'net/run') == {'written': 0, 'kept': 1}
+    assert road_labeler.write_marks(store, ROUTE, None, [(at(10), at(20))], SPAN, 'net/run') == {'written': 0, 'kept': 1}
+    assert store.road(ROUTE) == [] and store.works(ROUTE) == []
+    monkeypatch.undo()
+    # Its own undo is no person's removal: the next run writes it.
+    assert road_labeler.write_marks(store, ROUTE, kind, [(at(10), at(20))], SPAN, 'net/run')['written'] == 1
+
+
+def test_a_start_that_cannot_be_taken_back_is_counted_and_nothing_raises(store, monkeypatch):
+    kind = tunnel_of(store)
+    refusing(store, monkeypatch, 'end', 'remove')
+    result = road_labeler.write_marks(store, ROUTE, kind, [(at(10), at(20))], SPAN, 'net/run')
+    assert result == {'written': 0, 'kept': 1, 'left_open': 1}
+    assert [(row['start_ns'], row['end_ns']) for row in store.road(ROUTE)] == [(at(10), None)]
+
+
+def test_a_tunnel_whose_end_is_refused_is_taken_back_and_written_next_time(store, monkeypatch):
+    from nnslr_tools import tunnels
+    refusing(store, monkeypatch, 'end')
+    assert tunnels.write_tunnels(store, ROUTE, [(at(10), at(20))], SPAN) == {'written': 0, 'kept': 1}
+    assert store.road(ROUTE) == []
+    monkeypatch.undo()
+    refusing(store, monkeypatch, 'end', 'remove')
+    assert tunnels.write_tunnels(store, ROUTE, [(at(30), at(40))], SPAN) == {'written': 0, 'kept': 1, 'left_open': 1}
+    monkeypatch.undo()
+    store.tap_road(ROUTE, tunnel_of(store), 'remove', at(30), END, store.revision(ROUTE), 'osm')
+    # Neither undo of its own is a person's removal.
+    assert tunnels.write_tunnels(store, ROUTE, [(at(10), at(20)), (at(30), at(40))], SPAN) == {'written': 2, 'kept': 0}
+
+
+def test_a_person_s_removal_still_keeps_the_tunnels_out(store):
+    from nnslr_tools import tunnels
+    kind = tunnel_of(store)
+    assert tunnels.write_tunnels(store, ROUTE, [(at(10), at(20))], SPAN)['written'] == 1
+    store.tap_road(ROUTE, kind, 'remove', at(15), END, store.revision(ROUTE), 'cristian')
+    assert tunnels.write_tunnels(store, ROUTE, [(at(10), at(20))], SPAN) == {'written': 0, 'kept': 1}
+    # Nor does the labeler write where a person removed the osm mark; osm's own removal would not stop it.
+    assert road_labeler.write_marks(store, ROUTE, kind, [(at(12), at(18))], SPAN, 'net/run')['kept'] == 1
+
+
+# ---------- a person's removal and the tunnel's weak "no" ----------
+
+def test_a_person_s_removal_of_a_mark_with_an_end_answers_no(store):
+    kind = tunnel_of(store)
+    tap = lambda name, t, who='cristian', of=kind: store.tap_road(ROUTE, of, name, at(t), END, store.revision(ROUTE), who)
+    tap('start', 10), tap('end', 30), tap('remove', 20)                  # a person's removal: an answer
+    tap('start', 100), tap('remove', 100)                                # removed before its end: a slip
+    road_labeler.write_marks(store, ROUTE, kind, [(at(200), at(220))], SPAN, 'net/run')
+    tap('remove', 210, 'net/run')                                        # the labeler's own undo
+    road_labeler.write_marks(store, ROUTE, kind, [(at(300), at(320))], SPAN, 'net/run')
+    tap('remove', 310)                                                   # a person removes a proposal: an answer
+    tap('start', 400), tap('end', 430), tap('remove', 410), tap('start', 405), tap('end', 425)   # a mark moved
+    store.tap_works(ROUTE, 'start', at(500), END, store.revision(ROUTE), 'cristian')
+    store.tap_works(ROUTE, 'end', at(520), END, store.revision(ROUTE), 'cristian')
+    store.tap_works(ROUTE, 'remove', at(510), END, store.revision(ROUTE), 'cristian')
+    removed = data.removed_marks(store.root, ROUTE)
+    assert [(row['kind'], (row['start_ns'] - T0) // NS, (row['end_ns'] - T0) // NS) for row in removed] == \
+        [(kind, 10, 30), (kind, 300, 320), (kind, 400, 430), (None, 500, 520)]
+    ns = np.array([at(s) for s in range(0, 600)])
+    labels = {'road': store.road(ROUTE), 'road_checked': {}, 'works': store.works(ROUTE), 'checked_ns': None}
+    found = data.drive_answers(ns, labels, (kind,), removed)
+    answer = lambda s: (found['kinds'][s, 0], found['kinds_weight'][s, 0])
+    assert answer(15) == (0, 1) and answer(29) == (0, 1) and answer(310) == (0, 1)
+    assert answer(150)[1] == 0 and answer(215)[1] == 0                   # the slip and the undo say nothing
+    assert answer(415) == (1, 1)                                         # the mark set again is the answer
+    assert answer(401) == (0, 1) and answer(428) == (0, 1)                 # the old stretch outside it: no
+    assert answer(404)[1] == 0 and answer(426)[1] == 0                   # within 2 s of it: nothing
+    assert found['works'][510] == 0 and found['works_weight'][510] == 1 and found['works_weight'][530] == 0
+    assert data.drive_answers(ns, labels, (kind,))['kinds_weight'][15, 0] == 0
+
+
+def test_the_tunnel_s_weak_no_needs_a_fix_on_a_road_of_the_map_that_is_no_tunnel():
+    keys = [f'0/{n}' for n in range(60)]
+    steps = steps_of(keys)
+    ns = np.array([step['ns'] for step in steps])
+    lines = {key: {'way_id': 1} for key in keys}
+    for n in range(40, 45):
+        lines[f'0/{n}'] = {'way_id': 2}     # the map's tunnel
+    lines['0/20'] = {'way_id': None}        # no road of the map
+    fix = np.ones(60)
+    fix[25] = 0                             # no GPS fix
+    marks = [{'kind': 'tunnel', 'start_ns': at(10), 'end_ns': at(12), 'reviewer': 'osm'},
+             {'kind': 'tunnel', 'start_ns': at(57), 'end_ns': None, 'reviewer': 'net/run'}]
+    free = data.tunnel_free(ns, steps, lines, {2}, fix, marks)
+    assert free[:5].all() and not free[5:17].any() and free[17] and free[19]   # 5 s around the osm mark
+    assert not free[20] and not free[25] and free[26]
+    assert free[35] and not free[36:49].any() and free[49] and free[51]      # 5 s around the map's tunnel
+    assert not free[52:].any()                                              # a mark with no end: to the drive's end
+
+
+def test_the_tunnel_kind_is_found_by_its_kind_or_its_label(store):
+    assert data.tunnel_kind(store.root) == 'tunnel'

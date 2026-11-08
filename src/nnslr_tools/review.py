@@ -833,6 +833,12 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import road_types
                 self._json(200, road_types.summary(app.root))
                 return
+            # The runs of the road labeler, what each measured on validation and which of its heads write into Speed
+            # review (nnslr_tools.labeler_runs): the Road labeler card of Models › Versions.
+            if path == '/api/panel/road-labeler':
+                from nnslr_tools import labeler_runs
+                self._json(200, labeler_runs.summary(app.root))
+                return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
@@ -1715,6 +1721,10 @@ def make_handler(app: ReviewApp):
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit
                     # sent as a number must not become a whole route).
                     options.update((key, body[key]) for key in ('route', 'provider', 'save', 'limit')
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    # The road labeler's dry run, run and marks, the same way: a dry run sent as true must be refused,
+                    # never dropped into a real training on the GPU.
+                    options.update((key, body[key]) for key in ('dry', 'labeler', 'marks')
                                    if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END

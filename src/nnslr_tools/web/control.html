@@ -571,6 +571,28 @@ background:var(--ok-soft);color:var(--ok)}
 .import-why,.import-last{margin:0;font-size:13px;color:var(--muted)}
 .import-why.warn{color:var(--warn)}
 @media (max-width:480px){.import-row{flex-wrap:wrap}.import-row .btn{width:100%;justify-content:center}}
+/* Models, the Road labeler card (RoadLabelerCard.vue): its two buttons, then its runs, each with the road type on
+   validation and its heads (precision, recall, whether it writes into Speed review). */
+.labeler-card .rl-title{margin:0;font-size:19px;font-weight:650;letter-spacing:-.015em}
+.labeler-card .rl-what{margin:0;font-size:13.5px;color:var(--muted)}
+.rl-buttons{flex:none;display:flex;gap:8px;flex-wrap:wrap}
+.rl-runs{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.rl-run{border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.rl-run-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-width:0}
+.rl-run-head b{font-family:var(--font-data);font-size:13.5px;overflow-wrap:anywhere}
+.rl-run-head small,.rl-types{font-size:13px;color:var(--muted)}
+.rl-types{margin:0}
+.rl-heads{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.rl-head{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,2fr) minmax(0,2fr);gap:4px 10px;font-size:13px;
+align-items:baseline;min-width:0}
+.rl-head-name{font-weight:600;text-transform:capitalize}
+.rl-head-num{color:var(--muted);font-variant-numeric:tabular-nums}
+.rl-head-writes{color:var(--muted);overflow-wrap:anywhere}
+.rl-head.writes .rl-head-writes{color:var(--ok);font-weight:600}
+.rl-run-actions{display:flex;gap:8px;flex-wrap:wrap}
+.rl-marks{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--muted)}
+@media (max-width:640px){.rl-head{grid-template-columns:1fr}.rl-head-num,.rl-head-writes{padding-left:10px}}
+@media (max-width:480px){.rl-buttons,.rl-run-actions{width:100%}.rl-buttons .btn,.rl-run-actions .btn{flex:1;justify-content:center}}
 /* The lists of drives (Speed review, Sign distance, Regression): a row each, its name and when over its state. The
    colours of the road types are those of the scene network's lane of the drive player (.dr-lanes): four slots of the
    reference categorical palette, checked in both themes on every pair (any type can follow any other): amber town,

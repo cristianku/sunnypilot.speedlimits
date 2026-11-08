@@ -42,7 +42,10 @@ The roadworks (works_answers), a target of 1 or 0 and a weight of 1 or 0, apart 
 - inside a mark with an end: 1;
 - from the start of the drive to speed_works_checked, outside the marks: 0, a person went through it;
 - anywhere else: out of the loss. A stretch with no mark is not verified, it is not "no works";
-- from the start of a mark with no end, and EDGE_SECONDS around every tap: out of the loss.
+- from the start of a mark with no end, and EDGE_SECONDS around every tap: out of the loss;
+- inside a proposal of the road labeler (reviewer net/<run>, road_types.proposal) that no person kept: out of the loss.
+  A person keeps one by going past it with "checked to here" (kept_proposal: its end at or before the check); it is a
+  mark like a person's then. Only a person writes the answers, and the tunnels of nnslr tunnels (reviewer 'osm').
 
 The two answers never touch: the end of works says nothing of the speed, and no code turns one into the other.
 
@@ -193,7 +196,7 @@ from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.review_db import NOT_WAITING_SQL, db_path as sign_review_path
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
-from nnslr_tools.road_types import ROAD_TYPES, load_road_types
+from nnslr_tools.road_types import ROAD_TYPES, load_road_types, proposal
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.sign_reads import READ_INDEX_BASE
@@ -403,14 +406,37 @@ def speed_answers(ns: np.ndarray, driver_kph: list, blocks: list[dict],
     return classes, out
 
 
+def kept_proposal(mark: dict, checked_ns: int | None) -> bool:
+    """A proposal of the road labeler a person went past with "checked to here": kept, so a mark like a person's."""
+    return mark['end_ns'] is not None and checked_ns is not None and mark['end_ns'] <= checked_ns
+
+
+def answer_marks(marks: list[dict], checked_ns: int | None) -> list[dict]:
+    """The marks that are answers: every one but the road labeler's proposals no person kept."""
+    return [mark for mark in marks if not proposal(mark.get('reviewer')) or kept_proposal(mark, checked_ns)]
+
+
+def proposed_steps(ns: np.ndarray, marks: list[dict], checked_ns: int | None) -> np.ndarray:
+    """The frames at the times ns inside a proposal of the road labeler no person kept (to its drive's end when it has
+    no end)."""
+    ns = np.asarray(ns, dtype=np.int64)
+    hidden = np.zeros(len(ns), dtype=bool)
+    for mark in marks:
+        if proposal(mark.get('reviewer')) and not kept_proposal(mark, checked_ns):
+            end = np.iinfo(np.int64).max if mark['end_ns'] is None else mark['end_ns']
+            hidden |= (ns >= mark['start_ns']) & (ns < end)
+    return hidden
+
+
 def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> tuple[np.ndarray, np.ndarray]:
     """(target, weight) float32 per frame at the times ns: see the module's text."""
     target = np.zeros(len(ns), dtype=np.float32)
     weight = np.zeros(len(ns), dtype=np.float32)
     if checked_ns is not None:
         weight[ns < checked_ns] = 1
+    hidden = proposed_steps(ns, works, checked_ns)
     edges = []
-    for mark in works:
+    for mark in answer_marks(works, checked_ns):
         edges.append(mark['start_ns'])
         if mark['end_ns'] is None:
             weight[ns >= mark['start_ns']] = 0
@@ -421,6 +447,7 @@ def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> 
         weight[inside] = 1
     for edge in edges:
         weight[np.abs(ns - edge) < EDGE_SECONDS * NS] = 0
+    weight[hidden] = 0
     return target, weight
 
 
@@ -1089,7 +1116,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'next': following, 'next_weight': next_weight, 'metres': metres, 'metres_weight': metres_weight,
             'sign_review': reviewed,
             'measured': np.array([not frame.get('step') for frame in frames], dtype=bool),
-            'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
+            'marks': [mark for mark in answer_marks(labels['works'], labels['checked_ns']) if mark['end_ns'] is not None],
             'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None)
             if inputs else None,
             'signs_read': readings is not None,

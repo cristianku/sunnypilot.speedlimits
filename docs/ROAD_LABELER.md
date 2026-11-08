@@ -20,8 +20,8 @@ It is started only on request:
 - `helpers/road_labeler.sh train`
 - `helpers/road_labeler.sh predict`
 
-These wrap `nnslr road-labeler-train` and `nnslr road-labeler-predict`. There is no portal button and no Models-tab
-entry yet.
+These wrap `nnslr road-labeler-train` and `nnslr road-labeler-predict`. The portal starts both from the Road
+labeler card on Models (see Portal below).
 
 Code:
 
@@ -37,7 +37,7 @@ Code:
 | picture | the road camera `fcamera.hevc` (1344x760, or 2688x1520 at full definition), decoded at 2 a second and scaled to 768x432 | A far sign or a single cone is a few pixels. A full-definition video is slower to decode for the same picture (not measured). |
 | encoder | MobileNetV3-large on ImageNet, frozen; its 960 channels pooled to a 2x4 grid, so 7680 numbers a step, kept as fp16 | Only the coarse place in the frame survives (left, right, top, bottom). The encoder never learns. The cache is keyed by `encoder_id`, so a new encoder means new features. |
 | memory | a bidirectional GRU, 2 layers of 128 each way, after a 256-wide projection of the picture plus 48 inputs (47 of the map, the GPS and the speed, and whether the step has its picture); 2.6 M weights | It learns on windows of 960 steps (8 minutes). At prediction every step is said with at least 2 minutes (`MARGIN`) on each side, and up to 6, except at a drive's ends. Nothing further away than about 6 minutes reaches a step. |
-| answers | a road type at every step that has one; a kind of road or the roadworks only inside a mark, or before that kind's "checked to here" | No drive has a "checked to here" today, so no kind and no roadworks can be learned yet (see below). |
+| answers | a road type at every step that has one; a kind of road or the roadworks only inside a mark, before that kind's "checked to here", or where a person removed a mark; the tunnel also where the GPS has a fix on a road of the map that is no tunnel | No drive had a "checked to here" on 8 Nov 2026, so only the road type and the tunnel can learn yet (see below). |
 
 The cost per drive was measured on this server's CPU. The V100 rows are estimates, because no GPU was used.
 
@@ -84,15 +84,28 @@ too where the map is wrong or missing.
 
   The marks of `nnslr tunnels` (reviewer `osm`) count like a person's.
 - **Roadworks.** The same rules, from `speed_works` and `speed_works_checked`.
-- **The labeler's own marks.** Marks with reviewer `net/<run>` are never an answer of its own training. The only
-  exception is a mark that ends before that kind's "checked to here", because a person went through it and kept it.
-  Its own road-type corrections are never an answer; the map's line under them is used instead.
+- **A person's removal.** A person who removes a mark says that stretch is not of that kind, so its steps answer 0 at
+  weight 1 where nothing else answers, also past "checked to here" (`removed_marks`). Three cases are left out:
+  - the removals of the labeler and of `nnslr tunnels`, which are their own undo;
+  - a mark removed before it had an end, which was a start tapped by mistake;
+  - the steps within 2 s (`EDGE_SECONDS`) of a mark of that kind that is there now, because moving a mark means
+    removing it and setting it again.
+- **The tunnel's weak "no".** Where the GPS has a fix and our road of the map is not a tunnel, the tunnel column
+  answers 0 at weight 0.3 (`TUNNEL_FREE_WEIGHT`). "Our road" is the way `nnslr road-types` found with
+  `map_context.our_road`. It applies only where nothing else answers, and never within 5 s (`TUNNEL_MARGIN_S`) of a
+  tunnel mark of any reviewer or of a second whose road of the map is a tunnel. The map makes this label offline. It
+  never reaches the car.
+- **The labeler's own writes.** Everything with reviewer `net/<run>` is a proposal and never an answer, neither here
+  nor for the brain. The only exception is a mark that ends before that kind's "checked to here", because a person
+  went through it and kept it (`brain_targets.kept_proposal`; `brain_targets.works_answers` masks the others for the
+  brain too). Its road types are left out by `road_types.load_road_types`, so the brain, the road-type network and this
+  network use the map's line under them, until a person sets the type there.
 - **One side alone.** When a kind, or the roadworks, has only one side in train (all inside or all outside), it leaves
   the loss of train and the log says so (`keep_both_sides`). A constant answer would teach nothing.
 
-Today the tunnels of the map have 1960 steps inside and none outside, because no drive has a "checked to here" for
-tunnel. So the tunnel head, the other kinds and the roadworks do not learn yet, and only the road type learns. A
-"checked to here" on a few drives in Speed review is what turns them on.
+On 8 Nov 2026 the tunnels of the map had 1960 steps inside and none outside, because no drive had a "checked to here"
+for tunnel. The weak "no" gives the tunnel head its other side. The other kinds and the roadworks still need a "checked
+to here", or a person's removals, on a few drives in Speed review before they learn.
 
 ## Split
 
@@ -112,6 +125,16 @@ The measure is made for each partition:
   are the map itself, which is also an input.
 - **`kinds`, `works`.** Precision and recall at 0.5 on the steps that have an answer. The value is None where a
   partition has only one side.
+- **`gate`.** Which heads may write into Speed review, and why the others may not (`earned_heads`). The heads are each
+  kind, `works` and `type:<road type>`. It is measured on validation, on the answers of full weight only: a person's,
+  or a mark of `nnslr tunnels`, but never the map's weak answers.
+  - A kind or the roadworks earns its writes with at least 120 steps inside and 120 outside (`GATE_MIN_ANSWERS`, a
+    minute of steps each). It must also be sure (0.9) on at least 20 steps (`GATE_MIN_SAID`) and right on at least
+    90% of those (`GATE_PRECISION`).
+  - A road type is measured on the steps a person set. It counts as sure where the network says that type at 0.9
+    while the map says another, because that is where a write would go.
+
+  The gate is saved in the checkpoint (`earned`). A checkpoint made before the gate existed writes nothing.
 
 ## Proposals and writes
 
@@ -122,11 +145,22 @@ The measure is made for each partition:
   chance}, works}`.
 
 Where the network is sure, it also writes into Speed review, as `nnslr tunnels` does. The reviewer is `net/<run>`. It
-never writes over a person's mark, nor where a person removed a mark, nor before that kind's "checked to here".
+never writes over a person's mark, nor where a person removed a mark, nor before that kind's "checked to here". A
+removal counts as a person's word as for the answers (`road_types.person_removals`): a mark with an end, removed by a
+person, never the undo of the labeler or of `nnslr tunnels`.
 
-Only the heads trained with both sides write (`trained` in the checkpoint). A kind, or the roadworks, that left the loss
-of train still has its chances in the proposals, but never a mark: a head that did not learn says chances from its first
-weights.
+Only the heads that earned it write (`writable`, `held_back`):
+
+- they were trained with both sides (`trained` in the checkpoint). A head that did not learn says chances from its
+  first weights;
+- they passed the gate of validation (`earned` in the checkpoint, the `gate` of `result.json`).
+
+A head held back still has its chances in the proposals, but never a write. The log and each drive's summary name it
+with why (`held_back`).
+
+A start and its end are one write, here and in `nnslr tunnels`. When the store refuses the end (a revision changed
+meanwhile), the start is taken back and the stretch counts as kept. Nothing raises. If the store refuses that too, the
+summary counts it in `left_open`.
 
 - **Kinds of road.** These are written by default. A mark is a stretch where the chance stays at 0.9 or more (`SURE`),
   at least 2 s long, with stretches less than 3 s apart joined. A hole in time (a minute without its encode index or
@@ -136,12 +170,44 @@ weights.
   another type than the map's at 0.9 or more for at least 5 frames in a row. The type is kept with
   `speed_review.set_road_type`, as a correction in `annotations/road_types`.
 
-**Caution on `--write`.** `road_types.corrected` marks every correction as reviewed. So the brain's `type_head` and the
-road-type network take a type the labeler wrote as a person's answer, because their readers do not look at the
-reviewer. Until `road_types` leaves `net/` corrections out, write road types only on drives a person will go through.
+**What `--write` does not do.** A road type the labeler writes never counts as a person's. `road_types.load_road_types`
+leaves the `net/<run>` lines out for every training: the brain's `type_head`, the road-type network and this network's
+own answers. Only Speed review asks for them (`proposals=True`), so that a person sees them and fixes them. A person
+confirms one by setting the type there again, and the last correction wins.
 
 A dry run never writes into Speed review: `--dry-run`, or any checkpoint made by a dry run. Its proposals go to
 `<run>/proposals/`.
+
+## Portal
+
+The Road labeler card is at the bottom of Models (`/models`, `web/src/control/RoadLabelerCard.vue`).
+
+- **Dry run** and **Train**: `helpers/road_labeler.sh train`, with `--dry-run` for the first. The panel action is
+  `road_labeler_train`, its one option `dry` (`"on"`). Both ask first. It needs `.venv-gpu` and at least one drive with its
+  logs read and its frames; it needs no confirmed sign.
+- **Prepare Speed review** on a run with its checkpoint, and its own **Dry run**: `helpers/road_labeler.sh predict
+  --run-dir data/runs/<run> --all`. The panel action is `road_labeler_predict`, with the options `labeler` (the run's
+  folder name, which must hold `road-labeler.pt` and the run's `result.json`), `dry` and `marks` (`"off"` adds
+  `--no-marks`: the box **Proposals only**). The portal never passes `--write`: the roadworks and the road types are
+  written only from a terminal.
+- Any other option, or one that is not a string (a dry run sent as `true`), is refused with 400 and nothing starts.
+- **The GPU.** A real run is refused while another process has the GPU: the server answers 409 (`gpu_taken`), and the
+  helper checks again before it starts (`nvidia-smi`: another compute process, or more than `NNSLR_GPU_BUSY_PERCENT`, 10,
+  percent of its memory taken), with one line and exit code 3. A dry run is never refused for the GPU: it runs on the
+  CPU, so the **Dry run** buttons stay usable on a busy GPU, and **Train** and **Prepare Speed review** are greyed.
+- **Progress** (`nnslr_tools.job_progress`), from the helper's own lines:
+  - for train, Check the GPU, Read the drives and their pictures (drive k of N, from `drives: N` and one
+    `<route>: features of ...` or `left out` line a drive), then Train and measure (the `road_labeler epoch` lines, with
+    a curve of `train_loss`, `val_types` and `val_on_person`);
+  - for predict, Check the GPU, then Propose along the drives (one `{"route_id": ...}` line a drive).
+  - A busy GPU shows as the reason the job failed.
+- **The runs** (`GET /api/panel/road-labeler`, `nnslr_tools.labeler_runs`, files only). The newest 8 runs with a
+  `result.json` of the road labeler, each with:
+  - its drives, steps and epochs;
+  - the road type on validation: right overall, and on the steps a person set beside the map's share there;
+  - each kind of road and the roadworks: precision and recall on validation, and whether it writes or why it is held
+    back. It is the same rule as `road-labeler-predict` (`held_back` of the run's train sides and gate). A dry run never
+    writes, and the roadworks write with `--write` only.
 
 ## Commands
 
@@ -154,7 +220,6 @@ helpers/road_labeler.sh predict --run-dir data/runs/<run> --route R          # w
 
 ## What is left
 
-- A Models-tab entry and a portal button. Every operation has to be startable from the portal, and this one is not yet.
+- The portal's buttons and the runs' endpoint go live after a restart of `speedlimits-web`.
 - Showing the proposals in Speed review.
-- A filter in `road_types` for the `net/` reviewer, so that `--write` stops looking like a person.
 - A first real training on the V100.

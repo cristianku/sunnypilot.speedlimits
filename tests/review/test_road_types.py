@@ -612,3 +612,26 @@ def test_the_overview_counts_the_prepared_drives_without_road_types(tmp_path):
     (tmp_path / 'derived' / 'road_types').mkdir(parents=True)
     (tmp_path / 'derived' / 'road_types' / '00000001--aaaaaaaaaa.jsonl').write_text('{}\n')
     assert drives_without(tmp_path) == 1
+
+
+def test_the_labeler_s_road_types_are_proposals_left_out_of_every_answer(tmp_path):
+    from nnslr_tools.road_types import by_person, person_removals, proposal
+    _drive_of(tmp_path)
+    correct(tmp_path, ROUTE, '0/0', '0/1', 'town', 'admin')
+    correct(tmp_path, ROUTE, '0/1', '0/2', 'rural', 'net/run')
+    # The trainings read the map and the person's word under a proposal; Speed review shows the proposal.
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'town', 'motorway']
+    assert load_road_types(tmp_path, ROUTE)[2].get('reviewed', False) is False
+    shown = load_road_types(tmp_path, ROUTE, proposals=True)
+    assert [line['road_type'] for line in shown][:3] == ['town', 'rural', 'rural'] and shown[2]['reviewer'] == 'net/run'
+    # A person who sets the type there again makes it an answer: the last correction wins.
+    correct(tmp_path, ROUTE, '0/2', '0/2', 'rural', 'admin')
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'town', 'rural']
+    assert proposal('net/run') and not proposal('admin') and not proposal(None)
+    assert by_person('admin') and not by_person('net/run') and not by_person('osm') and not by_person(None)
+    history = [{'action': 'road_start', 'state': 't', 'start_ns': 1, 'end_ns': 9, 'reviewer': 'p'},
+               {'action': 'road_end', 'state': 't', 'start_ns': 1, 'end_ns': 5, 'reviewer': 'p'},
+               {'action': 'road_removed', 'state': 't', 'start_ns': 1, 'end_ns': 5, 'reviewer': 'p'},
+               {'action': 'works_start', 'state': None, 'start_ns': 7, 'end_ns': 9, 'reviewer': 'p'},
+               {'action': 'works_removed', 'state': None, 'start_ns': 7, 'end_ns': 9, 'reviewer': 'p'}]
+    assert person_removals(history) == [{'kind': 't', 'start_ns': 1, 'end_ns': 5}]

@@ -31,11 +31,21 @@ The answers (drive_answers), each with a weight a step, 0 where nothing is known
 - the kinds of road, one column a kind (brain_targets.road_answers): 1 inside a mark with an end, 0 before that kind's
   "checked to here" outside the marks, masked elsewhere. The marks of nnslr tunnels (reviewer 'osm') are answers like a
   person's;
-- roadworks: the same with speed_works and speed_works_checked (brain_targets.works_answers).
+- roadworks: the same with speed_works and speed_works_checked (brain_targets.works_answers);
+- a person's removal (removed_marks): a person who removes a mark says that stretch is not of that kind (or not
+  roadworks), so its steps answer 0 at STRONG_WEIGHT where nothing else answers, also past "checked to here". Left out:
+  the removals of the labeler and of nnslr tunnels (their own undo), a mark removed before it had an end (a start
+  tapped by mistake, logged to the drive's end), and the steps within EDGE_SECONDS of a mark of that kind there now (a
+  mark moved is removed and set again);
+- the tunnel's weak "no" (tunnel_free): where the GPS has a fix and our road of the map (map_context.our_road, the way
+  nnslr road-types found that second) is no tunnel, the tunnel column answers 0 at TUNNEL_FREE_WEIGHT where nothing
+  else answers, at least TUNNEL_MARGIN_S from any tunnel mark (any reviewer, one with no end too) and from any second
+  whose road of the map is a tunnel. The map makes this label offline; it never reaches anything of the car.
 
-The labeler's own marks and road types (reviewer NET_PREFIX + its run) are no answer of its own training: a mark of its own
-is one only before the kind's "checked to here" (a person went through it and kept it); elsewhere its steps are masked.
-A road type of its own is never an answer here: the map's line under it is.
+The labeler's own marks and road types (reviewer NET_PREFIX + its run) are proposals, no answer of any training: a mark
+of its own is one only before the kind's "checked to here" (a person went through it and kept it, brain_targets
+.kept_proposal); elsewhere its steps are masked (brain_targets.works_answers does both, for the brain too). A road type
+of its own is never an answer: the map's line under it is (road_types.load_road_types).
 
 Everything here reads: Speed review through brain_targets.read_labels (read only), speed_history of the removals through
 a read-only connection (removed_marks), the map and the drive's logs. No write, no training, no GPU.
@@ -51,20 +61,27 @@ import numpy as np
 
 from nnslr_tools import drive_logs
 from nnslr_tools.annotations import load_jsonl
-from nnslr_tools.brain_targets import (FramesChanged, NO_LABELS, _cell_partition, drive_frames, frame_partitions,
-                                       read_labels, read_split, road_answers, road_kinds, works_answers)
+from nnslr_tools.brain_targets import (EDGE_SECONDS, FramesChanged, NO_LABELS, _cell_partition, drive_frames,
+                                       frame_partitions, kept_proposal, read_labels, read_split, road_answers,
+                                       road_kinds, road_labels, works_answers)
 from nnslr_tools.map_context import ROADS_RELATIVE
 from nnslr_tools.road_type_data import frame_cells
-from nnslr_tools.road_types import (ROAD_TYPES, corrected, load_corrections, map_road_types, maxspeed_limit)
+from nnslr_tools.road_types import (NET_PREFIX, ROAD_TYPES, corrected, load_corrections, map_road_types, maxspeed_limit,
+                                    person_removals, proposal)
 from nnslr_tools.speed_review import NS, db_path as speed_review_path
 
 STEP_HZ = 2
 VIDEO_FPS = 20
 HALF_STEP = VIDEO_FPS // STEP_HZ  # decoded frames from a step to the next
-NET_PREFIX = 'net/'
 STRONG_WEIGHT = 1.0
 MAP_SURE_WEIGHT = 0.3
 MAP_WEIGHT = 0.1
+# The tunnel's weak "no" (tunnel_free): a GPS fix on a road of the map that is no tunnel is rarely in one, but the map can
+# be old or wrong, so it weighs like a sure map; and nothing within TUNNEL_MARGIN_S of a tunnel, whose portals are where
+# the map and the marks are least exact.
+TUNNEL_FREE_WEIGHT = MAP_SURE_WEIGHT
+TUNNEL_MARGIN_S = 5.0
+TUNNEL_KIND = 'tunnel'
 GPS_FIX_S = 1.0
 GPS_GAP_SCALE_S = 60.0
 SPEED_SCALE_KPH = 100.0
@@ -250,8 +267,8 @@ def step_inputs(steps: list[dict], map_lines: dict[str, dict], tunnels: set, mer
 
 
 def own(reviewer) -> bool:
-    """A write of the labeler itself (reviewer net/<run>)."""
-    return isinstance(reviewer, str) and reviewer.startswith(NET_PREFIX)
+    """A write of the labeler itself (reviewer net/<run>, road_types.proposal)."""
+    return proposal(reviewer)
 
 
 def type_answers(map_lines: list[dict], corrections: list[dict], steps: list[dict]) -> dict[str, np.ndarray]:
@@ -278,61 +295,106 @@ def type_answers(map_lines: list[dict], corrections: list[dict], steps: list[dic
 
 
 def _confirmed(mark: dict, checked: int | None) -> bool:
-    """A mark of the labeler a person went past with "checked to here": kept, so an answer."""
-    return mark['end_ns'] is not None and checked is not None and mark['end_ns'] <= checked
+    """A mark of the labeler a person went past with "checked to here": kept, so an answer (brain_targets
+    .kept_proposal)."""
+    return kept_proposal(mark, checked)
 
 
-def _masked_own(ns: np.ndarray, marks: list[dict], checked: int | None) -> np.ndarray:
-    """The steps inside the labeler's own marks that no person kept."""
-    hidden = np.zeros(len(ns), dtype=bool)
+def _near(ns: np.ndarray, start: int, end: int | None, margin_ns: int) -> np.ndarray:
+    """The steps within margin_ns of [start, end) (to the drive's end without one)."""
+    last = np.iinfo(np.int64).max if end is None else end + margin_ns
+    return (ns >= start - margin_ns) & (ns < last)
+
+
+def removal_answers(ns: np.ndarray, removed: list[dict], marks: list[dict]) -> np.ndarray:
+    """The steps a person's removals (removed_marks' of one kind, or of the roadworks) say "no" at: inside a removed
+    stretch, at least EDGE_SECONDS from the marks of that kind there now (see the module's text)."""
+    ns = np.asarray(ns, dtype=np.int64)
+    where = np.zeros(len(ns), dtype=bool)
+    for row in removed:
+        where |= (ns >= row['start_ns']) & (ns < row['end_ns'])
     for mark in marks:
-        if own(mark.get('reviewer')) and not _confirmed(mark, checked):
-            end = np.iinfo(np.int64).max if mark['end_ns'] is None else mark['end_ns']
-            hidden |= (ns >= mark['start_ns']) & (ns < end)
-    return hidden
+        where &= ~_near(ns, mark['start_ns'], mark['end_ns'], EDGE_SECONDS * NS)
+    return where & (ns >= 0)
 
 
-def _answers_of(marks: list[dict], checked: int | None) -> list[dict]:
-    return [mark for mark in marks if not own(mark.get('reviewer')) or _confirmed(mark, checked)]
-
-
-def drive_answers(ns: np.ndarray, labels: dict, kinds: tuple[str, ...]) -> dict[str, np.ndarray]:
-    """{kinds, kinds_weight (steps, kinds), works, works_weight (steps)} from read_labels' of the drive: see the module's
-    text. A step without a time (ns -1) answers nothing."""
+def drive_answers(ns: np.ndarray, labels: dict, kinds: tuple[str, ...],
+                  removed: list[dict] = ()) -> dict[str, np.ndarray]:
+    """{kinds, kinds_weight (steps, kinds), works, works_weight (steps)} from read_labels' of the drive and the person's
+    removals of removed_marks: see the module's text. A step without a time (ns -1) answers nothing."""
     ns = np.asarray(ns, dtype=np.int64)
     checked = labels.get('road_checked') or {}
     road = labels.get('road') or []
-    kept = [mark for kind in kinds for mark in _answers_of([m for m in road if m['kind'] == kind], checked.get(kind))]
-    target, weight = road_answers(ns, kept, checked, kinds)
-    for column, kind in enumerate(kinds):
-        weight[_masked_own(ns, [m for m in road if m['kind'] == kind], checked.get(kind)), column] = 0
+    target, weight = road_answers(ns, road, checked, kinds)
     works = labels.get('works') or []
-    works_target, works_weight = works_answers(ns, _answers_of(works, labels.get('checked_ns')), labels.get('checked_ns'))
-    works_weight[_masked_own(ns, works, labels.get('checked_ns'))] = 0
+    works_target, works_weight = works_answers(ns, works, labels.get('checked_ns'))
+    for column, kind in enumerate(kinds):
+        fill = removal_answers(ns, [row for row in removed if row['kind'] == kind],
+                               [mark for mark in road if mark['kind'] == kind]) & (weight[:, column] == 0)
+        target[fill, column], weight[fill, column] = 0, STRONG_WEIGHT
+    fill = removal_answers(ns, [row for row in removed if row['kind'] is None], works) & (works_weight == 0)
+    works_target[fill], works_weight[fill] = 0, STRONG_WEIGHT
     known = ns >= 0
     weight[~known] = 0
     works_weight[~known] = 0
     return {'kinds': target, 'kinds_weight': weight, 'works': works_target, 'works_weight': works_weight}
 
 
+def tunnel_kind(root: Path) -> str | None:
+    """The kind of road of the tunnels in Speed review (its kind or its label "tunnel", as tunnels.write_tunnels finds
+    it), None without one."""
+    return next((kind for kind, label in road_labels(root).items()
+                 if kind == TUNNEL_KIND or str(label).lower() == TUNNEL_KIND), None)
+
+
+def tunnel_free(ns: np.ndarray, steps: list[dict], map_lines: dict[str, dict], tunnels: set, gps_fix: np.ndarray,
+                marks: list[dict]) -> np.ndarray:
+    """The steps where the tunnel column answers its weak "no": see the module's text. marks: the tunnel marks of the
+    drive, of any reviewer."""
+    ns = np.asarray(ns, dtype=np.int64)
+    margin = int(TUNNEL_MARGIN_S * NS)
+    ways = [(map_lines.get(step['key']) or {}).get('way_id') for step in steps]
+    free = np.array([way is not None and way not in tunnels for way in ways], dtype=bool)
+    free &= (np.asarray(gps_fix) > 0) & (ns >= 0)
+    for mark in marks:
+        free &= ~_near(ns, mark['start_ns'], mark['end_ns'], margin)
+    inside = np.sort(ns[np.array([way is not None and way in tunnels for way in ways], dtype=bool) & (ns >= 0)])
+    if len(inside) and len(ns):
+        at = np.searchsorted(inside, ns)
+        before = np.abs(ns - inside[np.clip(at - 1, 0, len(inside) - 1)])
+        after = np.abs(inside[np.clip(at, 0, len(inside) - 1)] - ns)
+        free &= np.minimum(before, after) >= margin
+    return free
+
+
 def drive_data(root: Path, route: str, merged: dict, *, labels: dict | None = None, kinds: tuple[str, ...] = (),
-               tunnels: set | None = None, log=None) -> dict:
+               tunnels: set | None = None, removed: list[dict] = (), tunnel: str | None = None, log=None) -> dict:
     """Everything of a drive the training and the prediction need, but the pictures: route, steps, frames, ns (-1 without
-    a time), partitions, inputs (steps, INPUTS), the answers of type_answers and drive_answers, kind_names, map_lines
-    (the map's, in order) and lines (the map with every correction over it, the labeler's too: what a write must not go
-    over)."""
+    a time), partitions, inputs (steps, INPUTS), the answers of type_answers and drive_answers (with removed, the
+    person's removals of removed_marks, and the tunnel's weak "no" of tunnel_free in the column of the kind tunnel),
+    kind_names, map_lines (the map's, in order) and lines (the map with every correction over it, the labeler's too:
+    what a write must not go over)."""
     steps, frames = drive_steps(root, route, merged)
     ns = np.array([-1 if step['ns'] is None else step['ns'] for step in steps], dtype=np.int64)
     map_lines = map_road_types(root, route)
     corrections = load_corrections(root, route) if map_lines else []
     by_key = {line['frame_key']: line for line in map_lines}
+    tunnels = tunnel_ways(root) if tunnels is None else tunnels
+    labels = NO_LABELS if labels is None else labels
     data = {'route': route, 'steps': steps, 'frames': frames, 'ns': ns,
             'partitions': step_partitions(root, route, frames, steps, log),
-            'inputs': step_inputs(steps, by_key, tunnel_ways(root) if tunnels is None else tunnels, merged),
+            'inputs': step_inputs(steps, by_key, tunnels, merged),
             'kind_names': list(kinds), 'map_lines': map_lines,
             'lines': corrected(map_lines, corrections) if corrections else map_lines}
     data.update(type_answers(map_lines, corrections, steps))
-    data.update(drive_answers(ns, NO_LABELS if labels is None else labels, kinds))
+    data.update(drive_answers(ns, labels, kinds, removed))
+    if tunnel in kinds:
+        column = kinds.index(tunnel)
+        marks = [mark for mark in labels.get('road') or [] if mark['kind'] == tunnel]
+        free = tunnel_free(ns, steps, by_key, tunnels, data['inputs'][:, _AT['gps_fix']], marks)
+        free &= data['kinds_weight'][:, column] == 0
+        data['kinds'][free, column] = 0
+        data['kinds_weight'][free, column] = TUNNEL_FREE_WEIGHT
     return data
 
 
@@ -342,6 +404,7 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=None) ->
     kinds = road_kinds(root)
     labels = read_labels(root)
     tunnels = tunnel_ways(root)
+    tunnel = tunnel_kind(root)
     known = labeler_routes(root)
     drives = []
     for route in routes if routes is not None else known:
@@ -355,7 +418,7 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=None) ->
                 log(f'{route}: no scan, left out')
             continue
         drives.append(drive_data(root, route, merged, labels=labels.get(route, NO_LABELS), kinds=kinds, tunnels=tunnels,
-                                 log=log))
+                                 removed=removed_marks(root, route), tunnel=tunnel, log=log))
     return drives
 
 
@@ -399,17 +462,18 @@ def keep_both_sides(drives: list[dict], log=None) -> dict:
 
 
 def removed_marks(root: Path, route: str) -> list[dict]:
-    """The removals of speed_history of a drive ({action, state, start_ns, end_ns}), read only: a write never goes where
-    a person removed a mark. [] without the database."""
+    """The marks of a drive a person removed (person_removals of its speed_history, read only): answers "no" of their
+    kind (drive_answers). [] without the database."""
     path = speed_review_path(root)
     if not path.is_file():
         return []
     connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        return [dict(row) for row in connection.execute(
-            "SELECT action, state, start_ns, end_ns FROM speed_history WHERE route = ? AND action IN "
-            "('road_removed', 'works_removed')", (route,))]
+        return person_removals([dict(row) for row in connection.execute(
+            "SELECT action, state, start_ns, end_ns, reviewer FROM speed_history WHERE route = ? AND action IN "
+            "('road_start', 'road_end', 'road_removed', 'works_start', 'works_end', 'works_removed') ORDER BY revision",
+            (route,))])
     except sqlite3.OperationalError:
         return []
     finally:

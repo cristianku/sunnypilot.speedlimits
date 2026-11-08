@@ -11,8 +11,9 @@ of train (a picture of validation or test never runs in a training step, nor in 
 brain's frozen split, so the places held out of the brain are held out here too). A quarter of the windows (MAP_DROP_SHARE)
 lose the map's inputs, so the pictures have to say the road too where the map is wrong or missing. A kind of road, or the
 roadworks, with one side alone in train (all inside, or all outside) leaves the loss of train (road_labeler_data
-.keep_both_sides): the tunnels of the map without a "checked to here" are all inside, and alone they would teach a
-constant yes. The last epoch is kept: road-labeler.pt and result.json in the run's folder.
+.keep_both_sides): the marks of a kind with no "checked to here" are all inside, and alone they would teach a constant
+yes (the tunnels have the weak "no" of road_labeler_data.tunnel_free besides). The last epoch is kept, with the gate of
+each head on validation (earned_heads): road-labeler.pt and result.json (its gate) in the run's folder.
 
 The measure (result.json), per partition: types, the share of steps whose road type is right, on all those with one and
 on those a person set, beside the map's own type on the same steps (map_on_person): the steps a person set are where the
@@ -26,8 +27,12 @@ derived/road_labeler/<route>.jsonl: a first line {run, step_hz, road_types, kind
 segment, decoded, frame_key, partition, road_type, road_type_p, map_type, kinds: {kind: chance}, works}. Where the network
 is sure it also writes into Speed review, the way nnslr tunnels does (write_marks, as tunnels.write_tunnels, reviewer
 NET_PREFIX + the run's name): never over a person's mark, a mark of the kind already there, where a person removed one, or
-before that kind's "checked to here". Only the heads trained with both sides write (writable): a kind or the roadworks
-left out of the loss of train still has its chances in the proposals, and never a mark.
+before that kind's "checked to here". A start and its end are one write: when the store refuses the end, the start is
+taken back, and nothing raises. Only the heads that earned it write (writable): trained with both sides (a kind or the
+roadworks left out of the loss of train still has its chances in the proposals, and never a mark), and passed the gate
+of validation (earned_heads: at least GATE_MIN_ANSWERS steps of full weight on each side, sure on at least GATE_MIN_SAID
+of them, and right on at least GATE_PRECISION of those it was sure of). A head held back says why in the log and in
+the summary of each drive (held_back).
 
 - the kinds of road: a stretch of at least MIN_MARK_S where its chance stays at SURE or more (stretches closer than JOIN_S
   are one), by default;
@@ -35,10 +40,11 @@ left out of the loss of train still has its chances in the proposals, and never 
   map's line has no person's type and says another one, for at least TYPE_MIN_FRAMES seconds at TYPE_SURE or more
   (speed_review's set_road_type, which keeps it as a correction of annotations/road_types).
 
-A road type the labeler writes is a correction like a person's in annotations/road_types: road_types.corrected marks it
-reviewed, so the brain's type_head and the road-type network take it as a person's answer (their readers do not tell the
-reviewer). That is why it waits for --write. The labeler's own writes are never answers of its own training
-(road_labeler_data).
+Everything the labeler writes is a proposal, never a person's answer: only a person writes the answers, and the tunnels
+of nnslr tunnels. A road type it writes is a line of annotations/road_types with its reviewer, which Speed review shows
+and every training leaves out (road_types.load_road_types: the map's line under it stays the answer) until a person sets
+the type there. A mark it writes is no answer of the brain nor of its own training until a person goes past it with
+"checked to here" (brain_targets.works_answers, road_labeler_data).
 
 A dry run (train --dry-run) is a few steps on the CPU with ENCODER_TINY on the first DRY_STEPS steps of one or two drives:
 the chain works, nothing is learned, nothing written outside --run-dir. Its checkpoint never writes into Speed review, and
@@ -48,6 +54,7 @@ from __future__ import annotations
 
 import json
 import random
+import sqlite3
 import sys
 import time
 from datetime import datetime
@@ -57,7 +64,7 @@ import numpy as np
 
 from nnslr_tools import road_labeler_data as data
 from nnslr_tools.road_labeler_data import NET_PREFIX, NS, PARTITIONS, STEP_HZ
-from nnslr_tools.road_types import ROAD_TYPES
+from nnslr_tools.road_types import ROAD_TYPES, person_removals
 
 FEATURES_RELATIVE = Path('derived') / 'road_labeler_features'
 PROPOSALS_RELATIVE = Path('derived') / 'road_labeler'
@@ -77,6 +84,13 @@ MIN_MARK_S = 2.0
 JOIN_S = 3.0
 TYPE_MIN_FRAMES = 5
 DRY_STEPS = 48
+# The gate of a head's writes (earned_heads), on the steps of validation with an answer of full weight (a person's, or a
+# mark of nnslr tunnels; never the map's weak ones): at least GATE_MIN_ANSWERS of them inside and as many outside (a
+# minute of steps each), sure (SURE, or TYPE_SURE against the map for a road type) on at least GATE_MIN_SAID, and right
+# on at least GATE_PRECISION of those: a head that cannot show it is right where it would write writes nothing.
+GATE_MIN_ANSWERS = 60 * STEP_HZ
+GATE_MIN_SAID = 10 * STEP_HZ
+GATE_PRECISION = 0.9
 DRY_DRIVES = 2
 DRY_TRAIN_STEPS = 2
 # The map's inputs of road_labeler_data, set to "no line" when the map is dropped.
@@ -162,13 +176,13 @@ def write_marks(store, route: str, kind: str | None, found: list[tuple[int, int]
     """The stretches found as marks in Speed review (speed_review.SpeedReviewStore): of a kind of road (tap_road), or the
     roadworks (kind None: tap_works), with the rules of tunnels.write_tunnels. Returns {written, kept} (kept: left out for
     a person's mark, removal or check, or refused by the store; a start whose end is refused is taken back, and the
-    labeler's own removals do not count as a person's)."""
+    removals of the labeler and of nnslr tunnels do not count as a person's), and left_open when a start could not be
+    taken back either (the store refused both: a mark of the labeler waits for its end in Speed review). Never raises
+    for a write the store refuses."""
     from nnslr_tools.speed_review import SpeedReviewError
-    action = 'works_removed' if kind is None else 'road_removed'
-    removed = [(row['start_ns'], row['end_ns']) for row in store.history(route) if row['action'] == action
-               and (kind is None or row['state'] == kind) and not data.own(row.get('reviewer'))]
+    removed = [(row['start_ns'], row['end_ns']) for row in person_removals(store.history(route)) if row['kind'] == kind]
     checked = store.works_checked(route) if kind is None else store.road_checked(route).get(kind)
-    written = kept = 0
+    written = kept = left_open = 0
     for start, end in found:
         start, end = max(start, span[0]), min(end, span[1])
         if end - start < MIN_MARK_S * NS:
@@ -185,16 +199,19 @@ def write_marks(store, route: str, kind: str | None, found: list[tuple[int, int]
 
         try:
             tap('start', start)
-        except SpeedReviewError:
+        except (SpeedReviewError, sqlite3.Error):
             kept += 1
             continue
         try:
             tap('end', end)
             written += 1
-        except SpeedReviewError:
-            tap('remove', start)  # no mark left open: the store refused its end
+        except (SpeedReviewError, sqlite3.Error):
             kept += 1
-    return {'written': written, 'kept': kept}
+            try:
+                tap('remove', start)  # no mark left open: the store refused its end
+            except (SpeedReviewError, sqlite3.Error):
+                left_open += 1
+    return {'written': written, 'kept': kept, **({'left_open': left_open} if left_open else {})}
 
 
 def type_stretches(lines: list[dict], chance_of: dict[str, np.ndarray], threshold: float = TYPE_SURE,
@@ -390,6 +407,46 @@ def measure(drives: list[dict], said: list[dict], partition: str) -> dict:
             'kinds': {kind: joined(parts) for kind, parts in kinds.items()}, 'works': joined(works)}
 
 
+def _gate(truth: np.ndarray, sure: np.ndarray) -> dict:
+    """One head's gate from the answers of full weight (truth: inside) and where it was sure: see GATE_*."""
+    inside, outside = int(truth.sum()), int((~truth).sum())
+    said, hits = int(sure.sum()), int((sure & truth).sum())
+    precision = _share(hits, said)
+    if inside < GATE_MIN_ANSWERS or outside < GATE_MIN_ANSWERS:
+        why = (f'{inside} steps inside and {outside} outside of full weight on validation, {GATE_MIN_ANSWERS} of each '
+               'needed')
+    elif said < GATE_MIN_SAID:
+        why = f'sure on {said} steps of validation, {GATE_MIN_SAID} needed to tell whether it is right'
+    elif precision < GATE_PRECISION:
+        why = f'right on {precision:.0%} of the {said} steps of validation it was sure of, {GATE_PRECISION:.0%} needed'
+    else:
+        why = None
+    return {'inside': inside, 'outside': outside, 'said': said, 'precision': precision, 'why': why}
+
+
+def earned_heads(drives: list[dict], said: list[dict], partition: str = 'validation') -> dict:
+    """{head: {inside, outside, said, precision, why}} of every kind, of 'works' and of 'type:<road type>' on partition,
+    why None where the head earned its writes (GATE_*). A kind or the roadworks: its steps with an answer of full
+    weight, sure at SURE. A road type: the steps a person set, inside where it is that type, sure where the network
+    says it at TYPE_SURE and the map says another (where a write would go).
+    """
+    parts: dict[str, list] = {}
+    for drive, chance in zip(drives, said):
+        here = np.array(drive['partitions']) == partition
+        for column, kind in enumerate(drive['kind_names']):
+            full = here & (drive['kinds_weight'][:, column] >= data.STRONG_WEIGHT)
+            parts.setdefault(kind, []).append((drive['kinds'][full, column] >= 0.5, chance['kinds'][full, column] >= SURE))
+        full = here & (drive['works_weight'] >= data.STRONG_WEIGHT)
+        parts.setdefault('works', []).append((drive['works'][full] >= 0.5, chance['works'][full] >= SURE))
+        person = here & drive['type_person'] & (drive['type_weight'] > 0)
+        best, top = chance['types'][person].argmax(axis=1), chance['types'][person].max(axis=1)
+        for index, name in enumerate(ROAD_TYPES):
+            sure = (best == index) & (top >= TYPE_SURE) & (drive['map_type'][person] != index)
+            parts.setdefault(f'type:{name}', []).append((drive['type'][person] == index, sure))
+    return {head: _gate(np.concatenate([truth for truth, _ in items]).astype(bool),
+                        np.concatenate([sure for _, sure in items]).astype(bool)) for head, items in parts.items()}
+
+
 def train_labeler(data_root: Path, run_dir: Path, merged_of, *, routes: list[str] | None = None, epochs: int = EPOCHS,
                   device: str | None = None, dry_run: bool = False, seed: int = 0, log=_say) -> dict:
     """Train on train, keep the last epoch, measure once: road-labeler.pt and result.json in run_dir (see the module's
@@ -440,15 +497,18 @@ def train_labeler(data_root: Path, run_dir: Path, merged_of, *, routes: list[str
             f'val_types {validation["types"]["right"]} val_on_person {"-" if right is None else right} '
             f'(map {validation["types"]["map_on_person"]}) {len(errors)} steps {time.monotonic() - started:.0f}s')
     run = run_dir.name
+    earned = earned_heads(drives, said)
+    log('road_labeler gate on validation: ' + '; '.join(
+        f'{head} {"writes" if item["why"] is None else "held back: " + item["why"]}' for head, item in earned.items()))
     checkpoint = {'weights': model.state_dict(), 'epoch': epochs - 1, 'encoder': name, 'encoder_id': encoder_id(name),
                   'encoder_weights': encoder.state_dict() if name == ENCODER_TINY else None,
                   'feature_dim': feature_size(name), 'kinds': kinds, 'road_types': list(ROAD_TYPES),
                   'inputs': list(data.INPUT_NAMES), 'step_hz': STEP_HZ, 'window': window, 'dry_run': dry_run,
-                  'run': run, 'seed': seed, 'trained': trained_heads(sides)}
+                  'run': run, 'seed': seed, 'trained': trained_heads(sides), 'earned': earned}
     torch.save(checkpoint, run_dir / CHECKPOINT)
     result = {'run': run, 'dry_run': dry_run, 'encoder_id': encoder_id(name), 'step_hz': STEP_HZ, 'window_steps': window,
               'kinds': kinds, 'road_types': list(ROAD_TYPES), 'seed': seed, 'history': history,
-              'drives': {drive['route']: len(drive['steps']) for drive in drives}, 'train_sides': sides,
+              'drives': {drive['route']: len(drive['steps']) for drive in drives}, 'train_sides': sides, 'gate': earned,
               **{partition: measure(drives, said, partition) for partition in PARTITIONS}}
     (run_dir / RESULT).write_text(json.dumps(result, indent=2), encoding='utf-8')
     return result
@@ -459,12 +519,30 @@ def trained_heads(sides: dict) -> list[str]:
     return [name for name, item in sides.items() if item['inside'] and item['outside']]
 
 
-def writable(checkpoint: dict) -> tuple[list[str], bool]:
-    """(the kinds whose sure stretches may be written, whether the roadworks may): only the heads trained with both
-    sides. A head masked in training says chances from its first weights, and a mark of it would teach the brain noise;
-    its chances still go into the proposals."""
+def held_back(checkpoint: dict) -> dict[str, str]:
+    """{head: why it writes nothing into Speed review} of a run's heads (the kinds, 'works', 'type:<road type>'): not
+    trained with both sides (a head masked in training says chances from its first weights, and a mark of it would teach
+    the brain noise), or not through the gate of validation (earned_heads; a checkpoint without one, made before it,
+    writes nothing). Their chances still go into the proposals."""
     trained = set(checkpoint.get('trained') or ())
-    return [kind for kind in checkpoint['kinds'] if kind in trained], 'works' in trained
+    earned = checkpoint.get('earned') if isinstance(checkpoint.get('earned'), dict) else {}
+    found = {}
+    for head in (*checkpoint['kinds'], 'works', *(f'type:{name}' for name in checkpoint.get('road_types', ROAD_TYPES))):
+        if not head.startswith('type:') and head not in trained:
+            found[head] = 'not trained with both sides'
+        elif head not in earned:
+            found[head] = 'no gate of validation in the checkpoint'
+        elif earned[head].get('why'):
+            found[head] = earned[head]['why']
+    return found
+
+
+def writable(checkpoint: dict) -> tuple[list[str], bool, list[str]]:
+    """(the kinds whose sure stretches may be written, whether the roadworks may, the road types that may): the heads
+    not held_back."""
+    held = held_back(checkpoint)
+    return ([kind for kind in checkpoint['kinds'] if kind not in held], 'works' not in held,
+            [name for name in checkpoint.get('road_types', ROAD_TYPES) if f'type:{name}' not in held])
 
 
 def load_labeler(run_dir: Path, device):
@@ -522,10 +600,11 @@ def predict_labeler(data_root: Path, run_dir: Path, merged_of, span_of, routes: 
     cache = run_dir / 'features' if trial else root / FEATURES_RELATIVE / checkpoint['encoder_id']
     reviewer = NET_PREFIX + checkpoint['run']
     kinds = tuple(checkpoint['kinds'])
-    marked, works_trained = writable(checkpoint)
-    untrained = [name for name in (*kinds, 'works') if name not in marked and not (name == 'works' and works_trained)]
-    if untrained:
-        log(f'Not trained with both sides, never written: {", ".join(untrained)} (their chances are in the proposals).')
+    marked, works_earned, types_earned = writable(checkpoint)
+    held = held_back(checkpoint)
+    if held:
+        log('Never written (their chances are in the proposals): ' +
+            '; '.join(f'{head}: {why}' for head, why in held.items()))
     store = None
     if not trial and (marks or write):
         from nnslr_tools.speed_review import store_for
@@ -555,16 +634,17 @@ def predict_labeler(data_root: Path, run_dir: Path, merged_of, span_of, routes: 
         types = type_stretches(drive['lines'], chance_of)
         summary['sure'] = {**{kind: len(items) for kind, items in stretches.items()}, 'works': len(works),
                            'road_types': len(types)}
-        summary['untrained'] = untrained
+        summary['held_back'] = held
         if store is not None:
             known = {row['kind'] for row in store.road_kinds()}
             if marks:
                 summary['marks'] = {kind: write_marks(store, route, kind, items, span, reviewer)
                                     for kind, items in stretches.items() if kind in known and kind in marked}
             if write:
-                if works_trained:
+                if works_earned:
                     summary['works'] = write_marks(store, route, None, works, span, reviewer)
-                summary['road_types'] = write_types(store, route, types, ns_of, span, reviewer)
+                summary['road_types'] = write_types(store, route, [item for item in types if item[2] in types_earned],
+                                                    ns_of, span, reviewer)
         log(json.dumps(summary))
         found.append(summary)
     return found

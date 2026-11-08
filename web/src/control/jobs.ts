@@ -16,7 +16,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
-  review_box: 'review_box',
+  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train',
 };
 
 /** The icon of each action, on its button. */
@@ -26,7 +26,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
-  review_box: 'upload',
+  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes',
 };
 
 /**
@@ -41,6 +41,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
+  road_labeler_train: '/models', road_labeler_predict: '/models',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);

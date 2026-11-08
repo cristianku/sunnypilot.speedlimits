@@ -127,6 +127,32 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     return {title: 'Update the site?', action: 'Update',
       text: 'git pull, the libraries, then the site restarts: it is away for a few seconds.'};
   }
+  if (name === 'road_labeler_train' && options?.dry === 'on') {
+    return {title: 'Try the road labeler’s training?', action: 'Dry run',
+      text: 'A couple of steps on the CPU with a tiny encoder, on the start of two drives: it checks the chain works, '
+        + 'learns nothing and writes nothing outside its own run. A minute or two; the GPU is not used.'};
+  }
+  if (name === 'road_labeler_train') {
+    return {title: 'Train the road labeler?', action: 'Start training',
+      text: 'Reads every scanned drive and its pictures at high definition, then trains on the GPU on the corrections of '
+        + 'Speed review and measures itself on validation. The first time it decodes the videos of every drive (about 13 s '
+        + 'of CPU a minute of drive, an hour and a half for today’s drives); later runs reuse them. It refuses to start '
+        + 'while another job has the GPU. A new run in the Road labeler card; nothing is written into Speed review.'};
+  }
+  if (name === 'road_labeler_predict' && options?.dry === 'on') {
+    return {title: 'Try Prepare Speed review?', action: 'Dry run',
+      text: 'The start of every drive on the CPU with ' + (options.labeler ?? 'this run') + ': its proposals go into the '
+        + 'run’s own folder, nothing is written into Speed review.'};
+  }
+  if (name === 'road_labeler_predict') {
+    const marks = options?.marks === 'off'
+      ? ' Proposals only: no mark is written into Speed review.'
+      : ' Where it is sure, the heads that passed their gate also put the kinds of road into Speed review as marks of '
+        + 'net/' + (options?.labeler ?? 'the run') + ', never over a mark, a removal or a check of a person.';
+    return {title: 'Prepare Speed review with ' + (options?.labeler ?? 'the road labeler') + '?', action: 'Prepare',
+      text: 'Runs the road labeler along every scanned drive on the GPU and keeps its proposals in '
+        + 'derived/road_labeler.' + marks + ' The roadworks and the road types are never written from here.'};
+  }
   // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
   // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
   return null;
@@ -160,6 +186,9 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   try_on_comma: 'Stopped before the copy, nothing on the comma changed. Stopped during the copy or the wait, the networks '
     + 'already on the comma stay until “Back to the build\'s networks”.',
   comma_restore: 'Trying again puts the build\'s networks back; nothing else on the comma is touched.',
+  road_labeler_train: 'The pictures of the drives already read stay: training again reads only the others, then starts '
+    + 'over on a new run.',
+  road_labeler_predict: 'The drives done keep their proposals and marks; preparing again does every drive again.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

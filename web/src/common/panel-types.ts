@@ -3,7 +3,8 @@ import type {AiState} from './ai-types';
 
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
-  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box';
+  | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box'
+  | 'road_labeler_train' | 'road_labeler_predict';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -83,6 +84,43 @@ export interface ActionOptions {
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
   openpilot?: string;
   brains?: string;
+  /** The road labeler (road_labeler_train, road_labeler_predict): a dry run on the CPU, the run Prepare Speed review uses,
+   * and its marks off for the proposals alone. */
+  dry?: 'on';
+  labeler?: string;
+  marks?: 'on' | 'off';
+}
+/** GET /api/panel/road-labeler (nnslr_tools.labeler_runs): a head of a road labeler run, a kind of road or the
+ * roadworks, measured on validation, and whether it writes into Speed review (or why not). */
+export interface LabelerHead {
+  head: string;
+  inside: number | null;
+  outside: number | null;
+  precision: number | null;
+  recall: number | null;
+  writes: boolean;
+  why: string | null;
+  /** The roadworks write only with --write, from a terminal. */
+  with_write_only: boolean;
+}
+export interface LabelerRun {
+  run: string;
+  dry_run: boolean;
+  finished: string;
+  drives: number;
+  steps: number;
+  epochs: number;
+  /** Whether its road-labeler.pt is there: only then Prepare Speed review can use it. */
+  checkpoint: boolean;
+  types: {steps: number | null; right: number | null; person_steps: number | null; right_on_person: number | null;
+    map_on_person: number | null; writing_with_write: string[]};
+  heads: LabelerHead[];
+}
+export interface LabelerPayload {
+  runs: LabelerRun[];
+  total: number;
+  /** The drives it can read (a finished scan and frames); null when unknown. */
+  drives: number | null;
 }
 /** Train › Pipeline: our networks trained one after the other (POST /api/panel/pipeline), each a job of its own. */
 export type PipelineAction = 'dataset' | 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';

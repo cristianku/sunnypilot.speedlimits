@@ -1757,15 +1757,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_labeler_predict = sub.add_parser("road-labeler-predict", help="the road labeler of a run along drives: "
                                                                     "derived/road_labeler/<route>.jsonl, and where it "
                                                                     "is sure the marks of the kinds of road in Speed "
-                                                                    "review (reviewer net/<run>; a person's marks, "
-                                                                    "removals and checks win)")
+                                                                    "review (reviewer net/<run>: proposals, written "
+                                                                    "only by the heads that passed the gate of "
+                                                                    "validation; a person's marks, removals and checks "
+                                                                    "win)")
     p_labeler_predict.add_argument("--run-dir", required=True, help="the folder of the run with road-labeler.pt")
     p_labeler_predict.add_argument("--route", action="append", help="route id; repeat for more")
     p_labeler_predict.add_argument("--all", action="store_true", help="every scanned drive with its frames")
     p_labeler_predict.add_argument("--no-marks", action="store_true", help="the proposals only, no mark in Speed review")
     p_labeler_predict.add_argument("--write", action="store_true", help="also the roadworks and the road types where it "
-                                                                        "is sure (a road type written counts as a "
-                                                                        "person's for the brain and the road-type net)")
+                                                                        "is sure: proposals for Speed review, never a "
+                                                                        "person's answer (every training leaves a "
+                                                                        "net/<run> road type out until a person sets "
+                                                                        "the type there)")
     p_labeler_predict.add_argument("--out-dir", help="default: <data root>/derived/road_labeler")
     p_labeler_predict.add_argument("--device", help="default: cuda when there is one")
     p_labeler_predict.add_argument("--dry-run", action="store_true", help="the start of the drives on the CPU, the "

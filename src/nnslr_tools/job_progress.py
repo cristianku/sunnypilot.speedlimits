@@ -112,6 +112,12 @@ ROAD_TYPES_STEPS = (('gps', 'Read the GPS of the drives', 10), ('maps', 'Downloa
                     ('map_roads', 'Read the map roads near the drives', 50),
                     ('road_types', "Find the map's limit of every picture", 25))
 UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
+# helpers/road_labeler.sh: "== 1/2 Check the GPU ==", "drives: N", "== 2/2 ... ==", then nnslr. Train reads every drive
+# and its pictures ("<route>: features of ..."; the first time it decodes the videos, most of the time), then its
+# epochs ("road_labeler epoch 3/30 ..."); predict goes drive by drive ({"route_id": ...} a drive).
+ROAD_LABELER_TRAIN_STEPS = (('checks', 'Check the GPU', 2), ('features', 'Read the drives and their pictures', 58),
+                            ('road_labeler', 'Train and measure', 40))
+ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Propose along the drives', 97))
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
 AI_REVIEW_STEPS = (('review', 'Review the frames with the AI', 100),)
@@ -123,12 +129,13 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
-         'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS}
+         'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS,
+         'road_labeler_train': ROAD_LABELER_TRAIN_STEPS, 'road_labeler_predict': ROAD_LABELER_PREDICT_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
             'train_brain', 'regression', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
-            'try_on_comma', 'comma_restore')
+            'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -152,7 +159,9 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
             'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
-            'comma_restore': (2, {1: 'check', 2: 'restore'})}
+            'comma_restore': (2, {1: 'check', 2: 'restore'}),
+            'road_labeler_train': (2, {1: 'checks', 2: 'features'}),
+            'road_labeler_predict': (2, {1: 'checks', 2: 'predict'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
 # scripts/run_signnet.sh ("== 3/3 Train SignNet ==") and the lines that close its training.
 SIGNNET_PIPELINE = {1: 'checks', 2: 'checks', 3: 'signnet'}
@@ -174,12 +183,23 @@ MARKERS = (
     (re.compile(r'^== [bc]\. Speed of the drives'), 'speed', ()),
     (re.compile(r'^== [bcd]\. Map roads'), 'map_roads', ()),
     (re.compile(r'^== [cde]\. Road type'), 'road_types', ()),
+    # nnslr road-labeler-train: its first epoch closes the reading of the drives.
+    (re.compile(r'^road_labeler epoch \d'), 'road_labeler', ()),
 )
+# helpers/road_labeler.sh: how many drives it goes through ("drives:       12"), the step that goes through them, and
+# the line of each drive done (its features, or left out; for predict, its summary).
+LABELER_DRIVES = re.compile(r'^drives:\s+(\d+)\s*$')
+LABELER_DRIVE_STEP = {'road_labeler_train': 'features', 'road_labeler_predict': 'predict'}
+LABELER_DRIVE_LINE = {
+    'road_labeler_train': re.compile(r'^\S+: (?:features of \d+ steps|no finished scan or no frames, left out|'
+                                     r'no scan, left out)'),
+    'road_labeler_predict': re.compile(r'^(?:\{"route_id": |\S+: no scan, left out)'),
+}
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
 REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
 EPOCH = re.compile(r'^(signnet_pretrain|signnet|detector|reader|classifier|pretrain|experiment_b_crop_geom|experiment_b_crop|experiment_b_full|'
-                   r'brain_s[0-2]) epoch (\d+)/(\d+)\b')
+                   r'brain_s[0-2]|road_labeler) epoch (\d+)/(\d+)\b')
 # "classifier stops early after epoch 12: ...": the training ends before its planned epochs.
 EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after epoch (\d+)\b')
 # The values of an epoch line: "train_loss 0.5000 val_loss 0.6000 ... 40s" (the detector also writes
@@ -191,7 +211,7 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after ep
 # val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
                     r'val_rejection|val_balanced_accuracy|val_false_per_frame|'
-                    r'val_ownership_macro_f1|val_other_road_recall|val_error_kph) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_ownership_macro_f1|val_other_road_recall|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -228,6 +248,11 @@ FAILURES = (
     (re.compile(r'Connection refused|Connection timed out|No route to host|Could not resolve hostname|'
                 r'Permission denied \(publickey'),
      'The comma did not answer, or refused this server: is it on, and on the same network?'),
+    # helpers/road_labeler.sh refuses a real run on a busy GPU, or without one.
+    (re.compile(r'^helpers/road_labeler\.sh: the GPU \d+ is busy', re.M),
+     'The GPU was busy with another job: wait for it to finish, or start a dry run on the CPU.'),
+    (re.compile(r'^helpers/road_labeler\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
+     'No GPU answered: a dry run runs on the CPU.'),
 )
 # How far back from the end of a failed log a known failure is looked for.
 FAILURE_LINES = 60
@@ -304,6 +329,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     # Regression: the step, the drives done of those to do and the drive at work; how far that drive is.
     item: tuple[str, int, int, str] | None = None
     item_share = 0.0
+    # The road labeler: the drives it goes through, and those done.
+    labeler_drives: int | None = None
+    labeler_done = 0
     # The curves of the training: per network, one point per epoch.
     curves: dict[str, dict] = {}
     for raw in text.splitlines():
@@ -378,6 +406,12 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = REGRESSION_SEGMENT.match(line) if action == 'regression' else None
         if match:
             item_share = (int(match.group(1)) - 1) / max(int(match.group(2)), 1)
+        if action in LABELER_DRIVE_LINE:
+            match = LABELER_DRIVES.match(line)
+            if match:
+                labeler_drives = int(match.group(1))
+            elif LABELER_DRIVE_LINE[action].match(line):
+                labeler_done += 1
     # Step 4 of two stages is the pretraining until the script starts the second ("-- the second stage").
     if two_stages and current == 'classifier' and not SECOND_STAGE.search(text):
         current = 'pretrain'
@@ -395,6 +429,12 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         done_share = min(item[1] + item_share, item[2])
         inside = {'done': done_share, 'total': item[2], 'percent': round(done_share * 100 / item[2], 1),
                   'text': f'drive {min(item[1] + 1, item[2])} of {item[2]}'}
+    labeler_step = action in LABELER_DRIVE_STEP and current == LABELER_DRIVE_STEP[action] and bool(labeler_drives)
+    if labeler_step and not complete:
+        reached_drives = min(labeler_done, labeler_drives)
+        inside = {'done': reached_drives, 'total': labeler_drives,
+                  'percent': round(reached_drives * 100 / labeler_drives, 1),
+                  'text': f'drive {min(reached_drives + 1, labeler_drives)} of {labeler_drives}'}
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -432,6 +472,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
             if epoch[0].startswith(('experiment_b', 'brain')) else NET_NAMES.get(epoch[0], epoch[0])
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
+    elif labeler_step and state == 'running':
+        detail = f'{min(labeler_done, labeler_drives)} of {labeler_drives} drives done'
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)
     elif action == 'prepare' and preparation is not None and preparation.get('routes_total'):
@@ -499,7 +541,7 @@ CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )
 PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
 # A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
-NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary'}
+NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary', 'road_labeler': 'Road labeler'}
 
 
 def is_signnet(action: str, text: str) -> bool:

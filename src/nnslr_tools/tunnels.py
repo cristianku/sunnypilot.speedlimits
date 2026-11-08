@@ -16,9 +16,12 @@ scripts/osm_roads.py) and the dashboard speed (drive_logs.dashboard_speed). A tu
 
 Stretches closer than JOIN_S are one tunnel. The marks go in Speed review as a person's taps would (speed_review
 tap_road, start and end, kind "tunnel", reviewer REVIEWER), in speed_history like every write. A person's word wins: no
-mark is written over a mark of the kind already there, nor where a person removed one (road_removed), nor before the
-kind's "checked to here". Running it again adds only what is new. The map is never an input of the car: the marks are
-labels, for the brain (its road head) and for the network of the road types.
+mark is written over a mark of the kind already there, nor where a person removed one (road_types.person_removals: a
+mark with an end removed by a person, not this module's own undo nor the road labeler's, nor a start tapped by
+mistake), nor before the kind's "checked to here". A start and its end are one write: when the store refuses the end (a
+revision changed meanwhile), the start is taken back, and nothing raises. Running it again adds only what is new. The
+map is never an input of the car: the marks are labels, for the brain (its road head) and for the network of the road
+types.
 
 OpenStreetMap data © OpenStreetMap contributors (ODbL).
 """
@@ -26,14 +29,16 @@ from __future__ import annotations
 
 import bisect
 import math
+import sqlite3
 from pathlib import Path
 
 from nnslr_tools import drive_logs
 from nnslr_tools.map_context import OUR_ROAD_M, RoadMap, _angle, _xy, our_road
+from nnslr_tools.road_types import MAP_REVIEWER, person_removals
 
 KIND = 'tunnel'
 LABEL = 'Tunnel'
-REVIEWER = 'osm'
+REVIEWER = MAP_REVIEWER
 NS = 1_000_000_000
 # A GPS lost this long is a hole a tunnel may explain.
 GAP_S = 3.0
@@ -201,15 +206,16 @@ def drive_tunnels(road_map: RoadMap, merged: dict, tunnels: RoadMap | None = Non
 
 def write_tunnels(store, route: str, found: list[tuple[int, int]], span: tuple[int, int]) -> dict:
     """Writes the tunnels found as marks of the kind KIND in Speed review (speed_review.SpeedReviewStore), where a
-    person said nothing there: returns {written, kept} (kept: left out for a person's mark, removal or check)."""
+    person said nothing there: returns {written, kept} (kept: left out for a person's mark, removal or check, or refused
+    by the store; a start whose end is refused is taken back), and left_open when a start could not be taken back either
+    (the store refused both). Never raises for a write the store refuses."""
     from nnslr_tools.speed_review import SpeedReviewError
     kind = next((row['kind'] for row in store.road_kinds() if row['kind'] == KIND or row['label'].lower() == KIND), None)
     if kind is None:
         kind = store.add_road_kind(LABEL, REVIEWER)
-    removed = [(row['start_ns'], row['end_ns']) for row in store.history(route)
-               if row['action'] == 'road_removed' and row['state'] == kind]
+    removed = [(row['start_ns'], row['end_ns']) for row in person_removals(store.history(route)) if row['kind'] == kind]
     checked = store.road_checked(route).get(kind)
-    written = kept = 0
+    written = kept = left_open = 0
     for start, end in found:
         start, end = max(start, span[0]), min(end, span[1])
         if end - start < MIN_S * NS:
@@ -221,8 +227,16 @@ def write_tunnels(store, route: str, found: list[tuple[int, int]], span: tuple[i
             continue
         try:
             store.tap_road(route, kind, 'start', start, span[1], store.revision(route), REVIEWER)
+        except (SpeedReviewError, sqlite3.Error):
+            kept += 1
+            continue
+        try:
             store.tap_road(route, kind, 'end', end, span[1], store.revision(route), REVIEWER)
             written += 1
-        except SpeedReviewError:
+        except (SpeedReviewError, sqlite3.Error):
             kept += 1
-    return {'written': written, 'kept': kept}
+            try:
+                store.tap_road(route, kind, 'remove', start, span[1], store.revision(route), REVIEWER)
+            except (SpeedReviewError, sqlite3.Error):
+                left_open += 1
+    return {'written': written, 'kept': kept, **({'left_open': left_open} if left_open else {})}

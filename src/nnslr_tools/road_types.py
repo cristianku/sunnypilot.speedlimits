@@ -62,6 +62,10 @@ correction, appended, ``{"from", "to" (frame keys, the stretch), "road_type" (nu
 run; load_road_types gives the map labels with the corrections over them. A person confirms a proposal the same way,
 with a correction to the type the map proposed. Only a frame a person confirmed or corrected is a label of a training
 (confirmed), whatever the map says of it: a proposal, sure or not, is never one; "cannot tell" is reviewed, with no type.
+The road labeler (nnslr_tools.road_labeler) writes its sure types in the same file with the reviewer NET_PREFIX + its run:
+a proposal too, never a person's word, so load_road_types leaves those lines out (every training reads the map's line
+under them) and only Speed review, which shows them for a person to fix, asks for them (proposals=True). A person
+confirms one by setting the type again: that correction comes later, and the last one wins.
 OpenStreetMap data © OpenStreetMap contributors (ODbL).
 """
 from __future__ import annotations
@@ -79,6 +83,11 @@ from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 from nnslr_tools.sign_reads import is_read_frame
 
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
+# Who wrote a label without a person: the road labeler (reviewer NET_PREFIX + its run), whose writes are proposals and
+# never an answer until a person keeps them, and nnslr tunnels (MAP_REVIEWER, nnslr_tools.tunnels), the one write
+# without a person that is an answer (asked by Cristian on 8 Nov 2026).
+NET_PREFIX = 'net/'
+MAP_REVIEWER = 'osm'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
 # The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Read the map, Data › Speed review).
@@ -474,6 +483,40 @@ def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
             for line, correction in zip(lines, chosen)]
 
 
+def proposal(reviewer) -> bool:
+    """A write of the road labeler (reviewer NET_PREFIX + its run): a proposal, never a person's answer."""
+    return isinstance(reviewer, str) and reviewer.startswith(NET_PREFIX)
+
+
+def by_person(reviewer) -> bool:
+    """A write of a person: neither the road labeler's nor nnslr tunnels'."""
+    return isinstance(reviewer, str) and not proposal(reviewer) and reviewer != MAP_REVIEWER
+
+
+def person_removals(history: list[dict]) -> list[dict]:
+    """The marks a person removed, from a drive's speed_history in order ({action, state, start_ns, end_ns, reviewer}):
+    [{kind (None: roadworks), start_ns, end_ns}], each only if it had an end when removed (the history played again:
+    a mark open when removed is logged to the drive's end, and was a start tapped by mistake). The removals of the
+    labeler and of nnslr tunnels (by_person) are their own undo, never a person's word."""
+    ended: set = set()
+    found = []
+    for row in history:
+        action = row.get('action') or ''
+        family, _, tap = action.partition('_')
+        if family not in ('road', 'works') or tap not in ('start', 'end', 'removed'):
+            continue
+        key = (row.get('state') if family == 'road' else None, row.get('start_ns'))
+        if tap == 'start':
+            ended.discard(key)
+        elif tap == 'end':
+            ended.add(key)
+        else:
+            if key in ended and by_person(row.get('reviewer')) and row.get('end_ns') is not None:
+                found.append({'kind': key[0], 'start_ns': int(row['start_ns']), 'end_ns': int(row['end_ns'])})
+            ended.discard(key)
+    return found
+
+
 def confirmed(line: dict) -> bool:
     """Whether a person gave the frame its type (a correction, or the proposed type confirmed): the one condition for a
     label of a training (road_type_data.frame_label). "Cannot tell" is reviewed but has no type."""
@@ -488,11 +531,14 @@ def review_counts(lines: list[dict]) -> dict[str, int]:
     return {'usable': usable, 'cant_tell': reviewed - usable, 'to_review': len(lines) - reviewed}
 
 
-def load_road_types(root: Path, route: str) -> list[dict]:
+def load_road_types(root: Path, route: str, proposals: bool = False) -> list[dict]:
     """The lines of a route in the order of the drive with a person's corrections over the map (corrected), [] when
-    nnslr road-types has not run for it. Every reader takes these: a training."""
+    nnslr road-types has not run for it. Every reader takes these: a training. The road labeler's lines (proposal) are
+    left out, the map's line stays under them, unless proposals: Speed review, which shows them for a person to fix."""
     lines = map_road_types(root, route)
     corrections = load_corrections(root, route) if lines else []
+    if not proposals:
+        corrections = [line for line in corrections if not proposal(line.get('reviewer'))]
     return corrected(lines, corrections) if corrections else lines
 
 
