@@ -33,6 +33,9 @@ export interface SpeedDrive {
   revision: number;
   /** The dashboard speed along the drive at the brain's steps, in whole km/h, where it changes (speed_curve). */
   speed: SpeedPoint[];
+  /** [from_ns, to_ns] where openpilot or the car's cruise held the speed, the gas not pressed (held_spans): not his foot,
+   * so the brain learns no speed there unless a block says one. */
+  held: [number, number][];
   blocks: Block[];
   works: Works[];
   /** From the start of the drive up to here a person looked for roadworks: outside the marks there are none. */
@@ -82,10 +85,17 @@ export function speedAt(speed: readonly SpeedPoint[], ns: number): number | null
   return index < 0 ? null : speed[index]![1];
 }
 
-/** The answer at a time: the block's kph inside a block (null for one left out), else his speed. */
-export function labelAt(blocks: readonly Block[], speed: readonly SpeedPoint[], ns: number): number | null {
+/** Whether openpilot or the car's cruise held the speed at a time. */
+export function heldAt(held: readonly [number, number][], ns: number): boolean {
+  return held.some(([from, to]) => from <= ns && ns < to);
+}
+
+/** The answer at a time: the block's kph inside a block (null for one left out), else his speed, null where a machine
+ * held it. */
+export function labelAt(blocks: readonly Block[], speed: readonly SpeedPoint[], held: readonly [number, number][],
+                        ns: number): number | null {
   const block = blockAt(blocks, ns);
-  return block ? block.kph : speedAt(speed, ns);
+  return block ? block.kph : heldAt(held, ns) ? null : speedAt(speed, ns);
 }
 
 /** A kph a block may say: whole, 1..max (below 1 km/h the brain has no class: leave it out instead). */

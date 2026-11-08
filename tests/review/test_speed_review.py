@@ -83,6 +83,23 @@ def test_the_curve_is_the_speed_at_the_brains_steps_where_it_changes():
     assert speed_review.speed_curve(merged([(at(0.1), 30.0)]), (at(0), at(1))) == [[at(0), None], [at(0.25), 30]]
 
 
+def test_openpilot_or_the_cruise_held_the_speed_unless_his_foot_was_on_the_gas():
+    series = {'long_active': [[at(10), True], [at(20), False]],
+              'cruise_enabled': [[at(30), True], [at(60), False]], 'gas': [[at(40), True], [at(50), False]]}
+    times = [at(5), at(15), at(25), at(35), at(45), at(55), at(65)]
+    assert speed_review.machine_held(series, times) == [False, True, False, True, False, True, False]
+    # Logs without these series: nothing is held.
+    assert speed_review.machine_held({}, times[:2]) == [False, False]
+
+
+def test_the_page_greys_where_a_machine_held_the_speed_at_the_brains_steps():
+    drive = merged([(at(0), 80.0)])
+    drive['series']['long_active'] = [[at(1.1), True], [at(2), False]]
+    # 1.1 s falls between two steps: the first step it holds is 1.25 s, and the span ends at the step after the last.
+    assert speed_review.held_spans(drive, (at(0), at(4))) == [[at(1.25), at(2)]]
+    assert speed_review.held_spans(merged([(at(0), 80.0)]), (at(0), at(4))) == []
+
+
 # ---------- the blocks ----------
 
 def test_a_block_clips_the_blocks_it_covers(store):
@@ -201,7 +218,8 @@ def test_a_drive_without_a_scan_has_no_speed_and_takes_no_block(store):
         def summary(self, route):
             return None
     view = speed_review.drive_view(store, NoLogs(), ROUTE)
-    assert view['speed'] == [] and view['blocks'] == [] and view['revision'] == 0 and view['total_s'] == 0
+    assert view['speed'] == [] and view['held'] == [] and view['blocks'] == [] and view['revision'] == 0
+    assert view['total_s'] == 0
     assert view['span_ns'] is None
     with pytest.raises(SpeedReviewError) as refused:
         speed_review.save_block(store, NoLogs(), ROUTE, {}, 'a')

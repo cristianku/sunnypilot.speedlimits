@@ -27,6 +27,8 @@ each with its reason:
 
 - no_speed: the logs give no speed there (before the first carState, a hole);
 - stopped: the answer is below 1 km/h, which has no class;
+- cruise: a machine held the speed, not his foot: openpilot's longitudinal (carControl.longActive), or the car's cruise
+  (carState.cruiseState.enabled) with the gas not pressed (speed_review.machine_held). A block of his still answers there;
 - left_out: inside a block with no speed, a person took those moments out;
 - boundary: EDGE_SECONDS around the edge of a block where the answer jumps, since a tap is only so exact (a block with the
   dashboard's own speed at its edge is no jump, and the dashboard's speed changing from step to step is never one);
@@ -171,7 +173,7 @@ from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.sign_reads import READ_INDEX_BASE
-from nnslr_tools.speed_review import NS, db_path, driver_speed
+from nnslr_tools.speed_review import NS, db_path, driver_speed, machine_held
 
 # The brain's own table, never taken from Speed review: a class a km/h since 8 Nov 2026 (5 km/h before).
 BRAIN_STEP_KPH = 1
@@ -184,8 +186,9 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
 READ_COMMAND = 'nnslr road-type-signs --labelled'
-NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME = range(1, 6)
-OUT_REASONS = {NO_SPEED: 'no_speed', STOPPED: 'stopped', BLOCKED_OUT: 'left_out', BOUNDARY: 'boundary', NO_FRAME: 'no_frame'}
+NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME, CRUISE = range(1, 7)
+OUT_REASONS = {NO_SPEED: 'no_speed', STOPPED: 'stopped', BLOCKED_OUT: 'left_out', BOUNDARY: 'boundary', NO_FRAME: 'no_frame',
+               CRUISE: 'cruise'}
 NO_LABELS = {'blocks': [], 'works': [], 'checked_ns': None}
 HELD_OUT = ('test', 'validation')
 NIGHT_FROM, NIGHT_TO = 22, 6
@@ -310,12 +313,17 @@ def training_routes(root: Path) -> list[str]:
     return sorted(found)
 
 
-def speed_answers(ns: np.ndarray, driver_kph: list, blocks: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+def speed_answers(ns: np.ndarray, driver_kph: list, blocks: list[dict],
+                  held: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """(class per step, -1 without an answer; why a step is out of the loss, 0 when it is in) at the times ns, given the
-    driver's speed at each (speed_review.driver_speed, whole km/h or None) and the blocks of the drive."""
+    driver's speed at each (speed_review.driver_speed, whole km/h or None), the blocks of the drive and where a machine
+    held the speed (speed_review.machine_held; None: nowhere)."""
     ns = np.asarray(ns, dtype=np.int64)
     answer = np.array([-1 if kph is None else kph for kph in driver_kph], dtype=np.int64).reshape(len(ns))
     out = np.where(answer < 0, NO_SPEED, 0)
+    if held is not None:
+        machine = np.asarray(held, dtype=bool) & (out == 0)
+        out[machine], answer[machine] = CRUISE, -1
     known = ns >= 0
     ordered = sorted(blocks, key=lambda block: block['start_ns'])
     for block in ordered:
@@ -875,7 +883,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
     usable = np.array([frame['ns'] is not None and (frame['present'] or not need_pictures) for frame in frames], dtype=bool)
     blocks = labels['blocks']
-    speed, speed_out = speed_answers(ns, driver_speed(merged, ns), blocks)
+    series = merged.get('series') or {}
+    speed, speed_out = speed_answers(ns, driver_speed(merged, ns), blocks, machine_held(series, ns))
     pictured = (speed_out == 0) & np.array([frame['ns'] is not None and frame['present'] for frame in frames], dtype=bool)
     speed_out[~usable] = NO_FRAME
     speed[~usable] = -1
@@ -886,17 +895,18 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     works, works_weight = works_answers(ns, labels['works'], labels['checked_ns'])
     works_weight[~usable] = 0
     readings = record['readings'] if record else None
-    v_ego = (merged.get('series') or {}).get('v_ego') or []
+    v_ego = series.get('v_ego') or []
     own = _last_at(drive_logs.dashboard_speed(merged), ns)
     reviewed = reviewed_signs(root, route, merged)
-    # Without vEgo the car has driven no metres: no limit is ahead of any frame.
-    asked = (speed_out == 0) & any(point[1] is not None for point in v_ego)
+    # Without vEgo the car has driven no metres: no limit is ahead of any frame. The signs ahead are there whoever held
+    # the speed.
+    asked = np.isin(speed_out, (0, CRUISE)) & any(point[1] is not None for point in v_ego)
     following, next_weight, metres, metres_weight = ahead_from_signs(ns, reviewed, metres_driven(v_ego), asked)
     span = merged.get('span') or [None, None]
     taught = 0
     if span[0] is not None and span[1] is not None:
         grid = np.arange(int(span[0]), int(span[1]), int(NS / rate), dtype=np.int64)
-        taught = int((speed_answers(grid, driver_speed(merged, grid), blocks)[1] == 0).sum())
+        taught = int((speed_answers(grid, driver_speed(merged, grid), blocks, machine_held(series, grid))[1] == 0).sum())
     return {'route': route, 'rate': rate, 'frames': frames, 'ns': ns, 'partitions': partitions,
             'own_kph': np.array([np.nan if kph is None else kph for kph in own], dtype=np.float32),
             'cells': cells, 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,

@@ -9,7 +9,8 @@
 // taps on the frame shown; a third tap says that the drive was gone through up to the frame shown, so that no mark there
 // means no works, and the drive opens there again. The picture shows the answer (its square named ANSWER, as the lane)
 // next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
-// is the right one. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
+// is the right one. Where openpilot or the car's cruise held the speed (held) it is not his foot: the lane greys it and
+// ANSWER is a dash, as the training leaves it out, unless a block of his says a speed there. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
 // remove as any other. Every command has its key, listed under the card on a screen with a keyboard.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
@@ -18,7 +19,7 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
-import {type Block, blockAt, canEndWorks, clampKph, MIN_BLOCK_NS, type SpeedDrive, speedAt, speedIndex, worksAt,
+import {type Block, blockAt, canEndWorks, clampKph, heldAt, MIN_BLOCK_NS, type SpeedDrive, speedAt, speedIndex, worksAt,
   type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
@@ -59,11 +60,14 @@ async function read(): Promise<void> {
 }
 const blocks = computed(() => drive.value?.blocks ?? []);
 const speed = computed(() => drive.value?.speed ?? []);
+const held = computed(() => drive.value?.held ?? []);
 const maxKph = computed(() => drive.value?.max_kph ?? 200);
 /** His dashboard speed at the time shown, and the block there: the answer is the block's when there is one. */
 const driverKph = computed(() => speedAt(speed.value, now.value));
 const block = computed(() => blockAt(blocks.value, now.value));
-const label = computed(() => block.value ? block.value.kph : driverKph.value);
+/** openpilot or the car's cruise held the speed here, and no block says one: no answer. */
+const machine = computed(() => !block.value && heldAt(held.value, now.value));
+const label = computed(() => block.value ? block.value.kph : machine.value ? null : driverKph.value);
 
 const go = (item: Block): void => {
   // A millisecond in: the time shown is on this block, not at the end of the one before.
@@ -253,6 +257,13 @@ function speedPath(from: number, to: number, width: number, x: (second: number) 
 }
 watch(drive, () => { drawn = null; });
 /** The blocks inside the time window, with what the lane writes on them. */
+function heldIn(from: number, to: number) {
+  return held.value.flatMap(([start, stop]) => {
+    const first = Math.max(secondOf(start), from);
+    const last = Math.min(secondOf(stop), to);
+    return first < last ? [{key: start, from: first, to: last}] : [];
+  });
+}
 function blocksIn(from: number, to: number) {
   return blocks.value.flatMap((item) => {
     const first = Math.max(secondOf(item.start_ns), from);
@@ -289,16 +300,20 @@ function worksIn(from: number, to: number) {
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
                     @pick-map="fromMap">
     <template #hud>
-      <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one"><small>ANSWER</small>
+      <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out; orange bar: roadworks; grey line: gone through for roadworks">
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out; light grey band: openpilot or the cruise held the speed, not learnt; orange bar: roadworks; grey line: gone through for roadworks">
         <span class="dr-lane-name">Answer<small>km/h</small></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
             <line :x1="0" :x2="width" :y1="y(kph)" :y2="y(kph)" class="rg-grid"/>
             <text x="3" :y="y(kph) - 2" class="rg-tick">{{ kph }}</text>
+          </g>
+          <g v-for="run in heldIn(from, to)" :key="'held' + run.key">
+            <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" class="sr-held"/>
+            <text v-if="fits(run.from, run.to, 'cruise')" :x="x(run.from) + w(run.from, run.to) / 2" :y="PLOT - 4" class="dr-run-text sr-held-text">cruise</text>
           </g>
           <g v-for="run in blocksIn(from, to)" :key="run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" rx="3"
@@ -325,13 +340,18 @@ function worksIn(from: number, to: number) {
         <p v-else-if="!drive.span_ns" class="dr-hint">No speed to show: the logs of this drive are not read yet.</p>
         <template v-else>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
-          <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one.</p>
+          <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one. Where openpilot or
+            the cruise held the speed it is a dash: not your foot, not learnt.</p>
           <div class="sr-value">
-            <span>{{ block ? 'Block' : 'Your dashboard speed' }}</span><b>{{ label ?? '–' }}</b><span v-if="label !== null">km/h</span>
+            <span>{{ block ? 'Block' : 'Your dashboard speed' }}</span><b>{{ (machine ? driverKph : label) ?? '–' }}</b>
+            <span v-if="(machine ? driverKph : label) !== null">km/h</span>
             <span v-if="block" class="sr-tag" :class="{'sr-tag-out': block.kph === null}">{{ block.kph === null ? 'Left out' : 'Your block' }}</span>
+            <span v-else-if="machine" class="sr-tag sr-tag-out">Not learnt</span>
           </div>
           <p v-if="block" class="dr-hint">{{ clockOf(secondOf(block.start_ns)) }}–{{ clockOf(secondOf(block.end_ns)) }} ·
             your dashboard speed {{ driverKph ?? '–' }} km/h<template v-if="block.reviewer"> · {{ block.reviewer }}</template></p>
+          <p v-else-if="machine" class="dr-hint">openpilot or the car's cruise held the speed here, not your foot: the training
+            leaves it out, unless a block of yours says a speed.</p>
 
           <div v-if="pending !== null" class="sr-new" role="group" aria-labelledby="sr-new-title">
             <p id="sr-new-title" class="sr-new-title">New block from {{ clockOf(secondOf(pending)) }}<template v-if="canEnd && ends">

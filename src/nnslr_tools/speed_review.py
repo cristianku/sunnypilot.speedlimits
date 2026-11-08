@@ -129,6 +129,36 @@ def speed_curve(merged: dict | None, span: tuple[int, int]) -> list[list]:
     return out
 
 
+def machine_held(series: dict, ns) -> list[bool]:
+    """Whether a machine held the speed at each of the times ns, not his foot: openpilot's longitudinal was active
+    (carControl.longActive), or the car's cruise was on (carState.cruiseState.enabled) with the gas not pressed, since his
+    foot over the cruise is his speed. The brain learns no speed of his there; a block still says one. Unknown is not
+    held."""
+    def values(name: str) -> list:
+        points = series.get(name) or []
+        times = [point[0] for point in points]
+        found = []
+        for t in ns:
+            at = bisect.bisect_right(times, int(t)) - 1
+            found.append(points[at][1] if at >= 0 else None)
+        return found
+    return [active is True or (on is True and gas is not True)
+            for active, on, gas in zip(values('long_active'), values('cruise_enabled'), values('gas'))]
+
+
+def held_spans(merged: dict | None, span: tuple[int, int]) -> list[list[int]]:
+    """Where a machine held the speed (machine_held) at the brain's steps, as [from_ns, to_ns]: what the page greys."""
+    step = NS // STEPS_PER_SECOND
+    times = range(span[0], span[1], step)
+    out: list[list[int]] = []
+    for t, held in zip(times, machine_held((merged or {}).get('series') or {}, times)):
+        if held and out and out[-1][1] == t:
+            out[-1][1] = t + step
+        elif held:
+            out.append([t, t + step])
+    return out
+
+
 def _integer(value, name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise SpeedReviewError(400, 'bad_value', f'{name} must be a whole number.')
@@ -357,15 +387,16 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
-    """A drive for the page: its revision, the driver's speed along it (speed: speed_curve), its blocks, its roadworks,
-    its first and last ns (span_ns, where a block may go) and its length. A drive whose logs are not scanned has no
-    speed and no span."""
+    """A drive for the page: its revision, the driver's speed along it (speed: speed_curve), where a machine held it
+    (held: held_spans), its blocks, its roadworks, its first and last ns (span_ns, where a block may go) and its length.
+    A drive whose logs are not scanned has no speed and no span."""
     span = _span_of(drives, route)
     view = {'ok': True, 'route': route, 'revision': store.revision(route), 'blocks': store.blocks(route),
-            'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'speed': [], 'span_ns': None,
-            'total_s': 0, 'max_kph': MAX_KPH}
+            'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'speed': [], 'held': [],
+            'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH}
     if span is not None:
-        view.update(speed=speed_curve(drives.merged(route), span), span_ns=list(span),
+        merged = drives.merged(route)
+        view.update(speed=speed_curve(merged, span), held=held_spans(merged, span), span_ns=list(span),
                     total_s=round((span[1] - span[0]) / NS, 1))
     return view
 

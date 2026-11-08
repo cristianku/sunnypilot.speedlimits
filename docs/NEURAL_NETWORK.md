@@ -595,6 +595,7 @@ Each term only on the frames with an answer of its own. The speed's answer is a 
 
 - the answer is taken at the brain's steps, 4 a second, as the car steps it: the dashboard speed (`speed_review.driver_speed`: `vEgoCluster`, or `vEgo` + 3 km/h on the old Peugeot logs) in whole km/h, rounded half up, 0 to 200, the same numbers Speed review draws;
 - below 1 km/h it is out (`stopped`): there is no class for it, since the car reads a limit of 0 as none;
+- where a machine held the speed it is out (`cruise`): openpilot's longitudinal (`carControl.longActive`), or the car's cruise on (`carState.cruiseState.enabled`) with the gas not pressed. The brain learns his foot, never openpilot's driving (since 8 Nov 2026, when opendbc psa-torque-sunny-testing went back to `dashcamOnly = True`, 59b23860). A block of his still answers there, and the next limit and its metres are still learnt;
 - a block lasts at least 1 s, and within 2 s of its edge the answer is out where it jumps there (`boundary`): a tap is only so exact;
 - the next limit is learnt only where Sign review covers the frames (below);
 - before any training the signs of every such drive are read again by the car's reader of today, with the brain's pictures (`nnslr road-type-signs --labelled`, step 3 of `scripts/run_brain.sh`): the training refuses a drive not read so. As `--labelled` covers every drive with its logs read, the first reading is long.
@@ -605,6 +606,7 @@ Each term only on the frames with an answer of its own. The speed's answer is a 
 | inside a block with a speed | the block's | |
 | inside a block left out | out (`left_out`) | |
 | below 1 km/h | out (`stopped`) | |
+| openpilot or the car's cruise held the speed, the gas not pressed | out (`cruise`) | |
 | no speed in the logs, or no picture | out (`no_speed`, `no_frame`) | |
 | within 2 s of a block's edge where the answer jumps | out (`boundary`) | |
 | within 2 s of a works tap | | out |

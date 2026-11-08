@@ -86,6 +86,18 @@ def test_a_block_of_naught_is_a_car_that_stands_and_has_no_class():
     assert list(classes) == [79, -1] and out[1] == targets.STOPPED
 
 
+def test_where_a_machine_held_the_speed_his_foot_gave_no_answer_but_his_block_still_does():
+    targets = _targets()
+    held = [False, True, True, True, False]
+    classes, out = targets.speed_answers(seconds(5, 15, 25, 35, 45), [80] * 5, [], held)
+    assert list(classes) == [79, -1, -1, -1, 79] and list(out) == [0] + [targets.CRUISE] * 3 + [0]
+    classes, out = targets.speed_answers(seconds(5, 15, 25, 35, 45), [80] * 5, [block(20, 30, 100)], held)
+    assert list(classes) == [79, -1, 99, -1, 79] and list(out) == [0, targets.CRUISE, 0, targets.CRUISE, 0]
+    # No speed stays no speed.
+    assert list(targets.speed_answers(seconds(5), [None], [], [True])[1]) == [targets.NO_SPEED]
+    assert targets.OUT_REASONS[targets.CRUISE] == 'cruise'
+
+
 def test_a_moment_with_no_time_has_no_answer_from_a_block_either():
     targets = _targets()
     ns = _np().array([-1, 15 * NS], dtype=_np().int64)
@@ -434,7 +446,9 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     label_db(tmp_path, blocks=[(ROUTE, 10 * NS, 20 * NS, 100), (ROUTE, 25 * NS, 28 * NS, None)],
              works=[(ROUTE, 5 * NS, 15 * NS)], checked=[(ROUTE, 25 * NS)])
     # His speed from the third second on: vEgo + 3 km/h on a Peugeot log without its own vEgoCluster, 80 on the dashboard.
-    merged = {'frames': encoded(40, missing={23 * 20}), 'series': {'v_ego': [[3 * NS, 77.0]]},
+    # openpilot held the speed from 32 to 34 s: not his foot.
+    merged = {'frames': encoded(40, missing={23 * 20}),
+              'series': {'v_ego': [[3 * NS, 77.0]], 'long_active': [[32 * NS, True], [34 * NS, False]]},
               'meta': {'car': {'fingerprint': 'PSA_PEUGEOT_3008'}}, 'span': [0, 40 * NS],
               'gps': [[1 * NS, 47.0, 8.0, 1_750_000_000_000]]}
     split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
@@ -447,6 +461,8 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     assert drive['speed_out'][8] == 0 and drive['speed_out'][9] == drive['speed_out'][10] == targets.BOUNDARY
     assert drive['speed_out'][26] == targets.BLOCKED_OUT
     assert drive['speed_out'][30] == targets.NO_FRAME
+    assert drive['speed_out'][32] == drive['speed_out'][33] == targets.CRUISE and drive['speed'][32] == -1
+    assert drive['speed_out'][34] == 0 and drive['speed_weight'][33] == 0
     assert drive['blocked'][15] and not drive['blocked'][26] and not drive['blocked'][5]
     assert drive['works'][10] == 1 and drive['works_weight'][10] == 1
     assert drive['works'][20] == 0 and drive['works_weight'][20] == 1
@@ -468,6 +484,7 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     assert found['drives'][0]['works_in'] == drive['works'][drive['works_weight'] > 0].sum()
     assert found['partitions']['buffer']['speed'] == found['drives'][0]['speed']
     assert found['drives'][0]['blocks'] == 2 and found['drives'][0]['out']['left_out'] == 3
+    assert found['drives'][0]['out']['cruise'] == 2
     text = targets.summary_text(found)
     assert 'signs NOT read' in text and '3 seconds with a speed and no picture' in text and '2 blocks' in text
     assert drive['cuts'] == set() and drive['reader'] is None
