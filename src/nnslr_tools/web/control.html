@@ -1245,12 +1245,20 @@ button.dr-chip{cursor:pointer}button.dr-chip:hover{filter:brightness(1.15)}
 .dr-banner-actions{display:flex;flex-wrap:wrap;gap:8px}
 .dr-main{display:grid;grid-template-columns:minmax(0,1fr) 330px;grid-template-rows:auto 1fr;grid-template-areas:"stage side" "time side";
 gap:12px 20px;align-items:start}
-.dr-stage{grid-area:stage;position:relative;aspect-ratio:1928/1208;width:min(100%,calc((var(--stage-h,100dvh - 420px)) * 1928 / 1208));
+.dr-stage{grid-area:stage;position:relative;aspect-ratio:1928/1208;width:min(100%,calc(max(100dvh - 420px,var(--stage-h,0px)) * 1928 / 1208));
 min-width:min(100%,420px);justify-self:center;border-radius:12px;overflow:hidden;background:var(--stage);cursor:pointer}
-.dr-stage.sized{min-width:0}
-/* The grip under the picture on a computer (StageGrip.vue), as Sign review's under its photo. */
+/* The grip under the picture on a computer (StageGrip.vue): the page's own height is the lowest, dragged down it grows. */
 .dr-grip{display:none}
 @media (min-width:861px){
+  /* A picture bigger than its column (stage-size.ts, --stage-h on the drive): the drive leaves the page's 1180 px, centred,
+     as wide as the picture with the side (386 = the side 330, its gap 20, the card's padding 36); past the window's width
+     the side goes under the lanes. */
+  .page:has(> .dr-view.grown){max-width:none}
+  .page:has(> .dr-view.grown)>:not(.dr-view){width:min(100%,1148px);align-self:center}
+  .dr-view.grown{align-self:center;width:clamp(min(100%,1148px),calc(var(--stage-h) * 1928 / 1208 + 386px),100%)}
+  .dr-view.grown.under{width:clamp(min(100%,1148px),calc(var(--stage-h) * 1928 / 1208 + 36px),100%)}
+  .dr-view.under .dr-main{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto;grid-template-areas:"stage" "time" "side"}
+  .dr-view.under .dr-side{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px 24px;align-items:start}
   .dr-grip{display:flex;justify-content:center;align-items:center;height:14px;margin:-8px 0 -4px;cursor:row-resize;touch-action:none;
   user-select:none;-webkit-user-select:none;border-radius:7px}
   .dr-grip::before{content:"";width:44px;height:5px;border-radius:3px;background:var(--line-strong);transition:width .15s,background-color .15s}

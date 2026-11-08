@@ -5,8 +5,8 @@
 // every frame (drive-review.ts videoTimeOf), never a file's date. On the picture the limit the comma's vision held; under
 // it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
 // at the time shown. The commands of the video lie on the picture, at its foot, and the zoom of the lanes next to the
-// title, so that the picture and the lanes keep the room; on a computer the grip under the picture makes it bigger or
-// smaller (StageGrip.vue), as in Sign review. Review the signs here opens Sign review on the frame of the
+// title, so that the picture and the lanes keep the room; on a computer the grip under the picture makes it bigger than
+// the page's own (StageGrip.vue): the drive then leaves the page's width, its side under the lanes when they no longer fit. Review the signs here opens Sign review on the frame of the
 // time shown, and Sign review links back (?segment=N&second=S opens the drive at that time). Without logs the video
 // plays all the same, with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
@@ -27,7 +27,7 @@ import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousCha
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
-import {stageHeight} from './stage-size';
+import {grownLayout, stageHeight} from './stage-size';
 import StageGrip from './StageGrip.vue';
 import {type ControlTab, goTo} from './tabs';
 
@@ -471,6 +471,8 @@ const now = computed(() => {
 const change = computed(() => previousChange(atSign.value?.limit, cursor.value));
 const lanes = useTemplateRef<InstanceType<typeof DriveReviewLanes>>('lanes');
 const stage = useTemplateRef<HTMLDivElement>('stage');
+/** The picture made bigger with the grip: the drive leaves the page's width, its side under the lanes when they no longer fit. */
+const layout = computed(() => grownLayout(stageHeight.value));
 /** The whole run of the map's limit at a time, as a tap on the map's lane gives it (key m of Speed review). */
 const mapRunAt = (seconds: number): {from: number; to: number; kph: number} | null => lanes.value?.mapRunAt(seconds) ?? null;
 const mapEdges = (): number[] => lanes.value?.mapEdges() ?? [];
@@ -556,7 +558,8 @@ watch(() => props.route, () => {
 </script>
 
 <template>
-  <section class="card rt-view dr-view" aria-labelledby="dr-view-title">
+  <section class="card rt-view dr-view" :class="layout" :style="layout.grown ? {'--stage-h': stageHeight + 'px'} : undefined"
+           aria-labelledby="dr-view-title">
     <div class="rt-view-head">
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
       <div class="dr-view-top">
@@ -586,8 +589,7 @@ watch(() => props.route, () => {
       <p v-if="sending" class="dr-hint">Sending the logs… {{ sending.done }} of {{ sending.total }}</p>
 
       <div class="dr-main">
-        <div ref="stage" class="dr-stage" :class="{empty: !ready, sized: stageHeight !== null}"
-             :style="stageHeight === null ? undefined : {'--stage-h': stageHeight + 'px'}" @click="toggle">
+        <div ref="stage" class="dr-stage" :class="{empty: !ready}" @click="toggle">
           <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"
                  @error="onVideoError" @playing="videoProblem = ''" @seeking="stillAt = null" @seeked="onStill" @pause="onStill"
                  @play="stillAt = null"></video>
