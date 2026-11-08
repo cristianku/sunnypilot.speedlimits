@@ -70,14 +70,6 @@ function limitsAt(s: number): {map: number | null | undefined; vision: number | 
 const apart = (map: number | null | undefined, vision: number | null | undefined): boolean =>
   typeof map === 'number' && typeof vision === 'number' && Math.abs(map - vision) >= DIFFER_KPH;
 
-/** Map and vision differ at the frame (the red underline of its tick). */
-export function carDiffers(row: FrameRow): boolean {
-  const s = logTime(row);
-  if (s === null) return false;
-  const {map, vision} = limitsAt(s);
-  return apart(map, vision);
-}
-
 /** The comma's limits at the frame, in km/h, or null when the drive's logs are not read or do not cover it. */
 export function carMomentOf(row: FrameRow): CarMoment | null {
   const s = logTime(row);

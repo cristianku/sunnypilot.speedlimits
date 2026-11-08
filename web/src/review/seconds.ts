@@ -1,47 +1,20 @@
-// A cell of the timeline is a second of the drive. Where the server has the segment's road video (report.videos)
-// the cell is all the frames of that second, 20 of them: the picture at 1 a second and the frames of the video up to
-// the next one (a sign the comma read, a frame saved, a frame not saved yet). Confirm with To review or All goes on
-// through them frame by frame while the frames have a sign: after a frame confirmed with no sign it skips the frames
-// not saved and goes on to the next frame of the report, the picture of the next second (nextInVideo). The cell is
-// confirmed when every frame that walk reaches is. Offline, or in a segment with no video, the cell is its picture at
-// 1 a second alone, as before.
+// A second of the drive. Where the server has the segment's road video (report.videos) it is all the frames of that
+// second, 20 of them: the picture at 1 a second and the frames of the video up to the next one (a sign the comma read,
+// a frame saved, a frame not saved yet). Confirm with To review or All goes on through them frame by frame while the
+// frames have a sign: after a frame confirmed with no sign it skips the frames not saved and goes on to the next frame
+// of the report, the picture of the next second (nextInVideo). Offline, or in a segment with no video, the second is
+// its picture at 1 a second alone.
 import {computed} from 'vue';
 import {frameStatus, isBetweenFrame} from './frames';
 import {CAMERA_FPS, READ_INDEX_BASE} from './order';
 import {anchorIndex, indexOf, report, rowOf, state} from './store';
 import type {FrameRow} from './types';
 
-/** The frames of a cell confirmed, of all its frames; complete: every frame the walk of Confirm reaches is confirmed
- * (the frames after one with no sign are skipped). */
-export interface SecondProgress {
-  done: number;
-  total: number;
-  complete: boolean;
-}
-
-function secondId(segment: number, decoded: number): string {
-  return segment + '/' + Math.floor(decoded / CAMERA_FPS);
-}
-
 // The rows of the report by frame of their segment's video ("segment/decoded").
 const byFrame = computed(() => {
   const map = new Map<string, FrameRow>();
   for (const row of report.rows) {
     if (typeof row.decoded_frame_index === 'number') map.set(row.segment_index + '/' + row.decoded_frame_index, row);
-  }
-  return map;
-});
-
-// The frames between the seconds of the report (comma reads, frames of the video saved) by second (secondId).
-const betweenBySecond = computed(() => {
-  const map = new Map<string, FrameRow[]>();
-  for (const row of report.rows) {
-    const decoded = row.decoded_frame_index;
-    if (!isBetweenFrame(row) || typeof decoded !== 'number') continue;
-    const id = secondId(row.segment_index, decoded);
-    const list = map.get(id);
-    if (list === undefined) map.set(id, [row]);
-    else list.push(row);
   }
   return map;
 });
@@ -87,29 +60,6 @@ export function frameOfSecond(row: FrameRow): [number, number] | null {
   const count = report.videos?.[row.segment_index] ?? null;
   const place = decoded - first + 1;
   return [place, Math.max(place, Math.min(CAMERA_FPS, (count ?? Infinity) - first))];
-}
-
-/** The frames between the seconds of the report in the cell of a picture at 1 a second (empty: none, or a cell of its
- * picture alone). */
-export function cellFrames(row: FrameRow): FrameRow[] {
-  const span = secondSpan(row);
-  if (span === null) return [];
-  const list = betweenBySecond.value.get(secondId(row.segment_index, span[0])) ?? [];
-  return list.filter((other) => (other.decoded_frame_index ?? Infinity) < span[1]);
-}
-
-/** How many frames of the cell of a picture at 1 a second are confirmed, and whether all those the walk of Confirm
- * reaches are; null for a cell of its picture alone. A frame of the video not saved is not confirmed: confirmed, it is
- * a row of the report. */
-export function secondProgress(row: FrameRow): SecondProgress | null {
-  const span = secondSpan(row);
-  if (span === null) return null;
-  const done = [row, ...cellFrames(row)].filter((frame) => frameStatus(frame.frame_key) === 'done').length;
-  let complete = true;
-  for (let decoded = span[0]; decoded < span[1] && complete; decoded += 1) {
-    if (walked(row.segment_index, decoded)) complete = frameStatus(keyAt(row.segment_index, decoded)) === 'done';
-  }
-  return {done, total: span[1] - span[0], complete};
 }
 
 /** A frame between the seconds that its cell already counts (the walk goes through it there). */

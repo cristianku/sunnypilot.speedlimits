@@ -20,12 +20,11 @@ import Inspector from './Inspector.vue';
 import {photoHeight} from './photo-size';
 import MobileBar from './MobileBar.vue';
 import {pickStartFrame, startAtWork} from './navigation';
-import {scrollTimelineToCurrent} from './scroll';
 import {loadServer, retryUnsaved} from './server';
+import Scrubber from './Scrubber.vue';
 import Stage from './Stage.vue';
 import StageBar from './StageBar.vue';
 import {initStore, report, restore, rowOf, state} from './store';
-import Timeline from './Timeline.vue';
 import type {Payload} from './types';
 import {useKeyboard} from './use-keyboard';
 
@@ -75,7 +74,6 @@ watchEffect(() => {
 const retryLater = (): void => void retryUnsaved(false);
 let timer: number | undefined;
 onMounted(() => {
-  void nextTick(scrollTimelineToCurrent);
   if (!report.apiBase) return;
   watchBusy();
   if (!isGuest()) {
@@ -110,7 +108,7 @@ onBeforeUnmount(() => {
         <p>Choose another route above, or run the pre-annotation again.</p>
       </template>
     </div>
-    <div id="workspace" class="workspace" :class="{'tl-open': state.timelineOpen}" :hidden="!hasFrames">
+    <div id="workspace" class="workspace" :hidden="!hasFrames">
       <template v-if="row && work">
         <div class="stage-col" :style="photoStyle">
           <CarMoment :row="row" :work="work"/>
@@ -118,7 +116,7 @@ onBeforeUnmount(() => {
           <StageBar :row="row"/>
           <CarSection :row="row" :work="work"/>
           <AiSection :row="row"/>
-          <Timeline/>
+          <Scrubber/>
         </div>
         <Inspector :row="row" :work="work"/>
       </template>

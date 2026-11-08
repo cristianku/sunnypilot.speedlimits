@@ -76,7 +76,7 @@ with sync_playwright() as p:
     assert 'Click box 1 first' in page.locator('#saveMsg').inner_text()
     assert page.locator('#boxList .box-row').count() == 1
 
-    # A doubt counter of the timeline in use is shown pressed under the photo; × goes back to To review.
+    # A doubt counter under the drive's bar in use is shown pressed under the photo; × goes back to To review.
     page.locator('#qUnknown').click()
     chip = page.locator('.filters .doubt-on')
     assert chip.inner_text().startswith('1 without a number') and chip.get_attribute('aria-pressed') == 'true'
@@ -85,7 +85,8 @@ with sync_playwright() as p:
     assert page.locator('.filters [data-filter="todo"]').get_attribute('aria-pressed') == 'true'
 
     # 0/2 has the same sign twice: the first Confirm asks, the second saves both boxes.
-    page.locator('#timeline button[data-key="0/2"]').click()
+    page.locator('#scrubber').evaluate("(el) => { el.value = '2'; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+    page.wait_for_function("() => document.querySelector('#scrubber').value === '2'")
     # The panel under the sign in one tap, and a second tap takes it back.
     hours = page.locator('#panels [data-panel="time"]')
     hours.click()

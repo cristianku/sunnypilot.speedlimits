@@ -15,16 +15,16 @@ __NNSLR_SHARED_CSS__
   --topbar-row: 52px;
   /* What is above the photo and the inspector: the site's top bar (measured by ReviewToolbar.vue). */
   --topbar-h: var(--sitebar-h, 57px);
-  /* Confirmed by an AI: the green of a confirmation, hatched. Same look in the timeline, legend and state tag. */
+  /* Confirmed by an AI: the green of a confirmation, hatched. Same look in the state tag. */
   --ai-hatch: repeating-linear-gradient(135deg, var(--ok) 0 2px, transparent 2px 4px), var(--ok-soft);
   /* The top band of a frame confirmed with doubts. */
   --doubt: var(--todo);
-  /* A sign the comma read (sign_reads): its bar in the timeline and its words on the photo, in both themes. */
+  /* A sign the comma read (sign_reads): its words on the photo, in both themes. */
   --read: #0ea5e9;
 }
 
-/* Layout: one compact bar on top; photo, its bar and the timeline card on the canvas; on a computer the inspector
-   is docked to the right edge at full height. Nothing above the photo or above the timeline changes height
+/* Layout: one compact bar on top; photo, its bar and the drive's bar on the canvas; on a computer the inspector
+   is docked to the right edge at full height. Nothing above the photo or above the drive's bar changes height
    after loading: messages live in the inspector. One column with a fixed bottom bar on phones. */
 /* Base, buttons, pills, icon buttons and the brand mark are shared.css's; below, what this page does otherwise. */
 body { overflow-x: hidden; }
@@ -84,7 +84,7 @@ input::placeholder { color: var(--placeholder); }
 .filters button[aria-pressed="true"], .segmented button[aria-pressed="true"] {
   opacity: 1; font-weight: 600; background: var(--seg-on); box-shadow: var(--seg-on-shadow);
 }
-/* A doubt counter of the timeline in use (ReviewFilters.vue): pressed, with × to remove it. */
+/* A doubt filter in use (ReviewFilters.vue): pressed, with × to remove it. */
 .filters .doubt-on { color: var(--tab-on-fg); }
 .filters .doubt-on .x { margin-left: 6px; font-size: 15px; line-height: 1; opacity: 0.7; }
 /* The drive's count under its name in the inspector (ReviewToolbar.vue): the count, the bar, who reviews. */
@@ -203,7 +203,7 @@ input::placeholder { color: var(--placeholder); }
 .car-moment span span { font-weight: 700; }
 .car-moment .ahead { font-weight: 400; color: var(--muted); }
 .car-moment.differ { box-shadow: inset 0 0 0 1.5px var(--bad); }
-/* The frame of a sign the comma read (sign_reads): said first, in the colour of its bar in the timeline. */
+/* The frame of a sign the comma read (sign_reads): said first, in its own colour. */
 .car-moment .read-here { font-weight: 700; color: var(--read); }
 .stage-hint { position: absolute; left: 12px; bottom: 14px; right: 12px; display: flex; justify-content: center; pointer-events: none; }
 .stage-hint span {
@@ -242,7 +242,7 @@ input::placeholder { color: var(--placeholder); }
 
 /* Pills of shared.css. */
 .pill::before { flex: none; }
-/* Frame state tag: a solid pill, readable at a glance; its square marker is the timeline cell of the same state.
+/* Frame state tag: a solid pill, readable at a glance; its square marker is the colour of the state.
    Fixed width on a computer, so the bar never shifts between frames. Text on a solid fill is the page colour. */
 .pill.state { flex: none; width: 162px; height: 30px; padding: 0 12px; gap: 8px; font-size: 13px; font-weight: 700; overflow: hidden; }
 .pill.state::before { width: 10px; height: 10px; border-radius: 2px; }
@@ -285,79 +285,35 @@ input::placeholder { color: var(--placeholder); }
 .switch input:focus-visible + .track { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* Chevron of disclosures, drawn with borders. */
-details summary::after, .tl-toggle::after {
+details summary::after {
   content: ""; flex: none; width: 7px; height: 7px; margin: 0 4px 0 12px;
   border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted); transform: rotate(-45deg); transition: transform 0.2s;
 }
-details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transform: rotate(45deg); }
+details[open] summary::after { transform: rotate(45deg); }
 
 /* Card headings: the small quiet label of the other pages. */
-.tl-heading, .section-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
+.section-head h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
 
-/* ---------- timeline card: title, legend, one row per segment, doubt counters ---------- */
-.tl-card {
-  margin-top: 16px; overflow: hidden; background: var(--card-grad), var(--surface);
+/* ---------- the drive as one bar under the photo (Scrubber.vue) ---------- */
+.sc-card {
+  margin-top: 16px; padding: 12px 16px; background: var(--card-grad), var(--surface);
   border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow);
 }
-.tl-heading { padding: 16px 20px 0; }
-/* Phone only: one button folds the legend, the timeline and the doubt counters away. */
-.tl-toggle { display: none; }
-.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 8px 20px 12px; font-size: 12px; color: var(--muted); }
-.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend i { flex: none; width: 10px; height: 10px; border-radius: 2px; }
-.legend .l-done { background: var(--ok); }
-.legend .l-ai { background: var(--ai-hatch); }
-.legend .l-unsure { background: linear-gradient(var(--doubt) 0 35%, var(--ok) 35%); }
-.legend .l-sus { background: var(--sus); }
-.legend .l-has { background: var(--has); }
-.legend .l-none { background: var(--none-cell); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.legend .l-dirty { background: var(--warn); }
-.legend .l-error { background: var(--bad); }
-.legend .l-part { background: linear-gradient(to top, var(--ok) 40%, var(--none-cell) 40%); box-shadow: inset 0 0 0 1px var(--line-strong); }
-/* The cells fill the width: one column per image of the longest segment (set by the script). */
-.timeline { display: flex; flex-direction: column; gap: 3px; padding: 2px 20px 16px; }
-.tl-seg { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 10px; }
-.tl-label { font-size: 11px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tl-ticks { position: relative; display: grid; grid-template-columns: repeat(var(--tl-cols, 60), minmax(0, 1fr)); gap: 2px; min-width: 0; }
-.tl-ticks button { min-width: 0; height: 12px; border: 0; padding: 0; border-radius: 2px; background: var(--none-cell); }
-/* A frame between the seconds (a sign the comma read, a frame of the video saved): a thin bar, taller
-   than the cells, --at cells from the start (the cell of the picture before it and how far into its second it is);
-   its fill is the frame's state like a cell's, the colour of a read when nothing is proposed. */
-.tl-ticks button.between { position: absolute; z-index: 1; top: -3px; width: 4px; height: 18px; border-radius: 2px;
-  left: calc(var(--at) * (100% + 2px) / var(--tl-cols, 60) - 2px); box-shadow: 0 0 0 1px var(--surface); }
-.tl-ticks button.read { background: var(--read); }
-/* The frame of the video on screen, not saved (video.ts): an empty bar, ringed as the current frame. */
-.tl-ticks button.video { background: var(--surface); }
-.tl-ticks button.has { background: var(--has); }
-.tl-ticks button.sus { background: var(--sus); }
-.tl-ticks button.dirty { background: var(--warn); }
-.tl-ticks button.error { background: var(--bad); }
-.tl-ticks button.done { background: var(--ok); }
-.tl-ticks button.done.unsure { background: linear-gradient(var(--doubt) 0 4px, var(--ok) 4px); }
-/* Confirmed by an AI (REST API or MCP): hatched, so the provenance stays visible. */
-.tl-ticks button.done.ai { background: var(--ai-hatch); }
-.tl-ticks button.done.ai.unsure { background: linear-gradient(var(--doubt) 0 4px, transparent 4px), var(--ai-hatch); }
-.tl-ticks button:hover { box-shadow: inset 0 0 0 1px var(--fg); }
-/* A second partly confirmed (seconds.ts): its confirmed frames, --fill of 1, fill the cell from the bottom. */
-.tl-ticks button.part { position: relative; }
-.tl-ticks button.part::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; border-radius: inherit;
-  height: max(2px, calc(var(--fill, 0) * 100%)); background: var(--ok); }
-/* Map and vision differ there in the car (car-moment.ts): a red dash under the tick. */
-.timeline.car-logs { gap: 6px; }
-.tl-ticks button.differ { position: relative; }
-.tl-ticks button.differ::after { content: ''; position: absolute; left: 0; right: 0; bottom: -4px; height: 2.5px; border-radius: 1px; background: var(--bad); }
-.legend .l-read { width: 4px; height: 14px; background: var(--read); }
-.legend .l-differ { height: 3px; margin-top: 7px; background: var(--bad); }
-.tl-ticks button.cur, .tl-ticks button.cur:hover { position: relative; z-index: 1; box-shadow: 0 0 0 1.5px var(--surface), 0 0 0 3px var(--fg); }
-.tl-ticks button.between, .tl-ticks button.between.cur { position: absolute; z-index: 2; }
-.quality { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 12px 20px; font-size: 13px; color: var(--muted); background: var(--surface-2); border-top: 1px solid var(--line); }
-.quality-label { margin-right: 4px; font-weight: 600; }
+.sc-row { display: flex; align-items: center; gap: 6px; }
+.sc-bar { flex: 1 1 auto; min-width: 0; height: 28px; margin: 0 6px; accent-color: var(--accent); cursor: pointer; }
+.sc-step {
+  flex: none; min-height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px;
+  background: var(--surface); color: var(--fg); font-size: 12.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.sc-step:hover { border-color: var(--hover-line); background: var(--surface-3); }
+.sc-time { margin: 4px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sc-time b { color: var(--fg); font-weight: 600; }
+.sc-doubts { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 8px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
 .qchip {
   border: 1px solid var(--line-strong); background: var(--surface); color: var(--fg); border-radius: 999px;
   padding: 3px 11px; min-height: 28px; font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
 .qchip:hover { border-color: var(--hover-line); background: var(--surface-3); }
-.qchip.zero { color: var(--muted); }
 .qchip.some { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .qchip[aria-pressed="true"] { color: var(--tab-on-fg); background: var(--accent-soft); border-color: transparent; box-shadow: inset 0 0 0 1px var(--tab-on-ring); }
 
@@ -602,7 +558,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 @media (min-width: 981px) {
   .page { padding: 0; }
   .stage-col { width: 100%; max-width: 1320px; justify-self: center; padding: 20px 28px 40px; }
-  /* On low laptops the photo leaves room for its bar and the start of the timeline. */
+  /* On low laptops the photo leaves room for its bar and the drive's bar. */
   #scene { max-height: min(72vh, calc(100vh - var(--topbar-h, 57px) - 200px)); }
   /* The inspector has the window's height and scrolls on its own: the confirm button never moves. */
   .panel {
@@ -617,22 +573,16 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
     background: var(--topbar-bg); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   }
   .panel .confirm-section.quiet .status-line { min-height: 0; }
-  /* The photo stays where it is: the column has the window's height and the timeline card scrolls on its own, in
-     the room left under the photo. */
+  /* The photo stays where it is: the column has the window's height. */
   .stage-col {
     position: sticky; top: var(--topbar-h, 57px); height: calc(100vh - var(--topbar-h, 57px));
     height: calc(100dvh - var(--topbar-h, 57px)); padding-bottom: 20px;
   }
-  .stage-col > :not(.tl-card) { flex-shrink: 0; }
-  .stage-col > .tl-card { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .stage-col > * { flex-shrink: 0; }
 }
 @media (min-width: 641px) {
   /* "+ Box" and "Cancel" take the same width: the bar never re-wraps while drawing. */
   #draw { min-width: 7.5em; }
-}
-@media (min-width: 981px) and (max-width: 1680px) {
-  /* Two even rows of four: no label left alone on a second line. */
-  .legend { display: grid; grid-template-columns: repeat(4, max-content); gap: 4px 18px; font-size: 11.5px; }
 }
 @media (min-width: 981px) {
   /* The bar in two rows, the same height on every frame: the frame, its filters and the helpers (Car networks, Ask AI)
@@ -675,8 +625,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   #scene { max-height: none; }
   .stage-bar { flex-wrap: wrap; }
   .stage-bar .data { order: 5; flex-basis: 100%; white-space: normal; }
-  /* Photo, its bar, then the inspector: the boxes to check come right under the photo. The timeline card
-     follows, folded under its title. */
+  /* Photo, its bar, the drive's bar, then the inspector: the boxes to check come right under the photo. */
   .workspace { display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
   .stage-col { display: contents; }
   .car-moment, .stage { order: 1; }
@@ -684,20 +633,9 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .stage-bar { order: 2; margin-top: 0; }
   .stage-extra { order: 2; margin-top: 0; }
   .panel { order: 3; }
-  .tl-card { order: 4; margin-top: 0; }
-  .tl-heading { display: none; }
-  .tl-toggle {
-    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 10px 16px;
-    border: 0; background: transparent; color: var(--fg); text-align: left;
-  }
-  .tl-toggle .tl-title { flex: none; font-size: 13px; font-weight: 600; letter-spacing: 0; color: var(--muted); }
-  .tl-toggle .tl-sub { flex: 1 1 auto; min-width: 0; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .workspace.tl-open .tl-toggle { border-bottom: 1px solid var(--line); }
-  .workspace:not(.tl-open) .legend, .workspace:not(.tl-open) .timeline, .workspace:not(.tl-open) .quality { display: none; }
-  .legend { padding: 10px 16px 8px; }
-  .timeline { padding: 2px 16px 14px; }
-  .quality { padding: 10px 16px; }
-  .tl-ticks button { height: 16px; }
+  .sc-card { order: 2; margin-top: 0; padding: 10px 12px; }
+  .sc-step { min-height: 40px; padding: 0 9px; }
+  .qchip { min-height: 36px; padding: 4px 12px; }
   .signs { grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; }
   .signs.us { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px 6px; }
   /* The confirm button is in the bottom bar: the section under the inspector shows only messages and links. */
@@ -726,7 +664,6 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .chip, .chips.minor .chip { min-height: 44px; padding: 5px 14px; }
   .segmented button, .filters button { min-height: 40px; }
   .btn.small, .stage-tools .btn, .stage-helpers .btn { min-height: 44px; }
-  .qchip { min-height: 36px; padding: 4px 12px; }
   .box-main { min-height: 54px; }
   .box-del { width: 44px; height: 44px; margin-right: 2px; }
   details summary { min-height: 48px; }
@@ -771,7 +708,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .car-moment { min-height: 46px; gap: 1px 12px; font-size: 12.5px; }
   .panel { border-radius: 16px; }
   .panel section { padding: 14px 16px; }
-  .tl-card { border-radius: 16px; }
+  .sc-card { border-radius: 16px; }
   .status-line { min-height: 0; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
   .signs { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 8px; }
@@ -783,13 +720,13 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .sign.us .us-num { font-size: 21px; }
   .empty-note { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; }
   .empty-note svg { width: 28px; height: 28px; }
-  .tl-seg { grid-template-columns: 30px minmax(0, 1fr); gap: 6px; }
-  .tl-label { font-size: 10.5px; }
-  /* A whole segment fits the width: about 4px cells, 1px apart. */
-  .tl-ticks { gap: 1px; }
-  .tl-ticks button { height: 18px; border-radius: 1px; }
-  .tl-ticks button.cur, .tl-ticks button.cur:hover { box-shadow: 0 0 0 1px var(--surface), 0 0 0 2.5px var(--fg); }
   .mobilebar .keycap { display: none; }
+}
+@media (max-width: 560px) {
+  /* A phone: the bar on its own line, the whole width; the four buttons under it. */
+  .sc-row { flex-wrap: wrap; justify-content: space-between; row-gap: 8px; }
+  .sc-bar { order: -1; flex-basis: 100%; margin: 0; height: 32px; }
+  .sc-step { flex: 1 1 0; }
 }
 @media (max-height: 500px) and (max-width: 980px) {
   #scene { max-height: calc(100vh - 96px); }
@@ -802,15 +739,15 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   * { transition: none !important; animation: none !important; }
 }
 @media (min-width: 981px) {
-  /* The photo's height: the one chosen with its grip (PhotoGrip.vue, --photo-max), or room for its bar and a few
-     rows of the timeline on a low window too; never more than the window with 180px for the bar (after the rules
+  /* The photo's height: the one chosen with its grip (PhotoGrip.vue, --photo-max), or room for its bar and the
+     drive's bar on a low window too; never more than the window with 180px for the bar (after the rules
      above). Its frame hugs it, centred: no empty bands beside a lower photo. */
   .stage-col {
     --photo-h: min(var(--photo-max, min(72vh, calc(100vh - var(--topbar-h, 57px) - 330px))), calc(100vh - var(--topbar-h, 57px) - 180px));
   }
   #scene { max-height: var(--photo-h); }
   .stage-col > .stage { width: 100%; max-width: calc(var(--photo-h) * var(--photo-aspect, 1.6) + 2px); align-self: center; }
-  /* The grip, in the gap above the bar: dragged up the photo gets lower and the timeline gets the room. */
+  /* The grip, in the gap above the bar: dragged up the photo gets lower. */
   .photo-grip {
     display: flex; justify-content: center; align-items: center; flex-shrink: 0; height: 14px; margin-top: 1px;
     cursor: row-resize; touch-action: none; user-select: none; -webkit-user-select: none; border-radius: 7px;

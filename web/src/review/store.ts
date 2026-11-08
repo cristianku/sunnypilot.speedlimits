@@ -85,8 +85,6 @@ export interface ReviewState {
   filter: Filter;
   filterNote: string;
   showHints: boolean;
-  /** The timeline card unfolded on a phone. */
-  timelineOpen: boolean;
   /** The reviewer field of the top bar, as typed. */
   reviewer: string;
   /** A save needed the reviewer's name: the field is marked until something is typed. */
@@ -131,7 +129,6 @@ export const state: ReviewState = reactive({
   filter: 'todo',
   filterNote: '',
   showHints: true,
-  timelineOpen: false,
   reviewer: '',
   reviewerNeeded: false,
   reviewerFocus: 0,
@@ -348,6 +345,5 @@ export function restore(): void {
   state.reviewer = readLocal('nnslr-reviewer', '') || '';
   const savedFilter = readLocal('nnslr-review-filter', 'todo');
   if (isFilter(savedFilter)) state.filter = savedFilter;
-  state.timelineOpen = readLocal('nnslr-timeline-open', '0') === '1';
   state.showHints = readLocal('nnslr-show-hints', '1') !== '0';
 }

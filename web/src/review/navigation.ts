@@ -6,7 +6,7 @@ import {
   aiConfirmed, confirmedFilter, currentRow, frameStatus, isBetweenFrame, isQualityFilter, matchesFilter, segmentSecond,
   visibleRows, workOf,
 } from './frames';
-import {revealStage, scrollTimelineToCurrent} from './scroll';
+import {revealStage} from './scroll';
 import {anchorIndex, indexOf, report, rowOf, state} from './store';
 import type {Filter} from './types';
 
@@ -66,11 +66,8 @@ export function openFrame(key: string, reveal = true): void {
   state.selectedByUser = false;
   state.typing = '';
   writeLocal(report.lastKeyStorage, key);
-  // Once the page shows the frame: its tick in sight, and on a phone the photo.
-  void nextTick(() => {
-    scrollTimelineToCurrent();
-    if (reveal) revealStage();
-  });
+  // Once the page shows the frame: on a phone the photo in sight.
+  if (reveal) void nextTick(revealStage);
 }
 
 // The frame to show after a confirmation: the next one still to do under the current filter.

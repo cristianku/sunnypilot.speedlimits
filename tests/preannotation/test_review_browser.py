@@ -45,8 +45,9 @@ try:
         assert page.locator('#familiesMore [data-family="road_marking_candidate"]').get_attribute('aria-pressed')=='true'
         page.locator('#value').fill('50');page.locator('#value').dispatch_event('change')
         page.locator('#confirm').click();page.reload()
-        # The confirmation moved on to the next frame: open 0/0 again from the timeline.
-        page.locator('#timeline button[data-key="0/0"]').click()
+        # The confirmation moved on to the next frame: back to 0/0 with the drive's bar.
+        page.locator('#scrubber').evaluate("(el) => { el.value = '0'; el.dispatchEvent(new Event('input', {bubbles: true})); }")
+        page.wait_for_function("document.querySelector('#confirm').innerText.includes('Confirmed')")
         assert 'Confirmed' in page.locator('#confirm').inner_text()
         page.locator('#boxList .box-main').click()
         assert page.locator('#value').input_value()=='50'

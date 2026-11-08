@@ -534,7 +534,7 @@ def test_review_page_shows_ai_reviews_as_final(api):
     # The page is a Vue app: its markup and logic are in the built script, inline in the page.
     script = asset('js/review.js')
     assert script in page
-    assert 'data-filter' in script and 'tlToggle' in script and 'frameReviewerKind' in script and ' (AI' in script
+    assert 'data-filter' in script and 'scrubber' in script and 'frameReviewerKind' in script and ' (AI' in script
     assert 'Approva' not in page and 'approv' not in page.lower()
     reviews = json_of(server.request('GET', f'/api/route/{ROUTE}/reviews')[2])['reviews']
     assert reviews[0]['reviewer_kind'] == 'ai' and reviews[0]['channel'] == 'rest'

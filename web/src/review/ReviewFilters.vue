@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Which frames to show (To review, Suspicious, With proposals, All, AI when an AI confirmed some, and AI trial when
 // the route's last "Try without saving" left frames to review), next to the frame navigation under the photo; a
-// doubt counter of the timeline card in use is shown here too.
+// doubt filter in use is shown here too.
 import {computed} from 'vue';
 import {DOUBT_LABELS, doubtCounts, routeCounts} from './current';
 import {isQualityFilter, matchesFilter} from './frames';
@@ -22,7 +22,7 @@ const FILTERS: readonly FilterButton[] = [
 ];
 const counts = routeCounts;
 const trialCount = computed(() => report.rows.filter((row) => matchesFilter(row, 'trial')).length);
-// The doubt filter in use, if any ("26 without a number"): its counter is in the timeline card.
+// The doubt filter in use, if any ("26 without a number").
 const doubt = computed(() => (isQualityFilter(state.filter) ? state.filter : null));
 const doubtText = computed(() => (doubt.value === null ? ''
   : doubtCounts.value[doubt.value] + ' ' + DOUBT_LABELS[doubt.value]));
@@ -41,7 +41,7 @@ const doubtText = computed(() => (doubt.value === null ? ''
     <button type="button" data-filter="trial" :aria-pressed="state.filter === 'trial'"
             title="Frames the AI tried without saving, still to review"
             :hidden="trialCount === 0 && state.filter !== 'trial'" @click="pickFilter('trial')">AI trial · {{ trialCount }}</button>
-    <!-- A doubt counter of the timeline card in use (folded away on a phone): shown pressed here too, × removes it. -->
+    <!-- A doubt filter in use (its counter is under the drive's bar): shown pressed here too, × removes it. -->
     <button v-if="doubt !== null" type="button" class="doubt-on" :data-filter="doubt" aria-pressed="true"
             :aria-label="doubtText + ': remove this filter'" title="Remove this filter"
             @click="pickFilter(doubt)">{{ doubtText }}<span class="x" aria-hidden="true">×</span></button>

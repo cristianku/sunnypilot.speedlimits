@@ -44,7 +44,7 @@ export const DOUBT_LABELS: Record<QualityFilter, string> = {
   unknown: 'without a number', unreadable: 'with unreadable signs', road: 'road not set',
 };
 
-/** The confirmed frames that still carry each doubt (the counters of the timeline card, each one a filter). */
+/** The confirmed frames that still carry each doubt (the counters under the drive's bar, each one a filter). */
 export const doubtCounts = computed<Record<QualityFilter, number>>(() => {
   const counts = {unknown: 0, unreadable: 0, road: 0};
   for (const item of report.rows) {
