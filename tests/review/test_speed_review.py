@@ -470,6 +470,13 @@ def test_a_person_adds_a_kind_of_road_after_the_others(store):
     assert (refused.value.status, refused.value.reason) == (400, 'kind_exists')
     assert store.add_road_kind('Strada-bianca', 'a') == 'strada_bianca_2'
     assert store.add_road_kind('Über', 'a') == 'ber'
+    # The roadworks' names and those a page or a guest's copy reads otherwise are never a kind: a number is added.
+    for label in ('Roadworks', 'works'):
+        with pytest.raises(SpeedReviewError) as refused:
+            store.add_road_kind(label, 'a')
+        assert refused.value.reason == 'kind_exists'
+    assert [store.add_road_kind(label, 'a') for label in ('Works!', 'Constructor', 'Title', 'GPS', 'Road name')] == \
+        ['works_2', 'constructor_2', 'title_2', 'gps_2', 'road_name_2']
     for label in ('', '   ', 'x' * (speed_review.MAX_KIND_LABEL + 1)):
         with pytest.raises(SpeedReviewError) as refused:
             store.add_road_kind(label, 'a')
@@ -478,6 +485,11 @@ def test_a_person_adds_a_kind_of_road_after_the_others(store):
         speed_review.save_road_kind(store, {'label': 7}, 'a')
     store.tap_road(ROUTE, 'strada_bianca', 'start', at(10), END, 0, 'a')
     assert road_marks(store) == [('strada_bianca', 10, None)]
+
+
+def test_no_kind_of_road_is_a_field_a_guest_s_copy_drops():
+    from nnslr_tools.review_access import PLACE_FIELDS
+    assert PLACE_FIELDS <= speed_review.RESERVED_KINDS
 
 
 def test_a_kind_of_road_is_never_deleted(store):

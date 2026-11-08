@@ -1670,6 +1670,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the brain "
                                                           "can learn from (its logs read to the end and its frames)")
     p_brain.add_argument("--json", action="store_true", help="the same as JSON")
+    p_brain.add_argument("--no-road-types", action="store_true",
+                         help="as a training with --no-road-types: the seconds without a road type answer too")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
     p_regression_plan = sub.add_parser("regression-plan", help="what a run of Models › Regression still has to compute: a "
@@ -1696,6 +1698,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
     p_brain_net.add_argument("--no-road", action="store_true",
                              help="the comparison: the same training without the kinds of road of Speed review")
+    p_brain_net.add_argument("--no-road-types", action="store_true",
+                             help="the comparison: without the road type of the map and Speed review, and with the "
+                                  "seconds that have none")
     # The driver's inputs are out by default since 8 Nov 2026 (his speed is the answer); --no-driver, the opt-out of
     # before, still says the same.
     p_brain_net.add_argument("--driver", dest="driver", action="store_true", default=False,
@@ -2611,7 +2616,8 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
     drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route,
-                                   rate=brain_targets.RATE_HZ, need_pictures=False, inputs=False)
+                                   rate=brain_targets.RATE_HZ, need_pictures=False, inputs=False,
+                                   types=not args.no_road_types)
     found = brain_targets.summary(drives)
     print(json.dumps(found, indent=2) if args.json else brain_targets.summary_text(found))
     return 0
@@ -2649,7 +2655,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, driver=args.driver, road=not args.no_road,
-                                     device=args.device,
+                                     types=not args.no_road_types, device=args.device,
                                      dry_run=args.dry_run,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}

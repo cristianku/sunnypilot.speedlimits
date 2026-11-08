@@ -227,6 +227,13 @@ const brainRoads = computed(() => {
     return count && (count.in || count.out) ? [{kind, label: labels?.road_labels?.[kind] ?? kind, in: count.in, out: count.out}] : [];
   });
 });
+/** What Road types leaves out (brain_targets' types): the seconds with his speed and no road type, and the drives with none
+ * at all (nnslr road-types never ran on them, or the map knows none of their roads). */
+const brainUntyped = computed(() => {
+  const drives = brainLabels.value?.types ? brainLabels.value.drives ?? [] : [];
+  return {seconds: drives.reduce((total, drive) => total + (drive.out.no_road_type ?? 0), 0),
+          drives: drives.filter((drive) => !drive.typed_s).length};
+});
 const numbers = computed(() => {
   const status = props.status;
   if (status === null) return null;
@@ -257,7 +264,7 @@ const numbers = computed(() => {
       <strong>{{ numbers?.frames === null || !numbers ? '–' : thousands(numbers.frames) }}</strong> frames of
       {{ numbers ? plural(numbers.inDataset, 'drive') : '–' }}</span>
     <span v-if="importing" class="data-new">Importing your reviews…</span>
-    <span v-else-if="numbers?.fresh" class="data-new"><strong>{{ plural(numbers.fresh, 'review') }}</strong> not imported</span>
+    <span v-else-if="numbers?.fresh" class="data-new"><strong>{{ plural(numbers.fresh, 'sign review') }}</strong> not imported</span>
     <span v-else-if="numbers" class="data-new muted">Dataset is up to date</span>
     <span v-if="numbers && numbers.reviewed < numbers.needed" class="data-new warn">Training needs {{ numbers.needed }} reviewed
       drives (now {{ numbers.reviewed }})</span></span>
@@ -360,6 +367,9 @@ const numbers = computed(() => {
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. Sign review answers the next limit on
           <strong>{{ thousands(brainLabels.partitions.train.next) }}</strong> of the seconds to learn from.<template
           v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
+          v-if="brainLabels.types"> With Road types on, only the seconds with a road type (the map's, from Read the map in Data › Prepare) count:
+          <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
+          v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template
           v-if="brainRoads.length"> The kinds of road of Speed review, seconds to learn from on each and checked off it:<template
           v-for="(road, index) in brainRoads" :key="road.kind">{{ index ? ';' : '' }} {{ road.label }}
           <strong>{{ thousands(road.in) }}</strong> on, <strong>{{ thousands(road.out) }}</strong> off</template>.</template><template

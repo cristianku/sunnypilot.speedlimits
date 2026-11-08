@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// Data › Training dataset: what the networks learn from. First the reviews not in the dataset yet, with Import reviews
+// Data › Training dataset: what the networks learn from. First the Sign review frames not in the dataset yet, with Import
+// sign reviews (Speed review is not imported: the brain reads it as it is)
 // (helpers/3_train.sh --dataset-only, the panel action "dataset"), or its import running; then what the dataset holds
 // (DatasetSection.vue). Importing is always a click: opening this page or another starts nothing.
 import {computed} from 'vue';
@@ -28,18 +29,20 @@ const short = computed(() => props.status !== null && props.status.reviewed_rout
   <SectionHead tab="dataset"/>
 
   <section class="card import-card" id="import" aria-labelledby="import-title">
-    <h2 id="import-title" class="sr-only">Import reviews</h2>
+    <h2 id="import-title" class="sr-only">Import sign reviews</h2>
     <JobProgress v-if="bigJob" :job="bigJob" @details="emit('details', $event)" @stop="emit('stop', $event)"/>
     <div v-else class="import-row">
       <span class="import-icon" :class="{fresh: fresh.reviews > 0}" aria-hidden="true">{{ fresh.reviews > 0 ? '↓' : '✓' }}</span>
       <div class="import-what">
-        <strong>{{ status === null ? 'Loading…' : fresh.reviews ? plural(fresh.reviews, 'review') + ' to import'
+        <strong>{{ status === null ? 'Loading…' : fresh.reviews ? plural(fresh.reviews, 'sign review') + ' to import'
           : 'Dataset is up to date' }}</strong>
-        <span v-if="status && fresh.reviews">new or changed on {{ plural(fresh.drives, 'drive') }} · a few minutes</span>
-        <span v-else-if="status">Every confirmed frame is in.</span>
+        <span v-if="status && fresh.reviews">Sign review frames new or changed on {{ plural(fresh.drives, 'drive') }} · a few
+          minutes</span>
+        <span v-else-if="status">Every confirmed Sign review frame is in.</span>
+        <span v-if="status">Speed review needs no import: the brain reads it as it is.</span>
       </div>
       <button v-if="fresh.reviews" type="button" class="btn primary" id="import-reviews" :disabled="!state?.allowed"
-              @click="state && emit('run', 'dataset', state)">Import reviews</button>
+              @click="state && emit('run', 'dataset', state)">Import sign reviews</button>
     </div>
     <p v-if="!bigJob && fresh.reviews && state && !state.allowed" class="import-why">{{ state.reason }}</p>
     <p v-if="job && !bigJob" class="import-last">Last import {{ startedWhen(job) }} ·

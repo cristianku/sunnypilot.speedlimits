@@ -16,7 +16,7 @@ import re
 # Steps of the import and of the training, with their weight in the whole (they add up to 100): the
 # detector and the reader are most of a training.
 TRAIN_STEPS = (
-    ('import', 'Import the reviews', 2),
+    ('import', 'Import the sign reviews', 2),
     ('split', 'Check the dataset and fix the split', 2),
     ('gpu_env', 'Set up the GPU environment', 6),
     ('checks', 'Checks and GPU smoke test', 3),

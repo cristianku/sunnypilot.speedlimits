@@ -551,6 +551,62 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     assert 'signs read by ANOTHER reader' in targets.summary_text(found)
 
 
+def road_type_lines(root, route, types, corrections=()):
+    """The map's road type of each second of segment 0 (None: the map does not know) and a person's corrections over it:
+    [(from second, to second, road type or None)]."""
+    folder = root / 'derived' / 'road_types'
+    folder.mkdir(parents=True, exist_ok=True)
+    lines = [{'frame_key': f'0/{second}', 'segment_index': 0, 'output_index': second, 'road_type': kind}
+             for second, kind in enumerate(types)]
+    (folder / f'{route}.jsonl').write_text('\n'.join(json.dumps(line) for line in lines) + '\n', encoding='utf-8')
+    if corrections:
+        folder = root / 'annotations' / 'road_types'
+        folder.mkdir(parents=True, exist_ok=True)
+        rows = [{'from': f'0/{start}', 'to': f'0/{end}', 'road_type': kind, 'reviewer': 'a', 'at': 'x'}
+                for start, end, kind in corrections]
+        (folder / f'{route}.jsonl').write_text('\n'.join(json.dumps(row) for row in rows) + '\n', encoding='utf-8')
+
+
+def test_with_the_road_types_only_the_seconds_with_one_answer_and_a_person_s_type_wins(tmp_path):
+    from nnslr_tools.road_types import ROAD_TYPES
+    targets = _targets()
+    write_drive(tmp_path, ROUTE, [(0, i) for i in range(40)])
+    label_db(tmp_path, works=[(ROUTE, 5 * NS, 15 * NS)], checked=[(ROUTE, 39 * NS)])
+    road_type_lines(tmp_path, ROUTE, ['town'] * 20 + [None] * 10 + ['motorway'] * 10,
+                    corrections=[(25, 27, 'rural'), (35, 36, None)])
+    merged = {'frames': encoded(40), 'series': {'v_ego': [[3 * NS, 77.0]]}, 'meta': {}, 'span': [0, 40 * NS]}
+    split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
+    labels = targets.read_labels(tmp_path)[ROUTE]
+    drive = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True)
+    assert drive['types'] is True
+    assert drive['road_type'][5] == ROAD_TYPES.index('town') and not drive['typed_by_person'][5]
+    assert drive['road_type'][26] == ROAD_TYPES.index('rural') and drive['typed_by_person'][26]
+    assert drive['road_type'][32] == ROAD_TYPES.index('motorway') and drive['type_weight'][32] == 1
+    # The map does not know, or a person cannot tell: the second answers nothing, the speed included.
+    for second in (21, 35):
+        assert drive['road_type'][second] == -1 and drive['type_weight'][second] == 0
+        assert drive['speed_out'][second] == targets.NO_TYPE and drive['speed'][second] == -1
+        assert drive['speed_weight'][second] == 0 and drive['works_weight'][second] == 0
+    assert drive['speed_out'][1] == targets.NO_SPEED and drive['speed_out'][10] == 0 and drive['works_weight'][10] == 1
+    found = targets.summary([drive])
+    assert found['types'] is True and found['road_types'] == list(ROAD_TYPES)
+    assert found['partitions']['buffer']['types']['town'] == 20 and found['partitions']['buffer']['types']['rural'] == 3
+    assert found['drives'][0]['typed_s'] == 40 - 10 + 3 - 2 and found['drives'][0]['typed_by_person_s'] == 3
+    assert found['drives'][0]['out']['no_road_type'] == 7 + 2
+    assert 'road types in buffer: town 20' in targets.summary_text(found)
+    # Without the road types they are read all the same, and every second keeps its speed.
+    plain = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False)
+    assert plain['types'] is False and plain['speed_out'][21] == 0 and plain['speed'][21] == drive['speed'][19]
+    assert (plain['road_type'] == drive['road_type']).all()
+
+
+def test_a_drive_the_map_was_never_asked_about_has_no_road_type(tmp_path):
+    targets = _targets()
+    write_drive(tmp_path, ROUTE, [(0, i) for i in range(10)])
+    found, person = targets.type_answers(tmp_path, ROUTE, [{'segment': 0, 'index': i} for i in range(10)])
+    assert (found == -1).all() and not person.any()
+
+
 def test_reading_the_labels_changes_nothing(tmp_path):
     from nnslr_tools.speed_review import db_path
     label_db(tmp_path, works=[(ROUTE, 1, 2)])

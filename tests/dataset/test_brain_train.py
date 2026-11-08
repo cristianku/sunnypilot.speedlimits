@@ -268,6 +268,51 @@ def test_each_kind_of_road_is_measured_on_its_own_answers_and_the_speed_inside_i
     assert found['road']['narrow']['precision'] is None and found['in_road']['narrow']['frames'] == 2
 
 
+def typed(drive, types, by_person=None):
+    """The drive with a road type per frame (a ROAD_TYPES name, None: none), as drive_targets(types=True) leaves it."""
+    import numpy
+    from nnslr_tools.brain_targets import NO_TYPE
+    from nnslr_tools.road_types import ROAD_TYPES
+    drive['road_type'] = numpy.array([-1 if kind is None else ROAD_TYPES.index(kind) for kind in types], dtype=numpy.int64)
+    drive['type_weight'] = (drive['road_type'] >= 0).astype(numpy.float32)
+    drive['typed_by_person'] = numpy.zeros(len(types), dtype=bool) if by_person is None else numpy.array(by_person)
+    drive['speed_out'] = numpy.where(drive['road_type'] >= 0, 0, NO_TYPE)
+    drive['speed_weight'] = (drive['speed_out'] == 0).astype(numpy.float32)
+    drive['types'] = True
+    return drive
+
+
+def test_the_road_type_is_measured_on_the_frames_with_one_and_the_speed_on_each_type():
+    import numpy
+    from nnslr_tools.brain_train import measure
+    from nnslr_tools.road_types import ROAD_TYPES
+    drive = typed(fake_drive(['test'] * 4 + ['train']), ['town', 'town', 'motorway', None, 'town'])
+    answer = said([100, 90, 100, 100, 100])
+    answer['types'] = numpy.eye(len(ROAD_TYPES), dtype=numpy.float32)[[ROAD_TYPES.index(kind) for kind in
+                                                                         ('town', 'rural', 'motorway', 'town', 'town')]]
+    found = measure([drive], [answer], 'test')
+    assert found['types']['frames'] == 3 and found['types']['right'] == pytest.approx(2 / 3)
+    assert found['types']['per_type']['town'] == {'frames': 2, 'right': .5}
+    assert found['types']['per_type']['motorway'] == {'frames': 1, 'right': 1.0}
+    assert set(found['in_type']) == {'town', 'motorway'} and found['in_type']['town']['frames'] == 2
+    # A network without the type head: no measure of the type, the speed on each type still.
+    found = measure([drive], [said([100] * 5)], 'test')
+    assert found['types'] is None and found['in_type']['motorway']['frames'] == 1
+
+
+def test_the_log_says_the_seconds_with_a_road_type_and_the_drives_with_none():
+    from nnslr_tools.brain_train import _types_in_train
+    lines = []
+    one = typed(fake_drive(['train'] * 4 + ['test']), ['town', None, 'rural', 'rural', 'town'])
+    bare = typed(fake_drive(['train'] * 2, route='00000002--abcdef0123'), [None, None])
+    _types_in_train([one, bare, fake_drive(['train'])], lines.append)
+    assert lines[0] == 'Road types in train: 3 seconds with one; 3 seconds with a speed and no road type, left out.'
+    assert '00000002--abcdef0123' in lines[1] and 'Read the map in Data › Prepare' in lines[1]
+    lines.clear()
+    _types_in_train([fake_drive(['train'])], lines.append)
+    assert lines == []
+
+
 def test_a_site_of_another_partition_is_not_here():
     from nnslr_tools.brain_train import measure
     drive = fake_drive(['train'] * 10, marks=[{'start_ns': 2 * NS, 'end_ns': 6 * NS}])
@@ -420,6 +465,28 @@ def test_a_kind_of_road_alone_is_a_step_of_its_head_and_the_prediction_says_each
     # A network without the head: no road said.
     assert predict(tiny(torch), drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3,
                    device=torch.device('cpu'))['road'] is None
+
+
+def test_a_road_type_alone_is_a_step_of_its_head_and_the_prediction_says_the_chance_of_each():
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import predict
+    from nnslr_tools.road_type_net import FrameStore
+    from nnslr_tools.road_types import ROAD_TYPES
+    drive = typed(fake_drive(['train'] * T), ['town'] * 4 + ['motorway'] * 3 + [None])
+    drive['speed_weight'][:], drive['works_weight'][:] = 0, 0
+    model = tiny(torch, road_types=len(ROAD_TYPES))
+    before = {name: value.clone() for name, value in model.named_parameters()}
+    array = pictures(drive)
+    assert one_epoch(torch, model, drive, array) > 0
+    assert not torch.equal(before['type_head.weight'], model.type_head.weight)
+    said = predict(model, drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3, device=torch.device('cpu'))
+    assert said['types'].shape == (T, len(ROAD_TYPES)) and numpy_sum_is_one(said['types'])
+    assert predict(tiny(torch), drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3,
+                   device=torch.device('cpu'))['types'] is None
+
+
+def numpy_sum_is_one(chances):
+    return bool((abs(chances.sum(axis=-1) - 1) < 1e-4).all())
 
 
 def test_one_drive_has_one_look_in_all_its_pieces():

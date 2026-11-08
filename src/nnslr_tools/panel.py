@@ -89,6 +89,7 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
+BRAIN_TYPES = {'on': '1', 'off': '0'}
 BRAIN_DRIVER = {'off': '0', 'on': '1'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
@@ -263,6 +264,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('no roadworks')
     if '--no-road' in flags:
         chips.append('no kinds of road')
+    if '--no-road-types' in flags:
+        chips.append('no road types')
     if '--driver' in flags:
         chips.append('driver’s inputs')
     elif '--no-driver' in flags:
@@ -341,7 +344,7 @@ ACTIONS = {
     # The Mapillary photos cut into windows for "Train the cutter": the CPU for a while, the share read once; the
     # windows already cut are kept, windows.jsonl is replaced whole at the end.
     'mapillary_windows': {'label': 'Cut the Mapillary windows', 'group': 'mapillary', 'command': [WINDOWS_SCRIPT]},
-    'dataset': {'label': 'Import reviews', 'group': 'train',
+    'dataset': {'label': 'Import sign reviews', 'group': 'train',
                 'command': ['helpers/3_train.sh', '--dataset-only']},
     # The whole pipeline: import, split, the detector and the reader, evaluation, export, bundle.
     'train': {'label': 'Whole pipeline', 'group': 'train', 'command': ['helpers/3_train.sh']},
@@ -1106,7 +1109,7 @@ class Panel:
             # As the training will have them, once it has read again what it reads first.
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
-                                                                need_pictures=False, inputs=False))
+                                                                need_pictures=False, inputs=False, types=True))
             labels = brain_targets.road_labels(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
@@ -1624,17 +1627,18 @@ class Panel:
         return self.regression()
 
     def _brain_choices(self, options: dict) -> dict:
-        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'driver', 'pool'}),
-        the usual ones when not given: the roadworks and the kinds of road on, the driver's inputs off, the picture as a
-        grid."""
-        works, road = options.get('works', 'on'), options.get('road', 'on')
+        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'driver',
+        'pool'}), the usual ones when not given: the roadworks, the kinds of road and the road types on, the driver's inputs
+        off, the picture as a grid."""
+        works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
         driver, pool = options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
-        if not all(isinstance(value, str) for value in (works, road, driver, pool)) or works not in BRAIN_WORKS \
-                or road not in BRAIN_ROAD or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
-            raise PanelError(400, 'bad_option',
-                             'Roadworks, the kinds of road and the driver’s inputs are on or off, the picture mean or grid.')
+        if not all(isinstance(value, str) for value in (works, road, types, driver, pool)) or works not in BRAIN_WORKS \
+                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
+            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types and the driver’s inputs are '
+                                                'on or off, the picture mean or grid.')
         return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
-                'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver], 'NNSLR_BRAIN_POOL': pool}
+                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver],
+                'NNSLR_BRAIN_POOL': pool}
 
     def _network_start(self, action: str, start: object) -> dict:
         """The environment of where the cutter's or the applicability's training starts (one of NETWORK_STARTS):

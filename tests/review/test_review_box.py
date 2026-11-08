@@ -2,6 +2,7 @@
 on this disk, the copies with the real rsync; the drive, the people and their work are made up."""
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
 import math
@@ -377,11 +378,50 @@ def test_the_kinds_of_road_go_to_the_box_and_its_marks_come_back_and_a_kind_unkn
     package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
     package['speed']['road'].append({'route': ROUTE, 'kind': 'invented', 'start_ns': 1, 'end_ns': 2, 'reviewer': GUEST,
                                      'revision': 9})
+    package['speed']['history'].append({'route': ROUTE, 'revision': 9, 'action': 'road_start', 'start_ns': 1, 'end_ns': 2,
+                                        'kph': None, 'state': None, 'known_ns': None, 'note': 'invented',
+                                        'reviewer': GUEST, 'at': '2026-11-08T12:00:00Z'})
     package['speed']['kinds'].append({'kind': 'invented', 'label': 'Invented', 'position': 9})
     (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
     state = sync(pair.root, log=lambda _: None)
     assert [row['kind'] for row in here.road(ROUTE)] == [kind] and state['drives'][ROUTE]['saved']['refused'] == 1
     assert 'invented' not in {row['kind'] for row in here.road_kinds()}
+
+
+def test_a_box_that_took_the_drive_before_the_kinds_of_road_keeps_those_of_this_server(pair):
+    """A box updated after the drive came never held its kinds of road: its empty list does not wipe them here, a tap
+    of a person there does."""
+    here = speed_review.SpeedReviewStore(pair.root)
+    here.tap_road(ROUTE, 'narrow', 'start', 2, 10, 0, 'cristianku')
+    pair.give('speed')
+    pair.round()
+    with contextlib.closing(review_box._open(speed_review.db_path(pair.data))) as connection, connection:
+        connection.execute('DELETE FROM speed_road')
+    box = speed_review.SpeedReviewStore(pair.data)
+    revision = box.tap_works(ROUTE, 'start', 5, 10, here.revision(ROUTE), GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    sync(pair.root, log=lambda _: None)
+    assert [row['start_ns'] for row in here.works(ROUTE)] == [5]
+    assert [(row['kind'], row['start_ns']) for row in here.road(ROUTE)] == [('narrow', 2)]
+    pair.round()
+    box.tap_road(ROUTE, 'country', 'start', 7, 10, revision, GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    sync(pair.root, log=lambda _: None)
+    assert [(row['kind'], row['start_ns']) for row in here.road(ROUTE)] == [('country', 7)]
+
+
+def test_a_kind_of_road_added_here_after_the_drive_went_reaches_the_box(pair):
+    pair.give('speed')
+    pair.round()
+    kind = speed_review.SpeedReviewStore(pair.root).add_road_kind('Cobbles', 'cristianku')
+    pair.round()
+    box = speed_review.SpeedReviewStore(pair.data)
+    assert kind in {row['kind'] for row in box.road_kinds()}
+    box.tap_road(ROUTE, kind, 'start', 3, 10, 0, GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    state = sync(pair.root, log=lambda _: None)
+    assert [row['kind'] for row in speed_review.SpeedReviewStore(pair.root).road(ROUTE)] == [kind]
+    assert state['drives'][ROUTE]['saved']['refused'] == 0
 
 
 def test_review_completed_takes_the_results_and_the_work_back(pair):

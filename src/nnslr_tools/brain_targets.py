@@ -15,8 +15,7 @@ MADS or controlsd on anyway (speed_review.engaged_series). The sign classifier l
 labelled by being driven: one without a block or a mark is a drive like the others.
 
 A drive here is its frames in drive order, each on the comma's clock by the encode index (drive_logs.frame_time): labels
-and frames meet on logMonoTime, never on a count of seconds. The list of frames needs no road types: the road type is only
-data now, and no field of the map comes in here. Two rates (dataset's rate):
+and frames meet on logMonoTime, never on a count of seconds. Two rates (dataset's rate):
 
 - 1 Hz, the brains before 7 Nov 2026: the frames of derived/frames, the road-type network's pictures (PIL);
 - RATE_HZ (4 a second): every reading of speedvisiond, as the brain steps on the car. The frames of a second are its 1 Hz
@@ -46,6 +45,14 @@ The roadworks (works_answers), a target of 1 or 0 and a weight of 1 or 0, apart 
 - from the start of a mark with no end, and EDGE_SECONDS around every tap: out of the loss.
 
 The two answers never touch: the end of works says nothing of the speed, and no code turns one into the other.
+
+The road type (type_answers): one of road_types.ROAD_TYPES a frame, the map's (nnslr road-types, derived/road_types, at 1 Hz:
+the readings of a second take the type of its frame) with a person's corrections over it (annotations/road_types, set in
+Speed review). It is an answer of a head only the training has (brain_net's type_head), never an input: the car never reads
+the map, and here the map only makes labels offline, as AGENTS.md wants. With types (dataset's types, his rule of 8 Nov
+2026, "only the drives where we have the road type"), a frame without a road type answers nothing at all: the map's search
+not run on the drive, a road the map does not name (a car park nobody set), or "can't tell". All its weights are 0, its
+speed out as no_road_type; it still runs through the memory, as the rest of the drive does.
 
 The kinds of road (road_answers): the same answer, kind by kind (road_kinds: a narrow road, a country road, a gravel road,
 potholes, and those a person added in Speed review), from that kind's marks and its own "checked to here". A frame can be of
@@ -178,6 +185,7 @@ from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.review_db import NOT_WAITING_SQL, db_path as sign_review_path
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
+from nnslr_tools.road_types import ROAD_TYPES, load_road_types
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.sign_reads import READ_INDEX_BASE
@@ -195,9 +203,9 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
 READ_COMMAND = 'nnslr road-type-signs --labelled'
-NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME, CRUISE = range(1, 7)
+NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME, CRUISE, NO_TYPE = range(1, 8)
 OUT_REASONS = {NO_SPEED: 'no_speed', STOPPED: 'stopped', BLOCKED_OUT: 'left_out', BOUNDARY: 'boundary', NO_FRAME: 'no_frame',
-               CRUISE: 'cruise'}
+               CRUISE: 'cruise', NO_TYPE: 'no_road_type'}
 NO_LABELS = {'blocks': [], 'works': [], 'checked_ns': None, 'road': [], 'road_checked': {}}
 HELD_OUT = ('test', 'validation')
 NIGHT_FROM, NIGHT_TO = 22, 6
@@ -406,6 +414,20 @@ def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> 
     for edge in edges:
         weight[np.abs(ns - edge) < EDGE_SECONDS * NS] = 0
     return target, weight
+
+
+def type_answers(root: Path, route: str, frames: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """(class of road_types.ROAD_TYPES per frame, -1 without one; a person set it there) at the frames of a drive, from
+    load_road_types: see the module's text. A reading takes the type of the 1 Hz frame of its second."""
+    types = {line['frame_key']: line for line in load_road_types(root, route)}
+    found = np.full(len(frames), -1, dtype=np.int64)
+    person = np.zeros(len(frames), dtype=bool)
+    for at, frame in enumerate(frames):
+        line = types.get(f"{frame['segment']}/{frame['index']}")
+        if line is not None and line.get('road_type') in ROAD_TYPES:
+            found[at] = ROAD_TYPES.index(line['road_type'])
+            person[at] = line.get('reviewed') is True
+    return found, person
 
 
 def road_answers(ns: np.ndarray, road: list[dict], checked: dict[str, int], kinds: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
@@ -909,11 +931,12 @@ def memory_cuts(ns: np.ndarray) -> set[int]:
 
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict, *, rate: float = 1.0,
-                  need_pictures: bool = True, inputs: bool = True, kinds: tuple[str, ...] = ()) -> dict:
+                  need_pictures: bool = True, inputs: bool = True, kinds: tuple[str, ...] = (), types: bool = False) -> dict:
     """A drive for the training at rate frames a second (1 or RATE_HZ): frames, ns, partitions, cells, cuts (memory_cuts),
     speed (class per frame), speed_out (why a frame is out of the loss, 0 when in), speed_weight, blocks (Speed review's),
     blocked (a block with a speed holds there), works, works_weight, road, road_weight (road_answers, a column for each of
-    kinds: road_kinds), next, next_weight, metres, metres_weight
+    kinds: road_kinds), road_type, type_weight, typed_by_person (type_answers), types (the frames without a road type
+    answer nothing: see the module's text), next, next_weight, metres, metres_weight
     (ahead_from_signs), sign_review (reviewed_signs, with its fingerprint), measured (the frames a measure counts: one a
     second, so that it reads the same at both rates), inputs, own_kph (the car's speed as the dashboard shows it, in the
     labels' units: drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read, reader (what read
@@ -946,6 +969,13 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     works_weight[~usable] = 0
     road, road_weight = road_answers(ns, labels.get('road', []), labels.get('road_checked', {}), kinds)
     road_weight[~usable] = 0
+    road_type, typed_by_person = type_answers(root, route, frames)
+    typed = road_type >= 0
+    if types:
+        speed_out[(speed_out == 0) & ~typed] = NO_TYPE
+        speed[~typed] = -1
+        works_weight[~typed] = 0
+        road_weight[~typed] = 0
     readings = record['readings'] if record else None
     v_ego = series.get('v_ego') or []
     own = _last_at(drive_logs.dashboard_speed(merged), ns)
@@ -954,6 +984,9 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     # the speed.
     asked = np.isin(speed_out, (0, CRUISE)) & any(point[1] is not None for point in v_ego)
     following, next_weight, metres, metres_weight = ahead_from_signs(ns, reviewed, metres_driven(v_ego), asked)
+    if types:
+        next_weight[~typed] = 0
+        metres_weight[~typed] = 0
     span = merged.get('span') or [None, None]
     taught = 0
     if span[0] is not None and span[1] is not None:
@@ -964,6 +997,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'cells': cells, 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'blocks': blocks, 'blocked': blocked,
             'works': works, 'works_weight': works_weight, 'road': road, 'road_weight': road_weight, 'road_kinds': list(kinds),
+            'road_type': road_type, 'type_weight': (typed & usable).astype(np.float32), 'typed_by_person': typed_by_person,
+            'types': types,
             'next': following, 'next_weight': next_weight, 'metres': metres, 'metres_weight': metres_weight,
             'sign_review': reviewed,
             'measured': np.array([not frame.get('step') for frame in frames], dtype=bool),
@@ -1000,9 +1035,9 @@ def _say(text: str) -> None:
 
 
 def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *, rate: float = 1.0,
-            need_pictures: bool = True, inputs: bool = True) -> list[dict]:
-    """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs as there), each with
-    reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
+            need_pictures: bool = True, inputs: bool = True, types: bool = False) -> list[dict]:
+    """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs and types as
+    there), each with reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
     drive that is no dashcam drive, one whose logs show openpilot driving (engaged_series) and one of the frozen split
     whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for. Every drive
     has the kinds of road of today (road_kinds), in the same columns."""
@@ -1028,7 +1063,7 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
             continue
         try:
             drive = drive_targets(root, route, labels.get(route, NO_LABELS), merged, split, rate=rate,
-                                  need_pictures=need_pictures, inputs=inputs, kinds=kinds)
+                                  need_pictures=need_pictures, inputs=inputs, kinds=kinds, types=types)
         except FramesChanged as error:
             log(f'{error}, left out')
             continue
@@ -1065,6 +1100,14 @@ def road_weights(drive: dict, partition: str) -> np.ndarray | None:
         return None
     inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
     return drive['road_weight'] * inside[:, None]
+
+
+def type_weights(drive: dict, partition: str) -> np.ndarray | None:
+    """The road type's weight of a drive in one partition; None for a drive without it."""
+    if 'type_weight' not in drive:
+        return None
+    inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
+    return drive['type_weight'] * inside
 
 
 def ahead_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1163,6 +1206,8 @@ def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
         copy['next_weight'], copy['metres_weight'] = np.zeros_like(drive['next_weight']), np.zeros_like(drive['metres_weight'])
     if 'road_weight' in drive:
         copy['road_weight'] = np.zeros_like(drive['road_weight'])
+    if 'type_weight' in drive:
+        copy['type_weight'] = np.zeros_like(drive['type_weight'])
     return copy
 
 
@@ -1275,6 +1320,8 @@ def _per_second(drive: dict) -> dict:
         found['next_weight'] = drive['next_weight'] * kept
     if 'road_weight' in drive:
         found['road_weight'] = drive['road_weight'] * kept[:, None]
+    if 'type_weight' in drive:
+        found['type_weight'] = drive['type_weight'] * kept
     return found
 
 
@@ -1293,7 +1340,7 @@ def summary(drives: list[dict]) -> dict:
                        'out': int((weight[:, column] * (1 - road[:, column])).sum())} for column, kind in enumerate(kinds)}
 
     parts = {name: {'speed': 0, 'works_in': 0, 'works_out': 0, 'sites': 0, 'next': 0,
-                    'road': {kind: {'in': 0, 'out': 0} for kind in kinds}}
+                    'road': {kind: {'in': 0, 'out': 0} for kind in kinds}, 'types': {kind: 0 for kind in ROAD_TYPES}}
              for name in ('train', 'validation', 'test', 'buffer')}
     rows = []
     for drive in drives:
@@ -1309,6 +1356,9 @@ def summary(drives: list[dict]) -> dict:
             for kind, count in road_of(drive, here).items():
                 part['road'][kind]['in'] += count['in']
                 part['road'][kind]['out'] += count['out']
+            if 'type_weight' in drive:
+                for column, kind in enumerate(ROAD_TYPES):
+                    part['types'][kind] += int((drive['type_weight'][here] * (drive['road_type'][here] == column)).sum())
         for mark in drive['marks']:
             inside = np.flatnonzero((drive['ns'] >= mark['start_ns']) & (drive['ns'] < mark['end_ns']))
             if len(inside):
@@ -1322,9 +1372,13 @@ def summary(drives: list[dict]) -> dict:
                      'blocks': len(drive.get('blocks') or ()), 'signs': len(reviewed.get('signs') or ()),
                      'covered_s': round(sum(end - start for start, end in reviewed.get('covered') or ()) / NS),
                      'next': int(following.sum()),
+                     'typed_s': int(drive['type_weight'].sum()) if 'type_weight' in drive else 0,
+                     'typed_by_person_s': int((drive['type_weight'] * drive['typed_by_person']).sum())
+                     if 'type_weight' in drive else 0,
                      'signs_read': drive['signs_read'], 'reader_current': drive.get('reader_current', False),
                      'pictures': drive.get('pictures', True), 'no_picture_s': drive['no_picture_s']})
-    return {'partitions': parts, 'drives': rows, 'road_kinds': list(kinds)}
+    return {'partitions': parts, 'drives': rows, 'road_kinds': list(kinds), 'road_types': list(ROAD_TYPES),
+            'types': any(drive.get('types') for drive in drives)}
 
 
 def summary_text(found: dict) -> str:
@@ -1336,6 +1390,9 @@ def summary_text(found: dict) -> str:
     for kind in found.get('road_kinds', []):
         lines.append(f"  {kind}: " + ', '.join(f"{name} {part['road'][kind]['in']} in, {part['road'][kind]['out']} out"
                                                for name, part in found['partitions'].items()))
+    for name, part in found['partitions'].items():
+        typed = ', '.join(f'{kind} {count}' for kind, count in part.get('types', {}).items() if count)
+        lines.append(f"  road types in {name}: {typed or 'none'}")
     lines.append('Per drive:')
     for row in found['drives']:
         out = ', '.join(f'{name} {count}' for name, count in row['out'].items() if count)
@@ -1345,5 +1402,6 @@ def summary_text(found: dict) -> str:
                      f"blocks; works {row['works_in']} in, {row['works_out']} out, {row['marks']} marks; "
                      + ''.join(f"{kind} {count['in']} in, {count['out']} out; " for kind, count in row.get('road', {}).items()) +
                      f"{row.get('signs', 0)} signs reviewed, {row.get('covered_s', 0)} s gone through, the next limit on "
-                     f"{row.get('next', 0)}; signs {signs}; {row['no_picture_s']} seconds with a speed and no picture")
+                     f"{row.get('next', 0)}; a road type on {row.get('typed_s', 0)} s ({row.get('typed_by_person_s', 0)} "
+                     f"set by a person); signs {signs}; {row['no_picture_s']} seconds with a speed and no picture")
     return '\n'.join(lines)

@@ -73,10 +73,11 @@ export interface ActionOptions {
    * finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, its head of the kinds of road of Speed
-   * review, the driver's inputs (only to measure: the car does not give them), the picture's features as a mean or as a
-   * grid. */
+   * review, its head of the road type (and only the seconds with one), the driver's inputs (only to measure: the car does
+   * not give them), the picture's features as a mean or as a grid. */
   works?: 'on' | 'off';
   road?: 'on' | 'off';
+  types?: 'on' | 'off';
   driver?: 'on' | 'off';
   pool?: 'mean' | 'grid';
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
@@ -1477,8 +1478,8 @@ export interface TrainSetting {
 export interface TrainFixed {label: string; value: string; help: string}
 export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_decider' | 'train_brain';
 /** Why a second of a drive is out of the brain's speed loss (brain_targets.OUT_REASONS): no speed in the logs, below 1 km/h,
- * inside a block left out, at the edge of a block, no picture. */
-export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame';
+ * inside a block left out, at the edge of a block, no picture, a machine held the speed, no road type. */
+export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame' | 'cruise' | 'no_road_type';
 /** GET /api/panel/brain-labels (brain_targets.summary): what the brain's training gets today from every drive with its logs
  * read and its frames, in seconds of the drives. speed: his own speed, or a block's of Speed review; works_in/works_out:
  * the roadworks answers; next: the next limit from Sign review; sites: the roadworks sites. Per drive the same, with why
@@ -1491,10 +1492,15 @@ export interface RoadCount {
 export interface BrainLabels {
   problem?: string;
   partitions?: Record<'train' | 'validation' | 'test' | 'buffer',
-    {speed: number; works_in: number; works_out: number; sites: number; next: number; road: Record<string, RoadCount>}>;
+    {speed: number; works_in: number; works_out: number; sites: number; next: number; road: Record<string, RoadCount>;
+      types?: Record<string, number>}>;
   drives?: {route: string; frames: number; speed: number; out: Record<BrainOut, number>; works_in: number;
     works_out: number; marks: number; blocks: number; signs: number; covered_s: number; next: number; signs_read: boolean;
-    reader_current: boolean; pictures: boolean; no_picture_s: number; road?: Record<string, RoadCount>}[];
+    reader_current: boolean; pictures: boolean; no_picture_s: number; road?: Record<string, RoadCount>;
+    typed_s?: number; typed_by_person_s?: number}[];
+  /** The seconds without a road type are out (brain_targets' types), and the road types in their order. */
+  types?: boolean;
+  road_types?: string[];
   /** The kinds of road of Speed review in their order, and their names. */
   road_kinds?: string[];
   road_labels?: Record<string, string>;

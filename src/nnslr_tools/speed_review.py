@@ -70,6 +70,13 @@ WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 # The kinds of road there are before a person adds one: (kind, label), in the order the page and the brain take them.
 FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gravel', 'Gravel road'), ('potholes', 'Potholes'))
 MAX_KIND_LABEL = 40
+# The names a kind of road may not take: the page's own roadworks ("works", its taps go to speed_works), a name every
+# object of the page has already ("constructor"), and the fields a guest's copy drops as places
+# (review_access.PLACE_FIELDS: its "checked to here" would be lost on the box).
+RESERVED_KINDS = frozenset({'works', 'constructor', 'gps', 'latitude', 'longitude', 'lat', 'lon', 'lng', 'road_name',
+                            'title', 'way_id'})
+# The labels a kind may not take: the roadworks' own, as the page names them.
+RESERVED_LABELS = frozenset({'roadworks', 'works'})
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
 # openpilot driving, any of them True once: selfdriveState, MADS, carControl.
 ENGAGED_SERIES = ('sd_enabled', 'sd_active', 'mads_active', 'lat_active', 'long_active')
@@ -409,10 +416,10 @@ class SpeedReviewStore:
             try:
                 connection.execute('BEGIN IMMEDIATE')
                 rows = connection.execute('SELECT kind, label, position FROM speed_road_kinds').fetchall()
-                if any(row['label'].lower() == label.lower() for row in rows):
+                if label.lower() in RESERVED_LABELS or any(row['label'].lower() == label.lower() for row in rows):
                     connection.execute('ROLLBACK')
                     raise SpeedReviewError(400, 'kind_exists', f'There is a kind "{label}" already.')
-                taken = {row['kind'] for row in rows}
+                taken = {row['kind'] for row in rows} | RESERVED_KINDS
                 kind, number = base, 2
                 while kind in taken:
                     kind, number = f'{base}_{number}', number + 1

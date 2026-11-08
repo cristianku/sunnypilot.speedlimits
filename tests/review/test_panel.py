@@ -123,7 +123,7 @@ def test_a_waiting_action_names_the_job_that_runs_and_the_pages_see_it(root, che
             panel.start('train')
         assert busy.value.message == 'An import of the reviews is running: wait for it to finish.'
         running = panel.running()
-        assert running['jobs'] == [{'id': job['id'], 'action': 'dataset', 'label': 'Import reviews', 'state': 'running'}]
+        assert running['jobs'] == [{'id': job['id'], 'action': 'dataset', 'label': 'Import sign reviews', 'state': 'running'}]
         assert [item['label'] for item in running['activities']] == ['dataset and training']
     finally:
         panel.stop(job['id'])

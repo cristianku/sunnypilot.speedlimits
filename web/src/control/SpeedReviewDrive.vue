@@ -209,8 +209,12 @@ const pickedKind = computed(() => kinds.value.find((item) => item.kind === picke
 const isWorks = computed(() => pickedKind.value.kind === ROADWORKS);
 const marksOf = (kind: string): Works[] => kind === ROADWORKS ? drive.value?.works ?? []
   : (drive.value?.road ?? []).filter((item) => item.kind === kind);
-const checkedOf = (kind: string): number | null => kind === ROADWORKS ? drive.value?.works_checked_ns ?? null
-  : drive.value?.road_checked_ns?.[kind] ?? null;
+/** Its own key only: a kind is never read off what every object has. */
+const checkedOf = (kind: string): number | null => {
+  if (kind === ROADWORKS) return drive.value?.works_checked_ns ?? null;
+  const checked = drive.value?.road_checked_ns ?? {};
+  return Object.hasOwn(checked, kind) ? checked[kind] ?? null : null;
+};
 const marks = computed(() => marksOf(pickedKind.value.kind));
 const markOpen = computed(() => marks.value.find((item) => item.end_ns === null) ?? null);
 const markHere = computed(() => worksAt(marks.value, now.value));

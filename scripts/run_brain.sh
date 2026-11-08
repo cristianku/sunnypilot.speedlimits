@@ -24,6 +24,8 @@ set -euo pipefail
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
 # (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
+# NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
+# one; 0: not, every second),
 # NNSLR_BRAIN_DRIVER (0, the usual since 8 Nov 2026: without the driver's inputs; 1: also the gas, the brake and the
 # car's speed),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
@@ -40,6 +42,7 @@ SIGN_WORKERS_DEFAULT=$(( CORES / 2 > 1 ? CORES / 2 : 1 ))
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
+TYPES="${NNSLR_BRAIN_TYPES:-1}"
 DRIVER="${NNSLR_BRAIN_DRIVER:-0}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
 SEEDS=(0 1 2)
@@ -69,6 +72,11 @@ fi
 
 if [[ "$ROAD" != "0" && "$ROAD" != "1" ]]; then
   echo "error: NNSLR_BRAIN_ROAD must be 0 or 1: $ROAD" >&2
+  exit 2
+fi
+
+if [[ "$TYPES" != "0" && "$TYPES" != "1" ]]; then
+  echo "error: NNSLR_BRAIN_TYPES must be 0 or 1: $TYPES" >&2
   exit 2
 fi
 
@@ -137,6 +145,9 @@ fi
 if [[ "$ROAD" == "0" ]]; then
   SETTINGS+=(--no-road)
 fi
+if [[ "$TYPES" == "0" ]]; then
+  SETTINGS+=(--no-road-types)
+fi
 if [[ "$DRIVER" == "1" ]]; then
   SETTINGS+=(--driver)
 fi
@@ -160,7 +171,11 @@ echo "== 3/6 Read the signs of the drives as the car does today =="
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
 "$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
-"$NN" brain-targets --data-root "$DATA_ROOT"
+if [[ "$TYPES" == "0" ]]; then
+  "$NN" brain-targets --data-root "$DATA_ROOT" --no-road-types
+else
+  "$NN" brain-targets --data-root "$DATA_ROOT"
+fi
 
 step=4
 for seed in "${SEEDS[@]}"; do

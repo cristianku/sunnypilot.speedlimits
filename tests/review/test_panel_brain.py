@@ -40,7 +40,8 @@ def brain_script(checkout):
     script = checkout / 'scripts' / 'run_brain.sh'
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text('#!/usr/bin/env bash\necho "== Brain =="\necho "run:          $1"\n'
-                      'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_DRIVER $NNSLR_BRAIN_POOL"\n')
+                      'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_DRIVER $NNSLR_BRAIN_POOL"\n'
+                      'echo "road types: $NNSLR_BRAIN_TYPES"\n')
     script.chmod(0o755)
     return script
 
@@ -128,7 +129,7 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_brain') == first[2]
     # The usual choices: the roadworks and the kinds of road on, the driver's inputs off (since 8 Nov 2026), the picture
     # as a grid.
-    assert 'choices: 1 1 0 grid' in lines
+    assert 'choices: 1 1 0 grid' in lines and 'road types: 1' in lines
 
 
 def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkout, monkeypatch):
@@ -136,16 +137,17 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     brain_script(checkout)
     scanned(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
-    job = panel.start('train_brain', {'works': 'off', 'road': 'off', 'driver': 'off', 'pool': 'mean'})
+    job = panel.start('train_brain', {'works': 'off', 'road': 'off', 'types': 'off', 'driver': 'off', 'pool': 'mean'})
     done = finished(panel, job['id'])
-    assert 'choices: 0 0 0 mean' in full_log(panel, job['id']).splitlines()
+    assert {'choices: 0 0 0 mean', 'road types: 0'} <= set(full_log(panel, job['id']).splitlines())
     assert done['state'] == 'ok'
     # The job's chips, from the settings line of the script: the driver's inputs when a run had them (--driver), and
     # the runs of before 8 Nov 2026 that left them out (--no-driver) still say so.
     log = root / 'brain.log'
-    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean --no-works --no-road --no-driver\n')
-    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no roadworks', 'no kinds of road', 'no driver’s inputs',
-                                                'picture as a mean']
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean --no-works --no-road '
+                   '--no-road-types --no-driver\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no roadworks', 'no kinds of road', 'no road types',
+                                                'no driver’s inputs', 'picture as a mean']
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --driver\n')
     assert _settings_of(log, 'train_brain') == ['40 epochs', 'driver’s inputs']
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid\n')
@@ -282,8 +284,9 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
     server.app.panel.activities = list
     try:
         # Train › Brain's own button: a wrong choice is refused, never dropped (nothing starts).
-        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'pool': 'max'})
-        assert status == 400 and json_of(data)['error'] == 'bad_option'
+        for body in ({'pool': 'max'}, {'types': 'maybe'}):
+            status, _, data = server.request('POST', '/api/panel/run/train_brain', body=body)
+            assert status == 400 and json_of(data)['error'] == 'bad_option', body
         status, _, data = server.request('POST', '/api/panel/run/train_brain',
                                          body={'works': 'off', 'road': 'off', 'pool': 'mean'})
         assert status == 200, data

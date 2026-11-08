@@ -28,7 +28,7 @@ const emit = defineEmits<{pipeline: [steps: {action: PipelineAction; options: Ac
   stopPipeline: []; stop: [job: Job]; details: [job: Job]; run: [name: ActionName, state: ActionState, start?: TrainingStart]}>();
 
 const STEPS: {action: PipelineAction; label: string; text: string}[] = [
-  {action: 'dataset', label: 'Import the reviews', text: 'The reviews not imported yet join the dataset, and its split is made again.'},
+  {action: 'dataset', label: 'Import the sign reviews', text: 'The Sign review frames not imported yet join the dataset, and its split is made again.'},
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},

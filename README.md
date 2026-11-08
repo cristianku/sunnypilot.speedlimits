@@ -48,7 +48,7 @@ From a drive to the car, in six steps:
 flowchart TD
   A["Drives<br/>from the comma"] --> B["Prepare<br/>pictures + proposed boxes"]
   B --> C["Review on the site<br/>a person confirms the boxes"]
-  C --> D["Import reviews<br/>→ training dataset"]
+  C --> D["Import sign reviews<br/>→ training dataset"]
   D --> E["Train<br/>sign finder, sign reader, brain"]
   E --> F["Publish<br/>speed-limits-models"]
   F -.->|new drives| A
@@ -56,7 +56,7 @@ flowchart TD
 
 - **Prepare** takes one picture a second from each drive. A model proposes a box around each sign it sees.
 - **Review** is the only step done by hand. Every sign the networks learn from is confirmed here; the brain's speed is the driver's own, corrected in Speed review only where it should have been another.
-- **Import reviews** copies the confirmed labels (the boxes and what each sign says) into the training dataset ([what it does](#4-import-the-reviews)).
+- **Import sign reviews** copies the confirmed Sign review labels (the boxes and what each sign says) into the training dataset ([what it does](#4-import-the-reviews)).
 - **Train** teaches the networks on a GPU on the server. The car never trains anything.
 - **Publish** puts the networks in use into sunnypilot. The comma gets them with its next software update.
 
@@ -180,7 +180,7 @@ An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves not
 
 ### 4. Import the reviews
 
-On the site: **Data › Training dataset**, then **Import reviews**. In a terminal: `helpers/3_train.sh --dataset-only`.
+On the site: **Data › Training dataset**, then **Import sign reviews** (Speed review needs no import). In a terminal: `helpers/3_train.sh --dataset-only`.
 
 <img src="docs/images/panel-data.png" alt="Data, Training dataset page: Dataset is up to date, 12,575 frames and 21,414 objects, objects by sign family, who confirmed them (people and AI reviewers), and the train, validation and test split." width="100%">
 

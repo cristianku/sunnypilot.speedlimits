@@ -110,6 +110,8 @@ LINE_STORES = {'distance': 'distance'}
 DRIVE_TABLES = ('scans', 'log_files', 'episodes')
 # The columns that must be numbers in a package from the box, whatever else it holds.
 INTEGERS = frozenset({'revision', 'start_ns', 'end_ns'})
+# The kinds of road's own: see _take_results.
+ROAD_KEYS = ('road', 'road_checked')
 # Roadworks and kinds of road with no end yet.
 OPEN_ENDED = (SPEED_TABLES['works'][1], SPEED_TABLES['road'][1])
 
@@ -344,9 +346,7 @@ def install_drive(root: Path, package: dict) -> None:
                 [row for row in package['signs']['history'] if (row['run_id'], row['frame_key'], row['revision']) not in known])
     with contextlib.closing(_open(speed_review.db_path(root))) as connection, _transaction(connection):
         _replace_speed(connection, route, package['speed'])
-        connection.executemany('INSERT OR IGNORE INTO speed_road_kinds (kind, label, position, reviewer, at) VALUES (?, ?, ?, ?, ?)',
-                               [(row['kind'], row['label'], row['position'], 'nnslr', _now())
-                                for row in package['speed'].get('kinds', [])])
+        _add_kinds(connection, package['speed'].get('kinds', []))
         _insert(connection, 'speed_history', SPEED_HISTORY_COLUMNS, package['speed']['history'], 'INSERT OR IGNORE')
     with contextlib.closing(_open(drive_review.db_path(root))) as connection, _transaction(connection):
         for table, rows in package['drive'].items():
@@ -356,6 +356,17 @@ def install_drive(root: Path, package: dict) -> None:
             _insert(connection, table, tuple(rows[0]), rows)
     for key, path in _line_paths(root, route).items():
         _write_lines(path, package[key])
+
+
+def _add_kinds(connection: sqlite3.Connection, kinds: list[dict]) -> None:
+    """The kinds of road of this server on the box: those it has not got yet, after its own."""
+    connection.executemany('INSERT OR IGNORE INTO speed_road_kinds (kind, label, position, reviewer, at) VALUES (?, ?, ?, ?, ?)',
+                           [(row['kind'], row['label'], row['position'], 'nnslr', _now()) for row in kinds])
+
+
+def _kinds_of(root: Path) -> list[dict]:
+    with contextlib.closing(_open(speed_review.db_path(root))) as connection:
+        return _rows(connection, f'SELECT {", ".join(KIND_COLUMNS)} FROM speed_road_kinds ORDER BY position, kind')
 
 
 def _replace_speed(connection: sqlite3.Connection, route: str, speed: dict) -> None:
@@ -429,6 +440,10 @@ def tick(root: Path, box: Path, log: Callable[[str], None] = print) -> None:
         if people.is_file():
             given = json.loads(people.read_text(encoding='utf-8'))
             assignments.replace_work(given['people'], given['work'])
+            # A kind added on the server after a drive came: every drive here can be marked with it.
+            if given.get('kinds'):
+                with contextlib.closing(_open(speed_review.db_path(root))) as connection, _transaction(connection):
+                    _add_kinds(connection, given['kinds'])
             people.unlink()
         for route in sorted(installed):
             _write_if_changed(outbox / (route + '.json'), _text(reviews_of(root, route)))
@@ -700,6 +715,12 @@ def _take_results(root: Path, state: dict, pulled: Path, log: Callable[[str], No
         # A box on code from before 8 Nov 2026 sends no blocks: those sent to it stay in the base for the next round too,
         # else that round finds them only here and takes every later change of the box for a conflict.
         theirs['speed'] = {**{key: rows for key, rows in base['speed'].items() if key in SPEED_TABLES}, **theirs['speed']}
+        # A box that took the drive on code from before 8 Nov 2026 never held its kinds of road and sends none: those sent
+        # to it stay, in the base too, unless its history says a person tapped one since.
+        top = max((row['revision'] for row in base['speed']['history']), default=0)
+        if not any(str(row.get('action', '')).startswith('road_') and row['revision'] > top
+                   for row in theirs['speed'].get('history', [])):
+            theirs['speed'].update({key: base['speed'].get(key, []) for key in ROAD_KEYS})
         # The kinds of road never come back: those sent stay.
         theirs['speed'].pop('kinds', None)
         if 'kinds' in base['speed']:
@@ -753,19 +774,20 @@ def _take_people(root: Path, state: dict, pulled: Path, log: Callable[[str], Non
 
 
 def _send_people(root: Path, remote: str, state: dict) -> None:
-    """The people and their work on the drives that are there, when they changed: the site of the box writes that
-    file too, so the less it is touched the better."""
+    """The people and their work on the drives that are there, and the kinds of road, when they changed: the site of the
+    box writes that file too, so the less it is touched the better."""
     view = Assignments(auth_dir(root)).view()
     people = [person['name'] for person in view['people']]
     work = {name: {route: kinds for route, kinds in drives.items() if route in state['drives']}
             for name, drives in view['work'].items()}
-    if people == state['people'] and work == state['work']:
+    kinds = _kinds_of(root)
+    if people == state['people'] and work == state['work'] and kinds == state.get('kinds', []):
         return
     with tempfile.TemporaryDirectory(dir=own_dir(root), prefix='stage-') as folder:
         path = Path(folder) / PEOPLE_FILE
-        path.write_text(_text({'people': people, 'work': work}), encoding='utf-8')
+        path.write_text(_text({'people': people, 'work': work, 'kinds': kinds}), encoding='utf-8')
         _send_file(root, remote, path, f'{INBOX}/{PEOPLE_FILE}')
-    state['people'], state['work'] = people, work
+    state['people'], state['work'], state['kinds'] = people, work, kinds
 
 
 def _leave(root: Path, remote: str, state: dict, wanted: set[str], pulled: Path, log: Callable[[str], None]) -> None:
