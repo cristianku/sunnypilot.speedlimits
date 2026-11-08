@@ -1661,6 +1661,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
+    p_tunnels = sub.add_parser("tunnels", help="the tunnels of the scanned drives from the map and the comma's GPS, "
+                                               "written as marks of the kind tunnel in Speed review where the map is "
+                                               "sure (reviewer osm; a person's marks win)")
+    p_tunnels.add_argument("--route", action="append", help="route id; repeat for more")
+    p_tunnels.add_argument("--all", action="store_true", help="every scanned drive")
+    p_tunnels.add_argument("--dry-run", action="store_true", help="print the tunnels found, write nothing")
+    p_tunnels.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_tunnels.set_defaults(func=_cmd_tunnels)
     p_brain = sub.add_parser("brain-targets", help="what the brain's training gets today from every dashcam drive "
                                                    "(sunnypilot off) with its logs read and its frames: per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
@@ -2716,6 +2724,50 @@ def _cmd_export_brain(args: argparse.Namespace) -> int:
     print(json.dumps(brain_export.export_brain_onnx(run / brain_export.CHECKPOINT, run / 'export' / brain_export.BRAIN_FILE,
                                                     data_root=root, merged_of=lambda route: store.merged(route, keep=False),
                                                     route=args.route), indent=2))
+    return 0
+
+
+def _cmd_tunnels(args: argparse.Namespace) -> int:
+    from nnslr_tools import drive_review, speed_review, tunnels
+    from nnslr_tools.map_context import RoadMap
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    road_map = RoadMap.load(root)
+    if road_map is None:
+        print("nnslr tunnels: no map of the roads yet: helpers/road_types.sh", file=sys.stderr)
+        return 2
+    tunnel_roads = tunnels.tunnel_map(road_map)
+    if not tunnel_roads.ways:
+        print("nnslr tunnels: the map has no tunnels: read it again (helpers/road_types.sh --again)", file=sys.stderr)
+        return 2
+    drives = drive_review.store_for(root)
+    store = speed_review.store_for(root)
+    routes = list(args.route or [])
+    if args.all:
+        routes += [row['route'] for row in drives._rows('SELECT route FROM scans ORDER BY route')]
+    if not routes:
+        print("nnslr tunnels: name a --route or use --all", file=sys.stderr)
+        return 2
+    total = {'drives': 0, 'found': 0, 'written': 0, 'kept': 0}
+    for route in routes:
+        summary = drives.summary(route)
+        if not summary or not summary.get('span_ns') or summary['span_ns'][1] is None:
+            continue
+        merged = drives.merged(route, keep=False)
+        if not merged:
+            continue
+        found = tunnels.drive_tunnels(road_map, merged, tunnel_roads)
+        total['drives'] += 1
+        total['found'] += len(found)
+        if not found:
+            continue
+        span = (summary['t0_ns'], summary['span_ns'][1])
+        clock = lambda ns: f"{int((ns - span[0]) / 1e9) // 60}:{int((ns - span[0]) / 1e9) % 60:02d}"
+        result = {'written': 0, 'kept': len(found)} if args.dry_run else tunnels.write_tunnels(store, route, found, span)
+        total['written'] += result['written']
+        total['kept'] += result['kept']
+        print(json.dumps({'route_id': route, 'tunnels': [clock(a) + '-' + clock(b) for a, b in found], **result}))
+    print(json.dumps(total))
     return 0
 
 

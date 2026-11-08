@@ -13,7 +13,8 @@ of the drive, at least MIN_BLOCK_SECONDS long. kph is a whole number from 1 to M
 A new block over others clips them: what they say outside it stays, unless it is shorter than MIN_BLOCK_SECONDS.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
-on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI). One write sets a
+on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI), but for the tunnels of the map where it is sure (nnslr_tools.tunnels,
+reviewer 'osm', asked by Cristian on 8 Nov 2026), which never write over a person's mark. One write sets a
 block or removes one, in one transaction with the check of the revision the page read (a stale one is refused with 409,
 so two tabs cannot overwrite each other). The drive's revision is the number of the last write of that drive in
 speed_history, a table that only grows (triggers refuse the rest): a drive's speed_blocks can always be rebuilt by

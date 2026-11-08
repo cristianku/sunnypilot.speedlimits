@@ -18,6 +18,8 @@
 #      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are),
 #      and the names of the places that name the drives, again when the map is newer (scripts/osm_places.py)
 #   e. the map road of every frame, its limit and its type                         (nnslr road-types --all)
+#   f. the tunnels of the scanned drives, where the map and the lost GPS agree, written as marks of the kind tunnel in
+#      Speed review (reviewer osm; never over a person's mark, removal or check)      (nnslr tunnels --all)
 #
 # usage: helpers/road_types.sh [--again]   (--again: the map roads read again even when nothing is newer)
 # No network but Geofabrik's index once a month and the extracts the drives miss (download.geofabrik.de), uv's first
@@ -90,6 +92,9 @@ elif [ ! -f "$PARKING" ]; then
 elif ! grep -q -m 1 '"junction"' "$ROADS"; then
     # A map read before the junction and access tags were kept (the road types need them).
     newer=yes
+elif ! grep -q -m 1 '"tunnel"' "$ROADS"; then
+    # A map read before the tunnels were kept (f. needs them).
+    newer=yes
 fi
 places=no
 if [ "$again" = yes ] || [ ! -f "$PLACES" ] \
@@ -115,4 +120,6 @@ fi
 
 echo "== e. Road type of every frame"
 "$NN" road-types --all --data-root "$DATA" < /dev/null
+echo "== f. Tunnels"
+"$NN" tunnels --all --data-root "$DATA" < /dev/null || echo "The tunnels not written: Speed review keeps the marks it has"
 echo "Done: the map's limits are in $DATA/derived/road_types/."

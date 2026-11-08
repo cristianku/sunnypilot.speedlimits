@@ -8,7 +8,8 @@ Reads every ``derived/gps/<route>/positions.jsonl`` of the data root and keeps t
 ``highway`` tag that have a node within about --margin-m of a position. Writes ``derived/osm/roads.jsonl``:
 one line per way, ``{"id", "highway", "service" (parking_aisle, driveway... of a service road), "oneway", "name",
 "ref", "lanes", "maxspeed", "maxspeed_type", "motorroad", "junction" (roundabout, circular...), "access",
-"motor_vehicle", "nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates, nnslr road-types and nnslr junctions (a
+"motor_vehicle", "tunnel" (yes, building_passage, avalanche_protector... where the road runs under
+something: nnslr_tools.tunnels), "nodes": [[lat, lon], ...]}``. Used by nnslr map-candidates, nnslr road-types and nnslr junctions (a
 node shared by two ways is the same [lat, lon] in both: an intersection of the map).
 
 The car parks near the drives, by the same rule, go to ``derived/osm/parking.jsonl``: one line per ``amenity=parking``
@@ -119,6 +120,7 @@ def main() -> int:
                                   'maxspeed_type': tags.get('maxspeed:type') or tags.get('source:maxspeed'),
                                   'motorroad': tags.get('motorroad'), 'junction': tags.get('junction'),
                                   'access': tags.get('access'), 'motor_vehicle': tags.get('motor_vehicle'),
+                                  'tunnel': tags.get('tunnel'),
                                   'nodes': nodes})
 
         def area(self, area):
