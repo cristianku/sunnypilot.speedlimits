@@ -3,7 +3,7 @@
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
-// experiment B), the brain (scripts/run_brain.sh: its three seeds, from every drive with its logs read: his own speed with
+// experiment B), the brain (scripts/run_brain.sh: its three seeds, from every dashcam drive with its logs read: his own speed with
 // the blocks of Speed review, the next limit of Sign review, which it says before the click), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
@@ -206,7 +206,7 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   const shown = value.state === 'running' || Object.values(curves).some((curve) => Boolean(curve?.points.length));
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
-/** What every drive with its logs read gives the brain today (his speed, the blocks of Speed review as its corrections, the
+/** What every dashcam drive with its logs read gives the brain today (his speed, the blocks of Speed review as its corrections, the
  * next limit of Sign review), asked when its section opens and when a training of it ends (about 10 s on the server:
  * never with the status). */
 const brainLabels = shallowRef<BrainLabels | null>(null);
@@ -260,7 +260,7 @@ const numbers = computed(() => {
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'brain'" class="role-what">Says the speed to hold, four times a second, from the camera, the signs it reads and
-      the car’s own motion, and whether it is in roadworks. It learns your own speed on every drive whose logs are read, with the
+      the car’s own motion, and whether it is in roadworks. It learns your own speed on every drive with sunnypilot off whose logs are read, with the
       blocks you set in Speed review as the corrections, the roadworks you mark there, and the next limit from the signs of Sign review.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
@@ -344,7 +344,7 @@ const numbers = computed(() => {
                     @run="(name, state) => emit('run', name, state, undefined, brainChoices.option)"/>
         <p v-if="brainLabels?.problem" class="latest-none warn-text" id="train-brain-labels">{{ brainLabels.problem }}</p>
         <p v-else-if="brainLabels?.partitions" class="latest-none" id="train-brain-labels">Your speed on
-          {{ plural(brainLabels.drives?.length ?? 0, 'drive') }} with their logs read, the blocks of Speed review as its corrections:
+          {{ plural(brainLabels.drives?.length ?? 0, 'drive') }} with sunnypilot off and their logs read, the blocks of Speed review as its corrections:
           <strong>{{ thousands(brainLabels.partitions.train.speed) }}</strong> seconds to learn from,
           <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. Sign review answers the next limit on

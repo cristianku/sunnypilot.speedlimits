@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Data › Speed review, the answers the brain learns from (speed_review.py): his own dashboard speed at every moment of a
 // drive is the answer, with nothing to confirm; a block corrects it from a time to a time, with another speed or left out
-// of the training, and roadworks are marked on the frames. Nothing here changes the car. Every drive, the newest first,
-// with its blocks and roadworks marks; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
+// of the training, and roadworks are marked on the frames. Nothing here changes the car. Every drive the brain learns
+// from (sunnypilot off in all of it, speed_review.dashcam_drive, or not read yet), the newest first, with its blocks and
+// roadworks marks; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
 // list, Read the logs reads the comma's logs of every drive (ReadLogsCard.vue), the list read again every 2 s while it
 // does: a drive has a speed only once its logs are read.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
@@ -30,7 +31,10 @@ async function load(): Promise<void> {
 }
 // By date and time ("when" ends in the time): the number of a drive is not its date, the comma's count started again.
 const startOf = (drive: SpeedRow): string => (drive.day ?? '') + (drive.when ?? '').slice(-5);
-const rows = computed(() => [...(drives.value ?? [])].sort((a, b) => startOf(b).localeCompare(startOf(a))));
+const rows = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
+  .sort((a, b) => startOf(b).localeCompare(startOf(a))));
+/** Drives where sunnypilot was on: the brain does not learn from them, the list leaves them out. */
+const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
 /** What a drive has: its length, its blocks and its roadworks marks; before its logs are read, what reading them does. */
 const stateOf = (drive: SpeedRow): string => !drive.total_s ? scanText(drive.scan).text
   : clockOf(drive.total_s) + ' long · ' + (drive.blocks ? plural(drive.blocks, 'block') : 'no block')
@@ -65,6 +69,8 @@ onBeforeUnmount(() => window.clearTimeout(timer));
       <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
         is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
         time to a time, with that speed or left out of the training; mark the roadworks there too. Nothing here changes the car.</p>
+      <p v-if="engaged" class="import-why" id="sr-engaged">Only drives with sunnypilot off (sunnylink › Toggles › Enable
+        sunnypilot): there the speed is all yours. {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} not listed.</p>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <ul v-else class="rt-list">

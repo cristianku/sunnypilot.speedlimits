@@ -671,3 +671,17 @@ def test_the_setup_script_refuses_what_is_not_an_address_or_a_name(tmp_path, opt
     env_file.write_text('NNSLR_REVIEW_TOKEN=keep-me\n')
     assert run_setup(env_file, *options).returncode == 2
     assert env_file.read_text() == 'NNSLR_REVIEW_TOKEN=keep-me\n'
+
+
+def test_speed_review_is_given_only_on_a_drive_with_sunnypilot_off(outside, monkeypatch):
+    # The brain learns only dashcam drives (speed_review.dashcam_drive): Speed review is no work on the others.
+    from nnslr_tools import speed_review
+    server, _ = outside
+    rows = [{'route': ROUTE, 'video_segments': [0], 'dashcam': True},
+            {'route': OTHER_ROUTE, 'video_segments': [0], 'dashcam': False}]
+    monkeypatch.setattr(speed_review, 'drives_list', lambda *args, **kwargs: rows)
+    kinds = {drive['route']: drive['kinds'] for drive in server.app.assignable_drives()}
+    assert 'speed' in kinds[ROUTE] and 'speed' not in kinds.get(OTHER_ROUTE, [])
+    # A drive not read yet (dashcam None) can still be given.
+    rows[1]['dashcam'] = None
+    assert 'speed' in {drive['route']: drive['kinds'] for drive in server.app.assignable_drives()}[OTHER_ROUTE]

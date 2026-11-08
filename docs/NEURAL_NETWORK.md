@@ -591,14 +591,16 @@ loss = cross entropy(speed, a bell around the answer) + 0.3 * binary cross entro
 
 Each term only on the frames with an answer of its own. The speed's answer is a bell over the classes, 2 km/h wide (`SPEED_SIGMA_KPH`), so that 52 for 53 is a small error and 52 for 120 a large one; the car still decodes by argmax. The next limit is a sign's number, exact: one class, no bell. The works error goes back through the GRU into the layer on the picture's features, the part the speed uses too.
 
-**The answers** (`src/nnslr_tools/brain_targets.py`), on every drive with its logs read to the end and its frames (`training_routes`): a drive is labelled by being driven, and one with no block is a drive like the others. The design limits:
+**The answers** (`src/nnslr_tools/brain_targets.py`), on every dashcam drive with its logs read to the end and its frames (`training_routes`): a drive is labelled by being driven, and one with no block is a drive like the others. The design limits:
+
+- only dashcam drives (`speed_review.dashcam_drive`): `carParams.passive` True in every carParams of the drive, and `selfdriveState.enabled` never True. Passive is sunnylink › Toggles › **Enable sunnypilot** off (`OpenpilotEnabledToggle`, read once a route by `selfdrive/car/card.py`) or a car in `dashcamOnly`; then card sends nothing to the car and selfdrived, MADS and controlsd stay off. Extracts read before 8 Nov 2026 have no `passive` and fall back to `dashcamOnly`, the same there (the toggle was on in every log until then). A drive with no carParams is not one. A drive whose logs show `sd_enabled`, `sd_active`, `mads_active`, `lat_active` or `long_active` True anyway is left out too (`speed_review.engaged_series`). Every other drive is left out whole, with its reason in the training's log (`sunnypilot was on`); Speed review lists only these drives. The sign classifier still learns from every drive;
 
 - the answer is taken at the brain's steps, 4 a second, as the car steps it: the dashboard speed (`speed_review.driver_speed`: `vEgoCluster`, or `vEgo` + 3 km/h on the old Peugeot logs) in whole km/h, rounded half up, 0 to 200, the same numbers Speed review draws;
 - below 1 km/h it is out (`stopped`): there is no class for it, since the car reads a limit of 0 as none;
-- where a machine held the speed it is out (`cruise`): openpilot's longitudinal (`carControl.longActive`), or the car's cruise on (`carState.cruiseState.enabled`) with the gas not pressed. The brain learns his foot, never openpilot's driving (since 8 Nov 2026, when opendbc psa-torque-sunny-testing went back to `dashcamOnly = True`, 59b23860). A block of his still answers there, and the next limit and its metres are still learnt;
+- where a machine held the speed it is out (`cruise`, `speed_review.machine_held`): openpilot's longitudinal (`carControl.longActive`), or the car's cruise on (`carState.cruiseState.enabled`) with the gas not pressed. On the Peugeot carState never shows its own ACC or limiter on a dashcam drive: opendbc `psa/interface.py` sets `cruiseState.enabled` False while openpilot's radar session is off, which it always is when passive, and the limiter (regulation type 2) is no cruise at all (`psa/carstate.py`). So there, also out: a set speed (`cruiseState.speed` under 255) with the cruise available and the gas not pressed (its ACC: the same frames as the ACC bit of the raw 0x452, all but 18 of 4 million), and a set speed with the cruise not available and the car within 2 km/h of it (its limiter capping his foot; further above it is his kick-down). The raw 0x452 says regulation type 2, the limiter, at every such frame with the type known (1.7 million), never type 0. On the 27 dashcam drives of 8 Nov 2026 that is 11 555 s out. A block of his still answers there, and the next limit and its metres are still learnt;
 - a block lasts at least 1 s, and within 2 s of its edge the answer is out where it jumps there (`boundary`): a tap is only so exact;
 - the next limit is learnt only where Sign review covers the frames (below);
-- before any training the signs of every such drive are read again by the car's reader of today, with the brain's pictures (`nnslr road-type-signs --labelled`, step 3 of `scripts/run_brain.sh`): the training refuses a drive not read so. As `--labelled` covers every drive with its logs read, the first reading is long.
+- before any training the signs of every such drive are read again by the car's reader of today, with the brain's pictures (`nnslr road-type-signs --labelled`, step 3 of `scripts/run_brain.sh`): the training refuses a drive not read so. As `--labelled` covers every dashcam drive with its logs read (`training_routes`), the first reading is long.
 
 | Frame | Speed | Roadworks |
 | --- | --- | --- |
@@ -606,7 +608,7 @@ Each term only on the frames with an answer of its own. The speed's answer is a 
 | inside a block with a speed | the block's | |
 | inside a block left out | out (`left_out`) | |
 | below 1 km/h | out (`stopped`) | |
-| openpilot or the car's cruise held the speed, the gas not pressed | out (`cruise`) | |
+| openpilot or the car's cruise held the speed, the gas not pressed; on the Peugeot its ACC, or its limiter at the set speed | out (`cruise`) | |
 | no speed in the logs, or no picture | out (`no_speed`, `no_frame`) | |
 | within 2 s of a block's edge where the answer jumps | out (`boundary`) | |
 | within 2 s of a works tap | | out |

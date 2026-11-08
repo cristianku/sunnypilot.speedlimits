@@ -32,7 +32,7 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_brain', label: 'Brain', text: 'Three seeds, from your speed on every drive with its logs read. About 15 minutes.'},
+  {action: 'train_brain', label: 'Brain', text: 'Three seeds, from your speed on every drive with sunnypilot off and its logs read. About 15 minutes.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
 

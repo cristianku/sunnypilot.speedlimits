@@ -1661,8 +1661,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_road.add_argument("--all", action="store_true", help="every route with GPS positions (nnslr gps)")
     p_road.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road.set_defaults(func=_cmd_road_types)
-    p_brain = sub.add_parser("brain-targets", help="what the brain's training gets today from every drive with its "
-                                                   "logs read and its frames: per partition and per drive the frames "
+    p_brain = sub.add_parser("brain-targets", help="what the brain's training gets today from every dashcam drive "
+                                                   "(sunnypilot off) with its logs read and its frames: per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
                                                    "with an answer on roadworks and with the next limit (Sign review), "
                                                    "and why the others are out. Reads only: it writes nothing and "
@@ -2922,7 +2922,7 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
     else:
         routes = training_routes(root) if args.labelled else road_type_routes(root)
     if not routes:
-        print("nnslr road-type-signs: " + ("no drive to learn from (its logs read to the end and its frames)"
+        print("nnslr road-type-signs: " + ("no drive to learn from (sunnypilot off, its logs read to the end and its frames)"
                                            if args.labelled else "no drive with road types (nnslr road-types)"),
               file=sys.stderr)
         return 2

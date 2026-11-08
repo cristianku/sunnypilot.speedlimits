@@ -48,16 +48,17 @@ def brain_script(checkout):
 NS = 1_000_000_000
 
 
-def scanned(root, route='r1', frames=True):
+def scanned(root, route='r1', frames=True, passive=True):
     """A drive the brain can learn from (brain_targets.training_routes): its logs read to the end and, with frames, its
-    frames. No mark of Speed review: the driver's own speed is the answer."""
+    frames; with passive False, sunnypilot was on. No mark of Speed review: the driver's own speed is the answer."""
     path = drive_review.db_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
     for statement in drive_review.SCHEMA_STATEMENTS:
         connection.execute(statement)
     connection.execute("INSERT INTO scans (route, state, summary) VALUES (?, 'done', ?)",
-                       (route, json.dumps({'t0_ns': 0, 'span_ns': [0, 40 * NS]})))
+                       (route, json.dumps({'t0_ns': 0, 'span_ns': [0, 40 * NS],
+                                           'meta': {'car': {'brand': 'psa', 'passive': passive}}})))
     connection.commit()
     connection.close()
     if frames:
@@ -107,6 +108,11 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(
     # Its logs read but not its frames: still nothing to learn from.
     scanned(root, frames=False)
     assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == nothing
+    # Read and prepared, but driven with sunnypilot on: it says so, not to prepare one.
+    scanned(root, 'r3', passive=False)
+    assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == (
+        'no drive to learn from: sunnypilot was on in every drive with its logs read (1); '
+        'drive with sunnylink › Toggles › Enable sunnypilot off')
     scanned(root, 'r2')
     assert panel._action_states(ready_payload(gpu_processes=1), [])['train_brain']['reason'] == 'the GPU is busy with another process'
     # Its labels are the driver's own speed: no mark of Speed review and no reviewed drive of signs needed.

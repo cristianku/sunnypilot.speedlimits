@@ -59,6 +59,13 @@ MAX_NOTE = 500
 MIN_BLOCK_SECONDS = 1
 WORKS_TAPS = ('start', 'end', 'remove', 'checked')
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
+# carState.cruiseState.speed (cruise_speed, km/h) at or above it is no set speed: the Peugeot's 255.
+CRUISE_SPEED_OFF = 254.5
+# The Peugeot's limiter holds the car about 1 km/h under its set speed: this close, it is the limiter's speed; further
+# above it is his kick-down or a downhill, his foot (on the 27 dashcam drives of 8 Nov 2026 the car is rarely above it).
+LIMITER_MARGIN_KPH = 2.0
+# openpilot driving, any of them True once: selfdriveState, MADS, carControl.
+ENGAGED_SERIES = ('sd_enabled', 'sd_active', 'mads_active', 'lat_active', 'long_active')
 
 SCHEMA_STATEMENTS = (
     'CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)',
@@ -129,11 +136,21 @@ def speed_curve(merged: dict | None, span: tuple[int, int]) -> list[list]:
     return out
 
 
-def machine_held(series: dict, ns) -> list[bool]:
+def machine_held(merged: dict | None, ns) -> list[bool]:
     """Whether a machine held the speed at each of the times ns, not his foot: openpilot's longitudinal was active
     (carControl.longActive), or the car's cruise was on (carState.cruiseState.enabled) with the gas not pressed, since his
     foot over the cruise is his speed. The brain learns no speed of his there; a block still says one. Unknown is not
-    held."""
+    held.
+
+    On a Peugeot (brand psa) also its own ACC and limiter, which carState never shows as on: opendbc psa/interface.py
+    sets cruiseState.enabled False while openpilot's radar session is off, as it is on every dashcam drive, and the limiter
+    is no cruise at all there (psa/carstate.py). Its ACC is a set speed (cruise_speed under CRUISE_SPEED_OFF) with the
+    cruise available (regulation type 1 or 3), the gas not pressed: the same moments as the ACC bit of the car's 0x452,
+    all but 18 of 4 million frames on 8 Nov 2026. Its limiter is a set speed with the cruise not available (type 2) and
+    the car within LIMITER_MARGIN_KPH of it, gas or not: there the car capped his foot."""
+    series = (merged or {}).get('series') or {}
+    psa = (((merged or {}).get('meta') or {}).get('car') or {}).get('brand') == 'psa'
+
     def values(name: str) -> list:
         points = series.get(name) or []
         times = [point[0] for point in points]
@@ -142,8 +159,38 @@ def machine_held(series: dict, ns) -> list[bool]:
             at = bisect.bisect_right(times, int(t)) - 1
             found.append(points[at][1] if at >= 0 else None)
         return found
-    return [active is True or (on is True and gas is not True)
-            for active, on, gas in zip(values('long_active'), values('cruise_enabled'), values('gas'))]
+    out = []
+    for active, on, gas, available, setpoint, v_ego in zip(
+            values('long_active'), values('cruise_enabled'), values('gas'), values('cruise_available'),
+            values('cruise_speed'), values('v_ego')):
+        held = active is True or (on is True and gas is not True)
+        if psa and not held and setpoint is not None and 0 < setpoint < CRUISE_SPEED_OFF:
+            if available is True:
+                held = gas is not True
+            elif available is False:
+                held = v_ego is not None and abs(v_ego - setpoint) <= LIMITER_MARGIN_KPH
+        out.append(held)
+    return out
+
+
+def dashcam_drive(summary: dict | None) -> bool:
+    """Whether the brain learns from a drive, by its scan's summary (DriveReviewStore.summary): openpilot was passive in
+    every carParams of it, so he drove alone, and selfdriveState never said engaged. Passive is sunnylink › Toggles ›
+    "Enable sunnypilot" off (OpenpilotEnabledToggle) or a car in dashcamOnly (selfdrive/car/card.py), read once a route.
+    An extract older than carParams.passive (drive_extract, before 8 Nov 2026) says dashcamOnly instead: the toggle was on
+    in every log until then, so it is the same. A drive without carParams is not one. The sign classifier learns from
+    every drive; the brain and Speed review's list only from these."""
+    summary = summary or {}
+    car = (summary.get('meta') or {}).get('car') or {}
+    passive = car.get('passive', car.get('dashcam_only'))
+    return passive is True and not (summary.get('coverage') or {}).get('engaged')
+
+
+def engaged_series(merged: dict | None) -> list[str]:
+    """The series of openpilot driving (ENGAGED_SERIES) that say True anywhere in a drive's joined logs: none on a
+    dashcam drive (dashcam_drive), since passive keeps selfdriveState, MADS and controlsd off."""
+    series = (merged or {}).get('series') or {}
+    return [name for name in ENGAGED_SERIES if any(point[1] is True for point in series.get(name) or ())]
 
 
 def held_spans(merged: dict | None, span: tuple[int, int]) -> list[list[int]]:
@@ -151,7 +198,7 @@ def held_spans(merged: dict | None, span: tuple[int, int]) -> list[list[int]]:
     step = NS // STEPS_PER_SECOND
     times = range(span[0], span[1], step)
     out: list[list[int]] = []
-    for t, held in zip(times, machine_held((merged or {}).get('series') or {}, times)):
+    for t, held in zip(times, machine_held(merged, times)):
         if held and out and out[-1][1] == t:
             out[-1][1] = t + step
         elif held:
@@ -388,12 +435,14 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
     """A drive for the page: its revision, the driver's speed along it (speed: speed_curve), where a machine held it
-    (held: held_spans), its blocks, its roadworks, its first and last ns (span_ns, where a block may go) and its length.
-    A drive whose logs are not scanned has no speed and no span."""
+    (held: held_spans), its blocks, its roadworks, its first and last ns (span_ns, where a block may go), its length and
+    whether the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed and no
+    span, and dashcam None."""
     span = _span_of(drives, route)
     view = {'ok': True, 'route': route, 'revision': store.revision(route), 'blocks': store.blocks(route),
             'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'speed': [], 'held': [],
-            'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH}
+            'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
+            'dashcam': None if span is None else dashcam_drive(drives.summary(route))}
     if span is not None:
         merged = drives.merged(route)
         view.update(speed=speed_curve(merged, span), held=held_spans(merged, span), span_ns=list(span),
@@ -402,14 +451,16 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
 
 
 def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]:
-    """The drives for the page, which puts them in order: each with its length and how many blocks and roadworks marks
-    it has."""
+    """The drives for the page, which puts them in order: each with its length, how many blocks and roadworks marks it
+    has and whether the brain learns from it (dashcam: dashcam_drive, None before its logs are read). The page lists only
+    the ones not False; Read the logs and Regression take them all."""
     counts = store.counts()
     rows = []
     for drive in drives_view(drives):
         span = _span_of(drives, drive['route'])
         rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0}),
-                     'total_s': round((span[1] - span[0]) / NS, 1) if span else 0})
+                     'total_s': round((span[1] - span[0]) / NS, 1) if span else 0,
+                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route']))})
     return rows
 
 

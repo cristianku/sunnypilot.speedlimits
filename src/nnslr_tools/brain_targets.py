@@ -7,8 +7,12 @@ changes anything by itself. It reaches the network only as an answer on a frame:
 the network said, and that error moves the weights (brain_net.brain_loss). This module makes those answers. It reads the
 databases and writes nothing: no training, no GPU.
 
-The drives (training_routes): every drive with a finished scan (drive_review.sqlite, its span known) and its frames
-(derived/frames). A drive is labelled by being driven: one without a block or a mark is a drive like the others.
+The drives (training_routes): every dashcam drive with a finished scan (drive_review.sqlite, its span known) and its
+frames (derived/frames). A dashcam drive (speed_review.dashcam_drive) is one where openpilot was passive in every
+carParams (sunnylink › Toggles › "Enable sunnypilot" off, or dashcamOnly) and never engaged: he drove alone, so his speed
+is his. Any other drive is left out whole, with its reason in dataset's log, and so is one whose logs show openpilot,
+MADS or controlsd on anyway (speed_review.engaged_series). The sign classifier learns from every drive. A drive is
+labelled by being driven: one without a block or a mark is a drive like the others.
 
 A drive here is its frames in drive order, each on the comma's clock by the encode index (drive_logs.frame_time): labels
 and frames meet on logMonoTime, never on a count of seconds. The list of frames needs no road types: the road type is only
@@ -27,8 +31,9 @@ each with its reason:
 
 - no_speed: the logs give no speed there (before the first carState, a hole);
 - stopped: the answer is below 1 km/h, which has no class;
-- cruise: a machine held the speed, not his foot: openpilot's longitudinal (carControl.longActive), or the car's cruise
-  (carState.cruiseState.enabled) with the gas not pressed (speed_review.machine_held). A block of his still answers there;
+- cruise: a machine held the speed, not his foot: openpilot's longitudinal (carControl.longActive), the car's cruise
+  (carState.cruiseState.enabled) with the gas not pressed, or on the Peugeot its own ACC and limiter, which carState
+  hides on a dashcam drive (speed_review.machine_held). A block of his still answers there;
 - left_out: inside a block with no speed, a person took those moments out;
 - boundary: EDGE_SECONDS around the edge of a block where the answer jumps, since a tap is only so exact (a block with the
   dashboard's own speed at its edge is no jump, and the dashboard's speed changing from step to step is never one);
@@ -173,7 +178,7 @@ from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.sign_reads import READ_INDEX_BASE
-from nnslr_tools.speed_review import NS, db_path, driver_speed, machine_held
+from nnslr_tools.speed_review import NS, dashcam_drive, db_path, driver_speed, engaged_series, machine_held
 
 # The brain's own table, never taken from Speed review: a class a km/h since 8 Nov 2026 (5 km/h before).
 BRAIN_STEP_KPH = 1
@@ -288,9 +293,10 @@ def read_labels(root: Path) -> dict[str, dict]:
         connection.close()
 
 
-def training_routes(root: Path) -> list[str]:
-    """The drives the brain can learn from, in order: a finished scan (its start and its end on the comma's clock, in
-    drive_review.sqlite, read only) and its frames (derived/frames)."""
+def training_routes(root: Path, left_out: dict | None = None) -> list[str]:
+    """The drives the brain can learn from, in order: a dashcam drive (speed_review.dashcam_drive) with a finished scan
+    (its start and its end on the comma's clock, in drive_review.sqlite, read only) and its frames (derived/frames).
+    left_out, when given, gets why each scanned drive that is no dashcam drive is not there, by route."""
     path = drive_review.db_path(root)
     if not path.is_file():
         return []
@@ -307,6 +313,10 @@ def training_routes(root: Path) -> list[str]:
             summary = None
         span = summary.get('span_ns') if isinstance(summary, dict) else None
         if summary is None or summary.get('t0_ns') is None or not span or span[-1] is None:
+            continue
+        if not dashcam_drive(summary):
+            if left_out is not None:
+                left_out[row['route']] = 'sunnypilot was on (no dashcam drive)'
             continue
         if any((Path(root) / FRAMES_RELATIVE / row['route']).glob('*/frames.jsonl')):
             found.append(row['route'])
@@ -884,7 +894,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     usable = np.array([frame['ns'] is not None and (frame['present'] or not need_pictures) for frame in frames], dtype=bool)
     blocks = labels['blocks']
     series = merged.get('series') or {}
-    speed, speed_out = speed_answers(ns, driver_speed(merged, ns), blocks, machine_held(series, ns))
+    speed, speed_out = speed_answers(ns, driver_speed(merged, ns), blocks, machine_held(merged, ns))
     pictured = (speed_out == 0) & np.array([frame['ns'] is not None and frame['present'] for frame in frames], dtype=bool)
     speed_out[~usable] = NO_FRAME
     speed[~usable] = -1
@@ -906,7 +916,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     taught = 0
     if span[0] is not None and span[1] is not None:
         grid = np.arange(int(span[0]), int(span[1]), int(NS / rate), dtype=np.int64)
-        taught = int((speed_answers(grid, driver_speed(merged, grid), blocks, machine_held(series, grid))[1] == 0).sum())
+        taught = int((speed_answers(grid, driver_speed(merged, grid), blocks, machine_held(merged, grid))[1] == 0).sum())
     return {'route': route, 'rate': rate, 'frames': frames, 'ns': ns, 'partitions': partitions,
             'own_kph': np.array([np.nan if kph is None else kph for kph in own], dtype=np.float32),
             'cells': cells, 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
@@ -951,14 +961,15 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
             need_pictures: bool = True, inputs: bool = True) -> list[dict]:
     """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs as there), each with
     reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
-    drive of the frozen split whose frames changed is left out with a line in log. Sites stay whole only across the
-    drives asked for."""
+    drive that is no dashcam drive, one whose logs show openpilot driving (engaged_series) and one of the frozen split
+    whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for."""
     split = read_split(root)
     reader = fingerprint(package_path())
-    labels, trainable = read_labels(root), training_routes(root)
-    for route in sorted((set(labels) | set(routes or ())) - set(trainable)):
-        if routes is None or route in routes:
-            log(f'{route}: no finished scan or no frames, left out')
+    left_out: dict[str, str] = {}
+    labels, trainable = read_labels(root), training_routes(root, left_out)
+    for route in sorted(set(labels) | set(routes or ()) | set(left_out)):
+        if route not in trainable and (routes is None or route in routes):
+            log(f"{route}: {left_out.get(route, 'no finished scan or no frames')}, left out")
     drives = []
     for route in trainable:
         if routes is not None and route not in routes:
@@ -966,6 +977,10 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
         merged = merged_of(route)
         if merged is None:
             log(f'{route}: no scan, left out')
+            continue
+        engaged = engaged_series(merged)
+        if engaged:
+            log(f"{route}: openpilot drove ({', '.join(engaged)} on), left out")
             continue
         try:
             drive = drive_targets(root, route, labels.get(route, NO_LABELS), merged, split, rate=rate,

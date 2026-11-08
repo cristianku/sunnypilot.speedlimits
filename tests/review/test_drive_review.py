@@ -66,8 +66,9 @@ def _schema():
 
 
 @functools.lru_cache(maxsize=None)
-def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple = ()) -> bytes:
-    """A SYNTHETIC rlog of one minute of the made-up drive, zstd-compressed as the comma writes it."""
+def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple = (), passive: tuple = (False,)) -> bytes:
+    """A SYNTHETIC rlog of one minute of the made-up drive, zstd-compressed as the comma writes it, with one carParams for
+    each value of passive."""
     schema = _schema()
     start = BOOT_NS + segment * SEGMENT_NS
     messages: list[tuple[int, bytes]] = []
@@ -84,10 +85,12 @@ def segment_log(segment: int, gps_unix_ms: int | None = None, skip_frames: tuple
         data.version, data.gitBranch, data.gitCommit, data.deviceType = '0.0-synthetic', 'synthetic', '0' * 40, 'mici'
     put(start, init)
 
-    def params(event):
-        car = event.init('carParams')
-        car.brand, car.carFingerprint, car.dashcamOnly, car.openpilotLongitudinalControl = 'synthetic', 'SYNTHETIC', False, True
-    put(start, params)
+    for i, value in enumerate(passive):
+        def params(event, value=value):
+            car = event.init('carParams')
+            car.brand, car.carFingerprint, car.dashcamOnly, car.openpilotLongitudinalControl = 'synthetic', 'SYNTHETIC', False, True
+            car.passive = value
+        put(start + i, params)
     for k in range(600):
         t = start + k * NS // 10
         s = (t - BOOT_NS) / NS
@@ -278,6 +281,21 @@ def test_import_states_from_found_to_scanned_to_outdated_and_unreadable(tmp_path
     state = store.scan(OTHER_ROUTE)
     assert state['state'] == 'failed' and 'could be read' in state['error']
     assert [item['state'] for item in store.log_files(OTHER_ROUTE)] == ['unreadable']
+
+
+def test_a_drive_is_passive_only_when_every_carparams_of_every_minute_says_so(tmp_path, synthetic_schema):
+    third = '00000099--0123456789'
+    comma_drive(tmp_path, segments=(0, 1), passive=(True, True))
+    comma_drive(tmp_path, OTHER_ROUTE, segments=(0,), passive=(True,))
+    comma_drive(tmp_path, OTHER_ROUTE, segments=(1,), passive=(False,))
+    comma_drive(tmp_path, third, segments=(0,), passive=(True, False))
+    store = drive_review.store_for(tmp_path)
+    found = {}
+    for route in (ROUTE, OTHER_ROUTE, third):
+        store.import_logs(route)
+        assert store.scan(route)['state'] in ('done', 'no_episodes')
+        found[route] = store.summary(route)['meta']['car']['passive']
+    assert found == {ROUTE: True, OTHER_ROUTE: False, third: False}
 
 
 def test_logs_added_later_from_the_portal_are_kept_once_and_scanned(tmp_path):

@@ -515,6 +515,10 @@ def test_a_database_of_before_the_blocks_still_reads(tmp_path):
     assert _targets().read_labels(tmp_path / 'nothing') == {}
 
 
+# A drive the brain learns from: openpilot passive in every carParams and never engaged (speed_review.dashcam_drive).
+DASHCAM = {'meta': {'car': {'brand': 'psa', 'dashcam_only': False, 'passive': True}}, 'coverage': {'engaged': 0}}
+
+
 def scanned(root, route, summary=None):
     from nnslr_tools import drive_review
     path = drive_review.db_path(root)
@@ -522,7 +526,7 @@ def scanned(root, route, summary=None):
     connection = sqlite3.connect(path)
     for statement in drive_review.SCHEMA_STATEMENTS:
         connection.execute(statement)
-    summary = {'t0_ns': 0, 'span_ns': [0, 40 * NS]} if summary is None else summary
+    summary = {'t0_ns': 0, 'span_ns': [0, 40 * NS], **DASHCAM} if summary is None else summary
     connection.execute("INSERT INTO scans (route, state, summary) VALUES (?, 'done', ?)", (route, json.dumps(summary)))
     connection.commit()
     connection.close()
@@ -542,7 +546,7 @@ def test_the_drives_are_those_scanned_with_their_frames_with_a_block_or_not(tmp_
         write_drive(tmp_path, route, [(0, i) for i in range(3)])
     scanned(tmp_path, ROUTE)
     scanned(tmp_path, other)
-    scanned(tmp_path, unfinished, {'t0_ns': 0, 'span_ns': [0, None]})
+    scanned(tmp_path, unfinished, {'t0_ns': 0, 'span_ns': [0, None], **DASHCAM})
     scanned(tmp_path, bare)
     assert targets.training_routes(tmp_path) == [ROUTE, other]
     assert targets.training_routes(tmp_path / 'nothing') == []
@@ -559,6 +563,35 @@ def test_the_drives_are_those_scanned_with_their_frames_with_a_block_or_not(tmp_
     assert any(bare in line and 'left out' in line for line in said)
     assert targets.dataset(tmp_path, lambda route: None, routes=[ROUTE], log=said.append) == []
     assert said[-1] == f'{ROUTE}: no scan, left out'
+
+
+def test_the_brain_learns_only_from_dashcam_drives_and_says_why_it_leaves_the_others_out(tmp_path):
+    targets = _targets()
+    engaged, unknown, old, older, steered = (f'0000000{i}--abcdef0123' for i in range(5, 10))
+    for route in (ROUTE, engaged, unknown, old, older, steered):
+        write_drive(tmp_path, route, [(0, i) for i in range(3)])
+    scanned(tmp_path, ROUTE)
+    # sunnypilot on: passive False, or engaged once.
+    scanned(tmp_path, engaged, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'passive': True}},
+                                'coverage': {'engaged': 3.5}})
+    # No carParams: not a dashcam drive.
+    scanned(tmp_path, unknown, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {}})
+    # An extract before carParams.passive: dashcamOnly says it.
+    scanned(tmp_path, old, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'dashcam_only': True}}})
+    scanned(tmp_path, older, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'dashcam_only': False}}})
+    scanned(tmp_path, steered)
+    left_out = {}
+    assert targets.training_routes(tmp_path, left_out) == [ROUTE, old, steered]
+    assert sorted(left_out) == [engaged, unknown, older] and all('sunnypilot was on' in why for why in left_out.values())
+    frozen(tmp_path)
+    said = []
+    plain = {'frames': encoded(3), 'series': {'v_ego': [[0, 50.0]]}, 'span': [0, 3 * NS], 'gps': []}
+    # MADS steered though the summary says passive: the logs win.
+    madsed = {**plain, 'series': {**plain['series'], 'mads_active': [[0, False], [NS, True]]}}
+    drives = targets.dataset(tmp_path, lambda route: madsed if route == steered else plain, log=said.append)
+    assert [drive['route'] for drive in drives] == [ROUTE, old]
+    assert f'{steered}: openpilot drove (mads_active on), left out' in said
+    assert all(any(route in line and 'sunnypilot was on' in line for line in said) for route in (engaged, unknown, older))
 
 
 def test_a_frozen_drive_whose_frames_changed_is_named():

@@ -1072,16 +1072,22 @@ class Panel:
         return ''
 
     def _brain_drives_missing(self) -> str:
-        """Why the brain has no drive to learn from now, or '': a drive is one with its logs read to the end and its
-        frames (brain_targets.training_routes, the one rule of the training; what they give: brain_labels). A drive is
-        labelled by being driven, so no mark of Speed review is needed."""
+        """Why the brain has no drive to learn from now, or '': a drive is one with sunnypilot off (a dashcam drive), its
+        logs read to the end and its frames (brain_targets.training_routes, the one rule of the training; what they give:
+        brain_labels). A drive is labelled by being driven, so no mark of Speed review is needed."""
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone (once a process).
             from nnslr_tools import brain_targets
-            found = brain_targets.training_routes(self.root)
+            left_out: dict[str, str] = {}
+            found = brain_targets.training_routes(self.root, left_out)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return str(exc) or 'the drives of the brain cannot be read'
-        return '' if found else 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
+        if found:
+            return ''
+        if left_out:
+            return (f'no drive to learn from: sunnypilot was on in every drive with its logs read ({len(left_out)}); '
+                    'drive with sunnylink › Toggles › Enable sunnypilot off')
+        return 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
 
     def brain_labels(self) -> dict:
         """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed

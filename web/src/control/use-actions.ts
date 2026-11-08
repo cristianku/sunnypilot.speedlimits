@@ -59,7 +59,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     const driver = options?.driver === 'on' ? ' With the driver’s inputs.' : '';
     const mean = options?.pool === 'mean' ? ' With the picture as a mean.' : '';
     return {title: 'Train the brain?', action: 'Start training',
-      text: 'First it reads the signs of every drive with its logs read as the car does today, then trains three seeds on '
+      text: 'First it reads the signs of every drive with sunnypilot off and its logs read as the car does today, then trains three seeds on '
         + 'the GPU: about 15 minutes. Three new versions in Models; '
         + 'nothing goes to the car until you choose one and Publish.' + works + driver + mean};
   }

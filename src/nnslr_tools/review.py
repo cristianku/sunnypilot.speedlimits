@@ -379,7 +379,7 @@ class ReviewApp(ReviewService):
 
     def assignable_drives(self) -> list[dict]:
         """Every drive with the work it can give today, the latest first: Sign review needs its report, Sign distance
-        signs to mark, Speed review its video."""
+        signs to mark, Speed review its video and a drive the brain learns from (or one not read yet)."""
         from nnslr_tools import drive_review, sign_distance, speed_review
         store = drive_review.store_for(self.root)
         kinds: dict[str, set[str]] = {}
@@ -389,7 +389,8 @@ class ReviewApp(ReviewService):
             if item['status'] == 'signs':
                 kinds.setdefault(item['route'], set()).add('distance')
         for item in speed_review.drives_list(speed_review.store_for(self.root), store):
-            if item.get('video_segments'):
+            # Speed review only on a drive the brain learns from (sunnypilot off: speed_review.dashcam_drive).
+            if item.get('video_segments') and item.get('dashcam') is not False:
                 kinds.setdefault(item['route'], set()).add('speed')
         drives = []
         for route, found in kinds.items():

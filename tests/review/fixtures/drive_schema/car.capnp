@@ -43,4 +43,5 @@ struct CarParams {
   carFingerprint @1 :Text;
   dashcamOnly @2 :Bool;
   openpilotLongitudinalControl @3 :Bool;
+  passive @4 :Bool;
 }

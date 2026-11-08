@@ -378,6 +378,11 @@ def merge(extracts: dict[int, dict]) -> dict:
     for segment in kept:
         for key, value in (extracts[segment].get('meta') or {}).items():
             meta.setdefault(key, value)
+    # passive of the drive: every segment that has it says True (an extract before 8 Nov 2026 has none).
+    passive = [car['passive'] for car in ((extracts[segment].get('meta') or {}).get('car') for segment in kept)
+               if isinstance(car, dict) and 'passive' in car]
+    if passive and isinstance(meta.get('car'), dict):
+        meta['car'] = {**meta['car'], 'passive': all(value is True for value in passive)}
     spans = {segment: extracts[segment]['span'] for segment in kept}
     return {'series': series, 'events': events, 'gps': gps, 'frames': frames, 'segments': kept, 'spans': spans,
             'holes': holes, 'left_out': left_out, 't0': t0, 'span': [t0, end], 'meta': meta}

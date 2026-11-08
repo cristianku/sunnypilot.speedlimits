@@ -118,6 +118,8 @@ def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | N
                   rate: float = 1.0) -> tuple[dict, FrameStore]:
     """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test."""
     drives = dataset(root, merged_of, [route] if route else None, rate=rate)
+    if not drives:
+        raise ValueError(f'{route or "no drive"}: not a drive the brain learns from (brain_targets.training_routes)')
     drive = max(drives, key=lambda item: sum(partition == 'test' for partition in item['partitions']))
     drive['extra'] = pack_inputs(drive['inputs'], groups)
     return drive, FrameStore(_pictures(root, [drive], dry_run=False, log=lambda text: None), device)

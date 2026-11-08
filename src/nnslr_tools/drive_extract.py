@@ -227,8 +227,11 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
             counts[which] = counts.get(which, 0) + 1
         if which == 'carParams':
             params = message.carParams
+            # passive: openpilot neither steers nor holds the speed (dashcamOnly, or sunnylink "Enable sunnypilot" off),
+            # True only when every carParams of the segment says so.
+            passive = (meta.get('car') or {}).get('passive', True) is True and _get(params, 'passive') is True
             meta['car'] = {'brand': _get(params, 'brand'), 'fingerprint': _get(params, 'carFingerprint'),
-                           'dashcam_only': _get(params, 'dashcamOnly'),
+                           'dashcam_only': _get(params, 'dashcamOnly'), 'passive': passive,
                            'openpilot_longitudinal': _get(params, 'openpilotLongitudinalControl')}
             continue
         specs = by_service.get(which)

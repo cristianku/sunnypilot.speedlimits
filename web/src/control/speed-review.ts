@@ -33,8 +33,8 @@ export interface SpeedDrive {
   revision: number;
   /** The dashboard speed along the drive at the brain's steps, in whole km/h, where it changes (speed_curve). */
   speed: SpeedPoint[];
-  /** [from_ns, to_ns] where openpilot or the car's cruise held the speed, the gas not pressed (held_spans): not his foot,
-   * so the brain learns no speed there unless a block says one. */
+  /** [from_ns, to_ns] where openpilot, the car's cruise (the gas not pressed) or the Peugeot's limiter held the speed
+   * (held_spans): not his foot, so the brain learns no speed there unless a block says one. */
   held: [number, number][];
   blocks: Block[];
   works: Works[];
@@ -45,6 +45,9 @@ export interface SpeedDrive {
   total_s: number;
   /** The highest speed a block may say. */
   max_kph: number;
+  /** Whether the brain learns from the drive: sunnypilot off in all of it (speed_review.dashcam_drive); null before its
+   * logs are read. */
+  dashcam: boolean | null;
 }
 
 export interface SpeedRow extends DriveRow {
@@ -52,6 +55,8 @@ export interface SpeedRow extends DriveRow {
   blocks: number;
   works: number;
   total_s: number;
+  /** As SpeedDrive's: the list shows only the drives where it is not false. */
+  dashcam: boolean | null;
 }
 
 /** A block is at least this long (MIN_BLOCK_SECONDS of speed_review.py). */

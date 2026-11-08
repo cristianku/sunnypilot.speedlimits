@@ -87,9 +87,41 @@ def test_openpilot_or_the_cruise_held_the_speed_unless_his_foot_was_on_the_gas()
     series = {'long_active': [[at(10), True], [at(20), False]],
               'cruise_enabled': [[at(30), True], [at(60), False]], 'gas': [[at(40), True], [at(50), False]]}
     times = [at(5), at(15), at(25), at(35), at(45), at(55), at(65)]
-    assert speed_review.machine_held(series, times) == [False, True, False, True, False, True, False]
+    assert speed_review.machine_held({'series': series}, times) == [False, True, False, True, False, True, False]
     # Logs without these series: nothing is held.
     assert speed_review.machine_held({}, times[:2]) == [False, False]
+    assert speed_review.machine_held(None, times[:2]) == [False, False]
+
+
+def test_the_peugeots_own_acc_and_limiter_are_held_though_carstate_says_the_cruise_is_off():
+    # 0-10 s ACC at 100 (available, set speed), the gas pressed at 5-10 s; 10-20 s nothing set (255); 20-40 s the
+    # limiter at 80 (not available), the car at 70, at 79, then over it at 90 (his kick-down); 40-50 s nothing known.
+    series = {'cruise_enabled': [[at(0), False]],
+              'cruise_available': [[at(0), True], [at(10), False], [at(40), None]],
+              'cruise_speed': [[at(0), 100.0], [at(10), 255.0], [at(20), 80.0], [at(40), None]],
+              'gas': [[at(0), False], [at(5), True], [at(10), False]],
+              'v_ego': [[at(0), 100.0], [at(20), 70.0], [at(30), 79.0], [at(37), 90.0]]}
+    times = [at(2), at(7), at(15), at(25), at(35), at(38), at(45)]
+    peugeot = {'series': series, 'meta': {'car': {'brand': 'psa'}}}
+    assert speed_review.machine_held(peugeot, times) == [True, False, False, False, True, False, False]
+    # The rule is the Peugeot's: another car's cruise says itself in cruiseState.enabled.
+    assert speed_review.machine_held({'series': series, 'meta': {'car': {'brand': 'subaru'}}}, times) == [False] * 7
+
+
+def test_a_dashcam_drive_is_passive_in_every_carparams_and_never_engaged():
+    def summary(car, engaged=0.0):
+        return {'meta': {'car': car} if car is not None else {}, 'coverage': {'engaged': engaged}}
+    assert speed_review.dashcam_drive(summary({'passive': True, 'dashcam_only': False}))
+    assert not speed_review.dashcam_drive(summary({'passive': False, 'dashcam_only': False}))
+    assert not speed_review.dashcam_drive(summary({'passive': True}, engaged=1.5))
+    # An extract before carParams.passive: dashcamOnly.
+    assert speed_review.dashcam_drive(summary({'dashcam_only': True}))
+    assert not speed_review.dashcam_drive(summary({'dashcam_only': False}))
+    # No carParams, no summary: not one.
+    assert not speed_review.dashcam_drive(summary(None)) and not speed_review.dashcam_drive(None)
+    assert speed_review.engaged_series({'series': {'sd_enabled': [[0, False]], 'lat_active': [[0, None], [1, True]]}}) \
+        == ['lat_active']
+    assert speed_review.engaged_series(None) == []
 
 
 def test_the_page_greys_where_a_machine_held_the_speed_at_the_brains_steps():
@@ -363,6 +395,22 @@ def test_the_drives_say_their_blocks_and_roadworks(store, monkeypatch):
     rows = speed_review.drives_list(store, FakeDrives())
     assert [(row['route'], row['blocks'], row['works'], row['total_s']) for row in rows] == [
         (routes[0], 0, 0, 300), (routes[1], 2, 1, 300)]
+    # FakeDrives' summary has no carParams: no dashcam drive, the page leaves it out.
+    assert [row['dashcam'] for row in rows] == [False, False]
+
+
+def test_the_drives_say_whether_the_brain_learns_from_them(store, monkeypatch):
+    class Drives(FakeDrives):
+        def summary(self, route):
+            if route.startswith('00000003'):
+                return None
+            return {'t0_ns': T0, 'span_ns': [T0, END], 'coverage': {'engaged': 0},
+                    'meta': {'car': {'passive': route.startswith('00000001')}}}
+    routes = ['00000001--aaaaaaaaaa', '00000002--bbbbbbbbbb', '00000003--cccccccccc']
+    monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': route} for route in routes])
+    # Not read yet: None, listed so that its logs can be read.
+    assert [row['dashcam'] for row in speed_review.drives_list(store, Drives())] == [True, False, None]
+    assert speed_review.drive_view(store, Drives(), routes[1])['dashcam'] is False
 
 
 # ---------- who writes ----------
