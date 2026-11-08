@@ -1,9 +1,9 @@
 // Changes to the frame on screen: type, value, road and details of the selected box, boxes added (drawn or
 // taken from the second reading) and removed, drawing mode and second reading on or off.
 import {nextTick, toRaw} from 'vue';
-import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue} from './catalog';
+import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue, signStyleOf} from './catalog';
 import {writeLocal} from './dom';
-import {currentRow, selectedDetection, workOf} from './frames';
+import {countryOf, currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
 import {refuseChange} from './busy';
 import {revealEditor} from './scroll';
@@ -123,12 +123,16 @@ export function togglePainted(): void {
   });
 }
 
+/** The number written on the sign, or null when it cannot be read. On a frame in the US it is in mph, the written digits
+ * (25 mph is 25, never 40). */
 export function setValue(value: number | null): void {
   editSelected((d) => {
     if (!familyHasValue(d.family)) d.family = 'maximum_speed';
     d.value_kph = value;
     d.sign_value = value;
     d.value_state = value === null ? 'unknown' : 'reviewed';
+    const row = currentRow()!;
+    if (signStyleOf(countryOf(row, workOf(row))) === 'us') d.sign_unit = 'mph';
     state.valueError = false;
   });
 }

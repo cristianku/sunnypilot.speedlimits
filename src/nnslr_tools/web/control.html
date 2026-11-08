@@ -690,9 +690,6 @@ a.latest-link{display:flex;align-items:center;gap:12px;padding:10px 14px;min-wid
 a.latest-link:hover{background:var(--surface-3)}
 .latest-none{margin:0;font-size:13px;color:var(--muted)}
 /* Publish (Models tab): the latest package of the networks, one row with its button. */
-.car-settings{margin-top:18px;display:flex;flex-direction:column;gap:10px}
-.car-settings h2{margin:0}
-.car-settings .note{margin:0}
 .cs-group{display:flex;flex-direction:column;gap:2px}
 .cs-group .ds-title{margin:6px 0 2px}
 .cs-row{display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid var(--line)}
@@ -919,33 +916,50 @@ align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.in
 .role-card .count-badge{margin-left:8px;vertical-align:1px}
 .role-what{margin:0;font-size:13.5px;line-height:1.45}
 .role-what .muted{display:block;margin-top:2px;font-size:12.5px}
-/* Train › Brain as a flow of blocks (BrainFlow.vue): four columns with arrows drawn between the blocks, the detail of the
-   block pointed at beside it; stacked without arrows when narrow, the detail under the block. */
+.versions-card .flow-head{margin:6px 0 0;font-size:13px;font-weight:600;color:var(--muted)}
+/* The brain's choices in one short row (BrainChoices.vue): switches tinted when on, the picture's Mean or Grid. */
+.bc{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:14px 0 0}
+.bc-switch{appearance:none;font:inherit;font-size:12.5px;font-weight:500;line-height:1.2;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--line-strong);background:var(--surface);color:var(--muted);cursor:pointer;transition:background .15s,color .15s}
+.bc-switch[aria-pressed="true"]{border-color:transparent;background:var(--accent-soft);color:var(--accent);font-weight:600}
+.bc-switch[aria-pressed="true"]::before{content:"✓";margin-right:5px}
+.bc-switch:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.bc-pick{display:inline-flex;align-items:center;gap:6px;margin-left:6px;padding-left:12px;border-left:1px solid var(--line-strong);
+  font-size:12.5px;color:var(--muted)}
+.bc .seg button{font-size:12.5px;padding:3px 11px}
+@media (max-width:700px){.bc-switch{padding:8px 12px}.bc .seg button{padding:6px 12px}.bc-pick{margin-left:0;padding-left:0;border-left:0}}
+/* A network as a flow of blocks (FlowChart.vue: Train › Brain, the network in use in Models): columns with lines drawn
+   between the blocks, a placed column putting each block on its row (the grid's rows, by FlowChart), the detail of the
+   block pointed at beside it; stacked without lines when narrow, the detail under the block. */
 .bf-legend{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin:14px 0 18px;font-size:12px;color:var(--muted)}
 .bf-key{display:inline-flex;align-items:center;gap:6px}
 .bf-key::before{content:"";width:16px;height:11px;border-radius:4px;border:1.5px solid var(--line-strong)}
-.bf-key-in::before{border-color:var(--accent);background:var(--accent-soft)}
+.bf-key-input::before{border-color:var(--accent);background:var(--accent-soft)}
 .bf-key-car::before{border-color:var(--ok);background:var(--ok-soft)}
 .bf-key-train::before{border-color:var(--todo);border-style:dashed;background:var(--todo-soft)}
-.bf-key-off::before{border-style:dashed}
 .bf-hint{margin-left:auto}
-.bf-grid{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0 46px}
+.bf-grid{position:relative;isolation:isolate;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:repeat(9,auto);
+  gap:10px 46px}
 .bf-lines{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .bf-line{fill:none;stroke-width:1.5;stroke:var(--muted);opacity:.55;transition:opacity .15s,stroke .15s}
 .bf-line.train{stroke:var(--todo);stroke-dasharray:5 4;opacity:.65}
-.bf-line.off{stroke-dasharray:3 4;opacity:.3}
 .bf-line.lit{stroke:var(--accent);stroke-width:2.2;opacity:1}
 .bf-arrow path{fill:var(--muted)}
 .bf-arrow.train path{fill:var(--todo)}
 .bf-arrow.lit path{fill:var(--accent)}
+.bf-arrow circle{fill:var(--todo)}
+.bf-arrow.lit circle{fill:var(--accent)}
 .bf-col{position:relative;z-index:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+.bf:not(.stacked) .bf-stack{grid-row:1/-1}
+.bf:not(.stacked) .bf-placed{display:contents}
+.bf:not(.stacked) .bf-answers::before{grid-column:var(--bf-col);grid-row:1/-1}
 .bf-col h4{margin:0 0 2px;font-size:12px;font-weight:600;line-height:1.3;color:var(--muted)}
 .bf:not(.stacked) .bf-col h4{min-height:2.6em}
 .bf:not(.stacked) .bf-col-1{gap:48px}
 .bf:not(.stacked) .bf-col-1 h4{margin-bottom:auto}
 .bf:not(.stacked) .bf-col-1 .bf-block:last-of-type{margin-bottom:auto}
-.bf-col-3::before{content:"";position:absolute;inset:-10px -14px;z-index:-1;border-radius:16px;background:var(--todo-soft);opacity:.45}
-.bf-block{appearance:none;font:inherit;color:var(--fg);text-align:left;display:flex;flex-direction:column;gap:2px;min-width:0;
+.bf-answers::before{content:"";position:absolute;inset:-10px -14px;z-index:-1;border-radius:16px;background:var(--todo-soft);opacity:.45}
+.bf-block{position:relative;z-index:1;appearance:none;font:inherit;color:var(--fg);text-align:left;display:flex;flex-direction:column;gap:2px;min-width:0;
   padding:9px 12px;border-radius:12px;border:1.5px solid var(--line-strong);background:var(--surface);cursor:pointer;
   transition:transform .12s,box-shadow .12s}
 .bf-block:hover,.bf-block.on{transform:translateY(-1px);box-shadow:var(--tip-shadow)}
@@ -956,8 +970,7 @@ align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.in
 .bf-net{background:var(--surface-2)}
 .bf-car{border-color:var(--ok);background:linear-gradient(var(--ok-soft),var(--ok-soft)),var(--surface)}
 .bf-train{border-color:var(--todo);border-style:dashed;background:linear-gradient(var(--todo-soft),var(--todo-soft)),var(--surface)}
-.bf-off{border-style:dashed;color:var(--muted)}
-.bf-divider{display:flex;align-items:center;gap:8px;margin:8px 0 -2px;font-size:11px;font-weight:600;letter-spacing:.04em;
+.bf-divider{display:flex;align-items:center;gap:8px;margin:8px 0 -2px;min-width:0;font-size:11px;font-weight:600;letter-spacing:.04em;
   text-transform:uppercase;color:var(--todo)}
 .bf-divider::after{content:"";flex:1;border-top:1.5px dashed var(--todo);opacity:.6}
 .bf-detail strong{display:block;margin-bottom:6px;font-size:14px}
@@ -1560,6 +1573,26 @@ background:var(--surface-2);color:var(--fg);font:inherit;font-size:13px;font-wei
 .sr-kind-new input{flex:1 1 160px;min-width:0;font:inherit;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;
 background:var(--surface-2);color:var(--fg)}
 .sr-kind-new input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+/* The road types: a lane of the map's, light, solid where he corrected it, the frame's stretch outlined; chips with their colour. */
+.dr-lanes rect.sr-type{fill-opacity:.42;stroke:none}
+.dr-lanes rect.sr-type.sr-type-yours{fill-opacity:1}
+.dr-lanes rect.sr-type.sr-type-none{fill-opacity:.15}
+.dr-lanes rect.sr-type.sr-type-current{stroke:var(--fg);stroke-width:1.5}
+.dr-lanes rect.sr-type-new{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3}
+.dr-run-text.sr-type-text{font-size:10px}
+.dr-run-text.sr-type-text-yours{fill:#fff;stroke:rgba(0,0,0,.35);stroke-width:2;paint-order:stroke}
+.sr-type-row{display:flex;flex-direction:column;gap:8px}
+.sr-type-now{display:flex;align-items:baseline;gap:6px;margin:0;font-size:14px;color:var(--muted)}
+.sr-type-now b{font-size:17px;font-weight:600;color:var(--fg)}
+.sr-type-dot{width:9px;height:9px;border-radius:3px;flex:none}
+.sr-type-dot.rt-town{background:var(--split-4)}.sr-type-dot.rt-zone30{background:var(--rt-zone30)}.sr-type-dot.rt-rural{background:var(--rt-rural)}
+.sr-type-dot.rt-expressway{background:var(--split-5)}.sr-type-dot.rt-motorway{background:var(--c-train)}
+.sr-type-dot.rt-ramp,.sr-type-dot.rt-merge{background:var(--rt-ramp)}.sr-type-dot.rt-parking{background:var(--rt-parking)}
+.sr-type-dot.rt-garage{background:var(--rt-garage)}.sr-type-dot.rt-unknown{background:transparent;box-shadow:inset 0 0 0 1.5px var(--rt-unknown)}
+.sr-kind[aria-current="true"]{border-color:var(--fg);box-shadow:inset 0 0 0 1px var(--fg);font-weight:600}
+.sr-kind.sr-type-from{color:var(--accent)}
+.sr-kind.sr-type-from[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.sr-kind:disabled{opacity:.5;cursor:default}
 .sr-blocks ul{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
 .sr-blocks li{display:flex;align-items:center;gap:6px}
 .sr-blocks li+li{border-top:1px solid var(--line)}

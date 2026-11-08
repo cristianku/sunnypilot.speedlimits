@@ -132,6 +132,19 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(
     assert 'choices: 1 1 0 grid' in lines and 'road types: 1' in lines
 
 
+def test_a_step_of_the_pipeline_takes_every_choice_of_the_brain(root, checkout, monkeypatch):
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 0}})
+    view = panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {
+        'works': 'on', 'road': 'on', 'types': 'off', 'driver': 'off', 'pool': 'grid'}}]}, 'admin')
+    assert view['state'] == 'running' and view['steps'][0]['options']['types'] == 'off'
+    done = finished(panel, view['steps'][0]['job'])
+    assert done['state'] == 'ok' and 'road types: 0' in full_log(panel, view['steps'][0]['job']).splitlines()
+
+
 def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
@@ -307,3 +320,12 @@ def test_models_say_whether_a_brain_reads_the_plates():
     assert brain_digest({**result, 'plates': True})['plates'] is True
     assert brain_digest(result)['hours'] is False
     assert brain_digest({**result, 'hours': True})['hours'] is True
+
+
+def test_models_say_how_the_car_steps_a_brain():
+    from nnslr_tools.model_roles import brain_digest
+    old = brain_digest({'groups': ['signs'], 'test': {}})  # a brain of before 8 Nov 2026
+    assert (old['rate_hz'], old['ahead'], old['hidden'], old['kph']) == (1.0, False, None, {'from': 5, 'to': 200, 'step': 5})
+    new = brain_digest({'groups': ['signs'], 'test': {}, 'rate_hz': 4, 'ahead': True, 'hidden': 128,
+                        'kph': {'from': 1, 'to': 200, 'step': 1}})
+    assert (new['rate_hz'], new['ahead'], new['hidden'], new['kph']) == (4, True, 128, {'from': 1, 'to': 200, 'step': 1})

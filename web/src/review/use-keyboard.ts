@@ -1,5 +1,6 @@
 // Keyboard shortcuts: ← → frame by frame of the video (video.ts), Shift ← → a second (a whole cell of the timeline), ↑ ↓ box, the speed typed
-// with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too), O X U the road (ours, another, unclear), S other
+// with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too; on a frame in the US
+// two keys in mph, "3 5" = 35, one alone and a pause its tens, 3 = 30), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road (a direction has no
 // key, only its button), Enter confirm, B or N new box, C fit the box picked to its sign on the server
 // (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, T the car's
@@ -14,7 +15,8 @@ import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
 import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
   toggleHints, toggleVariable} from './edits';
-import {currentRow, workOf} from './frames';
+import {signStyleOf} from './catalog';
+import {countryOf, currentRow, workOf} from './frames';
 import {stepSecond} from './navigation';
 import {stepFrame} from './video';
 import {report, state, toggleKeys} from './store';
@@ -22,6 +24,12 @@ import {report, state, toggleKeys} from './store';
 // A speed is one key (2 = 20 … 9 = 90); after a 1 the page waits this long for a second digit ("1 2" = 120, 1 alone
 // = 100), and a 0 that comes this soon after a speed set at once only ends it typed whole ("5 0", "1 2 0").
 const TYPING_MS = 900;
+
+/** The frame on screen was taken in the US: its signs are in mph, every 5, and a speed takes two keys. */
+function usFrame(): boolean {
+  const row = currentRow();
+  return row !== null && signStyleOf(countryOf(row, workOf(row))) === 'us';
+}
 
 // G P R E M: the kind of an other sign.
 const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other', m: 'main_road'};
@@ -80,6 +88,11 @@ export function useKeyboard(): void {
     const typed = state.typing;
     state.typing = '';
     if (!typed || state.selected < 0) return;
+    // In the US a digit alone is its tens: 3 = 30 mph.
+    if (usFrame() && typed.length === 1) {
+      setValue(typed === '0' ? null : Number(typed) * 10);
+      return;
+    }
     if (typed === '1' || typed === '10') {
       setValue(100);
       return;
@@ -94,7 +107,9 @@ export function useKeyboard(): void {
       return;
     }
     const key = state.currentKey ?? '';
-    state.notice = {key, text: 'One key per speed: 2 for 20 … 9 for 90, 1 for 100, 1 2 for 120 (0: not readable).', error: true};
+    const text = usFrame() ? 'Two keys per speed in mph: 3 5 for 35, 6 5 for 65; one alone for its tens, 3 for 30 (0: not readable).'
+      : 'One key per speed: 2 for 20 … 9 for 90, 1 for 100, 1 2 for 120 (0: not readable).';
+    state.notice = {key, text, error: true};
   };
   /** A digit typed on the selected box: 2-9 set 20-90 at once, 0 sets "not readable", 1 waits for a second digit
    * (1 1 = 110, 1 2 = 120; 1 alone or 1 0 0 = 100). */
@@ -107,6 +122,22 @@ export function useKeyboard(): void {
     }
     justSet = false;
     const typed = state.typing + digit;
+    // In the US: "3 5" = 35 mph at once; a first digit waits for the second, and alone it is its tens (flushTyping).
+    if (usFrame()) {
+      if (typed === '0') {
+        state.typing = '';
+        setValue(null);
+        return;
+      }
+      if (typed.length === 1) {
+        state.typing = typed;
+        typingTimer = window.setTimeout(flushTyping, TYPING_MS);
+        return;
+      }
+      state.typing = '';
+      setValue(Number(typed));
+      return;
+    }
     if (typed === '1' || typed === '10') {
       state.typing = typed;
       typingTimer = window.setTimeout(flushTyping, TYPING_MS);

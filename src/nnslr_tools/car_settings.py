@@ -1,5 +1,5 @@
 """The settings of the comma's vision limit (sunnypilot speed_limits/vision.py): how sure a sign or a road type must be
-and how long it must be seen, set in Models › On the car and sent with the networks (the "settings" of
+and how long it must be seen, kept in the data root (no longer shown on Models since 8 Nov 2026) and sent with the networks (the "settings" of
 speed_limits.json, car_release.manifest_of). The comma takes each one it knows within its bounds and keeps its own
 default for the others (vision.apply_settings): a setting of this list is a constant of vision.py, same default.
 
@@ -116,7 +116,7 @@ def values(root: Path) -> dict:
 
 
 def view(root: Path, published: dict | None = None) -> dict:
-    """For Models › On the car: every setting with its value, default and bounds, who set them last, and the values
+    """Every setting with its value, default and bounds, who set them last, and the values
     on the car (published: the "settings" of the manifest in the models repository; None when unknown)."""
     stored = _stored(root)
     current = values(root)

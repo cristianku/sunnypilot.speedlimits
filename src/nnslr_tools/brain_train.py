@@ -594,8 +594,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     torch.save({'weights': model.state_dict(), 'epoch': epochs - 1, **source}, run_dir / CHECKPOINT)
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
+    table = [int(round(value)) for value in model.class_kph.tolist()]
+    # rate_hz, ahead, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'pool': pool, 'works': works, 'road_kinds': kinds,
-              'road_types': list(ROAD_TYPES) if types else [], 'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
+              'road_types': list(ROAD_TYPES) if types else [], 'rate_hz': source['rate_hz'], 'ahead': source['ahead'],
+              'hidden': HIDDEN, 'kph': {'from': table[0], 'to': table[-1], 'step': table[1] - table[0] if len(table) > 1 else 0},
+              'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
               'seed': seed, 'right_kph': RIGHT_KPH, 'history': history,
               'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),

@@ -42,6 +42,28 @@ export interface RoadMark extends Works {
 /** What the marks on the page are of: the roadworks, or a kind of road by its kind. */
 export const ROADWORKS = 'works';
 
+/** A stretch of one road type (speed_review.road_type_stretches): the map's, one a second (Read the map in Data ›
+ * Prepare), or a person's correction over it. road_type null: the map has none, or (with a reviewer) they cannot tell. */
+export interface RoadTypeStretch {
+  road_type: string | null;
+  /** Who corrected it; null where it is the map's. */
+  reviewer: string | null;
+  /** The frame keys of its first and last frame. */
+  from: string;
+  to: string;
+  from_ns: number;
+  to_ns: number;
+}
+
+/** The road types as the page names them, in the order of road_types.ROAD_TYPES. */
+export const ROAD_TYPE_LABELS: Record<string, {label: string; short: string}> = {
+  town: {label: 'Town', short: 'town'}, rural: {label: 'Rural', short: 'rural'},
+  expressway: {label: 'Expressway', short: 'expr'}, motorway: {label: 'Motorway', short: 'mway'},
+  ramp: {label: 'Ramp', short: 'ramp'}, parking: {label: 'Parking', short: 'park'}, zone30: {label: 'Zone 30', short: '30'},
+  garage: {label: 'Garage', short: 'gar'}, merge: {label: 'Merge', short: 'merge'},
+};
+export const roadTypeLabel = (type: string | null): string => type === null ? 'Can’t tell' : ROAD_TYPE_LABELS[type]?.label ?? type;
+
 export interface SpeedDrive {
   route: string;
   /** The drive's last write: a save sends it back, and a stale one is refused. */
@@ -60,6 +82,10 @@ export interface SpeedDrive {
   road_kinds: RoadKind[];
   road: RoadMark[];
   road_checked_ns: Record<string, number>;
+  /** The road types along the drive, the map's and a person's corrections, and the types there are; missing from a
+   * server older than them. */
+  road_types?: RoadTypeStretch[];
+  road_type_names?: string[];
   /** The drive's first and last ns, where a block may go; null before its logs are scanned. */
   span_ns: [number, number] | null;
   total_s: number;
@@ -155,6 +181,11 @@ export function draggedEdge(item: Block, side: 'start' | 'end', ns: number, bloc
 /** The roadworks on a frame, null outside them. */
 export function worksAt(works: readonly Works[], ns: number): Works | null {
   return works.find((item) => item.start_ns <= ns && (item.end_ns === null || ns < item.end_ns)) ?? null;
+}
+
+/** The stretch of road type at a time, null where the map has no frame. */
+export function roadTypeAt(stretches: readonly RoadTypeStretch[], ns: number): RoadTypeStretch | null {
+  return stretches.find((item) => item.from_ns <= ns && ns < item.to_ns) ?? null;
 }
 
 /** True when roadworks with no end yet may end at this time: after their start, not past the next ones. */

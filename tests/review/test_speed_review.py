@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 import io
+import json
 import shutil
 import sqlite3
 import stat
@@ -536,6 +537,115 @@ def test_the_drives_say_their_marks_of_a_kind_of_road(store, monkeypatch):
     assert [(row['blocks'], row['works'], row['road']) for row in speed_review.drives_list(store, FakeDrives())] == [(0, 0, 2)]
 
 
+# ---------- the road types ----------
+
+# The map of the made-up drive, a frame a second of minute 0: town 0-9 s, rural 10-19 s, motorway 20-29 s, then no frames
+# up to 35 s and motorway again to 39 s.
+MAP_TYPES = [(second, 'town' if second < 10 else 'rural' if second < 20 else 'motorway')
+             for second in (*range(30), *range(35, 40))]
+
+
+class TypedDrives(FakeDrives):
+    """A drive with the road camera's encode index: frame k of minute 0 exposed at T0 + k / 20 s, so the frame of second
+    s of the map (decoded 20 s) at at(s)."""
+
+    def merged(self, route):
+        ids = list(range(0, 20 * 60))
+        return {**merged(self.points), 'frames': {'0': {'sof': [T0 + frame * NS // 20 for frame in ids], 'ids': ids}}}
+
+
+def write_map(root: Path, route=ROUTE, types=MAP_TYPES) -> None:
+    from nnslr_tools.road_types import road_types_path
+    path = road_types_path(root, route)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(''.join(json.dumps({'frame_key': f'0/{second}', 'segment_index': 0, 'output_index': second,
+                                        'road_type': kind, 'basis': 'test', 'sure': True}) + '\n'
+                            for second, kind in types), encoding='utf-8')
+
+
+def stretches(view):
+    return [(row['road_type'], row['reviewer'], row['from'], row['to'], (row['from_ns'] - T0) / NS, (row['to_ns'] - T0) / NS)
+            for row in view['road_types']]
+
+
+def test_the_page_gets_the_road_types_of_the_map_as_stretches_on_the_comma_s_clock(store, tmp_path):
+    write_map(tmp_path)
+    view = speed_review.drive_view(store, TypedDrives(), ROUTE)
+    assert view['road_type_names'][:4] == ['town', 'rural', 'expressway', 'motorway']
+    # A stretch runs to the next one's first frame; the frames missing end one, though the type is the same.
+    assert stretches(view) == [('town', None, '0/0', '0/9', 0, 10), ('rural', None, '0/10', '0/19', 10, 20),
+                               ('motorway', None, '0/20', '0/29', 20, 30), ('motorway', None, '0/35', '0/39', 35, 40)]
+    # No map yet, or no encode index: no stretches.
+    assert speed_review.drive_view(store, FakeDrives(), ROUTE)['road_types'] == []
+    assert speed_review.drive_view(store, TypedDrives(), '00000002--abcdef1234')['road_types'] == []
+
+
+def test_a_road_type_on_the_frame_shown_corrects_its_whole_stretch(store, tmp_path):
+    write_map(tmp_path)
+    body = {'road_type': 'town', 'at_ns': at(14.5), 'base_revision': 0}
+    view = speed_review.save_road_type(store, TypedDrives(), ROUTE, body, 'a')
+    assert view['revision'] == 1
+    assert stretches(view)[:3] == [('town', None, '0/0', '0/9', 0, 10), ('town', 'a', '0/10', '0/19', 10, 20),
+                                   ('motorway', None, '0/20', '0/29', 20, 30)]
+    # The map's own correction, the one every training reads; the drive's history says it too.
+    from nnslr_tools import road_types
+    assert [(line['from'], line['to'], line['road_type'], line['reviewer']) for line in road_types.load_corrections(tmp_path, ROUTE)] \
+        == [('0/10', '0/19', 'town', 'a')]
+    assert [line['road_type'] for line in road_types.load_road_types(tmp_path, ROUTE)][9:21] == ['town'] * 11 + ['motorway']
+    row = store.history(ROUTE)[0]
+    assert (row['action'], row['state'], row['note'], row['start_ns'], row['end_ns']) == ('type_corrected', 'town', '0/10 to 0/19',
+                                                                                         at(10), at(20))
+
+
+def test_from_one_frame_to_another_corrects_those_frames_in_either_order(store, tmp_path):
+    write_map(tmp_path)
+    body = {'road_type': None, 'from_ns': at(25.5), 'to_ns': at(21.2), 'base_revision': 0}
+    view = speed_review.save_road_type(store, TypedDrives(), ROUTE, body, 'a')
+    assert stretches(view)[2:5] == [('motorway', None, '0/20', '0/20', 20, 21), (None, 'a', '0/21', '0/25', 21, 26),
+                                    ('motorway', None, '0/26', '0/29', 26, 30)]
+    assert store.history(ROUTE)[0]['state'] == 'cant_tell'
+
+
+def test_from_before_the_map_starts_is_from_its_first_frame(store, tmp_path):
+    write_map(tmp_path, types=[(second, 'town') for second in range(2, 10)])
+    body = {'road_type': 'rural', 'from_ns': T0, 'to_ns': at(4.5), 'base_revision': 0}
+    view = speed_review.save_road_type(store, TypedDrives(), ROUTE, body, 'a')
+    assert stretches(view) == [('rural', 'a', '0/2', '0/4', 2, 5), ('town', None, '0/5', '0/9', 5, 10)]
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.save_road_type(store, TypedDrives(), ROUTE, {**body, 'to_ns': at(1), 'base_revision': 1}, 'a')
+    assert refused.value.reason == 'bad_stretch'
+
+
+@pytest.mark.parametrize('change, status, reason', [
+    ({'road_type': 'highway'}, 400, 'bad_road_type'),
+    ({'road_type': 'Town'}, 400, 'bad_road_type'),
+    ({'road_type': 'missing'}, 400, 'bad_road_type'),
+    ({'at_ns': str(at(5))}, 400, 'bad_value'),
+    ({'at_ns': at(-1)}, 400, 'bad_stretch'),
+    ({'at_ns': at(32)}, 400, 'bad_stretch'),
+    ({'from_ns': at(1)}, 400, 'bad_stretch'),
+    ({'at_ns': 'missing'}, 400, 'bad_stretch'),
+    ({'at_ns': 'missing', 'from_ns': at(1)}, 400, 'bad_value'),
+    ({'base_revision': 3}, 409, 'stale_revision'),
+])
+def test_a_road_type_that_does_not_fit_changes_nothing(store, tmp_path, change, status, reason):
+    write_map(tmp_path)
+    body = {'road_type': 'town', 'at_ns': at(5), 'base_revision': 0, **change}
+    body = {key: value for key, value in body.items() if value != 'missing'}
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.save_road_type(store, TypedDrives(), ROUTE, body, 'a')
+    assert (refused.value.status, refused.value.reason) == (status, reason)
+    from nnslr_tools import road_types
+    assert store.revision(ROUTE) == 0 and road_types.load_corrections(tmp_path, ROUTE) == []
+
+
+def test_a_drive_without_the_map_takes_no_road_type(store):
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.save_road_type(store, TypedDrives(), ROUTE, {'road_type': 'town', 'at_ns': at(5), 'base_revision': 0}, 'a')
+    assert (refused.value.status, refused.value.reason) == (404, 'no_road_types')
+    assert store.revision(ROUTE) == 0
+
+
 # ---------- who writes ----------
 
 @pytest.fixture
@@ -660,6 +770,43 @@ def test_only_a_person_signed_in_marks_a_kind_of_road_or_adds_one(tmp_path, driv
     finally:
         server.close()
         speed_review._stores.clear()
+
+def test_only_a_person_signed_in_corrects_a_road_type(tmp_path, monkeypatch):
+    from nnslr_tools import drive_review
+    monkeypatch.setattr(drive_review, 'store_for', lambda _root: TypedDrives())
+    make_report(tmp_path)
+    write_map(tmp_path)
+    path = f'/api/speed-review/drives/{ROUTE}/road-type'
+    body = {'road_type': 'rural', 'at_ns': at(5), 'base_revision': 0}
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    token = {'X-Review-Token': TOKEN}
+
+    def post(headers, sent=body):
+        status, _response, data = server.request('POST', path, body=sent, headers=headers)
+        return status, json_of(data)
+
+    try:
+        status, answer = post(token)
+        assert (status, answer['error']) == (403, 'session_required')
+        session = sign_in(server)
+        assert post({**session, 'Origin': 'http://elsewhere.example'})[1]['error'] == 'cross_origin'
+        server.app.panel.actions_enabled = False
+        assert post(session)[1]['error'] == 'actions_disabled'
+        server.app.panel.actions_enabled = True
+        status, answer = post(session)
+        assert status == 200 and answer['revision'] == 1
+        assert [(row['road_type'], row['reviewer']) for row in answer['road_types']][0] == ('rural', 'admin')
+        status, answer = post(session)
+        assert (status, answer['error']) == (409, 'stale_revision')
+        status, answer = post(session, {**body, 'road_type': 'autobahn', 'base_revision': 1})
+        assert (status, answer['error']) == (400, 'bad_road_type')
+        status, _response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=token)
+        assert status == 200 and json_of(data)['road_types'][0]['road_type'] == 'rural'
+        assert server.request('GET', path, headers=token)[0] == 405
+    finally:
+        server.close()
+        speed_review._stores.clear()
+
 
 def test_the_hd_switch_gets_the_frame_of_the_road_video_at_its_own_size(tmp_path):
     """Standing still with HD on, the player shows frame k of a minute of the comma's road video (fcamera.hevc): frame k of

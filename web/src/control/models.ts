@@ -39,12 +39,12 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     today: 'Today: only the prototypes of experiment B.',
     empty: 'No applicability network trained yet: experiment B is the first prototype.',
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
-    uses: 'Nothing uses the applicability network yet: the choice is only noted for later.',
+    uses: 'The one in use says whom each speed sign applies to in Prepare’s Our networks and in the signs the brain’s training reads for the next limit; it never goes to the car.',
   },
   brain: {
-    what: 'Says the speed to hold, once a second, from the camera, the signs read, the car ahead, the hour and the country. '
+    what: 'Says the speed to hold from the camera, the signs read, the car ahead, the hour and the country. '
       + 'On the comma it is the vision limit: the rules of the signs no longer run.',
-    today: 'Today: trained on the speeds of Speed review, judged on the frames of drives it never learned.',
+    today: 'Today: trained on how you drove, your dashboard speed and your blocks of Speed review, judged on drives it never learned.',
     empty: 'No brain trained yet.',
     emptyMore: 'nnslr train-brain on the server; it appears here.',
     uses: 'The comma runs the brain in use once Publish puts it in its software, in place of the rules of the signs.',

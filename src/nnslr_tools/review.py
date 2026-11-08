@@ -836,7 +836,7 @@ def make_handler(app: ReviewApp):
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
-            # The settings of the comma's vision limit for Models › On the car (nnslr_tools.car_settings): the ones
+            # The settings of the comma's vision limit (nnslr_tools.car_settings), no longer shown on Models: the ones
             # set here and the ones the published speed_limits.json carries to the car.
             if path == '/api/panel/car-settings':
                 self._json(200, self._car_settings_view())
@@ -1134,7 +1134,7 @@ def make_handler(app: ReviewApp):
             return car_settings.view(app.root, car_release.published_settings())
 
         def _car_settings_post(self, body):
-            """Models › On the car: {"values": {setting: number or null}} saved for the next Publish to the car; a
+            """{"values": {setting: number or null}} saved for the next Publish to the car; a
             read-only panel refuses it, as it refuses the actions."""
             from nnslr_tools import car_settings
             if not app.panel.actions_enabled:
@@ -1449,7 +1449,7 @@ def make_handler(app: ReviewApp):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if re.fullmatch(drive + '/(blocks|works|road)', path) or path == '/api/speed-review/road-kinds':
+            if re.fullmatch(drive + '/(blocks|works|road|road-type)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Not found.', True)
@@ -1507,9 +1507,10 @@ def make_handler(app: ReviewApp):
             """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
             to leave the moments out, "from_start_ns" to move the block that started there to these ends; {"remove":
             true, "start_ns", "base_revision"} removes one), a tap on its roadworks
-            (/works: {"tap", "at_ns", "base_revision"}) or on a kind of road (/road: the same and "kind"), or a new kind of
-            road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on the site (never the
-            access token alone: an agent never writes these) and a panel that is not read-only."""
+            (/works: {"tap", "at_ns", "base_revision"}) or on a kind of road (/road: the same and "kind"), a road type
+            (/road-type: {"road_type", "at_ns" or "from_ns" and "to_ns", "base_revision"}, road_type null when it cannot be
+            told), or a new kind of road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on
+            the site (never the access token alone: an agent never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1521,7 +1522,7 @@ def make_handler(app: ReviewApp):
             self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works|road)', path)
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works|road|road-type)', path)
             if match is None and path != '/api/speed-review/road-kinds':
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
@@ -1539,7 +1540,7 @@ def make_handler(app: ReviewApp):
                 return
             route = match.group(1)
             write = {'blocks': speed_review.save_block, 'works': speed_review.save_works,
-                     'road': speed_review.save_road}[match.group(2)]
+                     'road': speed_review.save_road, 'road-type': speed_review.save_road_type}[match.group(2)]
             try:
                 answer = write(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body, reviewer)
             except speed_review.SpeedReviewError as exc:

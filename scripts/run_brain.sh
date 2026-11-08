@@ -3,21 +3,25 @@ set -euo pipefail
 
 # The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, four times a second, from the picture and the
 # car's own signals, learnt from every drive with its logs read: the driver's own speed, corrected by the blocks of
-# Speed review, the roadworks and the kinds of road marked there and the next limit of the signs of Sign review. On one
+# Speed review, the roadworks and the kinds of road marked there and the next limit of the signs our networks read,
+# those of Sign review where the frames were confirmed there. On one
 # GPU, one step after the other:
 #
 #   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run);
 #   2. a CUDA smoke test;
 #   3. reads the signs of every drive it learns from as the car does today (nnslr road-type-signs --labelled; a drive
 #      already read by the car's reader of today is not read again: a new vision.py or a new network reads them all
-#      again, and the training refuses anything else), then says what the labels give (nnslr brain-targets);
+#      again, and the training refuses anything else), the signs it is given; then reads them with our networks in use,
+#      cutter, classifier and applicability, on the pictures at 1 a second (nnslr brain-signs, the same: a new network
+#      reads them all again), the next limit and its metres it is taught where nobody confirmed the frames in Sign
+#      review; then says what the labels give (nnslr brain-targets);
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
 #      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart.
 #
 # usage: scripts/run_brain.sh NAME
 #
 # Writes only into $DATA_ROOT/runs/NAME/ (brain.log, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
-# the sign readings and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
+# the sign readings (derived/road_type_signs, derived/brain_signs) and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
 # exports nothing: Publish exports the brain chosen in Models and checks it along a real drive. Run it again with the same
 # NAME to finish: a finished seed is not repeated, the signs already read are not read again.
 #
@@ -171,6 +175,8 @@ echo "== 3/6 Read the signs of the drives as the car does today =="
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
 "$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
+# The next limit and its metres it is taught: our networks in use read the pictures (their worker on .venv-gpu's torch).
+"$NN" brain-signs --data-root "$DATA_ROOT"
 if [[ "$TYPES" == "0" ]]; then
   "$NN" brain-targets --data-root "$DATA_ROOT" --no-road-types
 else

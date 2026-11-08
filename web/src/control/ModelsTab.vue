@@ -10,17 +10,17 @@
 // (scripts/try_on_comma.sh: it and the classifier in use copied straight onto the comma, checked first with its own
 // code, until its next software update; models/on-comma-trial.json), whose job shows here while it runs, with “Back to
 // the build's networks”. The networks in use reach the car with Publish (/publish: scripts/send_to_car.sh). The runs
-// themselves are on Results (/evaluate). Last, On the car: the settings of the comma's vision limit, published with
-// the networks (CarSettingsSection).
+// themselves are on Results (/evaluate). The settings of the comma's vision limit are no longer shown here (8 Nov 2026,
+// his call): Publish sends them as they are kept (nnslr_tools.car_settings).
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Job, ModelRole, ModelVersion, PanelStatus, RoleModels} from '../common/panel-types';
 import {askConfirm} from '../composables/confirm';
 import {pct} from './evaluate';
-import CarSettingsSection from './CarSettingsSection.vue';
 import JobProgress from './JobProgress.vue';
 import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import ModelItem from './ModelItem.vue';
+import ModelFlow from './ModelFlow.vue';
 import Segmented from './Segmented.vue';
 import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, tryQuestion, useModels,
   type CarState} from './models';
@@ -73,6 +73,8 @@ const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, l
 
 /** The version in use of a role, or null (none chosen, or its files are gone). */
 const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
+/** The version drawn under the picked network: the one in use, else the newest. */
+const drawn = computed(() => pickedRole.value ? inUseOf(pickedRole.value) ?? pickedRole.value.versions[0] ?? null : null);
 /** The cutter in use is an old Detector, chosen before SignNet could be (the server says so; an older one: not a SignNet). */
 function oldInUse(role: RoleModels): boolean {
   if (role.role !== 'cutter') return false;
@@ -286,6 +288,10 @@ async function choose(version: ModelVersion): Promise<void> {
     <section v-if="pickedRole" class="card versions-card" :data-role="pickedRole.role" aria-label="Versions">
       <Segmented v-model="picked" :options="roleOptions" label="Network" class="versions-seg"/>
       <p class="role-what">{{ ROLE_TEXT[pickedRole.role].what }}</p>
+      <template v-if="drawn">
+        <h3 class="flow-head">How it works{{ drawn.in_use ? '' : ' (no version in use: the newest)' }}</h3>
+        <ModelFlow :version="drawn"/>
+      </template>
       <p v-if="pickedRole.versions.length === 0" class="role-what muted">{{ ROLE_TEXT[pickedRole.role].empty }}
         <a v-if="pickedRole.role !== 'decider'" href="/train">Go to Train ›</a></p>
       <div v-else class="vt" :style="{'--vt-cols': columns.length}">
@@ -332,8 +338,6 @@ async function choose(version: ModelVersion): Promise<void> {
       <p v-if="payload.on_car_problem" class="note">What is on the car cannot be shown: {{ payload.on_car_problem }}.</p>
     </section>
 
-    <!-- The settings of the comma's vision limit, sent with the networks. -->
-    <CarSettingsSection :read-only="readOnly"/>
     <p v-if="error" class="note">Not updated: {{ error }}</p>
   </template>
 </template>

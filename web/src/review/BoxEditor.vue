@@ -2,14 +2,14 @@
 // The editor of the selected box: zoom (its corners and inside move the box too) with what the classifier gets beside it, road, speed signs, other
 // value, type and kinds of other signs, details.
 import {computed, ref, useTemplateRef, watch, watchEffect} from 'vue';
-import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, familyHasValue,
-  type BooleanField, type SelectField} from './catalog';
+import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, US_VALUES,
+  familyHasValue, signStyleOf, type BooleanField, type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import ClassifierView from './ClassifierView.vue';
 import {coarsePointer, releaseFocus} from './dom';
 import {setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted, toggleVariable} from './edits';
-import {workOf} from './frames';
+import {countryOf, workOf} from './frames';
 import {vFill} from './fill';
 import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
@@ -55,6 +55,9 @@ const noValue = computed(() => hasValueField.value
 const road = computed(() => props.detection?.applicability || 'unresolved');
 const panel = computed(() => props.detection?.supplementary_panel ?? 'unknown');
 const variable = computed(() => props.detection?.family === 'variable_display');
+// In the US the signs are the white SPEED LIMIT rectangles, in mph and every 5; elsewhere the red discs of km/h.
+const usSigns = computed(() => signStyleOf(countryOf(props.row, workOf(props.row))) === 'us');
+const quickValues = computed(() => usSigns.value ? US_VALUES : QUICK_VALUES);
 // From and to of a plate of hours. The box takes them when both are chosen: until then they wait here.
 const asksHours = computed(() => panel.value === 'time' && props.detection?.family === 'maximum_speed');
 const halfHours = ref<[string, string]>(['', '']);
@@ -179,12 +182,21 @@ function booleanChanged(key: BooleanField, event: Event): void {
               @click="setOnVehicle(); releaseFocus($event)">On a vehicle<kbd>V</kbd></button>
     </div>
     <!-- The signs are always there: a number makes the box a speed limit, "?" means the number cannot be read. -->
-    <div :class="['signs', {led: variable}]" id="quickValues" role="group" aria-label="Speed">
-      <button v-for="value in QUICK_VALUES" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
-              :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' written on sign'"
-              @click="setValue(value); releaseFocus($event)">{{ value }}</button>
-      <button type="button" class="sign unknown" :aria-pressed="noValue" data-value="unknown" title="Number not readable"
-              aria-label="Number not readable" @click="setValue(null); releaseFocus($event)">?</button>
+    <div :class="['signs', {led: variable, us: usSigns}]" id="quickValues" role="group" :aria-label="usSigns ? 'Speed in mph' : 'Speed'">
+      <template v-if="usSigns">
+        <button v-for="value in quickValues" :key="value" type="button" class="sign us"
+                :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' mph written on sign'"
+                @click="setValue(value); releaseFocus($event)"><span class="us-top" aria-hidden="true">SPEED<br>LIMIT</span><span class="us-num">{{ value }}</span></button>
+      </template>
+      <template v-else>
+        <button v-for="value in quickValues" :key="value" type="button" :class="value >= 100 ? 'sign wide' : 'sign'"
+                :aria-pressed="detection?.value_kph === value" :data-value="value" :aria-label="value + ' written on sign'"
+                @click="setValue(value); releaseFocus($event)">{{ value }}</button>
+      </template>
+      <button type="button" :class="usSigns ? 'sign us unknown' : 'sign unknown'" :aria-pressed="noValue" data-value="unknown"
+              title="Number not readable" aria-label="Number not readable" @click="setValue(null); releaseFocus($event)"><template
+              v-if="usSigns"><span class="us-top" aria-hidden="true">SPEED<br>LIMIT</span><span class="us-num">?</span></template><template
+              v-else>?</template></button>
     </div>
     <!-- The lit display over the road (L): lit, the numbers above look like it; the number stays either way. -->
     <div class="quick-row">

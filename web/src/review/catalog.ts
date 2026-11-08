@@ -25,6 +25,15 @@ export const FAMILIES: readonly Family[] = [
   {id: 'not_a_sign', label: 'Not a sign', hasValue: false, minor: true},
 ];
 export const QUICK_VALUES: readonly number[] = [10, 20, 30, 40, 50, 60, 70, 80, 100, 120];
+/** The limits of a US speed sign (MUTCD R2-1), in mph: every 5 from 15 to 80. */
+export const US_VALUES: readonly number[] = [15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
+
+/** How the speed signs look where a frame was taken: 'us', the white SPEED LIMIT rectangle in mph; 'disc', the red
+ * ring of km/h everywhere else. */
+export type SignStyle = 'us' | 'disc';
+export function signStyleOf(country: string | null): SignStyle {
+  return country === 'US' ? 'us' : 'disc';
+}
 /** The one kind of a "Not a sign" box (nnslr_tools.sign_types.NOT_A_SIGN_TYPES): a sign-like disc or panel on a
  * vehicle, such as the top-speed sticker on the back of a truck. */
 export const ON_VEHICLE = 'on_vehicle';
@@ -192,8 +201,8 @@ export function describe(d: Detection): string {
 
 // Short label on the photo: the list in the panel has the full description.
 export function shortName(d: Detection): string {
-  const v = d.value_kph;
   const known = hasValue(d);
+  const v = known && d.sign_unit === 'mph' ? d.value_kph + ' mph' : d.value_kph;
   switch (d.family) {
     case 'maximum_speed': return known ? String(v) : 'limit ?';
     case 'zone': return known ? 'zone ' + v : 'zone';

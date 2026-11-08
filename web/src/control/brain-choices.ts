@@ -7,7 +7,6 @@ import type {ActionOptions} from '../common/panel-types';
 
 export type OnOff = 'on' | 'off';
 export type BrainPool = 'mean' | 'grid';
-export const ON_OFF: {key: OnOff; label: string}[] = [{key: 'on', label: 'On'}, {key: 'off', label: 'Off'}];
 export const POOL_OPTIONS: {key: BrainPool; label: string}[] = [{key: 'mean', label: 'Mean'}, {key: 'grid', label: 'Grid'}];
 
 export function useBrainChoices() {
@@ -25,7 +24,7 @@ export function useBrainChoices() {
     + (types.value === 'off' ? ', without the road types' : '')
     + (pool.value === 'mean' ? ', with the picture as a mean' : '')
     + (driver.value === 'on' ? ', with the driver’s inputs' : ''));
-  /** A line under the choices. */
+  /** What Mean and Grid are, on the picture's choice. */
   const note = 'Grid keeps where things are in the picture, Mean only what is in it.';
   return reactive({works, road, types, driver, pool, option, words, note});
 }

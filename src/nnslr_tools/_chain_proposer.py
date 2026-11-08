@@ -81,7 +81,10 @@ def run(request: dict) -> None:
     print(f"Proposals with our networks on {device}: cutter {proposer['cutter']} ({kind}), classifier {proposer['classifier']}, "
           f"decider {proposer['decider']}", file=sys.stderr, flush=True)
     output = Path(request['output'])
-    (output / 'images').mkdir()
+    # The brain's signs (nnslr_tools.brain_signs) want the boxes only: no preview pictures.
+    previews = request.get('previews', True)
+    if previews:
+        (output / 'images').mkdir()
     frames = request['frames']
     with (output / 'preannotations.jsonl').open('w') as manifest:
         for ordinal, (frame, pixels, boxes) in enumerate(cutter_boxes(cutter, device, frames, root,
@@ -124,8 +127,9 @@ def run(request: dict) -> None:
                     item['applicability_score'] = round(probability, 4)
             for i, item in enumerate(detections):
                 item['detection_id'] = f"{frame['frame_key']}/{i}"
-            preview = f'images/{ordinal:08}.jpg'
-            save_preview(image, root / frame['image_path'], output / preview)
+            preview = f'images/{ordinal:08}.jpg' if previews else None
+            if previews:
+                save_preview(image, root / frame['image_path'], output / preview)
             row = {**frame, 'schema_version': 1, 'kind': 'preannotated_frame', 'run_id': request['run_id'],
                    'width': width, 'height': height, 'preview_path': preview, 'detections': detections,
                    'review_state': 'pending', 'ground_truth': False, 'model': proposer, 'road_model': None, 'ocr': None,

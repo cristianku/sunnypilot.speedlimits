@@ -1319,6 +1319,17 @@ export interface BrainModel extends ModelBase {
   hours: boolean;
   /** It learnt the plates for wet roads: frames of train with a speed to answer had one. */
   wet: boolean;
+  /** How often the car steps it: 1 for a brain of before 8 Nov 2026, 4 since. */
+  rate_hz: number;
+  /** It also says the next limit and the metres to it. */
+  ahead: boolean;
+  /** The size of its memory (the GRU); null for a brain of before 8 Nov 2026. */
+  hidden: number | null;
+  /** The speeds it can say, in km/h. */
+  kph: {from: number | null; to: number | null; step: number | null};
+  /** The road kinds and types it learnt, only in training. */
+  road_kinds: string[];
+  road_types: string[];
   seed: number | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;
@@ -1482,8 +1493,10 @@ export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_d
 export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame' | 'cruise' | 'no_road_type';
 /** GET /api/panel/brain-labels (brain_targets.summary): what the brain's training gets today from every drive with its logs
  * read and its frames, in seconds of the drives. speed: his own speed, or a block's of Speed review; works_in/works_out:
- * the roadworks answers; next: the next limit from Sign review; sites: the roadworks sites. Per drive the same, with why
- * the rest is out; to_read: the drives the training reads again first; problem instead when they cannot be read. */
+ * the roadworks answers; next: the next limit from the signs our networks read, his Sign review over them; sites: the
+ * roadworks sites. Per drive the same, with why the rest is out and whether our networks read it (networks_read); to_read:
+ * the drives the training reads again first as the car does; signs_to_read: those our networks in use read first (null
+ * when they are not whole); problem instead when they cannot be read. */
 /** The seconds on a kind of road (in) and checked off it (out). */
 export interface RoadCount {
   in: number;
@@ -1495,7 +1508,7 @@ export interface BrainLabels {
     {speed: number; works_in: number; works_out: number; sites: number; next: number; road: Record<string, RoadCount>;
       types?: Record<string, number>}>;
   drives?: {route: string; frames: number; speed: number; out: Record<BrainOut, number>; works_in: number;
-    works_out: number; marks: number; blocks: number; signs: number; covered_s: number; next: number; signs_read: boolean;
+    works_out: number; marks: number; blocks: number; signs: number; covered_s: number; networks_read?: boolean; next: number; signs_read: boolean;
     reader_current: boolean; pictures: boolean; no_picture_s: number; road?: Record<string, RoadCount>;
     typed_s?: number; typed_by_person_s?: number}[];
   /** The seconds without a road type are out (brain_targets' types), and the road types in their order. */
@@ -1505,6 +1518,7 @@ export interface BrainLabels {
   road_kinds?: string[];
   road_labels?: Record<string, string>;
   to_read?: number;
+  signs_to_read?: number | null;
 }
 export interface TrainSettings {
   label: string;

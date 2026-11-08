@@ -48,10 +48,11 @@ export const BRAIN_OUTPUTS: BrainFact[] = [
 export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'speed', what: 'your dashboard speed, driver_speed (vEgoCluster, or vEgo + the car’s offset), on every second of the dashcam '
     + 'drives; the kph of your blocks of Speed review where you set one'},
-  {name: 'next, metres', what: 'from the signs you confirmed in Sign review, where Sign distance reaches zero'},
-  {name: 'works_head', what: 'your roadworks of Speed review (Roadworks on)'},
-  {name: 'road_head', what: 'your kinds of road of Speed review (Kinds of road on)'},
-  {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare) with your corrections over it (Road types on)'},
+  {name: 'next, metres', what: 'from the signs our networks in use (cutter, classifier, applicability) read on every picture of the '
+    + 'drive, yours of Sign review over them where you confirmed the frames; passed where Sign distance reaches zero'},
+  {name: 'works_head', what: 'the roadworks on the road, where they are marked in Speed review (Roadworks on)'},
+  {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Kinds of road on)'},
+  {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road types on)'},
 ];
 
 /** The seconds that answer nothing (brain_targets.OUT_REASONS): they still go through the memory, as on the car. */

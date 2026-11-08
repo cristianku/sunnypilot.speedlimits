@@ -5,6 +5,7 @@ import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
 import {hourMinute} from '../common/format';
 import {duplicatesOf} from './boxes';
+import {hasValue, signStyleOf} from './catalog';
 import {clone, writeLocal} from './dom';
 import {countryOf, currentRow, frameStatus, fromServer, sameAsServer, workOf} from './frames';
 import {blockUnchecked} from './carry';
@@ -81,6 +82,10 @@ export async function confirmFrame(): Promise<void> {
   }
   writeLocal('nnslr-reviewer', reviewer);
   const s = workOf(row);
+  // A US number confirmed as proposed is in mph as well, as one typed is (edits.ts setValue).
+  if (signStyleOf(countryOf(row, s)) === 'us') {
+    for (const d of s.detections) if (hasValue(d) && d.sign_unit !== 'km/h') d.sign_unit = 'mph';
+  }
   s.review_state = 'reviewed';
   s.reviewer = reviewer;
   s.reviewer_kind = 'human';

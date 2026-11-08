@@ -142,7 +142,7 @@ MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_brain': ('works', 'road', 'driver', 'pool'),
+                  'train_brain': ('works', 'road', 'types', 'driver', 'pool'),
                   'regression': ('openpilot', 'brains'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
@@ -1008,7 +1008,7 @@ class Panel:
                 reason = 'the GPU is busy with another process'
             elif name == 'train_brain':
                 # Its labels are his own speed on every drive with its logs read (the blocks of Speed review correct
-                # it): it needs no confirmed sign, Sign review only gives it the next limit where it has one.
+                # it): it needs no confirmed sign; the next limit is our networks' reading, his Sign review over it.
                 pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
@@ -1097,23 +1097,25 @@ class Panel:
 
     def brain_labels(self) -> dict:
         """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed
-        with the blocks of Speed review, the roadworks, the next limit of Sign review, as brain_targets.summary, with
-        the drives the next training reads again first (not read, read by another reader than the car's of today, or
-        without the brain's pictures) and the names of the kinds of road (road_labels). Without the inputs, which it
+        with the blocks of Speed review, the roadworks, the next limit of our networks' signs with his Sign review over
+        them, as brain_targets.summary, with the drives the next training reads again first (to_read: not read, read by
+        another reader than the car's of today, or without the brain's pictures; signs_to_read: not read by our networks
+        in use, brain_signs.unread) and the names of the kinds of road (road_labels). Without the inputs, which it
         does not show: about 10 s over every drive, asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone.
-            from nnslr_tools import brain_targets
+            from nnslr_tools import brain_signs, brain_targets
             # As the training will have them, once it has read again what it reads first.
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
                                                                 need_pictures=False, inputs=False, types=True))
             labels = brain_targets.road_labels(self.root)
+            signs_to_read = brain_signs.unread(self.root, [row['route'] for row in found['drives']])
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
-        return {**found, 'road_labels': labels,
+        return {**found, 'road_labels': labels, 'signs_to_read': signs_to_read,
                 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------

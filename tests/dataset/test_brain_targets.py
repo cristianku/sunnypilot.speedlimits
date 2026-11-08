@@ -841,7 +841,7 @@ def test_two_numbers_on_one_sign_are_two_signs_and_a_mark_goes_to_one_sign(tmp_p
 
 
 def test_no_sign_review_is_no_sign_and_nothing_gone_through(tmp_path):
-    empty = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None}
+    empty = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None, 'read_by': None}
     assert _targets().reviewed_signs(tmp_path, ROUTE, sign_merged()) == empty
     sign_review_db(tmp_path, [frame_review(10, sign_box(kph=60))])
     (tmp_path / 'derived' / 'preannotations' / ROUTE / 'latest.json').unlink()
@@ -854,6 +854,99 @@ def test_reading_sign_review_changes_nothing(tmp_path):
     before = db_path(tmp_path).read_bytes()
     _targets().reviewed_signs(tmp_path, ROUTE, sign_merged())
     assert db_path(tmp_path).read_bytes() == before
+
+
+NETWORKS = {part: {'id': f'{part}:run/x', 'size': 1, 'mtime_ns': 1} for part in ('cutter', 'classifier', 'decider')}
+
+
+def net_box(family='maximum_speed', kph=None, where='own_road', panel='unknown', label=None):
+    """A box of our networks as their worker writes it (_chain_proposer): its class in model_label, no sign_type."""
+    return {'family': family, 'value_kph': kph, 'applicability': where, 'supplementary_panel': panel,
+            'model_label': label or (family if kph is None else f'{family}:{kph}'), 'bbox_xyxy': [0, 0, 10, 10]}
+
+
+def network_read(root, boxes, monkeypatch, last=119, in_use=NETWORKS):
+    """The drive read by our networks (brain_signs) on its pictures from 0 to last s, with boxes {second: [box, ...]};
+    in_use: the networks in use now (brain_signs.stamp_in_use)."""
+    from nnslr_tools import brain_signs
+    monkeypatch.setattr(brain_signs, 'stamp_in_use', lambda _root: in_use)
+    path = brain_signs.cache_path(root, ROUTE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    head = {'version': brain_signs.CACHE_VERSION, 'pictures': 'p1', 'confidence': 0.1, 'networks': NETWORKS}
+    rows = [{'frame_key': f'0/{second}', 'segment_index': 0, 'decoded_frame_index': second * 20, 'output_index': second,
+             'detections': boxes.get(second, [])} for second in range(last + 1)]
+    path.write_text(''.join(json.dumps(line) + '\n' for line in [head, *rows]), encoding='utf-8')
+
+
+def test_without_sign_review_the_signs_are_what_our_networks_read_on_the_whole_drive(tmp_path, monkeypatch):
+    targets = _targets()
+    network_read(tmp_path, {
+        10: [net_box(kph=60)], 11: [net_box(kph=60)],
+        # One sign: the applicability network gave it our road on a picture.
+        15: [net_box(kph=40, where='unresolved')], 16: [net_box(kph=40)],
+        30: [net_box(kph=80, where='other_road')],
+        50: [net_box(kph=50, where='unresolved')],
+        70: [net_box(kph=30, panel='time', label='maximum_speed_hours:30')],
+        # Too far to read, then a 70: the 70's.
+        78: [net_box('unreadable', where='unresolved')], 80: [net_box(kph=70)],
+        86: [net_box('unreadable', where='unresolved')],
+        90: [net_box('other_sign', where='unresolved', label='other_sign:town_entry')],
+        95: [net_box('other_sign', where='unresolved', label='other_sign:direction')],
+        100: [net_box('cancellation')]}, monkeypatch)
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    # Another road's sign is not ours; one whose road the applicability network could not tell, a number with hours,
+    # a sign nobody could read and a town's entry say a limit nobody knows: their approach is masked.
+    assert found['signs'] == [(11_500_000_000, 60), (16_500_000_000, 40), (80_500_000_000, 70), (100_500_000_000, None)]
+    assert found['masked'] == [(50 * NS, 50_500_000_000), (70 * NS, 70_500_000_000), (86 * NS, 86_500_000_000),
+                               (90 * NS, 90_500_000_000)]
+    assert found['covered'] == [(0, 119 * NS)]
+    assert found['read_by'] == {'cutter': 'cutter:run/x', 'classifier': 'classifier:run/x', 'decider': 'decider:run/x'}
+    assert isinstance(found['fingerprint'], str)
+
+
+def test_a_reading_by_networks_no_longer_in_use_is_not_used(tmp_path, monkeypatch):
+    targets = _targets()
+    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch,
+                 in_use={**NETWORKS, 'classifier': {'id': 'classifier:run/y', 'size': 1, 'mtime_ns': 2}})
+    assert targets.reviewed_signs(tmp_path, ROUTE, sign_merged())['read_by'] is None
+    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch, in_use=None)
+    assert targets.reviewed_signs(tmp_path, ROUTE, sign_merged()) == {'signs': [], 'covered': [], 'masked': [],
+                                                                      'fingerprint': None, 'read_by': None}
+
+
+def test_where_he_confirmed_the_frames_his_signs_replace_the_networks(tmp_path, monkeypatch):
+    targets = _targets()
+    # He went through 0 to 25 s and 60 to 80 s: a 60 at 10-12, a 70 of another road at 24-25 and a 50 at 78-80.
+    his = {10: [sign_box(kph=60)], 11: [sign_box(kph=60)], 12: [sign_box(kph=60)],
+           24: [sign_box(kph=70, where='other_road')], 25: [sign_box(kph=70, where='other_road')],
+           78: [sign_box(kph=50)], 79: [sign_box(kph=50)], 80: [sign_box(kph=50)]}
+    sign_review_db(tmp_path, [frame_review(second, *his.get(second, [])) for second in [*range(26), *range(60, 81)]])
+    network_read(tmp_path, {
+        11: [net_box(kph=50)],                  # a frame he confirmed: his
+        26: [net_box(kph=70)], 27: [net_box(kph=70)],  # his 70 is another road's
+        40: [net_box(kph=100)], 41: [net_box(kph=100)],  # nobody went through it: the networks'
+        81: [net_box(kph=50)], 82: [net_box(kph=80)]}, monkeypatch)  # his 50 longer to 81 s, then misread
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert found['signs'] == [(12_500_000_000, 60), (41_500_000_000, 100), (81_500_000_000, 50)]
+    assert found['masked'] == [] and found['covered'] == [(0, 119 * NS)]
+    alone = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert alone == found
+    (tmp_path / 'derived' / 'brain_signs' / f'{ROUTE}.jsonl').unlink()
+    mine = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    assert mine['signs'] == [(12_500_000_000, 60), (80_500_000_000, 50)] and mine['read_by'] is None
+    assert mine['covered'] == [(0, 25 * NS), (60 * NS, 80 * NS)] and mine['fingerprint'] != found['fingerprint']
+
+
+def test_the_networks_answer_the_next_limit_where_nobody_went_through_the_frames(tmp_path, monkeypatch):
+    targets = _targets()
+    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch)
+    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
+    ns = seconds(5, 35, 60)
+    following, weight, metres, _metres_weight = targets.ahead_from_signs(
+        ns, found, targets.metres_driven([[0, 36.0]]), _np().ones(3, dtype=bool))
+    # At 36 km/h: 65 m before the 100 its number; far before it and after it, none.
+    assert following.tolist() == [targets.NONE_AHEAD, targets.speed_class(100), targets.NONE_AHEAD]
+    assert weight.tolist() == [1, 1, 1] and round(float(metres[1]) * targets.METRES_SCALE) == 65
 
 
 def ahead(times, signs=(), covered=((0, 100 * NS),), masked=(), asked=None):

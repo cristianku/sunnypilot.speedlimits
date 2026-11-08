@@ -34,7 +34,7 @@ flowchart TD
   class brain hero
 ```
 
-It learns from people, not from the map. Its answer is the speed the driver held, as the dashboard showed it, at every moment of every drive whose logs are read: there is nothing to confirm. In **Speed review** a person corrects it with a block, from a time to a time, where it should have been another speed, or leaves a block out of training. A brain trained since 8 Nov 2026 also learns the next limit and the metres to it, from the signs confirmed in Sign review. The aim is what fixed rules cannot do, such as letting go of a roadworks limit that never gets an end sign.
+It learns from people, not from the map. Its answer is the speed the driver held, as the dashboard showed it, at every moment of every drive whose logs are read: there is nothing to confirm. In **Speed review** a person corrects it with a block, from a time to a time, where it should have been another speed, or leaves a block out of training. A brain trained since 8 Nov 2026 also learns the next limit and the metres to it, from the signs our networks in use read on every drive, with those confirmed in Sign review over them. The aim is what fixed rules cannot do, such as letting go of a roadworks limit that never gets an end sign.
 
 Where it stands: the first brain is in the release on Cristian's comma. On places kept out of training it gets 83-90 % of the frames right, on a small test of 438 frames, and for now it mostly says what the sign says. Roadworks need more labelled sites. [How it is built and measured](docs/NEURAL_NETWORK.md#the-brain-4-november-2026).
 
@@ -85,7 +85,7 @@ flowchart TD
 
 ### The rules on the car
 
-How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* can be changed on the site, **Models › On the car**.
+How the readings become the limit (`SpeedLimitMemory` in `sunnypilot/speed_limits/vision.py`, branch `speed-limits` of cristianku/sunnypilot). The numbers are the defaults; the ones marked *setting* are kept in `data/models/car-settings.json` and travel with every publish (no longer shown on the site since 8 Nov 2026).
 
 **The brain.** A release with a brain (Models › Brain, then Publish) replaces everything below up to Speed Limit Assist: the network says the speed itself, and speedvisiond publishes it as the vision limit (`brain.py`, `speedLimitReason` "brain"). Smartspeed is the one choice in sunnylink and the resolver does not change; the map is never used. How often it steps, which speeds it can say and what it gets come from its contract (`brain.onnx.contract.json`, shown in Models › Brain), so the car follows the brain it was given:
 
@@ -166,7 +166,7 @@ It takes one picture a second, lets a model propose sign boxes, and reads the GP
 On each picture you:
 
 - move, add or delete boxes;
-- say what each sign is, and its speed;
+- say what each sign is, and its speed (on a drive in the US the signs are the white SPEED LIMIT rectangles, every 5 mph from 15 to 80, stored as written with the unit mph: 25 mph is 25);
 - say whom it is for: **Ours**, **Another** road, or **Unclear**;
 - press **Confirm**.
 
@@ -176,7 +176,7 @@ On each picture you:
 
 An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
-**Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, and you mark the roadworks and the kinds of road (narrow, country, gravel road, potholes, or one you add). Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
+**Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, you mark the roadworks and the kinds of road (narrow, country, gravel road, potholes, or one you add), and you correct the map's road type (town, rural, motorway…) where it is wrong. Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
 
 ### 4. Import the reviews
 
@@ -201,7 +201,7 @@ On the site: **Training**. There is one tab and one button per network. **They a
 
 - **Train the cutter** (SignNet): about 80 minutes. Its **Mapillary** switch adds photos of the Mapillary Traffic Sign Dataset, cut once with **Cut the Mapillary windows**: **With Mapillary** (about two hours) or **Mapillary, then ours** (about three hours, chosen at first once the windows are cut; the classifier's switch starts on it too).
 - **Train the classifier**: a few hours. It learns from the false boxes of the cutter in use, so choose a cutter first.
-- **Train the brain**: three networks that differ only by their seed, from your own speed on every drive with its logs read and the blocks of Data › Speed review, and the next limit from Sign review; it reads the signs of those drives again first. Compare them in Models › Brain.
+- **Train the brain**: three networks that differ only by their seed, from your own speed on every drive with its logs read and the blocks of Data › Speed review, and the next limit from the signs our networks read, Sign review's over them; it reads the signs of those drives again first, as the car does and with our networks. Compare them in Models › Brain.
 - **Train applicability** (is this sign for our road?): about 15 minutes. A prototype.
 
 <img src="docs/images/panel-train.png" alt="Training page, Cutter tab: the Train the cutter button, the latest SignNet 896 by 288 (in use, 74.9% of the speed signs) and the curves of its last training, validation recall and loss over 40 epochs." width="100%">
@@ -224,12 +224,6 @@ To the car:
 
 - **Publish** (**Models › Publish**, one button) publishes the SignNet, the classifier and the brain in use into the [`speed-limits-models`](https://github.com/cristianku/speed-limits-models) repository. That is a submodule of sunnypilot's `speed-limits` branch. It then rebuilds Cristian's sunnypilot test branch (`psa-torque-sunny-testing`), in a few minutes. On the comma: **Settings › Software › Check for updates**, then install. The Hugging Face package below it is optional, for other people.
 - **Try on the comma now**, on the card of a SignNet, copies that SignNet and the classifier in use straight onto a parked comma over SSH, after checking them with the comma's own code. The brain stays the build's. They last until the comma's next update. **Back to the build's networks** undoes it.
-
-The **On the car** card holds the comma's settings: how sure a sign must be, in how many pictures, how long a road type must be seen. They travel with the next send.
-
-<img src="docs/images/panel-car.png" alt="The On the car card: settings for signs (classifier 70% sure, seen in 2 pictures within 1.5 s) and for the scene network (counts after 3 answers, new limit after 10 s, 30 zone at 90%, car park after 5 s, car park 10 km/h, ramp 45 s, merged after 8 s)." width="100%">
-
-<sub>Models › On the car: the comma's own settings, sent with the networks.</sub>
 
 ### Keep the site up to date
 

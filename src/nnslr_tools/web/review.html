@@ -485,6 +485,21 @@ details[open] summary::after, .tl-toggle[aria-expanded="true"]::after { transfor
 .sign[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); transform: scale(1.04); }
 /* A variable speed limit: the numbers as its lit display, white on black inside the red ring. */
 .signs.led .sign:not(.unknown) { background: #111; color: #f5f5f5; }
+/* In the US the signs look like theirs (MUTCD R2-1): a white upright rectangle, a black edge, SPEED LIMIT over the mph.
+   Fourteen and "?", five per row. */
+.signs.us { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.sign.us {
+  max-width: 44px; aspect-ratio: 4 / 5; border-radius: 5px; border: 2px solid var(--sign-ink);
+  box-shadow: 0 0 0 1.5px var(--sign-face), 0 2px 6px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; letter-spacing: -0.04em;
+}
+.sign.us .us-top { font-size: 6.5px; font-weight: 800; line-height: 1.05; letter-spacing: 0.02em; }
+.sign.us .us-num { font-size: 18px; line-height: 1; }
+.sign.us.unknown { border: 2px dashed var(--muted); box-shadow: none; }
+.sign.us[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); }
+/* A US variable limit: the lit display, white figures on black inside a white edge. */
+.signs.led .sign.us:not(.unknown) { border-color: #f5f5f5; box-shadow: 0 0 0 1.5px #111, 0 2px 6px rgba(0, 0, 0, 0.25); }
+.signs.led .sign.us[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); }
 .drive-link { margin: -6px 0 0; font-size: 13px; }
 .kinds { display: flex; flex-direction: column; gap: 6px; margin-top: -4px; }
 .kind-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
@@ -684,6 +699,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .quality { padding: 10px 16px; }
   .tl-ticks button { height: 16px; }
   .signs { grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 6px; }
+  .signs.us { grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px 6px; }
   /* The confirm button is in the bottom bar: the section under the inspector shows only messages and links. */
   .panel .confirm-section.quiet { display: none; }
   .confirm-area .btn.primary, .keys, .keys-toggle { display: none; }
@@ -761,6 +777,10 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
   .signs { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px 8px; }
   .sign { max-width: 56px; font-size: 18px; border-width: 5px; }
   .sign.wide { font-size: 16px; }
+  .signs.us { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .sign.us { max-width: 52px; border-width: 2px; }
+  .sign.us .us-top { font-size: 7.5px; }
+  .sign.us .us-num { font-size: 21px; }
   .empty-note { flex-direction: row; align-items: center; gap: 12px; padding: 12px 14px; text-align: left; }
   .empty-note svg { width: 28px; height: 28px; }
   .tl-seg { grid-template-columns: 30px minmax(0, 1fr); gap: 6px; }

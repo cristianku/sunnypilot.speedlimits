@@ -1,5 +1,5 @@
-"""The settings of the comma's vision limit (nnslr_tools.car_settings): kept in the data root, shown and saved in
-Models › On the car (/api/panel/car-settings), sent in speed_limits.json; the same as the constants of vision.py."""
+"""The settings of the comma's vision limit (nnslr_tools.car_settings): kept in the data root, read and saved by
+/api/panel/car-settings (no longer shown on Models), sent in speed_limits.json; the same as the constants of vision.py."""
 from __future__ import annotations
 
 import importlib.util

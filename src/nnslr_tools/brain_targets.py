@@ -60,8 +60,14 @@ several kinds at once: one column a kind, each with its target and its weight, a
 
 The limit ahead (reviewed_signs, ahead_from_signs), what the brain says beside the speed so that sunnypilot can slow down
 for it as for the map's: the next limit (a class of the speed, or NONE_AHEAD) and the metres to it. The signs are the
-boxes of the frames a person confirmed in Sign review, on the drive's current run (review.latest_report), never a site AI
-review still waiting for a person (review_db.NOT_WAITING_SQL), and only those of our own road:
+boxes our networks in use read on every picture of the drive (brain_signs: cutter, classifier and applicability, at 1 a
+second), with the person's over them, his rule of 8 Nov 2026: a frame confirmed in Sign review, on the drive's current
+run (review.latest_report), never a site AI review still waiting for a person (review_db.NOT_WAITING_SQL), is his and
+the networks' boxes there are not read; a sign he boxed is his, whatever road he gave it: the networks' sign of the
+same kind (_kind) within SIGN_GAP_SECONDS of one of his boxes is his, with his reading on their pictures where it is of
+our road (for a number, those where they read his number), left out where it is another road's. Of the networks' signs,
+one the applicability network gave our road on any picture is ours, and a sign nobody could read within
+SIGN_GAP_SECONDS of a number is that number seen from far. Only those of our own road:
 
 - a maximum_speed or a variable_display with its number is a sign: boxes of one family at most SIGN_GAP_SECONDS apart are
   one, and two numbers among them are two signs;
@@ -69,7 +75,8 @@ review still waiting for a person (review_db.NOT_WAITING_SQL), and only those of
 - a zone, a town's entry or exit, a motorway's or an expressway's start or end, a sign nobody could read, and a number
   with a plate (time, wet, present or unresolved) say a limit with no number of its own: their approach is masked, out of
   the loss;
-- another road's signs, or the unresolved ones, are not ours: left out.
+- another road's signs, or the unresolved ones a person confirmed, are not ours: left out; a speed sign, an end or one
+  of the above the applicability network could not give a road (unresolved) may be ours: its approach is masked.
 
 A sign is passed at the zero a person marked in Sign distance (annotations/sign_distance/<route>.jsonl, the mark in effect
 of the vision's run on it), else PASSAGE_SECONDS after its last box. The metres are the car's own, plain vEgo integrated
@@ -81,12 +88,13 @@ always a next. At the start, after an end or after a masked sign nothing is in f
 next. Within AHEAD_METRES of it: its number and its metres. No such sign and nothing masked within AHEAD_MARGIN_METRES:
 none, and no metres. Anything else, between the two or before an end: out of the loss.
 
-Both need what a person went through (covered: consecutive confirmed 1 Hz frames, a gap over COVER_GAP_SECONDS breaks
-it), since a part nobody went through may hide a sign: a number only where one span holds the frame, the sign it
-answers and the sign that put the limit in force; none only where every frame of the AHEAD_MARGIN_METRES ahead was
-confirmed. Where a gap lies between the last sign and the frame, what is in force is not known and a repeat cannot be
-told from a change: no number, and none only with no sign at all within the margin. Only on frames with an answer of
-the speed.
+Both need what was read (covered: consecutive 1 Hz pictures confirmed by a person or read by the networks, a gap over
+COVER_GAP_SECONDS breaks it), since a part nobody read may hide a sign: a number only where one span holds the frame,
+the sign it answers and the sign that put the limit in force; none only where every frame of the AHEAD_MARGIN_METRES
+ahead was read. Where a gap lies between the last sign and the frame, what is in force is not known and a repeat
+cannot be told from a change: no number, and none only with no sign at all within the margin. Only on frames with an
+answer of the speed. A drive the networks never read keeps only what a person confirmed. The networks' mistakes are
+answers too: they get fewer as the networks get better, and every training reads the drives again with those in use.
 
 The split (frame_partitions) is the frozen one, data/splits/speed-brain-split.json, never computed again: a drive of the
 freeze joins it frame by frame through speed-brain-frames.json, and one whose frames changed is left out of the dataset with
@@ -180,7 +188,7 @@ from pathlib import Path
 
 import numpy as np
 
-from nnslr_tools import drive_logs, drive_review, sign_distance
+from nnslr_tools import brain_signs, drive_logs, drive_review, sign_distance
 from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.review_db import NOT_WAITING_SQL, db_path as sign_review_path
@@ -226,7 +234,7 @@ MASKED_PANELS = ('time', 'wet', 'present', 'unresolved')
 PASSAGE_SECONDS = 0.5  # a sign's last box to its passing, without a mark (median of the marks on 0000016e: 0.4 s)
 SIGN_GAP_SECONDS = 3.0  # boxes of one family at most this far apart are one sign
 MARK_SECONDS = 5.0  # a zero mark this long after a sign's last box can still be its passing (sign_distance.WINDOW_S)
-COVER_GAP_SECONDS = 1.5  # confirmed 1 Hz frames further apart than this break what a person went through
+COVER_GAP_SECONDS = 1.5  # 1 Hz frames read (confirmed or by the networks) further apart than this break a span
 
 
 def _load_brain_inputs(path: Path):
@@ -724,36 +732,111 @@ def _kph(value) -> int | None:
     return value if type(value) is int and 1 <= value <= BRAIN_MAX_KPH else None
 
 
+def _kind(box: dict):
+    """What a box is when his signs and the networks' are told apart: the two families with a number are one."""
+    family = box.get('family')
+    if family in LIMIT_FAMILIES:
+        return 'limit'
+    return (family, box.get('sign_type')) if family == 'other_sign' else family
+
+
 def reviewed_signs(root: Path, route: str, merged: dict) -> dict:
     """{'signs': [(pass_ns, kph, None for an end)], 'covered': [(start_ns, end_ns)], 'masked': [(start_ns, end_ns)],
-    'fingerprint'} of a drive from Sign review and Sign distance, read only: see the module's text. fingerprint: a hash
-    of the rows and marks it came from, None with no run."""
+    'fingerprint', 'read_by'} of a drive from Sign review, the networks' reading (brain_signs) and Sign distance, read
+    only: see the module's text. fingerprint: a hash of the rows, the reading and the marks it came from, None with
+    neither; read_by: the networks that read the drive, None when they never did."""
     run, rows = _sign_review(root, route)
-    found = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None}
-    if run is None:
+    network = brain_signs.load(root, route)
+    if network is not None and network['read_by'].get('networks') != brain_signs.stamp_in_use(root):
+        # Read by networks no longer in use, or Our networks are not whole now: Sign review alone.
+        network = None
+    found = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None, 'read_by': None}
+    if run is None and network is None:
         return found
     exposures = _exposures(merged)
+
+    def when(payload: dict) -> int | None:
+        try:
+            return exposures.get(int(payload['segment_index']), {}).get(int(payload['decoded_frame_index']))
+        except (TypeError, ValueError, KeyError):
+            return None
+
     pictures, limits, ends, hidden = [], {}, [], {}
+
+    def take(t: int, box: dict, unsure: bool) -> None:
+        family = box.get('family')
+        hide = family in MASKED_FAMILIES or (family == 'other_sign' and box.get('sign_type') in MASKED_SIGN_TYPES)
+        if unsure:
+            # A sign the applicability network could not give a road: its approach is out of the loss.
+            if family in LIMIT_FAMILIES or family == 'cancellation' or hide:
+                hidden.setdefault(('unsure', _kind(box)), []).append((t,))
+        elif family in LIMIT_FAMILIES:
+            limits.setdefault(family, []).append((t, _kph(box.get('value_kph')), box.get('supplementary_panel')))
+        elif family == 'cancellation':
+            ends.append((t,))
+        elif hide:
+            hidden.setdefault((family, box.get('sign_type')), []).append((t,))
+
+    confirmed, his = set(), {}
     for row in rows:
         try:
             payload = json.loads(row['payload'])
-            t = exposures.get(int(payload['segment_index']), {}).get(int(payload['decoded_frame_index']))
-        except (TypeError, ValueError, KeyError):
+        except (TypeError, ValueError):
             continue
+        t = when(payload)
         if t is None:
             continue
+        confirmed.add(t)
         if row['output_index'] < READ_INDEX_BASE:
             pictures.append(t)
         for box in payload.get('detections') or []:
-            if not isinstance(box, dict) or box.get('applicability') != 'own_road':
+            if not isinstance(box, dict):
                 continue
-            family = box.get('family')
-            if family in LIMIT_FAMILIES:
-                limits.setdefault(family, []).append((t, _kph(box.get('value_kph')), box.get('supplementary_panel')))
-            elif family == 'cancellation':
-                ends.append((t,))
-            elif family in MASKED_FAMILIES or (family == 'other_sign' and box.get('sign_type') in MASKED_SIGN_TYPES):
-                hidden.setdefault((family, box.get('sign_type')), []).append((t,))
+            his.setdefault(_kind(box), []).append((t, box))
+            if box.get('applicability') == 'own_road':
+                take(t, box, False)
+    # The networks' reading on the pictures he did not confirm, sign by sign (_groups). Their other signs say what they
+    # are in their class (model_label "other_sign:town_entry"), not in a sign_type.
+    theirs = {}
+    for row in (network or {}).get('rows', ()):
+        t = when(row)
+        if t is None or t in confirmed:
+            continue
+        pictures.append(t)
+        for box in row.get('detections') or []:
+            if not isinstance(box, dict) or box.get('applicability') not in ('own_road', 'unresolved'):
+                continue
+            if box.get('family') == 'other_sign' and not box.get('sign_type'):
+                box = {**box, 'sign_type': str(box.get('model_label') or '').partition(':')[2] or None}
+            theirs.setdefault(_kind(box), []).append((t, box))
+    gap = int(SIGN_GAP_SECONDS * NS)
+    # Where a number was read, by them or by him on any road.
+    numbers = np.array(sorted(t for t, _box in theirs.get('limit', []) + his.get('limit', [])), dtype=np.int64)
+
+    def near(times: np.ndarray, group: list[tuple]) -> np.ndarray:
+        return np.flatnonzero((times >= group[0][0] - gap) & (times <= group[-1][0] + gap))
+
+    for kind, boxes in theirs.items():
+        mine = sorted(his.get(kind, ()), key=lambda item: item[0])
+        mine_t = np.array([t for t, _box in mine], dtype=np.int64)
+        for group in _groups(boxes):
+            close = near(mine_t, group)
+            if len(close):
+                # A sign he boxed within SIGN_GAP_SECONDS is his, whatever road he gave it. On his road their pictures
+                # of it make it longer, with his reading: for a number, where they read his number.
+                _t, his_box = mine[min(close, key=lambda at: max(group[0][0] - mine_t[at], 0, mine_t[at] - group[-1][0]))]
+                if his_box.get('applicability') == 'own_road':
+                    for t, box in group:
+                        if kind != 'limit' or box.get('value_kph') == his_box.get('value_kph'):
+                            take(t, his_box, False)
+                continue
+            if kind == 'unreadable' and len(near(numbers, group)):
+                # A number too far to read, then read: the sign is the number's, its approach is not masked.
+                continue
+            # A sign the applicability network gave our road on any picture is ours; one it never could give is unsure.
+            unsure = not any(box.get('applicability') == 'own_road' for _t, box in group)
+            for t, box in group:
+                take(t, box, unsure)
     zeros = _zero_marks(root, route, merged)
     signs, masked = [], []  # [(first, last, kph)], [(first, last)]
     for boxes in limits.values():
@@ -771,8 +854,12 @@ def reviewed_signs(root: Path, route: str, merged: dict) -> dict:
     found['signs'] = sorted(((at, kph) for at, (_first, _last, kph) in zip(passes, signs)), key=lambda sign: sign[0])
     found['masked'] = sorted((first, at) for at, (first, _last) in zip(passes[len(signs):], masked))
     found['covered'] = _covered(pictures)
+    read_by = (network or {}).get('read_by')
+    found['read_by'] = {part: entry['id'] for part, entry in read_by['networks'].items()} if read_by else None
     seen = {'run': run, 'rows': sorted([row['frame_key'], row['revision'], row['updated_at']] for row in rows),
             'marks': [[line['_line'], line['sign'], line['mark'], t] for t, _run, line in zeros]}
+    if read_by:
+        seen['networks'] = [read_by['networks'], read_by['pictures']]
     found['fingerprint'] = hashlib.sha256(json.dumps(seen, sort_keys=True).encode()).hexdigest()[:16]
     return found
 
@@ -831,7 +918,7 @@ def ahead_from_signs(ns: np.ndarray, reviewed: dict, metres_at, asked: np.ndarra
         # A passing is a little after the box it comes from: as near the span as its frames are to one another.
         stop = stops[span] + int(COVER_GAP_SECONDS * NS)
         reach[held] = np.asarray(metres_at(stops[span[held]]), dtype=np.float64) - here[held]
-        # What is in force is known only where a person went through everything since the sign that put it there.
+        # What is in force is known only where everything since the sign that put it there was read.
         certain |= held & (np.maximum(last_passed, masked_passed) >= starts[span] - int(COVER_GAP_SECONDS * NS))
     # Where it is not known a repeat cannot be told from a change: no number, and none only with no sign at all ahead.
     upcoming = np.where(certain & (in_force > 0), changed, nearest)
@@ -1328,7 +1415,7 @@ def _per_second(drive: dict) -> dict:
 def summary(drives: list[dict]) -> dict:
     """What the labels give the training today: per partition the frames with a speed, the works frames, the frames of
     each kind of road (road: {kind: {in, out}}) and the frames with an answer of the next limit, per drive the same with
-    why the rest is out, its blocks, its signs of Sign review and the seconds a person went through there. Frames one a
+    why the rest is out, its blocks, its signs (Sign review's and our networks') and the seconds read there. Frames one a
     second (the measured ones) at either rate: seconds of the drive."""
     kinds = next((drive['road_kinds'] for drive in drives if 'road_kinds' in drive), [])
 
@@ -1371,6 +1458,7 @@ def summary(drives: list[dict]) -> dict:
                      'road': {kind: count for kind, count in road_of(drive, slice(None)).items() if count['in'] or count['out']},
                      'blocks': len(drive.get('blocks') or ()), 'signs': len(reviewed.get('signs') or ()),
                      'covered_s': round(sum(end - start for start, end in reviewed.get('covered') or ()) / NS),
+                     'networks_read': bool(reviewed.get('read_by')),
                      'next': int(following.sum()),
                      'typed_s': int(drive['type_weight'].sum()) if 'type_weight' in drive else 0,
                      'typed_by_person_s': int((drive['type_weight'] * drive['typed_by_person']).sum())
@@ -1401,7 +1489,9 @@ def summary_text(found: dict) -> str:
         lines.append(f"  {row['route']}: {row['speed']} of {row['frames']} with a speed ({out}), {row.get('blocks', 0)} "
                      f"blocks; works {row['works_in']} in, {row['works_out']} out, {row['marks']} marks; "
                      + ''.join(f"{kind} {count['in']} in, {count['out']} out; " for kind, count in row.get('road', {}).items()) +
-                     f"{row.get('signs', 0)} signs reviewed, {row.get('covered_s', 0)} s gone through, the next limit on "
+                     f"{row.get('signs', 0)} signs ("
+                     f"{'Sign review and our networks' if row.get('networks_read') else 'Sign review only, NOT read by our networks'}"
+                     f"), {row.get('covered_s', 0)} s read, the next limit on "
                      f"{row.get('next', 0)}; a road type on {row.get('typed_s', 0)} s ({row.get('typed_by_person_s', 0)} "
                      f"set by a person); signs {signs}; {row['no_picture_s']} seconds with a speed and no picture")
     return '\n'.join(lines)

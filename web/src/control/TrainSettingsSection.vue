@@ -3,7 +3,7 @@
 // rate, the processes reading the frames, the classifier's false boxes; GET/POST /api/panel/train-settings
 // (nnslr_tools.train_settings). Saved here, the next training of that kind uses them (Panel.start sets the variables
 // of its script); the one running keeps its own, and the job's chips say what each one used. What the car needs (the
-// cutter's band, grid, channels, fuse) is shown fixed. The look of On the car (CarSettingsSection), folded in a row.
+// cutter's band, grid, channels, fuse) is shown fixed. The look of the old On the car of Models, folded in a row.
 import {computed, onMounted, reactive, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen} from '../common/format';

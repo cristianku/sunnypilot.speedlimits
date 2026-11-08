@@ -38,6 +38,14 @@ kinds at once, so the marks of one kind never overlap and those of two kinds may
 The taps go in speed_history as road_start, road_end, road_removed and road_checked, with the kind in its column state,
 and speed_road is rebuilt by playing them again, as speed_works.
 
+The road types. Town, rural, expressway, motorway… (road_types.ROAD_TYPES) come from the map, one a second (Read the map
+in Data › Prepare, nnslr road-types), and a person corrects them here where the map is wrong: a type, or "can't tell",
+on the whole stretch of the frame shown or from one frame to another. The correction is the map's own
+(road_types.correct, annotations/road_types/<route>.jsonl), the file every training reads (road_types.load_road_types):
+never an input of the car, the brain learns the type aside (brain_net's type_head). It is a write of the drive like the
+others, same revision and same rules: type_corrected in speed_history, the type in its column state ('cant_tell' for
+none) and its frames in note.
+
 The old stretches. Until 8 Nov 2026 a person said the speed stretch by stretch, on a grid of 5 km/h, from a proposal of
 the OpenStreetMap limit: speed_stretches and its rows of speed_history (saved, cleared) stay in the file, and nothing
 reads them any more.
@@ -49,6 +57,7 @@ from __future__ import annotations
 
 import bisect
 import contextlib
+import json
 import math
 import os
 import sqlite3
@@ -56,7 +65,7 @@ import threading
 from pathlib import Path
 from typing import Iterator
 
-from nnslr_tools import drive_logs, video_frames
+from nnslr_tools import drive_logs, road_types, video_frames
 from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
 from nnslr_tools.road_type_signs import STEPS_PER_SECOND
 
@@ -79,6 +88,8 @@ RESERVED_KINDS = frozenset({'works', 'constructor', 'gps', 'latitude', 'longitud
 # The labels a kind may not take: the roadworks' own, as the page names them.
 RESERVED_LABELS = frozenset({'roadworks', 'works'})
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
+# A frame of the map this long after the one before starts a new stretch of road type: the frames between are missing.
+ROAD_TYPE_GAP_NS = 2 * NS
 # openpilot driving, any of them True once: selfdriveState, MADS, carControl.
 ENGAGED_SERIES = ('sd_enabled', 'sd_active', 'mads_active', 'lat_active', 'long_active')
 
@@ -494,6 +505,20 @@ class SpeedReviewStore:
                           reviewer)
         return revision
 
+    def set_road_type(self, route: str, first: str, last: str, start_ns: int, end_ns: int, road_type: str | None,
+                      base_revision: int, reviewer: str) -> int:
+        """A person's road type (None: they cannot tell) on the frames of the map from first to last (frame keys), from
+        start_ns to end_ns on the page, if the drive is still at base_revision: kept with road_types.correct, last, so
+        that a correction refused writes nothing. Returns the new revision."""
+        with self._writing(route, base_revision) as (connection, revision):
+            self._log(connection, route, revision, 'type_corrected', start_ns, end_ns,
+                      {**NO_LABEL, 'state': road_type or 'cant_tell', 'note': f'{first} to {last}'}, reviewer)
+            try:
+                road_types.correct(self.root, route, first, last, road_type, reviewer)
+            except road_types.CorrectionError as exc:
+                raise SpeedReviewError(400, 'bad_road_type', str(exc)) from exc
+        return revision
+
 
 _stores: dict[str, SpeedReviewStore] = {}
 _stores_lock = threading.Lock()
@@ -516,22 +541,81 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
     return summary['t0_ns'], summary['span_ns'][1]
 
 
+def road_type_frames(root: Path, route: str, merged: dict | None) -> list[tuple[int, dict]]:
+    """The road type of each frame of the map, one a second (road_types.load_road_types: the map's, a person's
+    corrections over it), with the time the road camera exposed that frame on the comma's clock (its decoded frame in
+    the drive's encode index, drive_logs.frame_time), in time order: [(ns, line)]. A frame the encode index lacks is left
+    out; [] before Read the map."""
+    from nnslr_tools.road_type_data import FRAMES_RELATIVE
+    lines = road_types.load_road_types(root, route)
+    if not lines or not merged:
+        return []
+    decoded = {}
+    for path in (Path(root) / FRAMES_RELATIVE / route).glob('*/frames.jsonl'):
+        for text in path.read_text(encoding='utf-8', errors='replace').splitlines():
+            try:
+                row = json.loads(text)
+                decoded[f"{row['segment_index']}/{row['output_index']}"] = int(row['decoded_frame_index'])
+            except (ValueError, TypeError, KeyError):
+                continue
+    index = drive_logs.frame_index(merged)
+    found = []
+    for line in lines:
+        segment, second = line.get('segment_index'), line.get('output_index')
+        if not isinstance(segment, int) or not isinstance(second, int):
+            continue
+        ns = drive_logs.frame_time(index, segment, decoded.get(line['frame_key'], second * drive_logs.FPS))
+        if ns is not None:
+            found.append((ns, line))
+    found.sort(key=lambda item: item[0])
+    return found
+
+
+def road_type_stretches(frames: list[tuple[int, dict]], drive_end: int) -> list[dict]:
+    """The drive as stretches of one road type for the page, from road_type_frames: [{road_type (None: the map has none,
+    or a person cannot tell), reviewer (None: the map's), from, to (frame keys of its first and last frame), from_ns,
+    to_ns}]. The map's frames and a person's are never one stretch. A stretch runs to the next one's first frame, the
+    last one a second past its last frame (never past drive_end), and frames missing (ROAD_TYPE_GAP_NS) end one."""
+    found: list[dict] = []
+    last_ns = None
+    for ns, line in frames:
+        reviewer = line.get('reviewer') if line.get('reviewed') is True else None
+        current = found[-1] if found else None
+        gap = last_ns is not None and ns - last_ns >= ROAD_TYPE_GAP_NS
+        if current and not gap and current['road_type'] == line.get('road_type') and current['reviewer'] == reviewer:
+            current['to'] = line['frame_key']
+        else:
+            if current:
+                current['to_ns'] = last_ns + NS if gap else ns
+            found.append({'road_type': line.get('road_type'), 'reviewer': reviewer, 'from': line['frame_key'],
+                          'to': line['frame_key'], 'from_ns': ns, 'to_ns': None})
+        last_ns = ns
+    if found:
+        found[-1]['to_ns'] = last_ns + NS
+    for stretch in found:
+        stretch['to_ns'] = max(stretch['from_ns'] + 1, min(stretch['to_ns'], drive_end))
+    return found
+
+
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
     """A drive for the page: its revision, the driver's speed along it (speed: speed_curve), where a machine held it
     (held: held_spans), its blocks, its roadworks, the kinds of road (road_kinds), their marks (road) and how far each was
-    gone through (road_checked_ns, by kind), its first and last ns (span_ns, where a block may go), its length and whether
-    the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed and no span, and
-    dashcam None."""
+    gone through (road_checked_ns, by kind), the road types of the map with a person's corrections (road_types:
+    road_type_stretches; road_type_names, in their order), its first and last ns (span_ns, where a block may go), its
+    length and whether the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed,
+    no span, no road types and dashcam None."""
     span = _span_of(drives, route)
     view = {'ok': True, 'route': route, 'revision': store.revision(route), 'blocks': store.blocks(route),
             'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'road_kinds': store.road_kinds(),
-            'road': store.road(route), 'road_checked_ns': store.road_checked(route), 'speed': [], 'held': [],
+            'road': store.road(route), 'road_checked_ns': store.road_checked(route), 'road_types': [],
+            'road_type_names': list(road_types.ROAD_TYPES), 'speed': [], 'held': [],
             'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
             'dashcam': None if span is None else dashcam_drive(drives.summary(route))}
     if span is not None:
         merged = drives.merged(route)
         view.update(speed=speed_curve(merged, span), held=held_spans(merged, span), span_ns=list(span),
-                    total_s=round((span[1] - span[0]) / NS, 1))
+                    total_s=round((span[1] - span[0]) / NS, 1),
+                    road_types=road_type_stretches(road_type_frames(store.root, route, merged), span[1]))
     return view
 
 
@@ -598,6 +682,45 @@ def save_road(store: SpeedReviewStore, drives: DriveReviewStore, route: str, bod
         raise SpeedReviewError(400, 'bad_kind', 'kind is the name of a kind of road.')
     tap, at, base = works_tap(body, span)
     store.tap_road(route, kind, tap, at, span[1], base, reviewer)
+    return drive_view(store, drives, route)
+
+
+def save_road_type(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
+    """A person's road type ({road_type: one of road_types.ROAD_TYPES, or null when they cannot tell, base_revision}) on
+    the whole stretch of the page the frame shown is in ({at_ns}: road_type_stretches), or from one frame to another
+    ({from_ns, to_ns}, in either order: the frames of the map shown at those times, both kept): checks it against the
+    drive, keeps it (SpeedReviewStore.set_road_type), and answers with the drive as it is now."""
+    span = _span_of(drives, route)
+    if span is None:
+        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    road_type = body.get('road_type')
+    if 'road_type' not in body or (road_type is not None and road_type not in road_types.ROAD_TYPES):
+        raise SpeedReviewError(400, 'bad_road_type', 'road_type is one of ' + ', '.join(road_types.ROAD_TYPES)
+                               + ', or null when it cannot be told.')
+    base = _integer(body.get('base_revision'), 'base_revision')
+    stretch = 'at_ns' in body
+    if stretch == ('from_ns' in body or 'to_ns' in body):
+        raise SpeedReviewError(400, 'bad_stretch', 'Say at_ns for the stretch of a frame, or from_ns and to_ns.')
+    times = [_integer(body.get(name), name) for name in (('at_ns',) if stretch else ('from_ns', 'to_ns'))]
+    if not all(span[0] <= ns <= span[1] for ns in times):
+        raise SpeedReviewError(400, 'bad_stretch', 'This frame is outside the logs of the drive.')
+    frames = road_type_frames(store.root, route, drives.merged(route))
+    if not frames:
+        raise SpeedReviewError(404, 'no_road_types', 'This drive has no road types yet: Read the map in Data › Prepare.')
+    if stretch:
+        here = next((item for item in road_type_stretches(frames, span[1])
+                     if item['from_ns'] <= times[0] < item['to_ns']), None)
+        if here is None:
+            raise SpeedReviewError(400, 'bad_stretch', 'The map has no frame here.')
+        first, last, start, end = here['from'], here['to'], here['from_ns'], here['to_ns']
+    else:
+        # The frame shown at each time: the last one at or before it, the first one before the map starts.
+        at = [max(0, bisect.bisect_right(frames, ns, key=lambda item: item[0]) - 1) for ns in sorted(times)]
+        if frames[at[1]][0] > max(times):
+            raise SpeedReviewError(400, 'bad_stretch', 'The map has no frame from here to there.')
+        (start, line_first), (last_ns, line_last) = frames[at[0]], frames[at[1]]
+        first, last, end = line_first['frame_key'], line_last['frame_key'], min(last_ns + NS, span[1])
+    store.set_road_type(route, first, last, start, max(end, start + 1), road_type, base, reviewer)
     return drive_view(store, drives, route)
 
 
