@@ -306,7 +306,10 @@ async function addKind(): Promise<void> {
 const roadTypes = computed(() => drive.value?.road_types ?? []);
 /** The chips: the types in their order, then "can't tell" (null). */
 const typeChoices = computed((): (string | null)[] => [...drive.value?.road_type_names ?? Object.keys(ROAD_TYPE_LABELS), null]);
-const typeHere = computed(() => roadTypeAt(roadTypes.value, now.value));
+/** The stretch at the frame shown, else one less than a second away: the map's first frame comes a moment after the
+ * logs start (0:00 had none) and its last one a moment before they end. */
+const typeHere = computed(() => roadTypeAt(roadTypes.value, now.value) ?? roadTypes.value.find((item) =>
+  item.from_ns - 1e9 <= now.value && now.value < item.to_ns + 1e9) ?? null);
 /** A stretch's type in words: where the map has none and nobody set one, it says so, not "can't tell". */
 const typeName = (item: RoadTypeStretch): string => item.road_type === null && item.reviewer === null ? 'None on the map'
   : roadTypeLabel(item.road_type);
@@ -336,7 +339,8 @@ async function setType(type: string | null): Promise<void> {
     toast('The map has no frame here: “From here” sets a type from one frame to another.');
     return;
   }
-  const at = within(now.value);
+  // On the stretch: a frame shown just before its start or after its end sets it all the same.
+  const at = here && from === null ? Math.min(here.to_ns - 1, Math.max(here.from_ns, within(now.value))) : within(now.value);
   // A part of the stretch: its ends are the frames of the map at those times, the frame shown in both parts.
   const body = from !== null ? {road_type: type, from_ns: from, to_ns: at}
     : here && typeCut.value === 'before' ? {road_type: type, from_ns: here.from_ns, to_ns: at}
