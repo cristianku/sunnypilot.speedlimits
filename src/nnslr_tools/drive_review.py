@@ -650,6 +650,69 @@ def inference_lane(root: Path, route: str) -> dict | None:
             'frames': frames}
 
 
+# The fields of a box the drive player draws and lists (review/catalog.ts shortName, describe): the rest stays in Sign
+# review.
+SIGN_BOX_FIELDS = ('bbox_xyxy', 'family', 'value_kph', 'sign_unit', 'sign_type', 'painted', 'plate_hours',
+                   'supplementary_panel', 'score')
+# A frame added at a sign the comma read is 1000 + its frame in the minute's video (sign_reads, review/order.ts).
+READ_INDEX_BASE = 1000
+CAMERA_FPS = 20
+
+
+def _frame_second(row: dict) -> float | None:
+    """The second of its segment's video a frame of Sign review was taken at: its media time, else its frame of the
+    video, else its place among the pictures at one a second; None when the report does not say."""
+    for value, scale in ((row.get('media_time_s'), 1), (row.get('decoded_frame_index'), CAMERA_FPS)):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            return round(value / scale, 3)
+    fps = row.get('requested_sample_fps')
+    index = row.get('output_index')
+    if (isinstance(fps, (int, float)) and fps > 0 and isinstance(index, int) and 0 <= index < READ_INDEX_BASE):
+        return round(index / fps, 3)
+    return None
+
+
+def _sign_box(item: dict) -> dict:
+    """A box as the drive player needs it: its fields of SIGN_BOX_FIELDS, its corners to a tenth of a pixel and its score
+    to three places (a drive has thousands of frames)."""
+    box = {name: item[name] for name in SIGN_BOX_FIELDS if name in item}
+    box['bbox_xyxy'] = [round(value, 1) if isinstance(value, float) else value for value in item['bbox_xyxy']]
+    if isinstance(box.get('score'), float):
+        box['score'] = round(box['score'], 3)
+    return box
+
+
+def sign_frames(run_id: str, rows: list[dict], reviews: list[dict]) -> dict:
+    """The boxes of Sign review on every frame of a drive, for Speed review's picture, its Signs lane and its Signs
+    panel (GET /api/speed-review/drives/<route>/signs): where a frame is confirmed, the boxes saved with it (none, when
+    the reviewer found no sign: never the proposals then); elsewhere the model's proposals of the report. Only reading:
+    the boxes are confirmed and corrected in Sign review. A frame whose second is not known is left out (it cannot be
+    placed on the drive), as is a saved frame no longer in the report. A frame the site's AI reviewer saved and no
+    person confirmed since (review_db.waits_for_a_person) shows its boxes, but as not confirmed (needs_person), as Sign
+    review counts it."""
+    from nnslr_tools.review_db import waits_for_a_person
+    saved = {review['frame_key']: review for review in reviews if review.get('confirmed')}
+    frames = []
+    for row in rows:
+        second = _frame_second(row)
+        if second is None or not isinstance(row.get('segment_index'), int):
+            continue
+        review = saved.get(row.get('frame_key'))
+        boxes = (review['payload'].get('detections') if review is not None else row.get('detections')) or ()
+        frames.append({
+            'frame_key': row['frame_key'], 'segment': row['segment_index'], 'second': second,
+            'width': row.get('width'), 'height': row.get('height'),
+            'confirmed': review is not None and not waits_for_a_person(review),
+            'needs_person': review is not None and waits_for_a_person(review),
+            'reviewer': review.get('reviewer') if review is not None else None,
+            'reviewer_kind': review.get('reviewer_kind') if review is not None else None,
+            'boxes': [_sign_box(item) for item in boxes if isinstance(item, dict)
+                      and isinstance(item.get('bbox_xyxy'), (list, tuple)) and len(item['bbox_xyxy']) == 4],
+        })
+    frames.sort(key=lambda item: (item['segment'], item['second']))
+    return {'run_id': run_id, 'frames': frames}
+
+
 def map_today_lane(root: Path, route: str) -> dict | None:
     """The road type and the OpenStreetMap limit of every frame as the map says today (nnslr road-types): data
     reconstructed now, not what the comma knew while driving. Runs of [segment, from second, to second, road type,

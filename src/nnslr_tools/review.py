@@ -1449,6 +1449,18 @@ def make_handler(app: ReviewApp):
                 self.end_headers()
                 self.wfile.write(data)
                 return
+            # The boxes of Sign review on the drive's frames, confirmed or proposed (drive_review.sign_frames), for the
+            # picture, the Signs lane and the Signs panel; of the frames Sign review shows now (app.view).
+            match = re.fullmatch(drive + '/signs', path)
+            if match:
+                try:
+                    _directory, run_id, rows, _busy, _proposer = app.view(match.group(1))
+                except (PreannotationError, ValueError, OSError):
+                    self._problem(404, 'unknown_route', 'This drive has no frames in Sign review.', True)
+                    return
+                reviews = app.store.reviews(match.group(1), run_id)
+                self._json(200, {'ok': True, **drive_review.sign_frames(run_id, rows, reviews)})
+                return
             if re.fullmatch(drive + '/(blocks|works|road|road-type)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return

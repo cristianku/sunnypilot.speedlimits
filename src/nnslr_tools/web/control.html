@@ -1634,6 +1634,32 @@ background:var(--surface-2);color:var(--fg)}
 color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;font-variant-numeric:tabular-nums}
 .sr-block-go b{font-weight:600}
 .sr-blocks li.current .sr-block-go{color:var(--accent)}
+/* The signs of Sign review on Speed review (sign-frames.ts): over the picture the boxes of the frame within half a second, in
+the box of the video (the same letterbox), solid confirmed, dashed proposed, lighter when the frame is near and not the one
+shown; the lane of the confirmed speed signs; the switch Speed | Signs at the top of the side, and the boxes listed. */
+.sr-sign-boxes{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.sr-sign-boxes.near{opacity:.6}
+.sr-sign-box{fill:none;stroke:currentColor;stroke-width:2.5;vector-effect:non-scaling-stroke}
+.sr-sign-box.proposed{stroke-dasharray:6 4}
+.sr-sign-tag{fill:currentColor;stroke:var(--ov-halo);stroke-opacity:.9;stroke-width:.16em;stroke-linejoin:round;paint-order:stroke;
+font-family:var(--font-ui);font-weight:700}
+.dr-lanes .sr-sign-tick{cursor:pointer}
+.dr-lanes .sr-sign-hit{fill:transparent}
+.dr-lanes .sr-sign-tick line{stroke:var(--bad);stroke-width:1.5}
+.dr-lanes .sr-sign-tick text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--bad)}
+.dr-lanes .sr-sign-tick:hover line{stroke-width:2.5}
+.sr-panel{display:flex;width:100%}.sr-panel button{flex:1 1 0;min-width:0}
+/* The Signs side already opens Sign review on this frame: the player's own link under it would say it twice. */
+.sr-signs-on .dr-signs{display:none}
+.sr-sign-frame{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0;font-size:14px;color:var(--muted)}
+.sr-sign-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.sr-sign-list li{display:flex;align-items:center;gap:8px;min-height:36px;font-size:14px}
+.sr-sign-list li+li{border-top:1px solid var(--line)}
+.sr-sign-list li span{flex:1;min-width:0;overflow-wrap:anywhere}
+.sr-sign-list li.speed span{font-weight:600}
+.sr-sign-list small{max-width:45%;color:var(--muted);font-size:12.5px;text-align:right;overflow-wrap:anywhere}
+.sr-sign-dot{width:13px;height:13px;flex:none;box-sizing:border-box;border-radius:3px;border:2.5px solid currentColor;background:var(--stage)}
+.sr-sign-dot.proposed{border-style:dashed}
 @media (max-width:860px){
   .sr-view .dr-main{display:flex;flex-direction:column;align-items:stretch}
   .sr-view .dr-side,.sr-view .dr-time{display:contents}

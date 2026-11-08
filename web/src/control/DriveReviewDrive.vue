@@ -16,6 +16,9 @@
 // definition over the video), its controls at the top of the side (slot "side"), a box of its own on the picture after
 // the car's speed (slot "hud"), a label after the drive's name (slot "badge": DASHCAM MODE), the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
 // on a limit of the map's lane (pickMap); each follows the time shown through the event time and moves it with seek.
+// Speed review also draws over the picture (slot "picture": the boxes of Sign review, given whether the frame shown is a
+// picture of the time shown and not zoomed in), and places the frames of Sign review on the drive with the segments of the
+// logs (event segments, at every reading of the drive).
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -24,7 +27,8 @@ import {setReviewSwitch} from '../common/review-switch';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
 import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
-  REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState, visionAtSign} from './drive-review';
+  REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type SyncSegment, type Timeline, valueAt, videoTimeOf,
+  type VideoState, visionAtSign} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
@@ -36,7 +40,8 @@ const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: C
   simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
   pickMap?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one', pickMap: false});
 const guest = isGuest();
-const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number]}>();
+const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
+  segments: [segments: SyncSegment[]]}>();
 /** The car's speed on the picture and at the side: the page's own (carKph) when it gives one, else vEgo of the logs. */
 const ownSpeed = computed(() => props.carKph !== undefined);
 
@@ -164,6 +169,7 @@ async function askVideo(start: boolean): Promise<void> {
   }
 }
 const segments = computed(() => view.value?.segments ?? []);
+watch(segments, (value) => emit('segments', value), {immediate: true});
 /** The picture of the time shown: its time in the video, or null where the video has none. */
 const videoTime = computed(() => ready.value && hasLogs.value ? videoTimeOf(segments.value, cursor.value) : null);
 /** Without logs the video's own time is the drive's (no sync to make). */
@@ -602,6 +608,7 @@ watch(() => props.route, () => {
           <img v-if="sharpShown" :src="shownSharp!" class="dr-sharp" :class="{zoomed: zoomAt}" alt="" draggable="false"
                :style="zoomAt ? {transform: 'scale(2.5)', transformOrigin: zoomAt.x + '% ' + zoomAt.y + '%'} : undefined"
                :title="zoomAt ? 'Tap to see the whole picture' : 'Tap to zoom in here'" @click.stop="zoomSharp">
+          <slot name="picture" :shown="ready && (plainVideo || videoTime !== null)" :zoomed="sharpShown && zoomAt !== null"></slot>
           <span v-if="sharpTag" class="dr-sharp-tag" aria-live="polite">{{ sharpTag }}</span>
           <div v-if="ready && videoProblem" class="dr-stage-note">{{ videoProblem }}</div>
           <div v-else-if="ready && hasLogs && videoTime === null" class="dr-stage-note">No picture of this time: the logs go on.</div>

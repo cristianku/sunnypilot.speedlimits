@@ -21,14 +21,22 @@
 // remove as any other. The kph of a block is stepped or typed; its ends are dragged on the lane, pulled as by a magnet onto
 // where the map's limit changes, the ends of the other blocks and the time shown, and the block is moved in one write.
 // Every command has its key, listed under the card on a screen with a keyboard.
+// The signs of Sign review are on it too, read only (sign-frames.ts): on the picture the boxes of the frame of Sign review
+// within half a second of the time shown, solid where the frame is confirmed, dashed the model's proposals where it is not;
+// a lane of the confirmed speed signs, a tap on one going there; and at the top of the side a switch Speed | Signs that
+// changes only the side: Signs lists the boxes of that frame and opens it in Sign review. The keys of the speed work in
+// both, and one of them brings the speed back. Without the signs (a server that does not send them yet, a drive without
+// frames in Sign review, a guest) the page is the same, without them.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
-import {api, messageOf, post} from '../common/api';
+import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
-import {clockOf} from './drive-review';
+import {boxColor, describe, shortName} from '../review/catalog';
+import {clockOf, secondOf as frameSecondOf, signReviewHref, type SyncSegment} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import Segmented from './Segmented.vue';
+import {frameHref, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
   roadTypeAt, roadTypeLabel, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
 
@@ -40,6 +48,8 @@ const TOP = 16;
 const PLOT = 74;
 /** The lane of the road types. */
 const TYPE_HEIGHT = 18;
+/** The lane of the confirmed speed signs. */
+const SIGN_HEIGHT = 24;
 /** A new block with no speed of his at its start begins at this kph. */
 const FALLBACK_KPH = 50;
 
@@ -398,9 +408,88 @@ function typeFromIn(from: number, to: number) {
   return start <= stop ? [{from: start, to: Math.max(stop, start + 0.5)}] : [];
 }
 
+// -- the signs of Sign review ---------------------------------------------------------------------------------------------
+// Read only, and not for a guest (no Sign review). Read again when the page comes back into view: a frame confirmed in
+// Sign review meanwhile shows its boxes.
+const showSigns = !isGuest();
+const signs = shallowRef<SignFrames | null>(null);
+const signsError = ref('');
+async function readSigns(): Promise<void> {
+  if (!showSigns) return;
+  try {
+    const answer = await api<SignFrames>(address() + '/signs');
+    if (!answer || !Array.isArray(answer.frames)) throw new Error('The server sent signs this page cannot read.');
+    signs.value = answer;
+    signsError.value = '';
+  } catch (problem) {
+    // A server that does not send them yet says only "Not found.": the page goes on without them, nothing to toast.
+    signsError.value = problem instanceof ApiError && problem.status === 404 && problem.message === 'Not found.'
+      ? 'The signs of Sign review are not on this server yet.' : messageOf(problem);
+  }
+}
+const onVisible = (): void => { if (document.visibilityState === 'visible') void readSigns(); };
+/** The segments of the drive's logs, from the player: what places a frame of Sign review on the drive. */
+const segments = shallowRef<SyncSegment[]>([]);
+const placed = computed(() => placeFrames(signs.value?.frames ?? [], (segment, second) => frameSecondOf(segments.value, segment, second)));
+/** The frame of Sign review shown, within half a second of the time shown. */
+const signFrame = computed(() => nearestFrame(placed.value, seconds.value));
+/** It is the very frame on the picture (a frame of the video or less away), not one near it: drawn at full strength. */
+const signExact = computed(() => !!signFrame.value && Math.abs(signFrame.value.at - seconds.value) < 0.05);
+const runs = computed(() => signRuns(placed.value));
+/** The confirmed speed signs inside the time window, their text on the first frame of each where it fits. */
+function signsIn(from: number, to: number, x: (second: number) => number) {
+  let lastX = -Infinity;
+  return runs.value.flatMap((run) => {
+    if (run.to < from || run.from > to) return [];
+    const start = x(run.from);
+    const shown = start - lastX >= run.text.length * 6.5 + 8;
+    if (shown) lastX = start;
+    return [{key: run.from, at: run.from, ticks: run.ticks.filter((at) => at >= from && at <= to), text: shown ? run.text : '', title: run.text}];
+  });
+}
+/** A tap on a sign of the lane: its first frame, the boxes on the picture. */
+const goSign = (at: number): void => player.value?.seek(at);
+/** The confirmed speed sign before or after the time shown (its first frame), else null. */
+const signBefore = computed(() => [...runs.value].reverse().find((run) => run.from < seconds.value - 0.05) ?? null);
+const signAfter = computed(() => runs.value.find((run) => run.from > seconds.value + 0.05) ?? null);
+/** Sign review on the frame shown, else on the frame nearest to the time shown. */
+const signHere = computed(() => signFrame.value ? frameHref(props.route, signFrame.value) : signReviewHref(props.route, segments.value, seconds.value));
+const signWords = (box: {family: string; score?: number | null}): string => signFrame.value?.confirmed || signFrame.value?.needs_person
+  ? signFrame.value.reviewer ?? 'confirmed' : typeof box.score === 'number' ? 'model ' + Math.round(box.score * 100) + '%' : 'model';
+/** Confirmed, saved by the site's AI reviewer and waiting for a person (as Sign review counts it), or the model's. */
+const signState = computed(() => signFrame.value?.confirmed ? 'Confirmed' : signFrame.value?.needs_person ? 'AI · to confirm' : 'Proposed');
+/** How far the frame shown is from the time shown, in words. */
+const signOffset = computed(() => {
+  const gap = signFrame.value ? signFrame.value.at - seconds.value : 0;
+  return Math.abs(gap) < 0.05 ? 'this frame' : Math.abs(gap).toFixed(1) + ' s ' + (gap > 0 ? 'later' : 'earlier');
+});
+
+// The side: the speed (the card as it was) or the signs. Kept for the next drive in this browser.
+type Panel = 'speed' | 'signs';
+const PANELS: {key: Panel; label: string}[] = [{key: 'speed', label: 'Speed'}, {key: 'signs', label: 'Signs'}];
+const PANEL_KEY = 'speed-review-panel';
+function readPanel(): Panel {
+  try {
+    return localStorage.getItem(PANEL_KEY) === 'signs' ? 'signs' : 'speed';
+  } catch {
+    return 'speed';
+  }
+}
+const panel = ref<Panel>(showSigns ? readPanel() : 'speed');
+watch(panel, (value) => {
+  try {
+    localStorage.setItem(PANEL_KEY, value);
+  } catch {
+    // A private window keeps nothing: the speed next time.
+  }
+});
+/** The keys that change the speed's work bring its side back, so that what they did is seen. */
+const SPEED_KEYS = /^[btmxlwck0-9=+-]$/;
+
 function onKey(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null;
   if (target?.closest('input, textarea, select, [contenteditable]') || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (panel.value === 'signs' && SPEED_KEYS.test(event.key)) panel.value = 'speed';
   if (event.key === 'b') tapBlock();
   else if (event.key === 'Escape' && pending.value !== null) cancelBlock();
   else if (event.key === 'Escape' && typeFrom.value !== null) typeFrom.value = null;
@@ -425,9 +514,14 @@ function onKey(event: KeyboardEvent): void {
 }
 onMounted(() => {
   window.addEventListener('keydown', onKey);
+  document.addEventListener('visibilitychange', onVisible);
   void read();
+  void readSigns();
 });
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKey);
+  document.removeEventListener('visibilitychange', onVisible);
+});
 
 // -- a block's ends dragged on the lane -----------------------------------------------------------------------------------
 /** How near on screen an end is pulled onto an edge, and how far the pointer goes before a press is a drag (a tap moves
@@ -588,13 +682,25 @@ function worksIn(from: number, to: number) {
 </script>
 
 <template>
-  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
+  <DriveReviewDrive ref="player" class="sr-view" :class="{'sr-signs-on': showSigns && panel === 'signs'}" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
-                    @pick-map="fromMap">
+                    @pick-map="fromMap" @segments="(value) => { segments = value; }">
     <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
     <template #hud>
       <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
+    </template>
+    <template #picture="{shown, zoomed}">
+      <svg v-if="showSigns && shown && !zoomed && signFrame && signFrame.boxes.length && signFrame.width && signFrame.height"
+           class="sr-sign-boxes" :class="{near: !signExact}" :viewBox="`0 0 ${signFrame.width} ${signFrame.height}`"
+           preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+        <g v-for="(box, index) in signFrame.boxes" :key="index" :style="{color: boxColor(box)}">
+          <rect :x="box.bbox_xyxy[0]" :y="box.bbox_xyxy[1]" :width="Math.max(1, box.bbox_xyxy[2] - box.bbox_xyxy[0])"
+                :height="Math.max(1, box.bbox_xyxy[3] - box.bbox_xyxy[1])" :class="['sr-sign-box', {proposed: !signFrame.confirmed}]"/>
+          <text :x="box.bbox_xyxy[0]" :y="Math.max(signFrame.height / 30, box.bbox_xyxy[1] - signFrame.height / 120)"
+                :font-size="signFrame.height / 28" class="sr-sign-tag">{{ shortName(box) }}</text>
+        </g>
+      </svg>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
       <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
@@ -651,10 +757,49 @@ function worksIn(from: number, to: number) {
                 :height="TYPE_HEIGHT - 2" rx="2" class="sr-type-new"/>
         </svg>
       </div>
+      <div v-if="signs" class="dr-lane sr-sign-lane" title="The speed signs confirmed in Sign review (their number, Z a zone, end an end of limit): a tap goes to the sign, its boxes on the picture">
+        <span class="dr-lane-name">Signs<small>review</small></span>
+        <svg :width="width" :height="SIGN_HEIGHT" :viewBox="`0 0 ${width} ${SIGN_HEIGHT}`" aria-hidden="true">
+          <g v-for="sign in signsIn(from, to, x)" :key="sign.key" class="sr-sign-tick" @pointerdown.stop="goSign(sign.at)">
+            <rect :x="x(sign.at) - 6" y="0" :width="Math.max(12, w(sign.at, sign.ticks[sign.ticks.length - 1] ?? sign.at) + 12)"
+                  :height="SIGN_HEIGHT" class="sr-sign-hit"/>
+            <line v-for="at in sign.ticks" :key="at" :x1="x(at)" :x2="x(at)" :y1="SIGN_HEIGHT - 9" :y2="SIGN_HEIGHT - 1"/>
+            <text v-if="sign.text" :x="x(sign.at)" :y="SIGN_HEIGHT - 11">{{ sign.text }}</text>
+            <title>{{ sign.title }}</title>
+          </g>
+        </svg>
+      </div>
     </template>
     <template #side>
       <section class="sr-card" aria-labelledby="sr-card-title">
-        <p v-if="error" class="dr-hint">{{ error }}</p>
+        <Segmented v-if="showSigns" v-model="panel" :options="PANELS" label="The side: the speed or the signs" class="sr-panel"/>
+        <template v-if="panel === 'signs'">
+          <h3 id="sr-card-title">The signs at {{ clockOf(seconds) }}</h3>
+          <p v-if="signsError" class="dr-hint" id="sr-signs-missing">{{ signsError }}</p>
+          <p v-else-if="!signs" class="dr-hint">Loading…</p>
+          <template v-else>
+            <template v-if="signFrame">
+              <p class="sr-sign-frame">Frame {{ signFrame.frame_key }} · {{ signOffset }}<span class="sr-tag"
+                :class="{'sr-tag-out': !signFrame.confirmed}">{{ signState }}</span></p>
+              <ul v-if="signFrame.boxes.length" class="sr-sign-list" id="sr-sign-list">
+                <li v-for="(box, index) in signFrame.boxes" :key="index" :class="{speed: isSpeedSign(box)}">
+                  <i class="sr-sign-dot" :class="{proposed: !signFrame.confirmed}" :style="{color: boxColor(box)}"></i>
+                  <span>{{ describe(box) }}</span><small>{{ signWords(box) }}</small>
+                </li>
+              </ul>
+              <p v-else class="dr-hint">{{ signFrame.confirmed ? 'Confirmed with no sign on it.' : signFrame.needs_person ? 'The AI reviewer found no sign here: a person has not confirmed it yet.' : 'The model proposed no sign here.' }}</p>
+            </template>
+            <p v-else class="dr-hint">No frame of Sign review within half a second of {{ clockOf(seconds) }}.</p>
+            <a class="btn primary sr-wide" id="sr-sign-open" :href="signHere">{{ signFrame ? 'Open this frame in Sign review' : 'Open Sign review here' }}</a>
+            <div class="sr-tools">
+              <button type="button" class="btn small" id="sr-sign-before" :disabled="!signBefore" @click="signBefore && goSign(signBefore.from)">‹ Sign before</button>
+              <button type="button" class="btn small" id="sr-sign-after" :disabled="!signAfter" @click="signAfter && goSign(signAfter.from)">Sign after ›</button>
+            </div>
+            <p class="dr-hint">Solid: confirmed in Sign review; dashed: the model's proposals, or the AI reviewer's boxes, on a frame not confirmed yet. Read only
+              here: the boxes are changed in Sign review. The keys of the speed work here too and bring it back.</p>
+          </template>
+        </template>
+        <p v-else-if="error" class="dr-hint">{{ error }}</p>
         <p v-else-if="!drive" class="dr-hint">Loading…</p>
         <p v-else-if="!drive.span_ns" class="dr-hint">No speed to show: the logs of this drive are not read yet.</p>
         <template v-else>
