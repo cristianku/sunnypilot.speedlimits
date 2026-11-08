@@ -282,7 +282,6 @@ const numbers = computed(() => {
         camera and what the car reads, never the map. It learns how you drive: your own speed on every second of the drives with sunnypilot
         off, your blocks of Speed review the only corrections.</p>
       <BrainChoices :choices="brainChoices" id="train-brain"/>
-      <BrainFlow :choices="brainChoices"/>
     </template>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
@@ -390,6 +389,8 @@ const numbers = computed(() => {
         {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
+    <!-- How the brain learns, under the training and its button: what runs comes first. -->
+    <BrainFlow v-if="section === 'brain'" :choices="brainChoices"/>
 
     <!-- The settings of the next training of this network, also while one runs (it keeps its own). -->
     <TrainSettingsSection v-if="settingsAction" :training="settingsAction"
