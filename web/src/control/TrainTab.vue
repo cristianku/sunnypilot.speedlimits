@@ -269,8 +269,9 @@ const numbers = computed(() => {
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
     <p v-else-if="section === 'brain'" class="role-what">Says the speed to hold, four times a second, from the camera, the signs it reads and
-      the car’s own motion, and whether it is in roadworks. It learns your own speed on every drive with sunnypilot off whose logs are read, with the
-      blocks you set in Speed review as the corrections, the roadworks you mark there, and the next limit from the signs of Sign review.</p>
+      the car’s own motion, and whether it is in roadworks or on a kind of road. It learns your own speed on every drive with sunnypilot off whose logs
+      are read, with the blocks you set in Speed review as the corrections, the roadworks and the kinds of road you mark there, and the next limit
+      from the signs of Sign review.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
