@@ -337,6 +337,40 @@ def test_the_limit_ahead_is_right_on_its_class_and_false_where_none_is_ahead_and
     assert found['false_ahead'] == pytest.approx(1 / 3)
 
 
+def test_the_changes_read_are_those_whose_number_the_signs_input_already_holds():
+    import numpy
+    from nnslr_tools.brain_targets import INPUT_SIZES, NONE_AHEAD, speed_class
+    from nnslr_tools.brain_train import SIGN_KPH_SCALE, measure
+    drive = fake_drive(['test'] * 4)
+    drive['next'] = numpy.array([speed_class(80)] * 3 + [NONE_AHEAD])
+    drive['next_weight'] = numpy.ones(4, dtype=numpy.float32)
+    drive['metres'] = drive['metres_weight'] = numpy.zeros(4, dtype=numpy.float32)
+    signs = numpy.zeros((4, INPUT_SIZES['signs']), dtype=numpy.float32)
+    signs[0, :2] = 80 / SIGN_KPH_SCALE, 1  # confirmed
+    signs[1, 8:10] = 80 / SIGN_KPH_SCALE, 1  # read once
+    signs[2, :2] = 50 / SIGN_KPH_SCALE, 1  # still the one in force
+    drive['inputs']['signs'] = signs
+    answer = {**said([100] * 4), 'next': numpy.array([speed_class(80), NONE_AHEAD, NONE_AHEAD, NONE_AHEAD]),
+              'metres': numpy.zeros(4), 'none': NONE_AHEAD}
+    found = measure([drive], [answer], 'test')['ahead']
+    assert found['changes'] == 3 and found['changes_read'] == 2 and found['changes_read_right'] == pytest.approx(1 / 2)
+
+
+def test_a_number_ahead_weighs_as_much_all_together_as_none():
+    import numpy
+    from nnslr_tools.brain_targets import NONE_AHEAD, speed_class
+    from nnslr_tools.brain_train import _balanced, next_balance
+    drive = fake_drive(['train'] * 10)
+    drive['next'] = numpy.array([speed_class(80)] * 2 + [NONE_AHEAD] * 8)
+    drive['next_weight'] = numpy.ones(10, dtype=numpy.float32)
+    drive['metres_weight'] = numpy.ones(10, dtype=numpy.float32)
+    balance = next_balance([drive])
+    assert balance == pytest.approx(4)
+    weights = _balanced((drive['next_weight'], drive['metres_weight']), drive, balance)[0]
+    assert weights[:2].sum() == pytest.approx(weights[2:].sum()) and weights.sum() == pytest.approx(8)
+    assert next_balance([fake_drive(['train'] * 3)]) == 1.0
+
+
 def test_no_frames_is_no_measure():
     from nnslr_tools.brain_train import measure
     assert measure([], [], 'test')['speed'] == {'frames': 0, 'right': None, 'mean_error_kph': None}
