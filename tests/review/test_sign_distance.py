@@ -795,7 +795,7 @@ def test_logs_that_cannot_be_read_are_their_own_state_and_not_scanned_again(tmp_
     view = sign_distance.drive_view(store, ROUTE)
     assert view['status'] == 'unreadable' and len(view['unreadable_files']) == 2
     assert view['message'] == 'Logs found, but this server cannot open them (their file permissions).'
-    # Find episodes of every drive skips it (the one rule of needs_scan) ...
+    # Read the logs of every drive (Speed review) skips it (the one rule of needs_scan) ...
     server = RunningServer(tmp_path)
     try:
         status, answer = post(server, '/api/drive-review/scan-all', {})

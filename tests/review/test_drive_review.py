@@ -1,5 +1,6 @@
-"""The drive review (Data › Drive review): the comma's logs of a recorded drive added to the portal, joined to its video,
-scanned for episodes and annotated by a person (nnslr_tools.drive_logs, drive_extract, drive_episodes, drive_review).
+"""The comma's logs of a recorded drive on the server: added to the portal, joined to its video and scanned for episodes,
+for the drive player of Speed review and Regression (nnslr_tools.drive_logs, drive_extract, drive_episodes, drive_review).
+The page Data › Drive review was removed on 7 Nov 2026: its address leads to Speed review.
 
 Every log here is SYNTHETIC: written by these tests with a made-up schema (fixtures/drive_schema, the field names of the
 runtime branch only) for a made-up drive of three minutes. Nothing here is a real drive or a person's review.
@@ -35,7 +36,7 @@ NS = 1_000_000_000
 BOOT_NS = 7_345 * NS
 SEGMENT_NS = 60 * NS
 SEGMENTS = (0, 1, 2)
-NO_LOGS_TEXT = 'Logs not available: import the logs to look for the episodes of the recorded drive.'
+NO_LOGS_TEXT = 'Logs not available: import the logs of the recorded drive to read them.'
 CONTROL_JS = Path(__file__).resolve().parents[2] / 'src' / 'nnslr_tools' / 'web' / 'js' / 'control.js'
 
 
@@ -239,17 +240,18 @@ def test_a_drive_without_logs_says_so_and_its_video_review_still_works(tmp_path)
     assert store.scan_state(ROUTE)['state'] == 'no_logs'
     # Scanning a drive without logs finds nothing and invents nothing.
     assert store.scan(ROUTE)['state'] == 'no_logs' and store.episodes(ROUTE) == []
+    drive = next(item for item in drive_review.drives_view(store) if item['route'] == ROUTE)
     server = RunningServer(tmp_path)
     try:
-        drives = json_of(server.request('GET', '/api/drive-review/drives')[2])['drives']
-        drive = next(item for item in drives if item['route'] == ROUTE)
         assert drive['scan']['state'] == 'no_logs' and drive['logs_found'] == 0 and drive['video_segments'] == 3
         view = json_of(server.request('GET', f'/api/drive-review/drives/{ROUTE}/timeline')[2])
         # The video plays without logs; there is no timeline of the comma and no episode.
         assert view['video']['state'] == 'ready' and view['t0_ns'] is None and view['episodes'] == []
         assert view['scan']['state'] == 'no_logs' and view['when_certain'] is False
-        status, _, data = server.request('GET', '/drive-review')
-        assert status == 200 and '<title>Speed limits · Drive review</title>' in data.decode()
+        # The page is gone: its address, with a drive and a moment, opens Speed review on them.
+        status, response, _ = server.request('GET', f'/drive-review?drive={ROUTE}&segment=1&second=2')
+        assert status == 303 and response.getheader('Location') == f'/speed-review?drive={ROUTE}&segment=1&second=2'
+        assert server.request('GET', '/api/drive-review/drives')[0] == 404
         # The frame review of the same drive is untouched.
         assert server.request('GET', f'/api/route/{ROUTE}/frames')[0] in (200, 404)
     finally:
@@ -303,13 +305,10 @@ def test_logs_added_later_from_the_portal_are_kept_once_and_scanned(tmp_path):
         assert upload(server, ROUTE, 'rlog.zst', b'x')[0] == 400
         assert server.request('POST', f'/api/drive-review/drives/{ROUTE}/logs?name=rlog.zst&segment=0',
                               body={'x': 1})[0] == 415
-        drives = json_of(server.request('GET', '/api/drive-review/drives')[2])['drives']
-        assert next(item for item in drives if item['route'] == ROUTE)['episodes'] == 2
-        queue = json_of(server.request('GET', '/api/drive-review/episodes?kind=disagreement')[2])['episodes']
-        assert [item['channel'] for item in queue] == ['disagreement']
-        assert server.request('GET', '/api/drive-review/episodes?kind=nonsense')[0] == 400
     finally:
         server.close()
+    assert next(item for item in drive_review.drives_view(store) if item['route'] == ROUTE)['episodes'] == 2
+    assert 'disagreement' in {item['channel'] for item in active(store)}
 
 
 def test_importing_again_records_nothing_twice(tmp_path, synthetic_schema):
@@ -552,21 +551,20 @@ def test_the_drive_review_only_shows_and_sends_to_sign_review(tmp_path, monkeypa
         assert all(item['channel'] != 'spot_check' for item in view['episodes'])
         for path in ('/api/drive-review/annotations', f'/api/drive-review/annotations/{run["id"]}/delete'):
             assert server.request('POST', path, body={'route': ROUTE, 'verdict': 'correct_limit'})[0] == 404
-        queue = json_of(server.request('GET', '/api/drive-review/episodes')[2])['episodes']
-        assert queue and all('status' not in item and item['channel'] != 'spot_check' for item in queue)
+        assert server.request('GET', '/api/drive-review/episodes')[0] == 404
     finally:
         server.close()
     # A new scanner keeps the episode's id: a link to it still opens it.
     monkeypatch.setattr(drive_episodes, 'SCANNER_VERSION', drive_episodes.SCANNER_VERSION + 1)
     assert store.scan(ROUTE)['state'] == 'done'
     assert next(item for item in active(store) if item['channel'] == 'disagreement')['id'] == run['id']
-    # Both ways between the two pages: Drive review to the frame of a moment, Sign review back to the drive.
+    # Both ways between the two pages: the drive player to the frame of a moment, Sign review back to the drive.
     script = CONTROL_JS.read_text(encoding='utf-8')
     assert '?segment=' in script and '&second=' in script
-    assert '/drive-review?drive=' in (CONTROL_JS.parent / 'review.js').read_text(encoding='utf-8')
+    assert '/speed-review?drive=' in (CONTROL_JS.parent / 'review.js').read_text(encoding='utf-8')
 
 
-def test_drives_before_the_first_day_reviewed_stay_out_of_the_queue(tmp_path):
+def test_drives_before_the_first_day_reviewed_are_left_out_by_read_the_logs(tmp_path):
     make_report(tmp_path)
     # ROUTE's GPS says 21 Sep 2026, before the default first day; OTHER_ROUTE has no fix: its videos' day (today).
     comma_drive(tmp_path, segments=(0,), gps_unix_ms=1_790_000_000_000)
@@ -576,34 +574,23 @@ def test_drives_before_the_first_day_reviewed_stay_out_of_the_queue(tmp_path):
     store.scan(OTHER_ROUTE)
     assert store.review_from() == drive_review.DEFAULT_REVIEW_FROM == '2026-10-30'
     assert drive_review.early_routes(store) == {ROUTE}
-    queue = drive_review.queue_view(store)
-    assert {item['route'] for item in queue} == {OTHER_ROUTE}
-    # Each episode says when it was: here from the videos' times only (no fix), so not certain.
-    assert all(item['when'] and item['when_certain'] is False for item in queue)
     view = {item['route']: item for item in drive_review.drives_view(store)}
     assert view[ROUTE]['day'] == '2026-09-21' and view[ROUTE]['before_review'] is True
     assert view[OTHER_ROUTE]['before_review'] is False
     server = RunningServer(tmp_path)
     try:
-        # Out of date with a new scanner: Find episodes searches only the drives reviewed.
+        # Out of date with a new scanner: Read the logs (Speed review) reads only the drives from the first day.
         store._run([("UPDATE scans SET scanner_version = 0", ())])
         status, _, data = server.request('POST', '/api/drive-review/scan-all', body={})
         assert status == 200 and json_of(data)['queued'] == [OTHER_ROUTE]
         settled(store, OTHER_ROUTE)
-        status, _, data = server.request('POST', '/api/drive-review/settings', body={'review_from': '30 Oct'})
-        assert status == 400 and json_of(data)['error'] == 'bad_date'
-        status, _, data = server.request('POST', '/api/drive-review/settings', body={'review_from': ''})
-        assert status == 200 and json_of(data)['review_from'] == ''
-        listing = json_of(server.request('GET', '/api/drive-review/drives')[2])
-        assert listing['review_from'] == '' and not any(item['before_review'] for item in listing['drives'])
+        # The early drive is still read from its own player; the first day is no longer changed from the site.
+        status, _, data = server.request('POST', f'/api/drive-review/drives/{ROUTE}/scan', body={})
+        assert status == 200
+        assert settled(store, ROUTE)['state'] == 'done'
+        assert server.request('POST', '/api/drive-review/settings', body={'review_from': ''})[0] == 404
     finally:
         server.close()
-    # Every drive again: both drives' episodes are in the queue; ROUTE's say their time from the GPS.
-    queue = drive_review.queue_view(store)
-    assert {item['route'] for item in queue} == {ROUTE, OTHER_ROUTE}
-    assert all(item['when'].endswith('2026 · ' + item['when'][-5:]) and item['when_certain']
-               for item in queue if item['route'] == ROUTE)
-    assert any('21 Sep 2026' in item['when'] for item in queue if item['route'] == ROUTE)
 
 
 def test_the_command_line_scans_every_drive_with_logs(tmp_path, capsys):

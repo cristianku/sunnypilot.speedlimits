@@ -1,4 +1,4 @@
-// What the comma had at the moment of a frame, from its own logs as Drive review read them: the map's limit (and the
+// What the comma had at the moment of a frame, from its own logs as the server read them: the map's limit (and the
 // one ahead), the limit the vision memory held (speedVisionSP, with how far it saw the sign when the car logs it) and
 // the one the car used (the resolver), in the bar above the photo (CarMoment.vue), and the frames where map and vision differ, underlined in the timeline. Shown only: the two sources stay separate
 // on the car, only the resolver weighs them. Read once per drive, on the server.

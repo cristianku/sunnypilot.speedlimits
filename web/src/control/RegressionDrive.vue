@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Models › Regression, a certified drive opened ("/regression?drive=<route>"): the player of Drive review with one lane more,
+// Models › Regression, a certified drive opened ("/regression?drive=<route>"): the drive player (DriveReviewDrive.vue) with one lane more,
 // his speed and the curves of the models lit, and at its side each curve with its value at the time shown and how far it
 // stays from his speed. It is open loop: the car drove as he drove, each curve is what a model said looking at that video.
 // A driving model's plan is drawn on the moment it speaks of, a few seconds after the frame it saw (nnslr_tools.regression).
@@ -111,7 +111,7 @@ const certifiedText = computed(() => drive.value?.certified ? 'Certified ' + iso
 </script>
 
 <template>
-  <DriveReviewDrive class="rg-view" :route="route" :read-only="readOnly" tab="regression" back-label="Regression" no-episodes
+  <DriveReviewDrive class="rg-view" :route="route" :read-only="readOnly" tab="regression" back-label="Regression"
                     :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, width, from, to}">
       <div class="dr-lane rg-lane">

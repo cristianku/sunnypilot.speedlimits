@@ -28,8 +28,8 @@ const carry = computed(() => carryState(props.row));
 // The previous frame has a confirmed sign and this one nothing: carrying it over is the likely next move.
 const carryHint = computed(() => carry.value.enabled
   && reasons.value.some((reason) => reason.rule === 'd' && reason.text.startsWith('the previous frame')));
-// On the server: what the car did at this moment (its limit, the map's, the vision's), in Drive review.
-const driveHref = computed(() => report.apiBase === null || isGuest() ? null : '/drive-review?drive=' + encodeURIComponent(report.routeId)
+// On the server: what the car did at this moment (its limit, the map's, the vision's), in the drive's player of Speed review.
+const driveHref = computed(() => report.apiBase === null || isGuest() ? null : '/speed-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
 </script>
 
@@ -43,7 +43,7 @@ const driveHref = computed(() => report.apiBase === null || isGuest() ? null : '
         <!-- Off, it still answers a press: the reason why appears on the status line. -->
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"
                 :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
-      <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Drive review →</a></p>
+      <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Speed review →</a></p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}<button v-if="carryHint" type="button" class="btn small carry-hint" @click="applyPrevious(); releaseFocus($event)">Apply previous <kbd class="keycap">A</kbd></button></template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>
       <BoxList :row="row" :work="work"/>

@@ -1,7 +1,7 @@
 """The exact frame of every sign the comma's vision read, added to Sign review next to the pictures at 1 a second.
 
-speedvisiond reads the road camera 5 times a second; a sign it reads (signRead, in the drive's logs as Drive review
-scans them: drive_extract) is often between two of the pictures at 1 a second, so the reviewer could not see what the
+speedvisiond reads the road camera 5 times a second; a sign it reads (signRead, in the drive's logs as the server
+reads them: drive_extract) is often between two of the pictures at 1 a second, so the reviewer could not see what the
 car saw. ``nnslr sign-reads --route R`` (run by helpers/1_prepare.sh after the pictures are taken out) takes the frame
 of fcamera.hevc the car was reading at each such moment: the last frame whose exposure started (timestampSof of the
 road camera's encode index) at or before the read. One frame per read, the first of each run of the same value
@@ -52,7 +52,7 @@ def frame_order(row: dict) -> tuple:
 
 def read_frames(merged: dict) -> dict[int, list[dict]]:
     """{segment: [{'decoded', 'kph', 't_ns'}]}: the frame of each run of comma reads (see the module's text), from
-    a drive as Drive review joins it (drive_logs.merge)."""
+    a drive as the server joins it (drive_logs.merge)."""
     from nnslr_tools.drive_logs import frame_at, frame_index
     reads = sorted((event[0], event[2]) for event in merged.get('events') or ()
                    if len(event) >= 3 and event[1] == 'sign' and isinstance(event[0], int))
@@ -103,7 +103,7 @@ def _current(directory: Path, manifest: list[dict], wanted: list[dict], video_sh
 def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe: str | None = None,
                   scan: bool = True, workers: int = 4) -> dict:
     """Write the pictures of the comma's reads of a drive (see the module's text); returns what was done. scan: read
-    the drive's logs first when Drive review has not (or not with these files); workers: segments at once."""
+    the drive's logs first when they are not read (or not with these files); workers: segments at once."""
     from nnslr_tools import drive_review
     from nnslr_tools.media import extract_frames, extracted_frame_rows, remove_picture
     from nnslr_tools.route_io import discover_segment_dirs

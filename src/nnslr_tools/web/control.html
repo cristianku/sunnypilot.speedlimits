@@ -572,7 +572,7 @@ background:var(--ok-soft);color:var(--ok)}
 .import-why.warn{color:var(--warn)}
 @media (max-width:480px){.import-row{flex-wrap:wrap}.import-row .btn{width:100%;justify-content:center}}
 /* The lists of drives (Speed review, Sign distance, Regression): a row each, its name and when over its state. The
-   colours of the road types are those of the scene network's lane on Drive review (.dr-lanes): four slots of the
+   colours of the road types are those of the scene network's lane of the drive player (.dr-lanes): four slots of the
    reference categorical palette, checked in both themes on every pair (any type can follow any other): amber town,
    green rural, magenta expressway, blue motorway. */
 :root{--rt-rural:#008300}
@@ -1129,7 +1129,7 @@ border-top:1px solid var(--line)}
 .proposer .figure-note{flex:1 0 100%}
 .proposer .proposer-missing{color:var(--bad)}
 @media (max-width:800px){.proposer .seg{display:grid;grid-template-columns:repeat(3,auto);width:100%}.proposer .seg button{padding-left:6px;padding-right:6px}}
-/* A row of a list of drives is a link; a drive opened (Drive review, Speed review, Sign distance) has Back and its name
+/* A row of a list of drives is a link; a drive opened (Speed review, Regression, Sign distance) has Back and its name
    at the top, and the controls of its video. */
 .rt-open{position:relative;display:flex;flex-direction:column;gap:7px;margin:-8px -10px;padding:8px 32px 8px 10px;border-radius:12px;
 color:inherit;text-decoration:none;transition:background .15s}
@@ -1213,49 +1213,22 @@ color:inherit;text-decoration:none;transition:background .15s}
 .trial-card .link-button:disabled{color:var(--muted);cursor:default}
 @media (max-width:560px){.inuse-car,.inuse-old{grid-column:1/-1}.versions-card[data-role="cutter"] .vt-c-every,
 .versions-card[data-role="cutter"] .vt-c-budget{display:none}}
-/* Data › Drive review (DriveReviewTab.vue): the search of the logs, the queue of episodes with its filters, the drives.
-   An episode is a link to its drive; its kinds are chips coloured by what happened (orange the driver's feet, red a
-   disengagement, blue the wheel, violet the set speed, amber vision against the map). */
+/* The drives' logs and the drive player (DriveReviewDrive.vue: Speed review, Regression, Sign distance): the spinner of
+   a reading (Read the logs, ReadLogsCard.vue), the chips that seek a time, the tones of a drive's state. */
 .dr-spin{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;
 animation:dr-spin .8s linear infinite}
 @keyframes dr-spin{to{transform:rotate(360deg)}}
-.dr-queue,.dr-drives{display:flex;flex-direction:column;gap:12px}
-.dr-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-.dr-filters .wp-field select{min-width:0}
-.dr-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
-.dr-list li{border-top:1px solid var(--line)}
-.dr-item{position:relative;display:flex;flex-direction:column;gap:5px;margin:0 -10px;padding:11px 32px 11px 10px;border-radius:12px;
-color:inherit;text-decoration:none;transition:background .15s}
-.dr-item:hover{background:var(--surface-2)}
-.dr-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.dr-item-head{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px}
-.dr-item-head strong{font-size:15px;font-weight:600;letter-spacing:-.01em}
-.dr-item-where,.dr-item-facts{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.dr-item-warn{font-size:12.5px;font-weight:600;color:var(--warn)}
-.dr-go{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
-.dr-chips{display:flex;flex-wrap:wrap;gap:5px}
 .dr-chip{display:inline-flex;align-items:center;padding:2px 9px;border:0;border-radius:999px;background:var(--surface-2);color:var(--fg);
 font:inherit;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
 button.dr-chip{cursor:pointer}button.dr-chip:hover{filter:brightness(1.15)}
-.dr-k-gas,.dr-k-brake{background:var(--todo-soft);color:var(--todo)}
-.dr-k-disengage_user,.dr-k-disengage_auto,.dr-k-disengage_unknown{background:var(--bad-soft);color:var(--bad)}
-.dr-k-steer,.dr-k-steer_contact{background:var(--rev-soft);color:var(--rev)}
-.dr-k-set_speed_manual,.dr-k-set_speed_auto,.dr-k-set_speed_unknown{background:var(--imp-soft);color:var(--imp)}
-.dr-k-disagreement{background:var(--warn-soft);color:var(--warn)}
 .dr-drive{position:relative}
 .dr-drive-state{margin:0;font-size:13.5px}
 .dr-muted{color:var(--muted)}.dr-todo{color:var(--todo)}.dr-ok{color:var(--ok)}.dr-bad{color:var(--bad)}.dr-busy{color:var(--rev)}
-.dr-drive-actions{display:flex;flex-wrap:wrap;gap:8px}
 .dr-route{font-family:var(--font-data);font-size:11.5px;overflow-wrap:anywhere}
-@media (max-width:560px){
-  .dr-filters{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .dr-filters .wp-field:first-child{grid-column:1/-1}
-  .dr-filters .wp-field select{min-height:44px}
-}
-@media (prefers-reduced-motion:reduce){.dr-spin{animation-duration:2.4s}.dr-item{transition:none}}
-/* Data › Drive review, a drive opened (DriveReviewDrive.vue): the video as large as the column leaves with the comma's
-   vision limit on it, under it the controls, the strip of the whole drive and the lanes; at the side the episode, what
-   the comma had at the time shown, what the server finds today and the verdict. On an iPad or a phone one column. */
+@media (prefers-reduced-motion:reduce){.dr-spin{animation-duration:2.4s}}
+/* The drive player (DriveReviewDrive.vue: Speed review, Regression, the guests' reviews): the video as large as the
+   column leaves with the comma's vision limit on it, under it the controls, the strip of the whole drive and the lanes;
+   at the side what the comma had at the time shown and what the server finds today. On an iPad or a phone one column. */
 .dr-view{gap:12px}
 .dr-uncertain{color:var(--warn)!important}
 .dr-banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px 14px;border-radius:12px;background:var(--surface-2)}
@@ -1302,8 +1275,6 @@ backdrop-filter:blur(6px)}
 .dr-strip{display:block;width:100%;height:26px;cursor:pointer;touch-action:none}
 .dr-strip:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
 .dr-strip-base{fill:var(--surface-3)}
-.dr-strip-ep{fill:var(--todo)}.dr-strip-ep.intervention{fill:var(--accent)}.dr-strip-ep.both{fill:var(--bad)}
-.dr-strip-ep.current{stroke:var(--fg);stroke-width:2;vector-effect:non-scaling-stroke}
 .dr-strip-window{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .dr-strip-head{fill:var(--fg)}
 .dr-zoom-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px}
@@ -1311,20 +1282,9 @@ backdrop-filter:blur(6px)}
 .dr-side{grid-area:side;display:flex;flex-direction:column;gap:14px;min-width:0}
 .dr-side h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
 .dr-hint{margin:0;font-size:12.5px;color:var(--muted);overflow-wrap:anywhere}
-.dr-search-facts{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px}
-.dr-search-facts .import-why{margin:0;flex:1 1 220px}
-.dr-from{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);white-space:nowrap}
-.dr-from input{font:inherit;font-size:13px;color:var(--fg);background:var(--surface-2);border:1px solid var(--line);border-radius:8px;padding:3px 8px;min-height:32px}
-.dr-item-when{font-weight:600;color:var(--fg)}
-.dr-episode-card,.dr-now,.dr-signs{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
-.dr-episode-card{padding-top:0;border-top:0}
+.dr-now,.dr-signs{display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
 .dr-ep-nav{display:flex;align-items:center;gap:8px}.dr-ep-nav h3{flex:1;text-align:center;font-variant-numeric:tabular-nums}
 .dr-ep-nav .btn{min-width:44px;justify-content:center;font-size:18px}
-.dr-ep-what,.dr-before{margin:0;font-size:13.5px;font-variant-numeric:tabular-nums}
-.dr-before{color:var(--muted)}.dr-before b{color:var(--fg);font-weight:600}
-.dr-reasons-list{margin:0;padding-left:18px;font-size:13px;color:var(--muted)}
-.dr-avail{margin:0;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--muted)}
-.dr-avail .ok{color:var(--ok)}.dr-avail .no{color:var(--warn)}
 .dr-now dl{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;font-size:13.5px}
 .dr-now dt{color:var(--muted)}.dr-now dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .dr-now dd small{font-size:12px;color:var(--muted)}
@@ -1392,7 +1352,7 @@ overflow:hidden;user-select:none;-webkit-user-select:none}
 .dr-episode{fill:var(--todo);opacity:.55}.dr-episode.intervention{fill:var(--accent)}.dr-episode.both{fill:var(--bad)}
 .dr-episode.current{opacity:1}
 @media (max-width:560px){.dr-lanes{--dr-name:62px}.dr-lane-name{font-size:11px}}
-/* Data › Speed review (SpeedReviewTab.vue, SpeedReviewDrive.vue): the drives, then one drive in the player of Drive review
+/* Data › Speed review (SpeedReviewTab.vue, SpeedReviewDrive.vue): the drives, then one drive in the drive player (DriveReviewDrive.vue)
    with the lane of the speed to hold over the others and the commands at the top of the side. On the lane a stretch nobody
    looked at is a dashed box, never filled, so a proposal left alone does not look approved; "?" a person could not tell,
    filled unlike the hatch of what the log does not have. Under 860 px the commands come right under the picture and its

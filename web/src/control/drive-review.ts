@@ -1,8 +1,8 @@
-// Data › Drive review (DriveReviewTab.vue, DriveReviewDrive.vue), to look at what happened in the car: the drives as
-// the comma recorded them, against its own logs; the signs of a moment are reviewed in Sign review (signReviewHref). The server reads the logs (nnslr_tools.drive_review: no networks, CPU only) and finds the episodes worth a
-// look: the driver intervening (accelerator, brake, the wheel held, openpilot disengaged, the set speed changed by
-// hand) and the vision limit disagreeing with the map's. Here: the types of /api/drive-review, a series' value at a
-// time, and a time of the logs as a time of the drive's video (the encode index of every frame: never a file's date).
+// The drives as the comma recorded them, against its own logs, for the drive player of Speed review and Regression
+// (DriveReviewDrive.vue) and Sign review's car bar; the signs of a moment are reviewed in Sign review (signReviewHref).
+// The server reads the logs (nnslr_tools.drive_review: no networks, CPU only). Here: the types of /api/drive-review, a
+// series' value at a time, and a time of the logs as a time of the drive's video (the encode index of every frame: never
+// a file's date).
 
 /** A point of a series of the comma's logs: seconds from the drive's first video frame, and the value (null: the
  * service was not in the log there). */
@@ -44,13 +44,13 @@ export interface DriveRow {
   when_certain: boolean;
   /** The local day it started (YYYY-MM-DD), null when unknown. */
   day: string | null;
-  /** Before the first day shown: not searched, its episodes not in the list. */
+  /** Before the first day read (DriveReviewStore.review_from): Read the logs skips it. */
   before_review: boolean;
   minutes: number | null;
   scan: ScanState;
   /** Logs found on the server and not imported yet (only for a drive without logs). */
   logs_found: number | null;
-  /** Find episodes reads this drive now (DriveReviewStore.needs_scan, the one rule of every caller). */
+  /** Read the logs reads this drive now (DriveReviewStore.needs_scan, the one rule of every caller). */
   needs_scan: boolean;
   video_segments: number;
   episodes: number;
@@ -93,26 +93,6 @@ export interface Hint {
 }
 
 export type Channel = 'intervention' | 'disagreement' | 'both';
-
-export interface QueueItem {
-  id: string;
-  route: string;
-  start_ns: number;
-  end_ns: number;
-  channel: Channel;
-  kinds: string[];
-  priority: number;
-  reasons: string[];
-  hint: Hint | null;
-  before: Recorded;
-  data: Availability;
-  video: boolean;
-  segments: [number, number] | null;
-  duration_s: number;
-  /** When the episode starts ("Fri 31 Oct 2026 · 08:12"): from the GPS when certain, else from the videos' times. */
-  when: string | null;
-  when_certain: boolean;
-}
 
 export interface Clue {
   kind: string;
@@ -198,18 +178,8 @@ export interface Timeline {
 // -- words ---------------------------------------------------------------------------------------------------------------
 
 /** The no-logs state, as the spec of the review says it. */
-export const NO_LOGS = 'Logs not available: import the logs to look for the episodes of the recorded drive.';
+export const NO_LOGS = 'Logs not available: import the logs of the recorded drive to read them.';
 
-/** A kind of clue in a few words (drive_episodes.KIND_TEXT is the sentence). */
-export const KIND_LABEL: Record<string, string> = {
-  gas: 'Accelerator', brake: 'Brake', steer: 'Wheel held', set_speed_manual: 'Set speed by hand',
-  disengage_user: 'Disengaged by the driver', disengage_auto: 'Disengaged by itself', disengage_unknown: 'Disengaged',
-  disagreement: 'Vision ≠ map', steer_contact: 'Wheel touched', set_speed_auto: 'Set speed by the car',
-  set_speed_unknown: 'Set speed changed',
-};
-export const CHANNEL_LABEL: Record<Channel, string> = {
-  intervention: 'Intervention', disagreement: 'Disagreement', both: 'Intervention and disagreement',
-};
 /** The state of a drive's logs and scan in words, and its tone. */
 export function scanText(scan: ScanState): {text: string; tone: 'muted' | 'todo' | 'ok' | 'bad' | 'busy'} {
   switch (scan.state) {
@@ -220,7 +190,7 @@ export function scanText(scan: ScanState): {text: string; tone: 'muted' | 'todo'
     case 'scanning': return {text: 'Searching the logs… ' + Math.round((scan.progress || 0) * 100) + '%', tone: 'busy'};
     case 'failed': return {text: 'The search failed: ' + (scan.error ?? 'unknown error') + '.', tone: 'bad'};
     case 'outdated': return {text: 'New logs or a newer search: search again.', tone: 'todo'};
-    case 'no_episodes': return {text: 'Searched: no episodes.', tone: 'ok'};
+    case 'no_episodes': return {text: 'Searched.', tone: 'ok'};
     case 'done': return {text: 'Searched.', tone: 'ok'};
   }
 }
@@ -234,11 +204,6 @@ export function clockOf(seconds: number | null | undefined): string {
   const minutes = Math.floor(whole / 60) % 60;
   const rest = String(whole % 60).padStart(2, '0');
   return sign + (hours ? hours + ':' + String(minutes).padStart(2, '0') : String(minutes)) + ':' + rest;
-}
-
-/** How long an episode lasts: "0:12 long", or "a moment" for a single event. */
-export function lengthOf(seconds: number): string {
-  return seconds < 1 ? 'a moment' : clockOf(seconds) + ' long';
 }
 
 /** A km/h value, or the reason there is none. */

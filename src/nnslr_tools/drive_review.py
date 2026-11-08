@@ -1,6 +1,8 @@
-"""The drive review (Data › Drive review), to look at only: the episodes of a recorded drive where the driver
-intervened or the comma's vision and the map disagreed, shown with the video and the comma's own logs. Nothing is
-judged here: the signs of a stretch are reviewed in Sign review, where the page links to.
+"""The comma's own logs of the recorded drives, read on the server: what the car, openpilot, the vision and the map
+did, second by second, for the drive player (Speed review, Regression, the guests' reviews), Sign distance and the
+brain's training. Nothing is judged here. The scan also finds the episodes where the driver intervened or the vision
+and the map disagreed (drive_episodes): the Episodes lane of Regression shows them. (Data › Drive review, the page
+that listed them, was removed on 7 Nov 2026.)
 
 Everything lives in ``<data root>/annotations/drive_review.sqlite`` next to the frame review's database, and nothing
 here touches that one, the dataset or a training:
@@ -29,7 +31,7 @@ import sqlite3
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from nnslr_tools import drive_episodes, drive_logs
@@ -77,8 +79,8 @@ SCHEMA_STATEMENTS = (
 )
 
 
-# Drives before this day are not searched and their episodes are not in the queue: the vision network on the car was
-# not yet the one worth judging (Cristian, 31 Oct 2026). Changed from the page (Review drives from); '' for every drive.
+# Drives before this day are left out by Read the logs: the vision network on the car was not yet the one worth
+# judging (Cristian, 31 Oct 2026). Each is still read from its player; a stored '' takes every drive.
 DEFAULT_REVIEW_FROM = '2026-10-30'
 
 
@@ -110,7 +112,7 @@ def _dumps(value) -> str:
 
 
 class DriveReviewStore:
-    """The drive review's database and its scan worker. Every call opens its own connection (the site's threads share
+    """The logs' database and its scan worker. Every call opens its own connection (the site's threads share
     the store); writes are serialized by a lock."""
 
     def __init__(self, root: Path) -> None:
@@ -270,17 +272,6 @@ class DriveReviewStore:
         """The first day (YYYY-MM-DD) whose drives are reviewed; '' for every drive."""
         rows = self._rows("SELECT value FROM settings WHERE key = 'review_from'")
         return rows[0]['value'] if rows else DEFAULT_REVIEW_FROM
-
-    def set_review_from(self, value) -> str:
-        value = '' if value is None else str(value).strip()
-        if value:
-            try:
-                value = date.fromisoformat(value).isoformat()
-            except ValueError:
-                raise DriveReviewError(400, 'bad_date', 'A day as YYYY-MM-DD, or nothing for every drive.') from None
-        self._run([("INSERT INTO settings (key, value) VALUES ('review_from', ?) "
-                    'ON CONFLICT(key) DO UPDATE SET value = excluded.value', (value,))])
-        return value
 
     # ---------- the scan ----------
 
@@ -494,7 +485,7 @@ class DriveReviewStore:
         return {**base, 'state': 'done' if count else 'no_episodes', 'episodes': count}
 
     def needs_scan(self, route: str, state: dict | None = None) -> bool:
-        """The one rule of every caller (Drive review's Find episodes, Sign distance, nnslr sign-reads) for a drive to
+        """The one rule of every caller (Read the logs on Speed review, Sign distance, nnslr sign-reads) for a drive to
         scan now: never scanned, out of date, a scan that stopped (interrupted, an error), or logs on this server not
         imported yet, or recorded as unreadable and readable now (a real open: never the mode bits, which an NFS share
         does not honour as root). A drive whose logs were all read and none could be read is not scanned again."""
@@ -567,12 +558,6 @@ class DriveReviewStore:
             out.append(payload)
         return out
 
-    def episode(self, episode_id: str) -> dict | None:
-        rows = self._rows('SELECT route FROM episodes WHERE id = ?', (episode_id,))
-        if not rows:
-            return None
-        return next((item for item in self.episodes(rows[0]['route'], active=False) if item['id'] == episode_id),
-                    None)
 
 def _readable(path: str) -> bool:
     """The file opens and reads for this process now."""
@@ -718,22 +703,6 @@ def _when(civil_ms: int | None, drive: dict) -> tuple[str | None, bool]:
     return drive.get('when'), False
 
 
-def episode_when(summary: dict, drive: dict, start_ns: int) -> tuple[str | None, bool]:
-    """The date and time an episode starts: the GPS's time of the drive plus the log time since its start (certain),
-    else the drive's videos' start plus that time (uncertain); (None, False) when neither is known."""
-    from nnslr_tools.drives import LOCAL
-    t0 = summary.get('t0_ns')
-    offset_s = (start_ns - t0) / NS if t0 is not None else 0.0
-    if summary.get('civil_ms') and t0 is not None:
-        at, certain = datetime.fromtimestamp(summary['civil_ms'] / 1000 + offset_s, timezone.utc), True
-    elif drive.get('start'):
-        at, certain = datetime.fromtimestamp(datetime.fromisoformat(drive['start']).timestamp() + offset_s,
-                                             timezone.utc), False
-    else:
-        return None, False
-    return at.astimezone(LOCAL).strftime('%a %-d %b %Y · %H:%M'), certain
-
-
 def drive_day(civil_ms: int | None, drive: dict) -> str | None:
     """The local day (YYYY-MM-DD) a drive started: the GPS's, else its videos' file times; None when unknown."""
     if civil_ms:
@@ -748,7 +717,7 @@ def before_review(day: str | None, review_from: str) -> bool:
 
 
 def early_routes(store: 'DriveReviewStore') -> set[str]:
-    """The drives before the first day reviewed (their episodes stay out of the queue, Find episodes skips them)."""
+    """The drives before the first day reviewed (Read the logs skips them)."""
     from nnslr_tools.drives import drive_of
     review_from = store.review_from()
     if not review_from:
@@ -785,8 +754,8 @@ def store_for(root: Path) -> DriveReviewStore:
 
 
 def drives_view(store: DriveReviewStore) -> list[dict]:
-    """Every drive of the portal for the page: its name, when, its logs and scan, whether Find episodes reads it
-    (needs_scan, the store's one rule), how many episodes it has."""
+    """Every drive of the portal (the rows of Speed review's list): its name, when, its logs and scan, whether Read
+    the logs reads it (needs_scan, the store's one rule), how many episodes it has."""
     from nnslr_tools import drive_video
     from nnslr_tools.drives import drive_of
     episodes = store.episodes()
@@ -810,51 +779,4 @@ def drives_view(store: DriveReviewStore) -> list[dict]:
                     'episodes': sum(1 for item in episodes
                                     if item['route'] == route and item['channel'] != 'spot_check')})
     out.sort(key=lambda item: item['route'], reverse=True)
-    return out
-
-
-QUEUE_KINDS = ('intervention', 'disagreement', 'both', *drive_episodes.INTERVENTIONS)
-QUEUE_DATA = ('vision_and_map', 'no_vision', 'no_map', 'no_video', 'qlog')
-
-
-def queue_view(store: DriveReviewStore, *, route: str | None = None, kind: str | None = None,
-               data: str | None = None) -> list[dict]:
-    """The episodes, the ones with more agreeing clues first: filtered by drive, kind (a channel or a clue) and data
-    available; none of a drive before the first day reviewed (early_routes)."""
-    from nnslr_tools import drive_video
-    from nnslr_tools.drives import drive_of
-    early = early_routes(store)
-    videos: dict[str, set] = {}
-    drives: dict[str, tuple[dict, dict]] = {}
-    out = []
-    for item in store.episodes(route):
-        if item['route'] in early or item['channel'] == 'spot_check':
-            continue
-        if kind and kind != item['channel'] and kind not in item['kinds']:
-            continue
-        if item['route'] not in videos:
-            videos[item['route']] = {segment for segment, _path in drive_video.minutes(store.root, item['route'])}
-        segments = item.get('segments') or [None, None]
-        has_video = segments[0] is not None and all(number in videos[item['route']]
-                                                    for number in range(segments[0], segments[1] + 1))
-        available = item['data']
-        if data == 'vision_and_map' and not (available['vision'] and available['map']):
-            continue
-        if data == 'no_vision' and available['vision']:
-            continue
-        if data == 'no_map' and available['map']:
-            continue
-        if data == 'no_video' and has_video:
-            continue
-        if data == 'qlog' and available.get('log') not in ('qlog', 'mixed'):
-            continue
-        if item['route'] not in drives:
-            drives[item['route']] = (store.summary(item['route']) or {}, drive_of(store.root, item['route']))
-        when, certain = episode_when(*drives[item['route']], item['start_ns'])
-        out.append({'when': when, 'when_certain': certain, 'id': item['id'], 'route': item['route'], 'start_ns': item['start_ns'], 'end_ns': item['end_ns'],
-                    'channel': item['channel'], 'kinds': item['kinds'], 'priority': item['priority'],
-                    'reasons': item['reasons'], 'hint': item['hint'], 'before': item['before'], 'data': available,
-                    'video': has_video, 'segments': item.get('segments'),
-                    'duration_s': round((item['end_ns'] - item['start_ns']) / NS, 1)})
-    out.sort(key=lambda item: (-item['priority'], item['route'], item['start_ns']))
     return out

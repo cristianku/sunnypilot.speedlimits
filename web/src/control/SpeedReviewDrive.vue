@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Data › Speed review, a drive opened ("/speed-review?drive=<route>"): the player of Drive review (DriveReviewDrive.vue)
+// Data › Speed review, a drive opened ("/speed-review?drive=<route>"): the drive player (DriveReviewDrive.vue)
 // with one lane more, the speed to hold, and the commands at its side. The proposal is the OpenStreetMap limit, where the
 // map has no number the limit of the signs the comma read, and a person says what the speed to hold really was
 // (speed_review.py). The card shows what the map and the signs read said on the stretch, and the lane marks red where
@@ -76,11 +76,13 @@ function goOn(after: Stretch): void {
   if (item) go(item);
   else toast('Every stretch of this drive is examined.');
 }
-// A drive opens at the first stretch nobody looked at: the review goes on where it stopped.
+// A drive opens at the first stretch nobody looked at: the review goes on where it stopped. Opened from Sign review at a
+// moment ("?segment=N&second=S"), it stays there: the player seeks to it.
+const linked = new URLSearchParams(location.search).has('segment');
 const toFirstOpen = watch([t0, drive], () => {
   if (!t0.value || !drive.value) return;
   toFirstOpen();
-  go(nextOpen(pieces.value, 0) ?? undefined);
+  if (!linked) go(nextOpen(pieces.value, 0) ?? undefined);
 });
 
 // -- the commands ----------------------------------------------------------------------------------------------------------
@@ -214,7 +216,7 @@ function worksIn(from: number, to: number) {
 </script>
 
 <template>
-  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" no-episodes simple-lanes
+  <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
                     sharp :rates="RATES" start-zoom="ten" @time="follow">
     <template #lane="{x, w, width, from, to, fits}">
       <div class="dr-lane sr-lane" title="The speed to hold: dashed, the proposal nobody looked at yet, from the map, or from the signs read where the map has no number; green confirmed; blue corrected; ? nobody can tell; red line: the sign read differs from the map; orange bar: roadworks; grey line: gone through for roadworks">

@@ -1,4 +1,4 @@
-"""One comma log (rlog or qlog) of one segment as the compact time series of the drive review (nnslr_tools.drive_logs).
+"""One comma log (rlog or qlog) of one segment as the compact time series the server reads (nnslr_tools.drive_logs).
 
     python -m nnslr_tools.drive_extract <cereal dir> <car.capnp dir> <log file>
 

@@ -179,7 +179,7 @@ export function frameUrl(route: string, frame: Pick<WindowFrame, 'segment' | 'fr
     + (wide ? '-wide' : '') + '.jpg';
 }
 
-/** The tone of a drive's state, with the classes of Drive review (dr-muted, dr-todo, dr-ok, dr-bad, dr-busy). */
+/** The tone of a drive's state, with the classes of the drive lists (dr-muted, dr-todo, dr-ok, dr-bad, dr-busy). */
 export function statusTone(status: DriveStatus): 'muted' | 'todo' | 'ok' | 'bad' | 'busy' {
   switch (status) {
     case 'reading': return 'busy';

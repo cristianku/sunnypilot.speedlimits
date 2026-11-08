@@ -1,4 +1,4 @@
-// The kinds of road with their words (Drive review shows the scene network's).
+// The kinds of road with their words (the drive player shows the scene network's).
 import type {RoadType} from '../common/panel-types';
 
 /** The kinds of road in the order of the legend, each with its colour (control.html .rt-town ...). */

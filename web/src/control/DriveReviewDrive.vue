@@ -1,36 +1,34 @@
 <script setup lang="ts">
-// Data › Drive review, a drive opened ("/drive-review?drive=<route>&episode=<id>"): its video (nnslr_tools.drive_video,
-// the same as Results › Drive) in step with the comma's logs (GET /api/drive-review/drives/<route>/timeline): a time of
-// the logs is a picture of the video through the encode index of every frame (drive-review.ts videoTimeOf), never a
-// file's date. On the picture the limit the comma's vision held; under it the lanes (DriveReviewLanes.vue) between two
-// times, the whole drive as a strip with its episodes, and at the side what the comma had at the time shown and the
-// episode. Nothing is judged here: Review the signs here opens Sign review on the frame of the time shown, and Sign
-// review links back (?segment=N&second=S opens the drive at that time). Without logs the video plays all the same,
-// with what to do to get them:
+// The player of a drive, on Speed review (SpeedReviewDrive.vue) and Regression (RegressionDrive.vue): its video
+// (nnslr_tools.drive_video, the same as Results › Drive) in step with the comma's logs (GET
+// /api/drive-review/drives/<route>/timeline): a time of the logs is a picture of the video through the encode index of
+// every frame (drive-review.ts videoTimeOf), never a file's date. On the picture the limit the comma's vision held; under
+// it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
+// at the time shown. Review the signs here opens Sign review on the frame of the time shown, and Sign review links back
+// (?segment=N&second=S opens the drive at that time). Without logs the video plays all the same, with what to do to get
+// them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
-// or rlog/qlog files named with their drive and segment). Speed review shows a drive with this same player
-// (SpeedReviewDrive.vue): its own tab and back label (tab, backLabel), no episodes (noEpisodes), a choice of playback
-// speed (rates), a lane of its own over the others (slot "lane"), only the lanes a speed is judged on (simpleLanes), the
-// switch HD (sharp: standing still, the frame at the comma's full definition over the video) and its controls at the top
-// of the side (slot "side");
-// it follows the time shown through the event time and moves it with seek.
+// or rlog/qlog files named with their drive and segment). Each page gives its own tab and back label (tab, backLabel)
+// and a choice of playback speed (rates); Speed review also a lane of its own over the others (slot "lane"), only the
+// lanes a speed is judged on (simpleLanes), the switch HD (sharp: standing still, the frame at the comma's full
+// definition over the video) and its controls at the top of the side (slot "side"); each follows the time shown through
+// the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
-import {aheadAt, CHANNEL_LABEL, clockOf, type Episode, FPS, KIND_LABEL, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
+import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
   REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type Timeline, valueAt, videoTimeOf, type VideoState, visionAtSign} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
-import {type ControlTab, goTo, showEpisode, tabEpisode} from './tabs';
+import {type ControlTab, goTo} from './tabs';
 
-const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab?: ControlTab; backLabel?: string; noEpisodes?: boolean;
-  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean}>(), {tab: 'drivereview', backLabel: 'Drive review',
-  noEpisodes: false, simpleLanes: false, rates: () => [], sharp: false,
-  startZoom: 'episode'});
+const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
+  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false,
+  startZoom: 'one'});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
 
@@ -379,20 +377,6 @@ const syncText = computed((): string => {
   return 'No frame index in this minute\'s log: video not in step.';
 });
 
-// -- the episodes ----------------------------------------------------------------------------------------------------------
-const episodes = computed(() => props.noEpisodes ? [] : (view.value?.episodes ?? []).filter((item) => item.active || item.id === tabEpisode.value)
-  .sort((a, b) => a.start_s - b.start_s));
-const episode = computed((): Episode | null => episodes.value.find((item) => item.id === tabEpisode.value) ?? null);
-const episodeIndex = computed(() => episode.value ? episodes.value.indexOf(episode.value) : -1);
-function openEpisode(item: Episode | null): void {
-  showEpisode(item?.id ?? null);
-  if (item) {
-    zoom.value = 'episode';
-    windowFrom.value = Math.max(0, item.start_s - 30);
-    seek(Math.max(0, item.anchor_s - 5));
-  }
-}
-
 /** Sign review of this drive on the frame nearest to the time shown (without logs: by the minute of the video). */
 const signHref = computed((): string => {
   if (hasLogs.value) return signReviewHref(props.route, segments.value, cursor.value);
@@ -402,16 +386,16 @@ const signHref = computed((): string => {
 });
 
 // -- the window of the lanes ------------------------------------------------------------------------------------------------
-type Zoom = 'episode' | 'two' | 'ten' | 'all';
+type Zoom = 'one' | 'two' | 'ten' | 'all';
 const zoom = ref<Zoom>(props.startZoom);
-const ZOOMS = computed(() => [{key: 'episode' as Zoom, label: episode.value ? 'Episode' : '1 min'}, {key: 'two' as Zoom, label: '2 min'},
-  {key: 'ten' as Zoom, label: '10 min'}, {key: 'all' as Zoom, label: 'Drive'}]);
+const ZOOMS: {key: Zoom; label: string}[] = [{key: 'one', label: '1 min'}, {key: 'two', label: '2 min'}, {key: 'ten', label: '10 min'},
+  {key: 'all', label: 'Drive'}];
 const windowSpan = computed(() => {
   const whole = Math.max(end.value, 1);
   if (zoom.value === 'all') return whole;
   if (zoom.value === 'ten') return Math.min(whole, 600);
   if (zoom.value === 'two') return Math.min(whole, 120);
-  return Math.min(whole, episode.value ? Math.max(60, episode.value.end_s - episode.value.start_s + 60) : 60);
+  return Math.min(whole, 60);
 });
 const windowFrom = ref(0);
 const windowTo = computed(() => windowFrom.value + windowSpan.value);
@@ -423,8 +407,7 @@ function place(): void {
 }
 watch(cursor, place);
 watch(zoom, () => {
-  windowFrom.value = zoom.value === 'episode' && episode.value ? Math.max(0, episode.value.start_s - 30)
-    : Math.max(0, Math.min(Math.max(0, end.value - windowSpan.value), cursor.value - windowSpan.value / 2));
+  windowFrom.value = Math.max(0, Math.min(Math.max(0, end.value - windowSpan.value), cursor.value - windowSpan.value / 2));
 });
 
 // -- what the comma had at the time shown ----------------------------------------------------------------------------------
@@ -541,9 +524,7 @@ onMounted(async () => {
   folderInput.value?.setAttribute('webkitdirectory', '');
   await read();
   void askVideo(true);
-  const first = episode.value;
-  if (first) openEpisode(first);
-  else seekLinked();
+  seekLinked();
 });
 /** A link from Sign review (?segment=N&second=S): the drive opens at that picture. */
 function seekLinked(): void {
@@ -631,8 +612,6 @@ watch(() => props.route, () => {
                :aria-valuemin="0" :aria-valuemax="Math.round(end)" :aria-valuenow="Math.round(cursor)" tabindex="0"
                @pointerdown="stripDown" @pointermove="stripMove" @pointerup="stripUp" @pointercancel="stripUp">
             <rect x="0" y="7" width="1000" height="6" rx="3" class="dr-strip-base"/>
-            <rect v-for="item in episodes" :key="item.id" :x="sx(item.start_s)" y="3" :width="Math.max(4, sx(item.end_s) - sx(item.start_s))" height="14" rx="2"
-                  :class="['dr-strip-ep', item.channel, {current: item.id === episode?.id}]"/>
             <rect :x="sx(windowFrom)" y="0.5" :width="Math.max(2, sx(windowTo) - sx(windowFrom))" height="19" rx="3" class="dr-strip-window"/>
             <rect :x="sx(cursor) - 1.5" y="0" width="3" height="20" class="dr-strip-head"/>
           </svg>
@@ -640,7 +619,7 @@ watch(() => props.route, () => {
             <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
             <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
           </div>
-          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor" :episode="episode"
+          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor"
                             :simple="simpleLanes" @seek="seek">
             <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
           </DriveReviewLanes>
@@ -649,41 +628,6 @@ watch(() => props.route, () => {
 
         <aside class="dr-side">
           <slot name="side"></slot>
-          <section v-if="episodes.length" class="dr-episode-card" aria-labelledby="dr-ep-title">
-            <div class="dr-ep-nav">
-              <button type="button" class="btn small" :disabled="episodeIndex <= 0 && episode !== null || !episodes.length" aria-label="Previous episode"
-                      @click="openEpisode(episodes[episodeIndex <= 0 ? 0 : episodeIndex - 1] ?? null)">‹</button>
-              <h3 id="dr-ep-title">{{ episode ? 'Episode ' + (episodeIndex + 1) + ' of ' + episodes.length : plural(episodes.length, 'episode') }}</h3>
-              <button type="button" class="btn small" :disabled="episodeIndex >= episodes.length - 1" aria-label="Next episode"
-                      @click="openEpisode(episodes[episodeIndex + 1] ?? null)">›</button>
-            </div>
-            <template v-if="episode">
-              <p class="dr-ep-what"><strong>{{ CHANNEL_LABEL[episode.channel] }}</strong> at {{ clockOf(episode.anchor_s) }}
-                <template v-if="episode.end_s - episode.start_s >= 1"> · {{ clockOf(episode.end_s - episode.start_s) }} long</template></p>
-              <p v-if="!episode.active" class="dr-hint">The latest search no longer finds it.</p>
-              <span class="dr-chips"><button v-for="clue in episode.clues" :key="clue.kind + clue.t_ns" type="button" class="dr-chip" :class="'dr-k-' + clue.kind"
-                      @click="seek((clue.t_ns - t0) / 1e9 - 2)">{{ KIND_LABEL[clue.kind] ?? clue.kind }} {{ clockOf((clue.t_ns - t0) / 1e9) }}</button></span>
-              <ul v-if="episode.reasons.length" class="dr-reasons-list"><li v-for="reason in episode.reasons" :key="reason">{{ reason }}</li></ul>
-              <p class="dr-before">Just before, the comma had: vision <b>{{ episode.before.vision_logged ? episode.before.vision_kph ?? 'none' : 'not logged' }}</b>,
-                map <b>{{ episode.before.map_logged ? episode.before.map_kph ?? 'none' : 'not logged' }}</b>,
-                resolver <b>{{ episode.before.resolver_kph ?? '–' }}</b>{{ episode.before.resolver_source ? ' (' + episode.before.resolver_source + ')' : '' }},
-                speed <b>{{ episode.before.v_ego_kph === null ? '–' : Math.round(episode.before.v_ego_kph) }}</b>, set <b>{{ episode.before.set_speed_kph ?? 'none' }}</b>,
-                openpilot <b>{{ episode.before.openpilot ?? 'not logged' }}</b><template v-if="episode.before.vision_model !== undefined">,
-                vision network <b>{{ episode.before.vision_model ?? 'not logged' }}</b></template>.</p>
-              <p v-if="episode.previous_change" class="dr-hint">Last change of the vision limit before it:
-                {{ episode.previous_change.from_kph ?? '–' }} → {{ episode.previous_change.vision_kph }}
-                <button type="button" class="link-button" @click="seek((episode.previous_change.t_ns - t0) / 1e9 - 3)">at
-                  {{ clockOf((episode.previous_change.t_ns - t0) / 1e9) }}</button></p>
-              <p class="dr-avail">
-                <span :class="episode.data.vision ? 'ok' : 'no'">vision {{ episode.data.vision ? 'logged' : 'not in the log' }}</span>
-                <span :class="episode.data.map ? 'ok' : 'no'">map {{ episode.data.map ? 'logged' : 'not in the log' }}</span>
-                <span :class="episode.data.state ? 'ok' : 'no'">openpilot {{ episode.data.state ? 'logged' : 'not in the log' }}</span>
-                <span v-if="episode.data.log">{{ episode.data.log }}</span>
-              </p>
-            </template>
-            <p v-else class="dr-hint">Pick one with the arrows, or tap it on the strip of the drive.</p>
-          </section>
-
           <section v-if="now" class="dr-now" aria-labelledby="dr-now-title">
             <h3 id="dr-now-title">At {{ clockOf(cursor) }}, the comma had</h3>
             <dl>

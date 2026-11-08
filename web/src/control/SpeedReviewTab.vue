@@ -1,13 +1,16 @@
 <script setup lang="ts">
 // Data › Speed review, where a person says the speed the car should hold, for the brain to learn from (speed_review.py):
 // nothing here changes the car. Every drive, the newest first; a tap opens it ("/speed-review?drive=<route>",
-// SpeedReviewDrive.vue). Drive review stays what it is: a place to look. Above the list, Find the road types reads the map
-// for the drives (RoadTypesCard.vue): the OpenStreetMap limit it finds is the proposal of each stretch.
-import {computed, onMounted, ref, shallowRef, watch} from 'vue';
+// SpeedReviewDrive.vue). Above the list, Read the map reads the map for the drives (RoadTypesCard.vue): the
+// OpenStreetMap limit it finds is the proposal of each stretch; and Read the logs reads the comma's logs of every drive
+// (ReadLogsCard.vue), the list read again every 2 s while it does.
+import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
+import {isGuest} from '../common/guest';
 import {plural} from '../common/format';
 import type {ActionName, ActionState, Job, PanelStatus} from '../common/panel-types';
 import {clockOf, scanText} from './drive-review';
+import ReadLogsCard from './ReadLogsCard.vue';
 import RoadTypesCard from './RoadTypesCard.vue';
 import SectionHead from './SectionHead.vue';
 import type {SpeedRow} from './speed-review';
@@ -36,9 +39,18 @@ const stateOf = (drive: SpeedRow): string => (drive.first && drive.examined_s < 
 const shareOf = (drive: SpeedRow): string => (drive.total_s ? drive.examined_s / drive.total_s * 100 : 0) + '%';
 const hrefOf = (drive: SpeedRow): string => '/speed-review?drive=' + encodeURIComponent(drive.route);
 
+// While logs are read, the list again every 2 s (never under an opened drive).
+const reading = computed(() => (drives.value ?? []).some((drive) => drive.scan.state === 'queued' || drive.scan.state === 'scanning'));
+let timer: number | undefined;
+function schedule(): void {
+  window.clearTimeout(timer);
+  if (reading.value && tabDrive.value === null) timer = window.setTimeout(() => void load().then(schedule), 2000);
+}
+const reload = (): Promise<void> => load().then(schedule);
 // Back on the list: the shares may have changed.
-watch(tabDrive, (route) => { if (route === null) void load(); });
-onMounted(() => { if (tabDrive.value === null) void load(); });
+watch(tabDrive, (route) => { if (route === null) void reload(); else window.clearTimeout(timer); });
+onMounted(() => { if (tabDrive.value === null) void reload(); });
+onBeforeUnmount(() => window.clearTimeout(timer));
 </script>
 
 <template>
@@ -47,6 +59,7 @@ onMounted(() => { if (tabDrive.value === null) void load(); });
     <SectionHead tab="speedreview"/>
     <RoadTypesCard :status="status" @run="(name, state) => emit('run', name, state)" @stop="emit('stop', $event)"
                    @details="emit('details', $event)"/>
+    <ReadLogsCard v-if="!isGuest()" :drives="drives" :error="error" :read-only="readOnly" @changed="reload"/>
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>

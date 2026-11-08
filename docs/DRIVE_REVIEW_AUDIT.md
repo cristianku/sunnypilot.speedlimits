@@ -1,7 +1,9 @@
-# Drive review: what the comma's logs can tell
+# The comma's logs: what they can tell
 
-The drive review (Data › Drive review, `nnslr drive-review`) reads the comma's own logs of a drive, joins them to the
-drive's video and looks for episodes worth a look. This page says, for each thing the review needs, whether the log
+The server (`nnslr drive-review`, **Read the logs** on Data › Speed review, and the drive player of Speed review and
+Regression) reads the comma's own logs of a drive, joins them to the drive's video and looks for episodes worth a look.
+The page Data › Drive review, which listed them, was removed on 7 Nov 2026; the Episodes lane of Regression shows them.
+This page says, for each thing the review needs, whether the log
 **has** it, whether it can be **derived** from what the log has, or whether it is **absent**, and what the comma's
 telemetry would need to change to fill the gaps. The code is `src/nnslr_tools/drive_extract.py` (what is read),
 `drive_logs.py` (files, merge, sync), `drive_episodes.py` (the scan) and `drive_review.py` (the store and the API).
@@ -22,8 +24,8 @@ SYNTHETIC).
 | qlog | accepted, ranked after an rlog of the same minute | decimated: see below |
 
 Every file is recorded with its drive, segment, kind, SHA-256, source, size and coverage (span and messages per
-service). A drive without any log keeps its video review and shows *Logs not available: import the logs to look for
-the episodes of the recorded drive.*
+service). A drive without any log keeps its video review and shows *Logs not available: import the logs of the recorded
+drive to read them.*
 
 ## What the review needs, and what the log gives
 
@@ -37,7 +39,7 @@ the episodes of the recorded drive.*
 | The comma's vision limit | **has** | `speedVisionSP.speedLimit` (about 4 Hz): the limit the memory holds and the screen shows, not the sign of one frame. 0 means "not sure" and is treated as missing |
 | A sign confirmed | **has** | `speedVisionSP.signRead` marks the moment the memory took a sign; the value is the limit after it |
 | Scene (road type) | **has** | `speedVisionSP.roadType` |
-| The vision network in use | **has** | `speedVisionSP.modelName`: shown with each episode, so an error is put on the network that made it. Drives before the first day reviewed (30 Oct 2026 by default, **Drives from** on the page) are left out: an older network is not worth judging |
+| The vision network in use | **has** | `speedVisionSP.modelName`: shown with each episode, so an error is put on the network that made it. Drives before the first day reviewed (30 Oct 2026) are left out by Read the logs: an older network is not worth judging |
 | Map limit | **has**, needs a GPS fix | `liveMapDataSP.speedLimit` with `speedLimitValid`, the next limit ahead and its distance, `roadName` (1 Hz). Not valid → missing, never a disagreement |
 | Limit the car used | **has** | `longitudinalPlanSP.speedLimit.resolver` (`speedLimit`, `source` none/car/map/vision, `speedLimitFinal`) |
 | Speed Limit Assist | **has** | `longitudinalPlanSP.speedLimit.assist` (`state`, `active`), `longitudinalPlanSource`, `vTarget` |
@@ -73,12 +75,12 @@ speed changes had no `buttonEvents`; with ICBM idle around them they now count a
   vision limit and ended within 10 s with the map on that same limit is no episode (counted as `vision_ahead`).
 - **Missing is not wrong**: no vision, vision not sure (0), or no valid map limit is shown hatched and never counts as
   a disagreement.
-- **Episodes** are clues for a person, not labels: the page only shows them. The labels are the signs confirmed in
-  Sign review, which every moment of the page opens on.
+- **Episodes** are clues for a person, not labels: the player only shows them. The labels are the signs confirmed in
+  Sign review and the speeds of Speed review; every moment of the player opens Sign review.
 
 ## Telemetry changes that would help
 
-None of these is made by the drive review: each is a change to the comma's software, for a later decision.
+None of these is made by the server: each is a change to the comma's software, for a later decision.
 
 1. **Cruise buttons on the PSA**: done in opendbc `048c22ae` (`psa-torque-sunny-testing` of cristianku/opendbc), in
    the car's logs once sunnypilot's test branch is rebuilt with it. The stalk is wired to the BSI and is on none of

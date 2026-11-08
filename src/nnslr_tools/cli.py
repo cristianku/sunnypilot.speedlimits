@@ -1175,7 +1175,7 @@ def _cmd_drive_video(args: argparse.Namespace) -> int:
 
 # [drive-review] - START
 def _cmd_drive_review(args: argparse.Namespace) -> int:
-    """The drive review (nnslr_tools.drive_review): scan drives' comma logs for episodes."""
+    """Read drives' comma logs on the server (nnslr_tools.drive_review), as Read the logs on Speed review."""
     from nnslr_tools import drive_logs, drive_review
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
@@ -2204,7 +2204,8 @@ def build_parser() -> argparse.ArgumentParser:
     # [drive-review] - START
     p_drive_review = sub.add_parser(
         "drive-review",
-        help="the drive review (Data › Drive review): scan drives' comma logs for episodes (CPU only)",
+        help="read drives' comma logs, as Read the logs on Speed review: the series of the drive player, Sign distance "
+             "and the brain's training, and the episodes (CPU only)",
     )
     p_drive_review.add_argument("action", choices=("scan",))
     p_drive_review.add_argument("routes", nargs="*", help="the drives, e.g. 00000154--fa7e8f49aa")
@@ -2219,7 +2220,7 @@ def build_parser() -> argparse.ArgumentParser:
         "sign-reads",
         help="the exact frame of every sign the comma's vision read (signRead in the drive's logs), added to Sign "
              "review next to the pictures at 1 a second: read_<1000 + frame>.png and sign_reads.jsonl per segment "
-             "(CPU only; reads the drive's logs first when Drive review has not; run preannotate after it)",
+             "(CPU only; reads the drive's logs first when they are not read; run preannotate after it)",
     )
     p_sign_reads.add_argument("routes", nargs="+", help="the drives, e.g. 00000160--ea56ae0f33")
     p_sign_reads.add_argument("--no-scan", action="store_true", help="do not read the drive's logs, use the last scan")

@@ -72,7 +72,7 @@ function leftOutText(drive: Drive): string {
   return parts.length ? plural(Object.values(drive.counts.excluded).reduce((a, b) => a + (b ?? 0), 0), 'sign') + ' left out (' + parts.join(', ') + ')' : '';
 }
 
-// The list reloads every 2 s while a drive's logs are being read (Drive review reads them).
+// The list reloads every 2 s while a drive's logs are being read (Read the logs on Speed review, or a drive's player).
 let timer = 0;
 function schedule(): void {
   window.clearTimeout(timer);
@@ -131,7 +131,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <p v-else-if="!withSigns.length" class="empty">No drive with a sign to compare yet. Vision's distance is in the logs of drives
-        made with a build from 31 October 2026 on; their logs are read in Drive review (Find episodes).</p>
+        made with a build from 31 October 2026 on; their logs are read by Read the logs in Speed review.</p>
       <ul v-else class="rt-list" id="sd-drive-list">
         <li v-for="drive in withSigns" :key="drive.route" class="rt-drive sd-drive">
           <a class="rt-open" :href="driveHref(drive.route)">
@@ -170,7 +170,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
               <span v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</span>
             </div>
             <p class="dr-drive-state" :class="'dr-' + otherTone(drive)">{{ otherText(drive) }}<template v-if="drive.status === 'unread'">
-              <a :href="'/drive-review?drive=' + encodeURIComponent(drive.route)">Read them in Drive review ›</a></template><template
+              <a :href="'/speed-review?drive=' + encodeURIComponent(drive.route)">Read them in Speed review ›</a></template><template
               v-else-if="drive.status === 'no_video'"> <a href="/prepare">Drives ›</a></template><template
               v-else-if="drive.status === 'signs'"> <a :href="driveHref(drive.route)">Open ›</a></template></p>
             <ul v-if="drive.status === 'unreadable' && drive.unreadable_files.length" class="sd-files">

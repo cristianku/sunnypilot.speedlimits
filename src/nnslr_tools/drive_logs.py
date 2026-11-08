@@ -1,5 +1,5 @@
-"""The comma's logs of a drive for the drive review (Data › Drive review): where they come from, how they are kept, read
-and joined to the video.
+"""The comma's logs of a drive, read on the server (nnslr_tools.drive_review): where they come from, how they are kept,
+read and joined to the video.
 
 Where they come from. The comma writes an rlog (every message) and a qlog (a decimated copy) for every minute of a
 drive. ``helpers/fetch_comma_segments.sh`` (the comma pill's Download new drives) already copies the rlog of every
@@ -9,7 +9,7 @@ there; nothing new connects to the comma. Logs downloaded elsewhere (comma conne
 portal (Upload logs) and kept, unchanged, in ``<data root>/raw/drive_logs/<route>/<segment>/<kind>-<sha16><ext>``:
 the name holds the content's hash, so the same file uploaded twice is stored once.
 
-What is kept. Every file is recorded in the drive review's database (drive_review.DriveReviewStore, table log_files)
+What is kept. Every file is recorded in the logs' database (drive_review.DriveReviewStore, table log_files)
 by the drive's original id, the segment, the kind (rlog or qlog) and the SHA-256 of its content, with where it came
 from (comma-download or upload), its size, and its coverage (the span of its messages and their count per service,
 once read). A segment may have several files: the scan reads the best one (an rlog before a qlog, then the one with

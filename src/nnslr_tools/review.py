@@ -722,7 +722,9 @@ def make_handler(app: ReviewApp):
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
                 return
             if path in OLD_ADDRESSES:
-                self._redirect(OLD_ADDRESSES[path], None)
+                # The query goes along: /drive-review?drive=<route>&segment=N opens that drive at that moment.
+                query = urlsplit(self.path).query
+                self._redirect(OLD_ADDRESSES[path] + ('?' + query if query else ''), None)
                 return
             # [guest-reviewers] - START
             if path == '/api/reviewer/work':
@@ -775,8 +777,8 @@ def make_handler(app: ReviewApp):
                 self._json(200, drive_video.state(app.root, match.group(1), start=start))
                 return
             # [drive-review] - START
-            # Data › Drive review (nnslr_tools.drive_review): the drives with their logs and scans, the queue of
-            # episodes, a drive's timeline.
+            # A drive's logs, their reading and its timeline (nnslr_tools.drive_review): the drive player of Speed
+            # review, Regression and the guests' reviews.
             if path.startswith('/api/drive-review/'):
                 self._drive_review_get(path)
                 return
@@ -1235,21 +1237,7 @@ def make_handler(app: ReviewApp):
             from nnslr_tools import drive_review, drive_video
             from nnslr_tools.drive_logs import DriveLogError
             store = drive_review.store_for(app.root)
-            query = parse_qs(urlsplit(self.path).query)
-            value = lambda name: query.get(name, [''])[0] or None  # noqa: E731
             try:
-                if path == '/api/drive-review/drives':
-                    self._json(200, {'drives': drive_review.drives_view(store), 'review_from': store.review_from()})
-                    return
-                if path == '/api/drive-review/episodes':
-                    route, kind, data = value('route'), value('kind'), value('data')
-                    if ((route and not re.fullmatch(r'[0-9a-f]{8}--[0-9a-f]{10}', route))
-                            or (kind and kind not in drive_review.QUEUE_KINDS)
-                            or (data and data not in drive_review.QUEUE_DATA)):
-                        self._problem(400, 'bad_filter', 'Unknown filter.', True)
-                        return
-                    self._json(200, {'episodes': drive_review.queue_view(store, route=route, kind=kind, data=data)})
-                    return
                 match = re.fullmatch(r'/api/drive-review/drives/([0-9a-f]{8}--[0-9a-f]{10})(/timeline)?', path)
                 if match and match.group(2):
                     route = match.group(1)
@@ -1272,8 +1260,8 @@ def make_handler(app: ReviewApp):
             self._problem(404, 'not_found', 'Not found.', True)
 
         def _drive_review_post(self, path):
-            """The drive review's actions (logs to read and scan, the first day shown; nothing is judged here): same
-            origin and a session, as every change of the portal. A log is sent as it is (application/octet-stream,
+            """A drive's logs: sent, read for one drive or for every drive not read yet (Read the logs, Speed review);
+            nothing is judged here. Same origin and a session, as every change of the portal. A log is sent as it is (application/octet-stream,
             ?name=<its path or name>&segment=N); everything else is JSON."""
             from nnslr_tools import drive_logs, drive_review
             store = drive_review.store_for(app.root)
@@ -1304,9 +1292,7 @@ def make_handler(app: ReviewApp):
                     self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                     return
                 self._require_ai_session()
-                body = self._read_json()
-                who, via = self._who()
-                author = who or 'administrator'
+                self._read_json()
                 match = re.fullmatch(r'/api/drive-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/scan', path)
                 if match:
                     self._json(200, {'ok': True, 'scan': store.queue_scan(match.group(1))})
@@ -1323,15 +1309,6 @@ def make_handler(app: ReviewApp):
                             store.queue_scan(route)
                             queued.append(route)
                     self._json(200, {'ok': True, 'queued': queued})
-                    return
-                if not isinstance(body, dict):
-                    self._problem(400, 'invalid_json', 'An object is expected.', True)
-                    return
-                if path == '/api/drive-review/settings':
-                    review_from = store.set_review_from(body.get('review_from'))
-                    print(f'Drive review: drives reviewed from {review_from or "the first"} ({terminal_text(author)})',
-                          flush=True)
-                    self._json(200, {'ok': True, 'review_from': review_from})
                     return
             except (drive_review.DriveReviewError, drive_logs.DriveLogError) as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)

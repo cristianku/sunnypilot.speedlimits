@@ -7,10 +7,10 @@
 // shows them (Speed review's speed to hold), first of all, drawn with the scale of the others. Simple (Speed review)
 // keeps only the vision's limit, the map's and the car's speed under it: what a speed to hold is judged on.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
-import {combine, type Episode, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
+import {combine, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value, visionAtSign} from './drive-review';
 
-const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; episode: Episode | null; simple?: boolean}>();
+const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; simple?: boolean}>();
 const emit = defineEmits<{seek: [seconds: number]}>();
 
 const ruler = useTemplateRef<HTMLDivElement>('ruler');
@@ -188,7 +188,7 @@ const mapToday = computed(() => (props.view.map_today?.runs ?? []).flatMap(([seg
 // The episodes, by their kind: the vision disagreeing with the map, the driver intervening, or both.
 const episodes = computed(() => props.view.episodes.filter((item) => item.active && item.end_s >= props.from && item.start_s <= props.to)
   .map((item) => ({id: item.id, from: Math.max(item.start_s, props.from), to: Math.min(Math.max(item.end_s, item.start_s + span.value / 200), props.to),
-    current: item.id === props.episode?.id, channel: item.channel})));
+    channel: item.channel})));
 
 // -- a tap or a drag on the lanes goes there -----------------------------------------------------------------------------
 const track = useTemplateRef<HTMLDivElement>('track');
@@ -309,7 +309,7 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
       <span class="dr-lane-name">Episodes</span>
       <svg :width="width" height="30" :viewBox="`0 0 ${width} 30`" aria-hidden="true">
         <rect v-for="item in episodes" :key="item.id" :x="x(item.from)" y="8" :width="Math.max(3, w(item.from, item.to))" height="14" rx="2"
-              :class="['dr-episode', item.channel, {current: item.current}]"/>
+              :class="['dr-episode', item.channel]"/>
       </svg>
     </div>
     <div class="dr-cursor" :style="{left: 'calc(var(--dr-name) + ' + cursorX + 'px)'}" aria-hidden="true"></div>

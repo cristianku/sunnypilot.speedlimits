@@ -48,7 +48,7 @@ function firstSign(list: Sign[]): string | null {
   return (list.find(toMark) ?? list.find((item) => item.included) ?? list[0])?.key ?? null;
 }
 
-/** The drive again every 2 s while its logs are being read (Drive review reads them), until they are. */
+/** The drive again every 2 s while its logs are being read (Speed review reads them), until they are. */
 let polling = 0;
 function stopPolling(): void {
   window.clearTimeout(polling);
@@ -503,7 +503,7 @@ const visionAtMark = computed(() => {
         <li class="sd-files-note">Their permissions are fixed on the server; this page never changes them.</li>
       </ul>
       <div v-if="!guest" class="dr-banner-actions">
-        <a v-if="drive.status === 'unread' || drive.status === 'unreadable'" class="btn small" :href="'/drive-review?drive=' + encodeURIComponent(route)">Drive review</a>
+        <a v-if="drive.status === 'unread' || drive.status === 'unreadable'" class="btn small" :href="'/speed-review?drive=' + encodeURIComponent(route)">Read the logs</a>
         <a v-if="drive.status === 'no_video'" class="btn small" href="/prepare">Drives</a>
       </div>
     </div>
@@ -632,7 +632,7 @@ const visionAtMark = computed(() => {
             <button type="button" class="btn" :disabled="nextDriveBusy" @click="nextDrive">Next drive ›</button>
           </template>
           <span v-else class="dr-hint">{{ remaining }} to mark</span>
-          <a v-if="!guest" class="link-button sd-car" :href="'/drive-review?drive=' + encodeURIComponent(route)">What the car did here ›</a>
+          <a v-if="!guest" class="link-button sd-car" :href="'/speed-review?drive=' + encodeURIComponent(route)">What the car did here ›</a>
         </div>
         <p class="dr-hint sd-keys">Keys: ← → one frame, , . five, Shift+← → the sign before or after;<template
           v-if="writable && sign.included"> Z zero here, C can't tell,</template><template v-if="writable && (sign.included

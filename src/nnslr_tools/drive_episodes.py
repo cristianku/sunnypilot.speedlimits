@@ -1,4 +1,4 @@
-"""The episodes of a recorded drive worth a look in the drive review: found in the comma's logs alone (CPU, no
+"""The episodes of a recorded drive worth a look (the Episodes lane of Regression): found in the comma's logs alone (CPU, no
 image, no neural network), on a drive joined by drive_logs.merge.
 
 Two channels, independent of each other:

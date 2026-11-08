@@ -49,14 +49,13 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
 # shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, their
-# review, Speed review (the speed a person wants held along a drive, with the map's limits it proposes), Sign distance
+# sign review, Speed review (the speed a person wants held along a drive, with the map's limits it proposes), Sign distance
 # (where the comma's vision says a sign is passed against the frame a person marks) and the training dataset; Models the
 # versions to choose, their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
-                                  ('drivereview', '/drive-review', 'Drive review'),
                                   ('speedreview', '/speed-review', 'Speed review'),
                                   ('signdistance', '/sign-distance', 'Sign distance'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
@@ -71,7 +70,7 @@ SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages o
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
 # route list (/routes) is a page of its own.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset',
-                '/drive-review': 'drivereview', '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
+                '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
                 '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
@@ -81,12 +80,14 @@ SECTION_ICONS = {
     'train': '<path d="M4 19h16"/><path d="M5 16l4.5-5 3.5 3 6-7"/><path d="M15 7h4v4"/>',
     'models': '<path d="M12 3.5 19.5 7.7v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.8 7.9 12 12l7.2-4.1M12 12v8.3"/>',
 }
-# Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review).
+# Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review). Drive
+# review is gone (7 Nov 2026): its drive player is Speed review's, where its links lead with their drive and moment.
 # The home of a reviewer from outside. / cannot be: on the public names it is the page of the project, open to all, and
 # what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
 GUEST_HOME = '/reviews'
 OLD_ADDRESSES = {GUEST_HOME: '/', '/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
-                 '/settings': '/account', '/review': '/routes', '/roads': '/speed-review'}
+                 '/settings': '/account', '/review': '/routes', '/roads': '/speed-review',
+                 '/drive-review': '/speed-review'}
 # The name of each page in the window title.
 TAB_TITLES = {key: label for key, _, label in SITE_TABS}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
