@@ -364,8 +364,9 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     event.preventDefault();
     const direction = event.key === 'ArrowLeft' ? -1 : 1;
-    if (event.shiftKey) stepFrame(direction);
-    else seek(cursor.value + direction);
+    // ← → a frame, ⇧ ← → a second.
+    if (event.shiftKey) seek(cursor.value + direction);
+    else stepFrame(direction);
   }
 }
 onMounted(() => window.addEventListener('keydown', onKey));

@@ -8,8 +8,9 @@
 // their kph, the roadworks and how far the drive was gone through for them. Roadworks are marked next to the speed, two
 // taps on the frame shown; a third tap says that the drive was gone through up to the frame shown, so that no mark there
 // means no works, and the drive opens there again. The kinds of road (narrow, country, gravel, potholes, and those added
-// with "+") are marked the same way, each with its own marks and its own "checked to here": a chip picks what the taps
-// mark, the lane draws the one picked, and a dot on a chip says the frame shown is inside one of its marks. The road type
+// with "+") are marked the same way, each with its own marks and its own "checked to here": a tap on a chip starts a mark of
+// it at the frame shown and a second tap ends it there; the chip is solid where the frame shown is inside one of its
+// marks, and the last one tapped is the one the lane draws and Remove / Checked to here work on. The road type
 // (town, rural, motorway…) is the map's, one a second, drawn on a lane of its own, light, and solid where he corrected it:
 // a chip sets a type, or "can't tell", on the whole stretch of the frame shown, on its part before or after the frame
 // shown (✂ Before / After, the stretch cut there), or from a frame kept with "From here" to the frame shown
@@ -273,6 +274,18 @@ const tapMark = (tap: WorksTap): void => {
 };
 function mark(): void {
   if (canMark.value) tapMark(markOpen.value ? 'end' : 'start');
+}
+/** A tap on a kind's chip: picked, and a mark of it started here, or its open one ended here; inside a mark it is only
+ * picked (Remove this mark is under the chips). */
+function tapKind(kind: string): void {
+  picked.value = kind;
+  if (locked.value) return;
+  if (markOpen.value) {
+    if (canMark.value) tapMark('end');
+    else toast('Its end goes after its start, ' + clockOf(secondOf(markOpen.value.start_ns)) + '.', true);
+  } else if (!markHere.value) {
+    tapMark('start');
+  }
 }
 /** Key k: the next kind. */
 function nextKind(): void {
@@ -747,12 +760,12 @@ function worksIn(from: number, to: number) {
                 v-else>The map has no type here.</template></p>
             </div>
             <p v-else-if="drive.road_type_names && !readOnly && !isGuest()" class="dr-hint">No road types for this drive yet: Read the map in Data › Prepare.</p>
-            <div class="sr-kinds" role="radiogroup" aria-label="What the taps mark">
-              <button v-for="item in kinds" :key="item.kind" type="button" role="radio" class="sr-kind"
+            <div class="sr-kinds" role="group" aria-label="Kinds of road: a tap where it starts, a tap where it ends">
+              <button v-for="item in kinds" :key="item.kind" type="button" class="sr-kind"
                       :class="{'sr-kind-works': item.kind === ROADWORKS, 'sr-kind-here': inside.has(item.kind)}"
-                      :aria-checked="item.kind === pickedKind.kind"
-                      :title="(inside.has(item.kind) ? 'Marked at the frame shown' : 'No mark at the frame shown') + ' · a tap picks it for the buttons below (key k)'"
-                      @click="picked = item.kind">{{ item.label }}<span v-if="inside.has(item.kind)" class="sr-hidden"> (here)</span></button>
+                      :aria-current="item.kind === pickedKind.kind" :aria-pressed="inside.has(item.kind)" :disabled="locked"
+                      :title="inside.has(item.kind) ? 'Marked here' : 'A tap: it starts here (key w)'"
+                      @click="tapKind(item.kind)">{{ item.label }}</button>
               <button v-if="canAdd && !adding" type="button" class="sr-kind sr-kind-add" id="sr-kind-add" aria-label="Add a kind of road"
                       @click="adding = true">+</button>
             </div>
@@ -762,22 +775,23 @@ function worksIn(from: number, to: number) {
               <button type="submit" class="btn small primary" :disabled="saving || !newLabel.trim()">Add</button>
               <button type="button" class="btn small" @click="adding = false; newLabel = ''">Cancel</button>
             </form>
+            <p v-if="markOpen" class="sr-open" id="sr-works-open"><strong>{{ pickedKind.label }} from {{ clockOf(secondOf(markOpen.start_ns)) }}</strong>:
+              go to where it ends and tap {{ pickedKind.label }} again.</p>
             <div class="sr-tools">
-              <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMark" title="Key w" @click="mark">{{ pickedKind.label + (markOpen ? ' to here' : ' from here') }}</button>
-              <button v-if="markHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapMark('remove')">Remove this mark</button>
+              <button v-if="markHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapMark('remove')">Remove {{ pickedKind.label }} here</button>
               <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheck"
                       :title="'From the start of the drive to this frame every ' + pickedKind.label.toLowerCase() + ' is marked: no mark there means none (key c)'"
                       @click="tapMark('checked')">Checked to here</button>
             </div>
-            <p class="dr-hint">{{ pickedKind.label }}<template v-if="markShown"> {{ clockOf(secondOf(markShown.start_ns)) }}{{ markShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(markShown.end_ns)) }}</template><template
+            <p class="dr-hint">A tap on a kind where it starts, a tap where it ends. {{ pickedKind.label }}<template v-if="markShown"> {{ clockOf(secondOf(markShown.start_ns)) }}{{ markShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(markShown.end_ns)) }}</template><template
               v-else>: no mark here</template><template v-if="checked !== null"> · checked up to {{ clockOf(secondOf(checked)) }}</template><template
               v-else> · not checked yet</template></p>
             <p v-if="!isWorks" class="dr-hint">A kind of road changes no speed: the brain learns it aside, as the roadworks, to read the road better.</p>
           </div>
           <details v-if="!readOnly" class="dr-more sr-keys"><summary>Keys</summary>
             <p class="dr-hint">b block from / to here · m block of the map · x remove the block · l leave out · ↑ ↓ ±1 · − + ±5 ·
-              Esc cancel · k next kind of road · w start / end of it · c checked to here · t road type from here · 1–9 its type,
-              0 can't tell · space play · ← → 1 s · ⇧ ← → a frame</p></details>
+              Esc cancel · k next kind of road · w start / end of the last one tapped · c checked to here · t road type from here · 1–9 its type,
+              0 can't tell · space play · ← → a frame · ⇧ ← → 1 s</p></details>
         </template>
       </section>
     </template>
