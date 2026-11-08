@@ -218,6 +218,15 @@ watch([section, () => jobFor('brain')?.state], async ([value]) => {
     brainLabels.value = {problem: messageOf(problem)};
   }
 }, {immediate: true});
+/** The kinds of road of Speed review the brain learns from: the seconds to learn from on each and checked off it. */
+const brainRoads = computed(() => {
+  const labels = brainLabels.value;
+  const road = labels?.partitions?.train.road ?? {};
+  return (labels?.road_kinds ?? []).flatMap((kind) => {
+    const count = road[kind];
+    return count && (count.in || count.out) ? [{kind, label: labels?.road_labels?.[kind] ?? kind, in: count.in, out: count.out}] : [];
+  });
+});
 const numbers = computed(() => {
   const status = props.status;
   if (status === null) return null;
@@ -349,7 +358,11 @@ const numbers = computed(() => {
           <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. Sign review answers the next limit on
           <strong>{{ thousands(brainLabels.partitions.train.next) }}</strong> of the seconds to learn from.<template
-          v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template></p>
+          v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
+          v-if="brainRoads.length"> The kinds of road of Speed review, seconds to learn from on each and checked off it:<template
+          v-for="(road, index) in brainRoads" :key="road.kind">{{ index ? ';' : '' }} {{ road.label }}
+          <strong>{{ thousands(road.in) }}</strong> on, <strong>{{ thousands(road.out) }}</strong> off</template>.</template><template
+          v-else-if="brainLabels.road_kinds?.length"> No kind of road is marked in Speed review yet.</template></p>
         <p v-else class="latest-none" id="train-brain-labels">Loading…</p>
       </template>
       <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :brain-choices="brainChoices" :fresh="numbers?.fresh ?? 0"

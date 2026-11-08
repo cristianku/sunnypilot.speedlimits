@@ -408,6 +408,100 @@ def test_the_drives_say_whether_the_brain_learns_from_them(store, monkeypatch):
     assert speed_review.drive_view(store, Drives(), routes[1])['dashcam'] is False
 
 
+
+# ---------- the kinds of road ----------
+
+def road_marks(store, route=ROUTE):
+    return [(row['kind'], (row['start_ns'] - T0) / NS, None if row['end_ns'] is None else (row['end_ns'] - T0) / NS)
+            for row in store.road(route)]
+
+
+def test_the_first_kinds_of_road_are_there_in_their_order(store):
+    assert store.road_kinds() == [{'kind': kind, 'label': label} for kind, label in speed_review.FIRST_ROAD_KINDS]
+    # Opening the file again seeds nothing twice.
+    assert SpeedReviewStore(store.root).road_kinds() == store.road_kinds()
+
+
+def test_marks_of_two_kinds_may_overlap_and_those_of_one_kind_may_not(store):
+    store.tap_road(ROUTE, 'narrow', 'start', at(10), END, 0, 'a')
+    store.tap_road(ROUTE, 'gravel', 'start', at(20), END, 1, 'a')
+    store.tap_road(ROUTE, 'narrow', 'end', at(40), END, 2, 'a')
+    assert road_marks(store) == [('gravel', 20, None), ('narrow', 10, 40)]
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_road(ROUTE, 'narrow', 'start', at(30), END, 3, 'a')
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_road')
+    # Roadworks are their own: a kind of road changes none of them, and all share the revision of the drive.
+    store.tap_works(ROUTE, 'start', at(25), END, 3, 'a')
+    assert marks(store) == [(25, None)] and store.revision(ROUTE) == 4
+    store.tap_road(ROUTE, 'gravel', 'remove', at(50), END, 4, 'a')
+    assert road_marks(store) == [('narrow', 10, 40)]
+    assert [(row['action'], row['state']) for row in store.history(ROUTE)] == [
+        ('road_start', 'narrow'), ('road_start', 'gravel'), ('road_end', 'narrow'), ('works_start', None),
+        ('road_removed', 'gravel')]
+
+
+def test_each_kind_is_checked_on_its_own(store):
+    store.tap_road(ROUTE, 'potholes', 'start', at(10), END, 0, 'a')
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_road(ROUTE, 'potholes', 'checked', at(20), END, 1, 'a')
+    assert refused.value.reason == 'bad_road'
+    store.tap_road(ROUTE, 'country', 'checked', at(200), END, 1, 'a')
+    store.tap_road(ROUTE, 'potholes', 'checked', at(5), END, 2, 'a')
+    assert store.road_checked(ROUTE) == {'country': at(200), 'potholes': at(5)} and store.works_checked(ROUTE) is None
+    assert [(row['action'], row['state'], row['start_ns']) for row in store.history(ROUTE)][-1] == (
+        'road_checked', 'potholes', at(5))
+
+
+def test_a_tap_on_a_kind_that_is_not_there_is_refused(store):
+    with pytest.raises(SpeedReviewError) as refused:
+        store.tap_road(ROUTE, 'motorway', 'start', at(10), END, 0, 'a')
+    assert (refused.value.status, refused.value.reason) == (400, 'bad_kind') and store.revision(ROUTE) == 0
+    with pytest.raises(SpeedReviewError) as refused:
+        speed_review.save_road(store, FakeDrives(), ROUTE, {'tap': 'start', 'at_ns': at(10), 'base_revision': 0}, 'a')
+    assert refused.value.reason == 'bad_kind'
+
+
+def test_a_person_adds_a_kind_of_road_after_the_others(store):
+    answer = speed_review.save_road_kind(store, {'label': '  Strada   bianca '}, 'a')
+    assert answer['kind'] == 'strada_bianca' and answer['road_kinds'][-1] == {'kind': 'strada_bianca', 'label': 'Strada bianca'}
+    # The same name twice is refused, whatever its case; a name with the kind of another gets a number.
+    with pytest.raises(SpeedReviewError) as refused:
+        store.add_road_kind('strada BIANCA', 'a')
+    assert (refused.value.status, refused.value.reason) == (400, 'kind_exists')
+    assert store.add_road_kind('Strada-bianca', 'a') == 'strada_bianca_2'
+    assert store.add_road_kind('Über', 'a') == 'ber'
+    for label in ('', '   ', 'x' * (speed_review.MAX_KIND_LABEL + 1)):
+        with pytest.raises(SpeedReviewError) as refused:
+            store.add_road_kind(label, 'a')
+        assert refused.value.reason == 'bad_value'
+    with pytest.raises(SpeedReviewError):
+        speed_review.save_road_kind(store, {'label': 7}, 'a')
+    store.tap_road(ROUTE, 'strada_bianca', 'start', at(10), END, 0, 'a')
+    assert road_marks(store) == [('strada_bianca', 10, None)]
+
+
+def test_a_kind_of_road_is_never_deleted(store):
+    connection = sqlite3.connect(store.path)
+    with pytest.raises(sqlite3.DatabaseError):
+        connection.execute("DELETE FROM speed_road_kinds WHERE kind = 'narrow'")
+    connection.close()
+
+
+def test_a_tap_on_a_kind_answers_with_the_drive_as_it_is_now(store):
+    body = {'kind': 'country', 'tap': 'start', 'at_ns': at(50), 'base_revision': 0}
+    view = speed_review.save_road(store, FakeDrives(), ROUTE, body, 'a')
+    assert view['revision'] == 1 and view['works'] == [] and view['road_checked_ns'] == {}
+    assert view['road'] == [{'kind': 'country', 'start_ns': at(50), 'end_ns': None, 'reviewer': 'a', 'revision': 1}]
+    assert [row['kind'] for row in view['road_kinds']] == [kind for kind, _label in speed_review.FIRST_ROAD_KINDS]
+
+
+def test_the_drives_say_their_marks_of_a_kind_of_road(store, monkeypatch):
+    monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': ROUTE}])
+    store.tap_road(ROUTE, 'narrow', 'start', at(10), END, 0, 'a')
+    store.tap_road(ROUTE, 'gravel', 'start', at(10), END, 1, 'a')
+    assert [(row['blocks'], row['works'], row['road']) for row in speed_review.drives_list(store, FakeDrives())] == [(0, 0, 2)]
+
+
 # ---------- who writes ----------
 
 @pytest.fixture
@@ -490,6 +584,42 @@ def test_only_a_person_signed_in_marks_roadworks(tmp_path, drives):
         server.close()
         speed_review._stores.clear()
 
+
+
+def test_only_a_person_signed_in_marks_a_kind_of_road_or_adds_one(tmp_path, drives):
+    make_report(tmp_path)
+    path = f'/api/speed-review/drives/{ROUTE}/road'
+    body = {'kind': 'narrow', 'tap': 'start', 'at_ns': at(10), 'base_revision': 0}
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    token = {'X-Review-Token': TOKEN}
+
+    def post(headers, sent=body, to=path):
+        status, _response, data = server.request('POST', to, body=sent, headers=headers)
+        return status, json_of(data)
+
+    try:
+        status, answer = post(token)
+        assert (status, answer['error']) == (403, 'session_required')
+        assert post(token, {'label': 'Strada bianca'}, '/api/speed-review/road-kinds')[1]['error'] == 'session_required'
+        session = sign_in(server)
+        assert post({**session, 'Origin': 'http://elsewhere.example'})[1]['error'] == 'cross_origin'
+        server.app.panel.actions_enabled = False
+        assert post(session, {'label': 'Strada bianca'}, '/api/speed-review/road-kinds')[1]['error'] == 'actions_disabled'
+        server.app.panel.actions_enabled = True
+        status, answer = post(session)
+        assert status == 200 and answer['revision'] == 1 and answer['road'][0]['reviewer'] == 'admin'
+        status, answer = post(session, {**body, 'base_revision': 1})
+        assert (status, answer['error']) == (400, 'bad_road')
+        status, answer = post(session, {'label': 'Strada bianca'}, '/api/speed-review/road-kinds')
+        assert status == 200 and answer['kind'] == 'strada_bianca'
+        assert speed_review.store_for(tmp_path).road_kinds()[-1]['label'] == 'Strada bianca'
+        status, answer = post(session, {'label': 'Strada bianca'}, '/api/speed-review/road-kinds')
+        assert (status, answer['error']) == (400, 'kind_exists')
+        assert server.request('GET', path, headers=token)[0] == 405
+        assert server.request('GET', '/api/speed-review/road-kinds', headers=token)[0] == 405
+    finally:
+        server.close()
+        speed_review._stores.clear()
 
 def test_the_hd_switch_gets_the_frame_of_the_road_video_at_its_own_size(tmp_path):
     """Standing still with HD on, the player shows frame k of a minute of the comma's road video (fcamera.hevc): frame k of

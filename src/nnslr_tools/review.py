@@ -1422,8 +1422,8 @@ def make_handler(app: ReviewApp):
 
         # [speed-review] - START
         def _speed_review_get(self, path):
-            """Data › Speed review, reading only: the drives with their blocks, a drive's speed, blocks and roadworks, a
-            frame of its road video at full definition (the HD switch)."""
+            """Data › Speed review, reading only: the drives with their blocks, a drive's speed, blocks, roadworks and kinds
+            of road, a frame of its road video at full definition (the HD switch)."""
             from nnslr_tools import drive_review, speed_review
             store = speed_review.store_for(app.root)
             drives = drive_review.store_for(app.root)
@@ -1449,7 +1449,7 @@ def make_handler(app: ReviewApp):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            if re.fullmatch(drive + '/(blocks|works)', path):
+            if re.fullmatch(drive + '/(blocks|works|road)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Not found.', True)
@@ -1505,9 +1505,10 @@ def make_handler(app: ReviewApp):
 
         def _speed_review_post(self, path):
             """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
-            to leave the moments out; {"remove": true, "start_ns", "base_revision"} removes one) or a tap on its roadworks
-            (/works: {"tap", "at_ns", "base_revision"}): same origin, JSON, a person signed in on the site (never the access
-            token alone: an agent never writes these) and a panel that is not read-only."""
+            to leave the moments out; {"remove": true, "start_ns", "base_revision"} removes one), a tap on its roadworks
+            (/works: {"tap", "at_ns", "base_revision"}) or on a kind of road (/road: the same and "kind"), or a new kind of
+            road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on the site (never the
+            access token alone: an agent never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
@@ -1519,15 +1520,25 @@ def make_handler(app: ReviewApp):
             self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works)', path)
-            if match is None:
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works|road)', path)
+            if match is None and path != '/api/speed-review/road-kinds':
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
             body = self._read_json()
             who, _via = self._who()
             reviewer = who or 'local'
+            if match is None:
+                try:
+                    answer = speed_review.save_road_kind(speed_review.store_for(app.root), body, reviewer)
+                except speed_review.SpeedReviewError as exc:
+                    self._problem(exc.status, exc.reason, exc.message, True)
+                    return
+                print(f'Speed review: new kind of road {answer["kind"]} ({terminal_text(reviewer)})', flush=True)
+                self._json(200, answer)
+                return
             route = match.group(1)
-            write = speed_review.save_block if match.group(2) == 'blocks' else speed_review.save_works
+            write = {'blocks': speed_review.save_block, 'works': speed_review.save_works,
+                     'road': speed_review.save_road}[match.group(2)]
             try:
                 answer = write(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body, reviewer)
             except speed_review.SpeedReviewError as exc:
@@ -1677,12 +1688,12 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}, {"rebuild": "on"}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), what the brain learns ({"works", "driver", "pool"}), the models of a
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "driver", "pool"}), the models of a
                     # regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
-                                                          'classifier', 'boards', 'works', 'driver', 'pool', 'rebuild', 'openpilot',
+                                                          'classifier', 'boards', 'works', 'road', 'driver', 'pool', 'rebuild', 'openpilot',
                                                           'brains')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START

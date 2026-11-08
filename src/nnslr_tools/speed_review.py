@@ -28,6 +28,15 @@ says that a person went through the drive from its start to the frame shown and 
 (works_checked in speed_history, the last one holds, speed_works_checked keeps it), so what lies there outside the marks
 is free of works. Saying where works are not is what lets the brain learn them at all (nnslr_tools.brain_targets).
 
+The kinds of road. The same taps mark what the road is, kind by kind: a narrow road, a country road, a gravel road,
+potholes (FIRST_ROAD_KINDS), and any kind a person adds from the page (speed_road_kinds, which only grows: a kind keeps
+its marks). Like the roadworks they say nothing of the speed and are never an input of the car: the brain learns to tell
+them (nnslr_tools.brain_net's road_head), and that changes the memory the speed shares. One stretch can be of several
+kinds at once, so the marks of one kind never overlap and those of two kinds may. "Checked to here" is a kind's own
+(speed_road_checked): a person went through the drive for that kind, and a kind added later starts with nothing checked.
+The taps go in speed_history as road_start, road_end, road_removed and road_checked, with the kind in its column state,
+and speed_road is rebuilt by playing them again, as speed_works.
+
 The old stretches. Until 8 Nov 2026 a person said the speed stretch by stretch, on a grid of 5 km/h, from a proposal of
 the OpenStreetMap limit: speed_stretches and its rows of speed_history (saved, cleared) stay in the file, and nothing
 reads them any more.
@@ -58,6 +67,9 @@ MAX_NOTE = 500
 # A block shorter than this is no stretch of road: a slip of the finger.
 MIN_BLOCK_SECONDS = 1
 WORKS_TAPS = ('start', 'end', 'remove', 'checked')
+# The kinds of road there are before a person adds one: (kind, label), in the order the page and the brain take them.
+FIRST_ROAD_KINDS = (('narrow', 'Narrow road'), ('country', 'Country road'), ('gravel', 'Gravel road'), ('potholes', 'Potholes'))
+MAX_KIND_LABEL = 40
 NO_LABEL = {'kph': None, 'state': None, 'known_ns': None, 'note': ''}
 # openpilot driving, any of them True once: selfdriveState, MADS, carControl.
 ENGAGED_SERIES = ('sd_enabled', 'sd_active', 'mads_active', 'lat_active', 'long_active')
@@ -82,6 +94,16 @@ SCHEMA_STATEMENTS = (
         PRIMARY KEY (route, start_ns))''',
     '''CREATE TABLE IF NOT EXISTS speed_works_checked (
         route TEXT PRIMARY KEY, end_ns INTEGER NOT NULL, reviewer TEXT NOT NULL, revision INTEGER NOT NULL)''',
+    '''CREATE TABLE IF NOT EXISTS speed_road_kinds (
+        kind TEXT PRIMARY KEY, label TEXT NOT NULL, position INTEGER NOT NULL, reviewer TEXT NOT NULL, at TEXT NOT NULL)''',
+    '''CREATE TABLE IF NOT EXISTS speed_road (
+        route TEXT NOT NULL, kind TEXT NOT NULL, start_ns INTEGER NOT NULL, end_ns INTEGER, reviewer TEXT NOT NULL,
+        revision INTEGER NOT NULL, PRIMARY KEY (route, kind, start_ns))''',
+    '''CREATE TABLE IF NOT EXISTS speed_road_checked (
+        route TEXT NOT NULL, kind TEXT NOT NULL, end_ns INTEGER NOT NULL, reviewer TEXT NOT NULL, revision INTEGER NOT NULL,
+        PRIMARY KEY (route, kind))''',
+    '''CREATE TRIGGER IF NOT EXISTS speed_road_kinds_no_delete BEFORE DELETE ON speed_road_kinds
+        BEGIN SELECT RAISE(ABORT, 'a kind of road keeps its marks'); END''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_update BEFORE UPDATE ON speed_history
         BEGIN SELECT RAISE(ABORT, 'speed_history only grows'); END''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_delete BEFORE DELETE ON speed_history
@@ -252,6 +274,9 @@ class SpeedReviewStore:
                     connection.execute('ROLLBACK')
                     raise RuntimeError(f'{self.path} has schema version {version}; this nnslr knows {SCHEMA_VERSION}')
                 connection.execute('INSERT OR IGNORE INTO schema_version (version) VALUES (?)', (SCHEMA_VERSION,))
+                connection.executemany('INSERT OR IGNORE INTO speed_road_kinds (kind, label, position, reviewer, at) '
+                                       'VALUES (?, ?, ?, ?, ?)', [(kind, label, position, 'nnslr', utc_now())
+                                                                  for position, (kind, label) in enumerate(FIRST_ROAD_KINDS)])
                 connection.execute('COMMIT')
             finally:
                 connection.close()
@@ -273,11 +298,11 @@ class SpeedReviewStore:
                                                 'WHERE route = ? ORDER BY start_ns', (route,))]
 
     def counts(self) -> dict[str, dict[str, int]]:
-        """Per drive, how many blocks and roadworks marks it has."""
+        """Per drive, how many blocks, roadworks marks and marks of a kind of road it has."""
         out: dict[str, dict[str, int]] = {}
-        for table, key in (('speed_blocks', 'blocks'), ('speed_works', 'works')):
+        for table, key in (('speed_blocks', 'blocks'), ('speed_works', 'works'), ('speed_road', 'road')):
             for row in self._rows(f'SELECT route, COUNT(*) AS n FROM {table} GROUP BY route'):
-                out.setdefault(row['route'], {'blocks': 0, 'works': 0})[key] = row['n']
+                out.setdefault(row['route'], {'blocks': 0, 'works': 0, 'road': 0})[key] = row['n']
         return out
 
     def history(self, route: str) -> list[dict]:
@@ -357,37 +382,102 @@ class SpeedReviewStore:
         """A tap on the roadworks at a frame: start a mark, end the one with no end yet, remove the one on this frame,
         say that the drive is checked up to it. Marks do not overlap, one at a time has no end, and a drive is not
         checked past a mark with no end. Returns the new revision."""
+        return self._tap(route, None, tap, at_ns, drive_end, base_revision, reviewer)
+
+    def road_kinds(self) -> list[dict]:
+        """The kinds of road, [{kind, label}] in their order: the page's and the brain's (nnslr_tools.brain_targets)."""
+        return [dict(row) for row in self._rows('SELECT kind, label FROM speed_road_kinds ORDER BY position, kind')]
+
+    def road(self, route: str) -> list[dict]:
+        """The marks of the kinds of road on a drive, by kind then time, end_ns None while a mark has no end yet."""
+        return [dict(row) for row in self._rows('SELECT kind, start_ns, end_ns, reviewer, revision FROM speed_road '
+                                                'WHERE route = ? ORDER BY kind, start_ns', (route,))]
+
+    def road_checked(self, route: str) -> dict[str, int]:
+        """{kind: up to when a person went through the drive for that kind, from its start}; a kind nobody did is not there."""
+        return {row['kind']: row['end_ns'] for row in self._rows('SELECT kind, end_ns FROM speed_road_checked WHERE route = ?',
+                                                                 (route,))}
+
+    def add_road_kind(self, label: str, reviewer: str) -> str:
+        """A new kind of road with this label, after the others: returns its kind, a name made of the label."""
+        label = ' '.join(label.split())
+        if not label or len(label) > MAX_KIND_LABEL:
+            raise SpeedReviewError(400, 'bad_value', f'A kind of road is a name of 1 to {MAX_KIND_LABEL} characters.')
+        base = ''.join(char if char.isascii() and char.isalnum() else '_' for char in label.lower()).strip('_') or 'kind'
+        with self._write:
+            connection = self._connect()
+            try:
+                connection.execute('BEGIN IMMEDIATE')
+                rows = connection.execute('SELECT kind, label, position FROM speed_road_kinds').fetchall()
+                if any(row['label'].lower() == label.lower() for row in rows):
+                    connection.execute('ROLLBACK')
+                    raise SpeedReviewError(400, 'kind_exists', f'There is a kind "{label}" already.')
+                taken = {row['kind'] for row in rows}
+                kind, number = base, 2
+                while kind in taken:
+                    kind, number = f'{base}_{number}', number + 1
+                connection.execute('INSERT INTO speed_road_kinds (kind, label, position, reviewer, at) VALUES (?, ?, ?, ?, ?)',
+                                   (kind, label, max((row['position'] for row in rows), default=-1) + 1, reviewer, utc_now()))
+                connection.execute('COMMIT')
+            finally:
+                connection.close()
+        return kind
+
+    def tap_road(self, route: str, kind: str, tap: str, at_ns: int, drive_end: int, base_revision: int, reviewer: str) -> int:
+        """A tap on a kind of road at a frame, as tap_works on the roadworks, with that kind's marks and its own "checked to
+        here". Returns the new revision."""
+        label = next((row['label'] for row in self.road_kinds() if row['kind'] == kind), None)
+        if label is None:
+            raise SpeedReviewError(400, 'bad_kind', 'No such kind of road.')
+        return self._tap(route, kind, tap, at_ns, drive_end, base_revision, reviewer, label)
+
+    def _tap(self, route: str, kind: str | None, tap: str, at_ns: int, drive_end: int, base_revision: int,
+             reviewer: str, label: str = '') -> int:
+        """tap_works (kind None) and tap_road: the same rules, on speed_works or on the marks of one kind in speed_road
+        (label: the kind's, for the messages)."""
+        if kind is None:
+            marks_table, checked_table, action, what = 'speed_works', 'speed_works_checked', 'works', 'roadworks'
+            keys, item, bad = {'route': route}, NO_LABEL, 'bad_works'
+        else:
+            marks_table, checked_table, action, what = 'speed_road', 'speed_road_checked', 'road', f'"{label}" mark'
+            keys, item, bad = {'route': route, 'kind': kind}, {**NO_LABEL, 'state': kind}, 'bad_road'
+        of = ' AND '.join(f'{name} = ?' for name in keys)
+        names = ', '.join(keys)
+        holes = ', '.join('?' for _ in keys)
+        values = tuple(keys.values())
         with self._writing(route, base_revision) as (connection, revision):
-            marks = connection.execute('SELECT * FROM speed_works WHERE route = ? ORDER BY start_ns', (route,)).fetchall()
+            marks = connection.execute(f'SELECT * FROM {marks_table} WHERE {of} ORDER BY start_ns', values).fetchall()
             here = next((row for row in marks if row['start_ns'] <= at_ns and (row['end_ns'] is None or at_ns < row['end_ns'])), None)
             unended = next((row for row in marks if row['end_ns'] is None), None)
             if tap == 'start':
                 if unended is not None or here is not None:
-                    raise SpeedReviewError(400, 'bad_works', 'End the roadworks already open first.' if unended is not None
-                                           else 'This frame is already inside roadworks.')
-                connection.execute('INSERT INTO speed_works (route, start_ns, end_ns, reviewer, revision) VALUES (?, ?, NULL, ?, ?)',
-                                   (route, at_ns, reviewer, revision))
-                self._log(connection, route, revision, 'works_start', at_ns, drive_end, NO_LABEL, reviewer)
+                    raise SpeedReviewError(400, bad, f'End the {what} already open first.' if unended is not None
+                                           else f'This frame is already inside a {what}.' if kind else
+                                           'This frame is already inside roadworks.')
+                connection.execute(f'INSERT INTO {marks_table} ({names}, start_ns, end_ns, reviewer, revision) '
+                                   f'VALUES ({holes}, ?, NULL, ?, ?)', (*values, at_ns, reviewer, revision))
+                self._log(connection, route, revision, f'{action}_start', at_ns, drive_end, item, reviewer)
             elif tap == 'end':
                 if unended is None:
-                    raise SpeedReviewError(400, 'bad_works', 'No roadworks are waiting for their end.')
+                    raise SpeedReviewError(400, bad, f'No {what} is waiting for its end.' if kind else
+                                           'No roadworks are waiting for their end.')
                 later = [row['start_ns'] for row in marks if row['start_ns'] > unended['start_ns']]
                 if at_ns <= unended['start_ns'] or (later and at_ns > later[0]):
-                    raise SpeedReviewError(400, 'bad_works', 'The end must come after the start, before the next roadworks.')
-                connection.execute('UPDATE speed_works SET end_ns = ?, reviewer = ?, revision = ? WHERE route = ? AND start_ns = ?',
-                                   (at_ns, reviewer, revision, route, unended['start_ns']))
-                self._log(connection, route, revision, 'works_end', unended['start_ns'], at_ns, NO_LABEL, reviewer)
+                    raise SpeedReviewError(400, bad, f'The end must come after the start, before the next {what}.')
+                connection.execute(f'UPDATE {marks_table} SET end_ns = ?, reviewer = ?, revision = ? WHERE {of} AND start_ns = ?',
+                                   (at_ns, reviewer, revision, *values, unended['start_ns']))
+                self._log(connection, route, revision, f'{action}_end', unended['start_ns'], at_ns, item, reviewer)
             elif tap == 'checked':
                 if unended is not None and unended['start_ns'] <= at_ns:
-                    raise SpeedReviewError(400, 'bad_works', 'End the roadworks already open first.')
-                connection.execute('INSERT OR REPLACE INTO speed_works_checked (route, end_ns, reviewer, revision) VALUES (?, ?, ?, ?)',
-                                   (route, at_ns, reviewer, revision))
-                self._log(connection, route, revision, 'works_checked', at_ns, at_ns, NO_LABEL, reviewer)
+                    raise SpeedReviewError(400, bad, f'End the {what} already open first.')
+                connection.execute(f'INSERT OR REPLACE INTO {checked_table} ({names}, end_ns, reviewer, revision) '
+                                   f'VALUES ({holes}, ?, ?, ?)', (*values, at_ns, reviewer, revision))
+                self._log(connection, route, revision, f'{action}_checked', at_ns, at_ns, item, reviewer)
             else:
                 if here is None:
-                    raise SpeedReviewError(400, 'bad_works', 'No roadworks on this frame.')
-                connection.execute('DELETE FROM speed_works WHERE route = ? AND start_ns = ?', (route, here['start_ns']))
-                self._log(connection, route, revision, 'works_removed', here['start_ns'], here['end_ns'] or drive_end, NO_LABEL,
+                    raise SpeedReviewError(400, bad, f'No {what} on this frame.')
+                connection.execute(f'DELETE FROM {marks_table} WHERE {of} AND start_ns = ?', (*values, here['start_ns']))
+                self._log(connection, route, revision, f'{action}_removed', here['start_ns'], here['end_ns'] or drive_end, item,
                           reviewer)
         return revision
 
@@ -415,12 +505,14 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) -> dict:
     """A drive for the page: its revision, the driver's speed along it (speed: speed_curve), where a machine held it
-    (held: held_spans), its blocks, its roadworks, its first and last ns (span_ns, where a block may go), its length and
-    whether the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed and no
-    span, and dashcam None."""
+    (held: held_spans), its blocks, its roadworks, the kinds of road (road_kinds), their marks (road) and how far each was
+    gone through (road_checked_ns, by kind), its first and last ns (span_ns, where a block may go), its length and whether
+    the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed and no span, and
+    dashcam None."""
     span = _span_of(drives, route)
     view = {'ok': True, 'route': route, 'revision': store.revision(route), 'blocks': store.blocks(route),
-            'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'speed': [], 'held': [],
+            'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'road_kinds': store.road_kinds(),
+            'road': store.road(route), 'road_checked_ns': store.road_checked(route), 'speed': [], 'held': [],
             'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
             'dashcam': None if span is None else dashcam_drive(drives.summary(route))}
     if span is not None:
@@ -431,14 +523,14 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
 
 
 def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]:
-    """The drives for the page, which puts them in order: each with its length, how many blocks and roadworks marks it
-    has and whether the brain learns from it (dashcam: dashcam_drive, None before its logs are read). The page lists only
+    """The drives for the page, which puts them in order: each with its length, how many blocks, roadworks marks and
+    marks of a kind of road it has and whether the brain learns from it (dashcam: dashcam_drive, None before its logs are read). The page lists only
     the ones not False; Read the logs and Regression take them all."""
     counts = store.counts()
     rows = []
     for drive in drives_view(drives):
         span = _span_of(drives, drive['route'])
-        rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0}),
+        rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0, 'road': 0}),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0,
                      'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route']))})
     return rows
@@ -478,3 +570,26 @@ def save_works(store: SpeedReviewStore, drives: DriveReviewStore, route: str, bo
     tap, at, base = works_tap(body, span)
     store.tap_works(route, tap, at, span[1], base, reviewer)
     return drive_view(store, drives, route)
+
+
+def save_road(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
+    """A person's tap on a kind of road ({kind, tap, at_ns, base_revision}, as save_works): checks it against the drive,
+    applies it, and answers with the drive as it is now."""
+    span = _span_of(drives, route)
+    if span is None:
+        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    kind = body.get('kind')
+    if not isinstance(kind, str):
+        raise SpeedReviewError(400, 'bad_kind', 'kind is the name of a kind of road.')
+    tap, at, base = works_tap(body, span)
+    store.tap_road(route, kind, tap, at, span[1], base, reviewer)
+    return drive_view(store, drives, route)
+
+
+def save_road_kind(store: SpeedReviewStore, body: dict, reviewer: str) -> dict:
+    """A person's new kind of road ({label}): answers with its kind and all the kinds."""
+    label = body.get('label')
+    if not isinstance(label, str):
+        raise SpeedReviewError(400, 'bad_value', 'label is the name of the kind of road.')
+    kind = store.add_road_kind(label, reviewer)
+    return {'ok': True, 'kind': kind, 'road_kinds': store.road_kinds()}

@@ -88,6 +88,7 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # answer).
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
+BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_DRIVER = {'off': '0', 'on': '1'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
@@ -140,7 +141,7 @@ MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_brain': ('works', 'driver', 'pool'),
+                  'train_brain': ('works', 'road', 'driver', 'pool'),
                   'regression': ('openpilot', 'brains'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
@@ -260,6 +261,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
     # 8 Nov 2026 (--driver turns them on); a run of before that left them out said --no-driver.
     if '--no-works' in flags:
         chips.append('no roadworks')
+    if '--no-road' in flags:
+        chips.append('no kinds of road')
     if '--driver' in flags:
         chips.append('driver’s inputs')
     elif '--no-driver' in flags:
@@ -1093,8 +1096,8 @@ class Panel:
         """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed
         with the blocks of Speed review, the roadworks, the next limit of Sign review, as brain_targets.summary, with
         the drives the next training reads again first (not read, read by another reader than the car's of today, or
-        without the brain's pictures). Without the inputs, which it does not show: about 10 s over every drive, asked
-        when the section opens, never by the status."""
+        without the brain's pictures) and the names of the kinds of road (road_labels). Without the inputs, which it
+        does not show: about 10 s over every drive, asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
@@ -1104,9 +1107,11 @@ class Panel:
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
                                                                 need_pictures=False, inputs=False))
+            labels = brain_targets.road_labels(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
-        return {**found, 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
+        return {**found, 'road_labels': labels,
+                'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:
@@ -1619,13 +1624,17 @@ class Panel:
         return self.regression()
 
     def _brain_choices(self, options: dict) -> dict:
-        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'driver', 'pool'}), the usual
-        ones when not given: the roadworks on, the driver's inputs off, the picture as a grid."""
-        works, driver, pool = options.get('works', 'on'), options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
-        if not all(isinstance(value, str) for value in (works, driver, pool)) or works not in BRAIN_WORKS \
-                or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
-            raise PanelError(400, 'bad_option', 'Roadworks and the driver’s inputs are on or off, the picture mean or grid.')
-        return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver], 'NNSLR_BRAIN_POOL': pool}
+        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'driver', 'pool'}),
+        the usual ones when not given: the roadworks and the kinds of road on, the driver's inputs off, the picture as a
+        grid."""
+        works, road = options.get('works', 'on'), options.get('road', 'on')
+        driver, pool = options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
+        if not all(isinstance(value, str) for value in (works, road, driver, pool)) or works not in BRAIN_WORKS \
+                or road not in BRAIN_ROAD or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
+            raise PanelError(400, 'bad_option',
+                             'Roadworks, the kinds of road and the driver’s inputs are on or off, the picture mean or grid.')
+        return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
+                'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver], 'NNSLR_BRAIN_POOL': pool}
 
     def _network_start(self, action: str, start: object) -> dict:
         """The environment of where the cutter's or the applicability's training starts (one of NETWORK_STARTS):
@@ -1739,7 +1748,7 @@ class Panel:
             start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
-        for key in ('works', 'driver', 'pool'):
+        for key in ('works', 'road', 'driver', 'pool'):
             if (options or {}).get(key) is not None and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':

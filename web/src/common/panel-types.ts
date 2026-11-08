@@ -72,9 +72,11 @@ export interface ActionOptions {
    * (train_cutter, train_decider): "fresh" (random weights for SignNet, ImageNet for the applicability), or the id of a
    * finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
-  /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, the driver's inputs (only to measure: the car
-   * does not give them), the picture's features as a mean or as a grid. */
+  /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, its head of the kinds of road of Speed
+   * review, the driver's inputs (only to measure: the car does not give them), the picture's features as a mean or as a
+   * grid. */
   works?: 'on' | 'off';
+  road?: 'on' | 'off';
   driver?: 'on' | 'off';
   pool?: 'mean' | 'grid';
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
@@ -1481,13 +1483,21 @@ export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_fr
  * read and its frames, in seconds of the drives. speed: his own speed, or a block's of Speed review; works_in/works_out:
  * the roadworks answers; next: the next limit from Sign review; sites: the roadworks sites. Per drive the same, with why
  * the rest is out; to_read: the drives the training reads again first; problem instead when they cannot be read. */
+/** The seconds on a kind of road (in) and checked off it (out). */
+export interface RoadCount {
+  in: number;
+  out: number;
+}
 export interface BrainLabels {
   problem?: string;
   partitions?: Record<'train' | 'validation' | 'test' | 'buffer',
-    {speed: number; works_in: number; works_out: number; sites: number; next: number}>;
+    {speed: number; works_in: number; works_out: number; sites: number; next: number; road: Record<string, RoadCount>}>;
   drives?: {route: string; frames: number; speed: number; out: Record<BrainOut, number>; works_in: number;
     works_out: number; marks: number; blocks: number; signs: number; covered_s: number; next: number; signs_read: boolean;
-    reader_current: boolean; pictures: boolean; no_picture_s: number}[];
+    reader_current: boolean; pictures: boolean; no_picture_s: number; road?: Record<string, RoadCount>}[];
+  /** The kinds of road of Speed review in their order, and their names. */
+  road_kinds?: string[];
+  road_labels?: Record<string, string>;
   to_read?: number;
 }
 export interface TrainSettings {

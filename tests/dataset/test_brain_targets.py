@@ -133,6 +133,48 @@ def test_a_tap_is_only_so_exact():
     assert list(weight) == [0, 0, 1, 1, 0, 0, 1]
 
 
+def kind_mark(kind, start, end):
+    return {**mark(start, end), 'kind': kind}
+
+
+def test_each_kind_of_road_is_the_roadworks_of_its_own_marks_and_its_own_check():
+    targets = _targets()
+    ns = seconds(5, 20, 60, 90)
+    road = [kind_mark('narrow', 10, 50), kind_mark('gravel', 0, 100), kind_mark('gone', 0, 100)]
+    target, weight = targets.road_answers(ns, road, {'narrow': 70 * NS}, ('narrow', 'country', 'gravel'))
+    assert target.shape == weight.shape == (4, 3)
+    # Narrow: inside its mark, checked to 70 s.
+    assert target[:, 0].tolist() == [0, 1, 0, 0] and weight[:, 0].tolist() == [1, 1, 1, 0]
+    # Country: no mark and nobody looked, nothing to say.
+    assert not target[:, 1].any() and not weight[:, 1].any()
+    # Gravel at the same time as narrow: a road can be both.
+    assert target[:, 2].tolist() == [1, 1, 1, 1] and target[1].tolist() == [1, 0, 1]
+    # A kind not asked for is not read.
+    assert targets.road_answers(ns, road, {}, ())[0].shape == (4, 0)
+
+
+def test_the_kinds_of_road_are_read_in_their_order_and_a_file_without_them_has_the_first_ones(tmp_path):
+    import sqlite3 as sql
+    from nnslr_tools.speed_review import FIRST_ROAD_KINDS, SpeedReviewStore, db_path
+    targets = _targets()
+    first = tuple(kind for kind, _label in FIRST_ROAD_KINDS)
+    assert targets.road_kinds(tmp_path) == first
+    SpeedReviewStore(tmp_path)
+    connection = sql.connect(db_path(tmp_path))
+    connection.execute("INSERT INTO speed_road_kinds (kind, label, position, reviewer, at) VALUES ('cobbles', 'Cobbles', -1, 'a', 'now')")
+    connection.commit()
+    connection.close()
+    assert targets.road_kinds(tmp_path) == ('cobbles', *first)
+    # A file of before the kinds of road.
+    old = tmp_path / 'old'
+    path = db_path(old)
+    path.parent.mkdir(parents=True)
+    connection = sql.connect(path)
+    connection.execute('CREATE TABLE speed_works (route TEXT, start_ns INTEGER, end_ns INTEGER, reviewer TEXT, revision INTEGER)')
+    connection.close()
+    assert targets.road_kinds(old) == first
+
+
 def test_the_end_of_works_leaves_the_speed_alone():
     targets = _targets()
     ns = seconds(20, 60)
@@ -403,10 +445,16 @@ def write_drive(root, route, frames):
             (folder / f'frame_{i:08d}.png').write_bytes(b'x')
 
 
-def label_db(root, blocks=(), works=(), checked=()):
+def label_db(root, blocks=(), works=(), checked=(), road=(), road_checked=()):
     from nnslr_tools.speed_review import SpeedReviewStore, db_path
     SpeedReviewStore(root)
     connection = sqlite3.connect(db_path(root))
+    for route, kind, start, end in road:
+        connection.execute('INSERT INTO speed_road (route, kind, start_ns, end_ns, reviewer, revision) VALUES (?, ?, ?, ?, ?, ?)',
+                           (route, kind, start, end, 'a', 1))
+    for route, kind, end in road_checked:
+        connection.execute('INSERT INTO speed_road_checked (route, kind, end_ns, reviewer, revision) VALUES (?, ?, ?, ?, ?)',
+                           (route, kind, end, 'a', 1))
     for route, start, end, kph in blocks:
         connection.execute('INSERT INTO speed_blocks (route, start_ns, end_ns, kph, note, reviewer, revision) '
                            'VALUES (?, ?, ?, ?, ?, ?, ?)', (route, start, end, kph, '', 'a', 1))
@@ -444,7 +492,9 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     for second in (22, 30):
         (tmp_path / 'derived' / 'frames' / ROUTE / '0' / f'frame_{second:08d}.png').unlink()
     label_db(tmp_path, blocks=[(ROUTE, 10 * NS, 20 * NS, 100), (ROUTE, 25 * NS, 28 * NS, None)],
-             works=[(ROUTE, 5 * NS, 15 * NS)], checked=[(ROUTE, 25 * NS)])
+             works=[(ROUTE, 5 * NS, 15 * NS)], checked=[(ROUTE, 25 * NS)],
+             road=[(ROUTE, 'narrow', 5 * NS, 15 * NS), (ROUTE, 'gravel', 10 * NS, None)],
+             road_checked=[(ROUTE, 'narrow', 25 * NS)])
     # His speed from the third second on: vEgo + 3 km/h on a Peugeot log without its own vEgoCluster, 80 on the dashboard.
     # openpilot held the speed from 32 to 34 s: not his foot.
     merged = {'frames': encoded(40, missing={23 * 20}),
@@ -454,8 +504,14 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
     labels = targets.read_labels(tmp_path)
     assert labels[ROUTE]['checked_ns'] == 25 * NS and len(labels[ROUTE]['blocks']) == 2
-    drive = targets.drive_targets(tmp_path, ROUTE, labels[ROUTE], merged, split)
+    assert labels[ROUTE]['road_checked'] == {'narrow': 25 * NS} and len(labels[ROUTE]['road']) == 2
+    drive = targets.drive_targets(tmp_path, ROUTE, labels[ROUTE], merged, split, kinds=('narrow', 'gravel'))
     assert [frame['key'] for frame in drive['frames']][:2] == ['0/0', '0/1']
+    # The kinds of road, a column each, answered as the roadworks; a frame with no picture teaches none of them.
+    assert drive['road_kinds'] == ['narrow', 'gravel'] and drive['road'].shape == drive['road_weight'].shape == (40, 2)
+    assert drive['road'][10].tolist() == [1, 0] and drive['road_weight'][10].tolist() == [1, 0]
+    assert drive['road'][20, 0] == 0 and drive['road_weight'][20, 0] == 1 and drive['road_weight'][22, 0] == 0
+    assert drive['road_weight'][30, 0] == 0 and not drive['road_weight'][:, 1].any()
     assert list(drive['speed_out'][:3]) == [targets.NO_SPEED] * 3
     assert drive['speed'][5] == 79 and drive['speed'][15] == 99 and drive['speed'][35] == 79
     assert drive['speed_out'][8] == 0 and drive['speed_out'][9] == drive['speed_out'][10] == targets.BOUNDARY
@@ -484,6 +540,9 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     assert found['drives'][0]['works_in'] == drive['works'][drive['works_weight'] > 0].sum()
     assert found['partitions']['buffer']['speed'] == found['drives'][0]['speed']
     assert found['drives'][0]['blocks'] == 2 and found['drives'][0]['out']['left_out'] == 3
+    assert found['road_kinds'] == ['narrow', 'gravel'] and set(found['drives'][0]['road']) == {'narrow'}
+    narrow = found['partitions']['buffer']['road']['narrow']
+    assert narrow['in'] == int(drive['road'][drive['road_weight'][:, 0] > 0, 0].sum()) and narrow['out'] > 0
     assert found['drives'][0]['out']['cruise'] == 2
     text = targets.summary_text(found)
     assert 'signs NOT read' in text and '3 seconds with a speed and no picture' in text and '2 blocks' in text
@@ -511,7 +570,7 @@ def test_a_database_of_before_the_blocks_still_reads(tmp_path):
     connection.close()
     assert _targets().read_labels(tmp_path) == {ROUTE: {'blocks': [], 'works': [{'route': ROUTE, 'start_ns': 1, 'end_ns': 2,
                                                                                     'reviewer': 'a', 'revision': 1}],
-                                                        'checked_ns': None}}
+                                                        'checked_ns': None, 'road': [], 'road_checked': {}}}
     assert _targets().read_labels(tmp_path / 'nothing') == {}
 
 
@@ -1000,8 +1059,10 @@ def test_a_night_copy_answers_only_its_frames():
     np, targets = _np(), _targets()
     drive = plated(hours=(14.0,) * 5, partitions=['train', 'train', 'validation', 'buffer', 'train'])
     drive['speed_weight'][1] = 0
-    _day, night = in_an_epoch(drive)
+    drive['road'], drive['road_weight'] = np.ones((5, 2), dtype=np.float32), np.ones((5, 2), dtype=np.float32)
+    day, night = in_an_epoch(drive)
     assert list(night['speed_weight']) == [1, 0, 0, 0, 1]
+    assert not night['road_weight'].any() and day['road_weight'].all()
     assert night['partitions'] == drive['partitions']
     assert night['speed'][1] == drive['speed'][1]
 

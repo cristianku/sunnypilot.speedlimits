@@ -7,7 +7,9 @@
 // it again with the same ends, and removed with its start. The lane draws his speed as a step line, the blocks over it with
 // their kph, the roadworks and how far the drive was gone through for them. Roadworks are marked next to the speed, two
 // taps on the frame shown; a third tap says that the drive was gone through up to the frame shown, so that no mark there
-// means no works, and the drive opens there again. The picture shows the answer (its square named ANSWER, as the lane)
+// means no works, and the drive opens there again. The kinds of road (narrow, country, gravel, potholes, and those added
+// with "+") are marked the same way, each with its own marks and its own "checked to here": a chip picks what the taps
+// mark, the lane draws the one picked, and a dot on a chip says the frame shown is inside one of its marks. The picture shows the answer (its square named ANSWER, as the lane)
 // next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
 // is the right one. Where openpilot or the car's cruise held the speed (held) it is not his foot: the lane greys it and
 // ANSWER is a dash, as the training leaves it out, unless a block of his says a speed there. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
@@ -19,13 +21,13 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import {clockOf} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
-import {type Block, blockAt, canEndWorks, clampKph, heldAt, MIN_BLOCK_NS, type SpeedDrive, speedAt, speedIndex, worksAt,
-  type WorksTap} from './speed-review';
+import {type Block, blockAt, canEndWorks, clampKph, heldAt, MIN_BLOCK_NS, ROADWORKS, type RoadKind, type SpeedDrive, speedAt,
+  speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
 const RATES = [1, 2, 4] as const;
 const HEIGHT = 84;
-/** The speed is drawn from TOP to PLOT; under it the roadworks bar and the line of what was gone through. */
+/** The speed is drawn from TOP to PLOT; under it the bar of the marks picked and the line of what was gone through. */
 const TOP = 16;
 const PLOT = 74;
 /** A new block with no speed of his at its start begins at this kph. */
@@ -73,14 +75,14 @@ const go = (item: Block): void => {
   // A millisecond in: the time shown is on this block, not at the end of the one before.
   player.value?.seek(secondOf(item.start_ns) + 0.001);
 };
-// A drive opens where the roadworks were gone through to, the review going on where it stopped, else at its start.
-// Opened from Sign review at a moment ("?segment=N&second=S"), it stays there: the player seeks to it.
+// A drive opens where what is picked (the roadworks, or a kind of road) was gone through to, the review going on where it
+// stopped, else at its start. Opened from Sign review at a moment ("?segment=N&second=S"), it stays there: the player
+// seeks to it.
 const linked = new URLSearchParams(location.search).has('segment');
 const toStart = watch([t0, drive], () => {
   if (!t0.value || !drive.value) return;
   toStart();
-  const checked = drive.value.works_checked_ns;
-  if (!linked && checked !== null) player.value?.seek(secondOf(checked));
+  if (!linked && checked.value !== null) player.value?.seek(secondOf(checked.value));
 });
 
 // -- the commands ----------------------------------------------------------------------------------------------------------
@@ -183,17 +185,73 @@ function step(delta: number): void {
 const kphOf = (item: Block): number => speedAt(speed.value, item.start_ns) ?? FALLBACK_KPH;
 const blockText = (item: Block): string => item.kph === null ? 'left out' : item.kph + ' km/h';
 
-// -- the roadworks ---------------------------------------------------------------------------------------------------------
-const works = computed(() => drive.value?.works ?? []);
-const worksOpen = computed(() => works.value.find((item) => item.end_ns === null) ?? null);
-const worksHere = computed(() => worksAt(works.value, now.value));
-const worksShown = computed(() => worksHere.value ?? worksOpen.value);
-const canMarkWorks = computed(() => worksOpen.value ? canEndWorks(works.value, worksOpen.value, now.value) : worksHere.value === null);
-const worksChecked = computed(() => drive.value?.works_checked_ns ?? null);
-const canCheckWorks = computed(() => !worksOpen.value || now.value < worksOpen.value.start_ns);
-const tapWorks = (tap: WorksTap): void => { void send('/works', {tap, at_ns: now.value}); };
-function markWorks(): void {
-  if (canMarkWorks.value) tapWorks(worksOpen.value ? 'end' : 'start');
+// -- the roadworks and the kinds of road -----------------------------------------------------------------------------------
+/** The roadworks first, then the kinds of road: the one picked is what the taps mark. */
+const kinds = computed((): RoadKind[] => [{kind: ROADWORKS, label: 'Roadworks'}, ...(drive.value?.road_kinds ?? [])]);
+const PICKED_KEY = 'speed-review-kind';
+function readPicked(): string {
+  try {
+    return localStorage.getItem(PICKED_KEY) ?? ROADWORKS;
+  } catch {
+    return ROADWORKS;
+  }
+}
+const picked = ref(readPicked());
+watch(picked, (kind) => {
+  try {
+    localStorage.setItem(PICKED_KEY, kind);
+  } catch {
+    // A private window keeps nothing: the roadworks next time.
+  }
+});
+/** What is picked; a kind this drive's server does not have (an old choice) is the roadworks. */
+const pickedKind = computed(() => kinds.value.find((item) => item.kind === picked.value) ?? kinds.value[0]!);
+const isWorks = computed(() => pickedKind.value.kind === ROADWORKS);
+const marksOf = (kind: string): Works[] => kind === ROADWORKS ? drive.value?.works ?? []
+  : (drive.value?.road ?? []).filter((item) => item.kind === kind);
+const checkedOf = (kind: string): number | null => kind === ROADWORKS ? drive.value?.works_checked_ns ?? null
+  : drive.value?.road_checked_ns?.[kind] ?? null;
+const marks = computed(() => marksOf(pickedKind.value.kind));
+const markOpen = computed(() => marks.value.find((item) => item.end_ns === null) ?? null);
+const markHere = computed(() => worksAt(marks.value, now.value));
+const markShown = computed(() => markHere.value ?? markOpen.value);
+const canMark = computed(() => markOpen.value ? canEndWorks(marks.value, markOpen.value, now.value) : markHere.value === null);
+const checked = computed(() => checkedOf(pickedKind.value.kind));
+const canCheck = computed(() => !markOpen.value || now.value < markOpen.value.start_ns);
+/** The kinds whose marks the frame shown is inside: a dot on their chips. */
+const inside = computed(() => new Set(kinds.value.filter((item) => worksAt(marksOf(item.kind), now.value)).map((item) => item.kind)));
+const tapMark = (tap: WorksTap): void => {
+  void (isWorks.value ? send('/works', {tap, at_ns: now.value})
+    : send('/road', {kind: pickedKind.value.kind, tap, at_ns: now.value}));
+};
+function mark(): void {
+  if (canMark.value) tapMark(markOpen.value ? 'end' : 'start');
+}
+/** Key k: the next kind. */
+function nextKind(): void {
+  const index = kinds.value.findIndex((item) => item.kind === pickedKind.value.kind);
+  picked.value = kinds.value[(index + 1) % kinds.value.length]!.kind;
+}
+// A new kind of road from its name, saved at once and picked. A guest marks with the kinds there are and adds none.
+const canAdd = computed(() => !props.readOnly && !isGuest());
+const adding = ref(false);
+const newLabel = ref('');
+async function addKind(): Promise<void> {
+  const label = newLabel.value.trim();
+  if (!label || saving.value || !drive.value) return;
+  saving.value = true;
+  try {
+    const answer = await post<{kind: string; road_kinds: RoadKind[]}>('/api/speed-review/road-kinds', {label});
+    if (drive.value) drive.value = {...drive.value, road_kinds: answer.road_kinds};
+    picked.value = answer.kind;
+    newLabel.value = '';
+    adding.value = false;
+    toast('“' + label + '” added: mark it as the roadworks.');
+  } catch (problem) {
+    toast(messageOf(problem), true);
+  } finally {
+    saving.value = false;
+  }
 }
 
 function onKey(event: KeyboardEvent): void {
@@ -204,8 +262,9 @@ function onKey(event: KeyboardEvent): void {
   else if (event.key === 'm') mapBlock();
   else if (event.key === 'x') removeHere();
   else if (event.key === 'l') leaveOut();
-  else if (event.key === 'w') markWorks();
-  else if (event.key === 'c' && !locked.value && canCheckWorks.value) tapWorks('checked');
+  else if (event.key === 'w') mark();
+  else if (event.key === 'c' && !locked.value && canCheck.value) tapMark('checked');
+  else if (event.key === 'k') nextKind();
   else if (event.key === '-') step(-5);
   else if (event.key === '+' || event.key === '=') step(5);
   else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (pending.value !== null || typeof block.value?.kph === 'number')) {
@@ -279,15 +338,15 @@ function pendingIn(from: number, to: number) {
   return [{start: start >= from && start <= to ? start : null, from: Math.max(secondOf(ends.value[0]), from),
     to: Math.min(secondOf(ends.value[1]), to)}];
 }
-/** The part of the time window a person went through for roadworks. */
+/** The part of the time window a person went through for what is picked. */
 function checkedIn(from: number, to: number) {
-  if (worksChecked.value === null) return [];
-  const last = Math.min(secondOf(worksChecked.value), to);
+  if (checked.value === null) return [];
+  const last = Math.min(secondOf(checked.value), to);
   return from < last ? [{from, to: last}] : [];
 }
-/** The roadworks inside the time window. */
+/** The marks picked inside the time window. */
 function worksIn(from: number, to: number) {
-  return works.value.flatMap((item) => {
+  return marks.value.flatMap((item) => {
     const first = Math.max(secondOf(item.start_ns), from);
     const last = Math.min(item.end_ns === null ? end.value : secondOf(item.end_ns), to);
     return first < last ? [{key: item.start_ns, from: first, to: last, open: item.end_ns === null}] : [];
@@ -305,7 +364,7 @@ function worksIn(from: number, to: number) {
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out; light grey band: openpilot or the cruise held the speed, not learnt; orange bar: roadworks; grey line: gone through for roadworks">
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
         <span class="dr-lane-name">Answer<small>km/h</small></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
@@ -328,7 +387,7 @@ function worksIn(from: number, to: number) {
             <line v-if="part.start !== null" :x1="x(part.start)" :x2="x(part.start)" y1="0" :y2="PLOT" class="sr-block-start"/>
           </g>
           <rect v-for="mark in worksIn(from, to)" :key="mark.key" :x="x(mark.from)" :y="PLOT + 2" :width="w(mark.from, mark.to)" height="4"
-                :class="['sr-works', {'sr-works-open': mark.open}]"/>
+                :class="['sr-works', {'sr-works-open': mark.open, 'sr-road': !isWorks}]"/>
           <rect v-for="part in checkedIn(from, to)" :key="part.from" :x="x(part.from)" :y="HEIGHT - 2" :width="w(part.from, part.to)" height="2"
                 class="sr-works-checked"/>
         </svg>
@@ -406,17 +465,37 @@ function worksIn(from: number, to: number) {
             </ul>
           </div>
 
-          <div class="sr-tools">
-            <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMarkWorks" title="Key w" @click="markWorks">{{ worksOpen ? 'Roadworks end here' : 'Roadworks start here' }}</button>
-            <button v-if="worksHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapWorks('remove')">Remove roadworks</button>
-            <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheckWorks"
-                    title="From the start of the drive to this frame every roadworks is marked: the rest is free of them (key c)" @click="tapWorks('checked')">Roadworks checked to here</button>
+          <div class="sr-road-card" role="group" aria-labelledby="sr-road-title">
+            <p id="sr-road-title" class="sr-blocks-title">The road</p>
+            <div class="sr-kinds" role="radiogroup" aria-label="What the taps mark">
+              <button v-for="item in kinds" :key="item.kind" type="button" role="radio" class="sr-kind"
+                      :class="{'sr-kind-works': item.kind === ROADWORKS}" :aria-checked="item.kind === pickedKind.kind"
+                      :title="inside.has(item.kind) ? 'The frame shown is inside a mark of it' : 'Key k: the next one'"
+                      @click="picked = item.kind">{{ item.label }}<i v-if="inside.has(item.kind)" class="sr-kind-dot" aria-label="here"/></button>
+              <button v-if="canAdd && !adding" type="button" class="sr-kind sr-kind-add" id="sr-kind-add" aria-label="Add a kind of road"
+                      @click="adding = true">+</button>
+            </div>
+            <form v-if="adding" class="sr-kind-new" @submit.prevent="addKind">
+              <input v-model="newLabel" type="text" maxlength="40" placeholder="Bumpy road, cobbles, …" aria-label="The name of the new kind of road"
+                     enterkeyhint="done" autofocus>
+              <button type="submit" class="btn small primary" :disabled="saving || !newLabel.trim()">Add</button>
+              <button type="button" class="btn small" @click="adding = false; newLabel = ''">Cancel</button>
+            </form>
+            <div class="sr-tools">
+              <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMark" title="Key w" @click="mark">{{ markOpen ? 'End here' : 'Start here' }}</button>
+              <button v-if="markHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapMark('remove')">Remove this mark</button>
+              <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheck"
+                      :title="'From the start of the drive to this frame every ' + pickedKind.label.toLowerCase() + ' is marked: no mark there means none (key c)'"
+                      @click="tapMark('checked')">Checked to here</button>
+            </div>
+            <p class="dr-hint">{{ pickedKind.label }}<template v-if="markShown"> {{ clockOf(secondOf(markShown.start_ns)) }}{{ markShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(markShown.end_ns)) }}</template><template
+              v-else>: no mark here</template><template v-if="checked !== null"> · checked up to {{ clockOf(secondOf(checked)) }}</template><template
+              v-else> · not checked yet</template></p>
+            <p v-if="!isWorks" class="dr-hint">A kind of road changes no speed: the brain learns it aside, as the roadworks, to read the road better.</p>
           </div>
-          <p v-if="worksShown" class="dr-hint">Roadworks {{ clockOf(secondOf(worksShown.start_ns)) }}{{ worksShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(worksShown.end_ns)) }}</p>
-          <p v-if="worksChecked !== null" class="dr-hint">Checked for roadworks up to {{ clockOf(secondOf(worksChecked)) }}</p>
           <details v-if="!readOnly" class="dr-more sr-keys"><summary>Keys</summary>
             <p class="dr-hint">b block from / to here · m block of the map · x remove the block · l leave out · ↑ ↓ ±1 · − + ±5 ·
-              Esc cancel · w roadworks · c checked to here · space play · ← → 1 s · ⇧ ← → a frame</p></details>
+              Esc cancel · k next kind of road · w start / end of it · c checked to here · space play · ← → 1 s · ⇧ ← → a frame</p></details>
         </template>
       </section>
     </template>

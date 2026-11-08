@@ -11,9 +11,9 @@ network's (gru_step): no GRU node in the graph the comma compiles. A brain with 
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
-works_head stays out (brain_net.car_weights). What comes out of the export is checked twice: against PyTorch with onnxruntime
-on random inputs, and along a whole real drive against what training measured (brain_train.predict), the memory fed back as
-on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
+works_head and road_head stay out (brain_net.car_weights). What comes out of the export is checked twice: against PyTorch
+with onnxruntime on random inputs, and along a whole real drive against what training measured (brain_train.predict), the
+memory fed back as on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
 """
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ RTOL, ATOL = 1e-4, 1e-4
 
 
 def load_brain(checkpoint: Path):
-    """(the network on the CPU in eval mode, without works_head; what the checkpoint says of itself). The network has the
-    table of its checkpoint (class_kph): a brain of 5 km/h classes stays one."""
+    """(the network on the CPU in eval mode, without works_head and road_head; what the checkpoint says of itself). The
+    network has the table of its checkpoint (class_kph): a brain of 5 km/h classes stays one."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
     table = saved['weights'].get('class_kph')

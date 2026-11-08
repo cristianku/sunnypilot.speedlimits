@@ -47,6 +47,10 @@ The roadworks (works_answers), a target of 1 or 0 and a weight of 1 or 0, apart 
 
 The two answers never touch: the end of works says nothing of the speed, and no code turns one into the other.
 
+The kinds of road (road_answers): the same answer, kind by kind (road_kinds: a narrow road, a country road, a gravel road,
+potholes, and those a person added in Speed review), from that kind's marks and its own "checked to here". A frame can be of
+several kinds at once: one column a kind, each with its target and its weight, and a kind nobody went through has none.
+
 The limit ahead (reviewed_signs, ahead_from_signs), what the brain says beside the speed so that sunnypilot can slow down
 for it as for the map's: the next limit (a class of the speed, or NONE_AHEAD) and the metres to it. The signs are the
 boxes of the frames a person confirmed in Sign review, on the drive's current run (review.latest_report), never a site AI
@@ -177,7 +181,8 @@ from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.sign_reads import READ_INDEX_BASE
-from nnslr_tools.speed_review import NS, dashcam_drive, db_path, driver_speed, engaged_series, machine_held
+from nnslr_tools.speed_review import (FIRST_ROAD_KINDS, NS, dashcam_drive, db_path, driver_speed, engaged_series,
+                                      machine_held)
 
 # The brain's own table, never taken from Speed review: a class a km/h since 8 Nov 2026 (5 km/h before).
 BRAIN_STEP_KPH = 1
@@ -193,7 +198,7 @@ READ_COMMAND = 'nnslr road-type-signs --labelled'
 NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME, CRUISE = range(1, 7)
 OUT_REASONS = {NO_SPEED: 'no_speed', STOPPED: 'stopped', BLOCKED_OUT: 'left_out', BOUNDARY: 'boundary', NO_FRAME: 'no_frame',
                CRUISE: 'cruise'}
-NO_LABELS = {'blocks': [], 'works': [], 'checked_ns': None}
+NO_LABELS = {'blocks': [], 'works': [], 'checked_ns': None, 'road': [], 'road_checked': {}}
 HELD_OUT = ('test', 'validation')
 NIGHT_FROM, NIGHT_TO = 22, 6
 SWAPS = {30: 40, 40: 30, 50: 60, 60: 50, 70: 80, 80: 70, 100: 120, 120: 100}
@@ -267,8 +272,9 @@ def _connect_read_only(path: Path) -> sqlite3.Connection:
 
 
 def read_labels(root: Path) -> dict[str, dict]:
-    """{route: {'blocks', 'works', 'checked_ns'}} of every drive with a block or a mark of Speed review. Read only: this
-    database holds what only a person can write. A file of before 8 Nov 2026 has no blocks yet."""
+    """{route: {'blocks', 'works', 'checked_ns', 'road', 'road_checked'}} of every drive with a block or a mark of Speed
+    review (road: the marks of the kinds of road, each with its kind; road_checked: {kind: end_ns}). Read only: this
+    database holds what only a person can write. A file of before 8 Nov 2026 has no blocks yet, nor kinds of road."""
     path = db_path(root)
     if not path.is_file():
         return {}
@@ -278,18 +284,41 @@ def read_labels(root: Path) -> dict[str, dict]:
         labels: dict[str, dict] = {}
 
         def drive(route: str) -> dict:
-            return labels.setdefault(route, {'blocks': [], 'works': [], 'checked_ns': None})
+            return labels.setdefault(route, {'blocks': [], 'works': [], 'checked_ns': None, 'road': [], 'road_checked': {}})
 
-        for table, key in (('speed_blocks', 'blocks'), ('speed_works', 'works')):
+        for table, key in (('speed_blocks', 'blocks'), ('speed_works', 'works'), ('speed_road', 'road')):
             if table in tables:
                 for row in connection.execute(f'SELECT * FROM {table} ORDER BY route, start_ns'):
                     drive(row['route'])[key].append(dict(row))
         if 'speed_works_checked' in tables:
             for row in connection.execute('SELECT * FROM speed_works_checked'):
                 drive(row['route'])['checked_ns'] = row['end_ns']
+        if 'speed_road_checked' in tables:
+            for row in connection.execute('SELECT * FROM speed_road_checked'):
+                drive(row['route'])['road_checked'][row['kind']] = row['end_ns']
         return labels
     finally:
         connection.close()
+
+
+def road_labels(root: Path) -> dict[str, str]:
+    """{kind: label} of the kinds of road of Speed review in their order, read only. A file without them yet has the first
+    ones (speed_review.FIRST_ROAD_KINDS)."""
+    path = db_path(root)
+    if path.is_file():
+        connection = _connect_read_only(path)
+        try:
+            if connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'speed_road_kinds'").fetchone():
+                return {row['kind']: row['label'] for row in
+                        connection.execute('SELECT kind, label FROM speed_road_kinds ORDER BY position, kind')}
+        finally:
+            connection.close()
+    return dict(FIRST_ROAD_KINDS)
+
+
+def road_kinds(root: Path) -> tuple[str, ...]:
+    """The kinds of road of Speed review in their order: the columns of road_answers."""
+    return tuple(road_labels(root))
 
 
 def training_routes(root: Path, left_out: dict | None = None) -> list[str]:
@@ -376,6 +405,17 @@ def works_answers(ns: np.ndarray, works: list[dict], checked_ns: int | None) -> 
         weight[inside] = 1
     for edge in edges:
         weight[np.abs(ns - edge) < EDGE_SECONDS * NS] = 0
+    return target, weight
+
+
+def road_answers(ns: np.ndarray, road: list[dict], checked: dict[str, int], kinds: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
+    """(target, weight) float32 (frames, kinds) at the times ns: works_answers of each kind, from its marks and its own
+    "checked to here". A mark of a kind not in kinds is not read."""
+    target = np.zeros((len(ns), len(kinds)), dtype=np.float32)
+    weight = np.zeros((len(ns), len(kinds)), dtype=np.float32)
+    for column, kind in enumerate(kinds):
+        target[:, column], weight[:, column] = works_answers(ns, [mark for mark in road if mark['kind'] == kind],
+                                                             checked.get(kind))
     return target, weight
 
 
@@ -869,10 +909,11 @@ def memory_cuts(ns: np.ndarray) -> set[int]:
 
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict, *, rate: float = 1.0,
-                  need_pictures: bool = True, inputs: bool = True) -> dict:
+                  need_pictures: bool = True, inputs: bool = True, kinds: tuple[str, ...] = ()) -> dict:
     """A drive for the training at rate frames a second (1 or RATE_HZ): frames, ns, partitions, cells, cuts (memory_cuts),
     speed (class per frame), speed_out (why a frame is out of the loss, 0 when in), speed_weight, blocks (Speed review's),
-    blocked (a block with a speed holds there), works, works_weight, next, next_weight, metres, metres_weight
+    blocked (a block with a speed holds there), works, works_weight, road, road_weight (road_answers, a column for each of
+    kinds: road_kinds), next, next_weight, metres, metres_weight
     (ahead_from_signs), sign_review (reviewed_signs, with its fingerprint), measured (the frames a measure counts: one a
     second, so that it reads the same at both rates), inputs, own_kph (the car's speed as the dashboard shows it, in the
     labels' units: drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read, reader (what read
@@ -903,6 +944,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             blocked |= (ns >= block['start_ns']) & (ns < block['end_ns'])
     works, works_weight = works_answers(ns, labels['works'], labels['checked_ns'])
     works_weight[~usable] = 0
+    road, road_weight = road_answers(ns, labels.get('road', []), labels.get('road_checked', {}), kinds)
+    road_weight[~usable] = 0
     readings = record['readings'] if record else None
     v_ego = series.get('v_ego') or []
     own = _last_at(drive_logs.dashboard_speed(merged), ns)
@@ -920,7 +963,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'own_kph': np.array([np.nan if kph is None else kph for kph in own], dtype=np.float32),
             'cells': cells, 'cuts': memory_cuts(ns), 'speed': speed, 'speed_out': speed_out,
             'speed_weight': (speed_out == 0).astype(np.float32), 'blocks': blocks, 'blocked': blocked,
-            'works': works, 'works_weight': works_weight,
+            'works': works, 'works_weight': works_weight, 'road': road, 'road_weight': road_weight, 'road_kinds': list(kinds),
             'next': following, 'next_weight': next_weight, 'metres': metres, 'metres_weight': metres_weight,
             'sign_review': reviewed,
             'measured': np.array([not frame.get('step') for frame in frames], dtype=bool),
@@ -961,8 +1004,10 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
     """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs as there), each with
     reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
     drive that is no dashcam drive, one whose logs show openpilot driving (engaged_series) and one of the frozen split
-    whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for."""
+    whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for. Every drive
+    has the kinds of road of today (road_kinds), in the same columns."""
     split = read_split(root)
+    kinds = road_kinds(root)
     reader = fingerprint(package_path())
     left_out: dict[str, str] = {}
     labels, trainable = read_labels(root), training_routes(root, left_out)
@@ -983,7 +1028,7 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
             continue
         try:
             drive = drive_targets(root, route, labels.get(route, NO_LABELS), merged, split, rate=rate,
-                                  need_pictures=need_pictures, inputs=inputs)
+                                  need_pictures=need_pictures, inputs=inputs, kinds=kinds)
         except FramesChanged as error:
             log(f'{error}, left out')
             continue
@@ -1012,6 +1057,14 @@ def loss_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray]:
     """(speed weight, works weight) of a drive in one partition: the rest of the drive still runs through the memory."""
     inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
     return drive['speed_weight'] * inside, drive['works_weight'] * inside
+
+
+def road_weights(drive: dict, partition: str) -> np.ndarray | None:
+    """The road weight (frames, kinds) of a drive in one partition; None for a drive without the kinds of road."""
+    if 'road_weight' not in drive:
+        return None
+    inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
+    return drive['road_weight'] * inside[:, None]
 
 
 def ahead_weights(drive: dict, partition: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -1108,6 +1161,8 @@ def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
             'speed_weight': answered.astype(np.float32), 'works_weight': np.zeros_like(drive['works_weight'])}
     if 'next_weight' in drive:
         copy['next_weight'], copy['metres_weight'] = np.zeros_like(drive['next_weight']), np.zeros_like(drive['metres_weight'])
+    if 'road_weight' in drive:
+        copy['road_weight'] = np.zeros_like(drive['road_weight'])
     return copy
 
 
@@ -1218,15 +1273,27 @@ def _per_second(drive: dict) -> dict:
              'speed_out': np.where(kept, drive['speed_out'], -1)}
     if 'next_weight' in drive:
         found['next_weight'] = drive['next_weight'] * kept
+    if 'road_weight' in drive:
+        found['road_weight'] = drive['road_weight'] * kept[:, None]
     return found
 
 
 def summary(drives: list[dict]) -> dict:
-    """What the labels give the training today: per partition the frames with a speed, the works frames and the frames
-    with an answer of the next limit, per drive the same with why the rest is out, its blocks, its signs of Sign review
-    and the seconds a person went through there. Frames one a second (the measured ones) at either rate: seconds of the
-    drive."""
-    parts = {name: {'speed': 0, 'works_in': 0, 'works_out': 0, 'sites': 0, 'next': 0}
+    """What the labels give the training today: per partition the frames with a speed, the works frames, the frames of
+    each kind of road (road: {kind: {in, out}}) and the frames with an answer of the next limit, per drive the same with
+    why the rest is out, its blocks, its signs of Sign review and the seconds a person went through there. Frames one a
+    second (the measured ones) at either rate: seconds of the drive."""
+    kinds = next((drive['road_kinds'] for drive in drives if 'road_kinds' in drive), [])
+
+    def road_of(drive: dict, here) -> dict:
+        if 'road_weight' not in drive:
+            return {}
+        weight, road = drive['road_weight'][here], drive['road'][here]
+        return {kind: {'in': int((weight[:, column] * road[:, column]).sum()),
+                       'out': int((weight[:, column] * (1 - road[:, column])).sum())} for column, kind in enumerate(kinds)}
+
+    parts = {name: {'speed': 0, 'works_in': 0, 'works_out': 0, 'sites': 0, 'next': 0,
+                    'road': {kind: {'in': 0, 'out': 0} for kind in kinds}}
              for name in ('train', 'validation', 'test', 'buffer')}
     rows = []
     for drive in drives:
@@ -1239,6 +1306,9 @@ def summary(drives: list[dict]) -> dict:
             part['works_in'] += int((drive['works_weight'][here] * drive['works'][here]).sum())
             part['works_out'] += int((drive['works_weight'][here] * (1 - drive['works'][here])).sum())
             part['next'] += int(following[here].sum())
+            for kind, count in road_of(drive, here).items():
+                part['road'][kind]['in'] += count['in']
+                part['road'][kind]['out'] += count['out']
         for mark in drive['marks']:
             inside = np.flatnonzero((drive['ns'] >= mark['start_ns']) & (drive['ns'] < mark['end_ns']))
             if len(inside):
@@ -1248,12 +1318,13 @@ def summary(drives: list[dict]) -> dict:
                      'out': {name: int((drive['speed_out'] == reason).sum()) for reason, name in OUT_REASONS.items()},
                      'works_in': int((drive['works_weight'] * drive['works']).sum()),
                      'works_out': int((drive['works_weight'] * (1 - drive['works'])).sum()), 'marks': len(drive['marks']),
+                     'road': {kind: count for kind, count in road_of(drive, slice(None)).items() if count['in'] or count['out']},
                      'blocks': len(drive.get('blocks') or ()), 'signs': len(reviewed.get('signs') or ()),
                      'covered_s': round(sum(end - start for start, end in reviewed.get('covered') or ()) / NS),
                      'next': int(following.sum()),
                      'signs_read': drive['signs_read'], 'reader_current': drive.get('reader_current', False),
                      'pictures': drive.get('pictures', True), 'no_picture_s': drive['no_picture_s']})
-    return {'partitions': parts, 'drives': rows}
+    return {'partitions': parts, 'drives': rows, 'road_kinds': list(kinds)}
 
 
 def summary_text(found: dict) -> str:
@@ -1262,6 +1333,9 @@ def summary_text(found: dict) -> str:
     for name, part in found['partitions'].items():
         lines.append(f"  {name:<11}{part['speed']:>7}{part['works_in']:>10}{part['works_out']:>11}{part['sites']:>7}"
                      f"{part.get('next', 0):>7}")
+    for kind in found.get('road_kinds', []):
+        lines.append(f"  {kind}: " + ', '.join(f"{name} {part['road'][kind]['in']} in, {part['road'][kind]['out']} out"
+                                               for name, part in found['partitions'].items()))
     lines.append('Per drive:')
     for row in found['drives']:
         out = ', '.join(f'{name} {count}' for name, count in row['out'].items() if count)
@@ -1269,6 +1343,7 @@ def summary_text(found: dict) -> str:
         signs += '' if row.get('pictures', True) else ", the brain's pictures NOT made"
         lines.append(f"  {row['route']}: {row['speed']} of {row['frames']} with a speed ({out}), {row.get('blocks', 0)} "
                      f"blocks; works {row['works_in']} in, {row['works_out']} out, {row['marks']} marks; "
+                     + ''.join(f"{kind} {count['in']} in, {count['out']} out; " for kind, count in row.get('road', {}).items()) +
                      f"{row.get('signs', 0)} signs reviewed, {row.get('covered_s', 0)} s gone through, the next limit on "
                      f"{row.get('next', 0)}; signs {signs}; {row['no_picture_s']} seconds with a speed and no picture")
     return '\n'.join(lines)

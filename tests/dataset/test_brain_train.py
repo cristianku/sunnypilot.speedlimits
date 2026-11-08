@@ -233,6 +233,41 @@ def test_marks_with_a_stretch_checked_stay_in_the_loss():
     assert list(drive['works_weight']) == [1, 1, 1] and not said_to
 
 
+def roads(drive, road, weight=None):
+    """The drive with two kinds of road, narrow and gravel: road their answers per frame, weight 1 everywhere unless said."""
+    import numpy
+    drive['road_kinds'] = ['narrow', 'gravel']
+    drive['road'] = numpy.array(road, dtype=numpy.float32)
+    drive['road_weight'] = numpy.ones_like(drive['road']) if weight is None else numpy.array(weight, dtype=numpy.float32)
+    return drive
+
+
+def test_a_kind_of_road_with_one_side_alone_leaves_the_loss_of_train_and_the_other_stays():
+    from nnslr_tools.brain_train import _road_needs_both
+    said_to = []
+    drive = roads(fake_drive(['train', 'train', 'test']), [[1, 1], [0, 1], [1, 1]])
+    _road_needs_both([drive, fake_drive(['train'])], said_to.append)
+    assert drive['road_weight'].tolist() == [[1, 0], [1, 0], [1, 1]]
+    assert 'Road "narrow" in train: 1 frames inside and 1 outside.' in said_to
+    assert any('"gravel"' in line and 'checked to here' in line for line in said_to)
+
+
+def test_each_kind_of_road_is_measured_on_its_own_answers_and_the_speed_inside_its_marks():
+    import numpy
+    from nnslr_tools.brain_train import measure
+    drive = roads(fake_drive(['test'] * 4), [[1, 0], [1, 0], [0, 0], [0, 1]], [[1, 1], [1, 1], [1, 1], [0, 1]])
+    answer = said([100, 90, 100, 100])
+    answer['road'] = numpy.array([[.9, .9], [.1, .1], [.9, .1], [.9, .9]], dtype=numpy.float32)
+    found = measure([drive], [answer], 'test')
+    narrow, gravel = found['road']['narrow'], found['road']['gravel']
+    assert (narrow['true_positive'], narrow['false_positive'], narrow['false_negative']) == (1, 1, 1)
+    assert (gravel['true_positive'], gravel['false_positive'], gravel['false_negative']) == (1, 1, 0)
+    assert found['in_road']['narrow']['frames'] == 2 and found['in_road']['gravel']['frames'] == 1
+    # A network without the road head: the speed inside each kind is still measured, no precision.
+    found = measure([drive], [said([100] * 4)], 'test')
+    assert found['road']['narrow']['precision'] is None and found['in_road']['narrow']['frames'] == 2
+
+
 def test_a_site_of_another_partition_is_not_here():
     from nnslr_tools.brain_train import measure
     drive = fake_drive(['train'] * 10, marks=[{'start_ns': 2 * NS, 'end_ns': 6 * NS}])
@@ -367,6 +402,24 @@ def test_without_the_works_task_a_works_answer_is_no_step():
     before = [value.clone() for value in model.parameters()]
     assert one_epoch(torch, model, drive, pictures(drive)) == 0
     assert all(torch.equal(a, b) for a, b in zip(before, model.parameters()))
+
+
+def test_a_kind_of_road_alone_is_a_step_of_its_head_and_the_prediction_says_each_kind():
+    torch = torch_or_skip()
+    from nnslr_tools.brain_train import predict
+    from nnslr_tools.road_type_net import FrameStore
+    drive = roads(fake_drive(['train'] * T), [[1, 0]] * 4 + [[0, 0]] * 4)
+    drive['speed_weight'][:], drive['works_weight'][:] = 0, 0
+    model = tiny(torch, road_kinds=2)
+    before = {name: value.clone() for name, value in model.named_parameters()}
+    array = pictures(drive)
+    assert one_epoch(torch, model, drive, array) > 0
+    assert not torch.equal(before['road_head.weight'], model.road_head.weight)
+    said = predict(model, drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3, device=torch.device('cpu'))
+    assert said['road'].shape == (T, 2) and ((said['road'] >= 0) & (said['road'] <= 1)).all()
+    # A network without the head: no road said.
+    assert predict(tiny(torch), drive, FrameStore({drive['route']: array}, torch.device('cpu')), chunk=3,
+                   device=torch.device('cpu'))['road'] is None
 
 
 def test_one_drive_has_one_look_in_all_its_pieces():

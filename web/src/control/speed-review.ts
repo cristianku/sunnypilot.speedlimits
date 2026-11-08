@@ -27,6 +27,21 @@ export interface Works {
 
 export type WorksTap = 'start' | 'end' | 'remove' | 'checked';
 
+/** A kind of road a person can mark as the roadworks (narrow, country, gravel, potholes, and those added from the page):
+ * the brain learns them aside, as the roadworks, to understand the road better; they change no speed. */
+export interface RoadKind {
+  kind: string;
+  label: string;
+}
+
+/** A mark of a kind of road: as the roadworks, each kind with its own marks; a road can be of several kinds at once. */
+export interface RoadMark extends Works {
+  kind: string;
+}
+
+/** What the marks on the page are of: the roadworks, or a kind of road by its kind. */
+export const ROADWORKS = 'works';
+
 export interface SpeedDrive {
   route: string;
   /** The drive's last write: a save sends it back, and a stale one is refused. */
@@ -40,6 +55,11 @@ export interface SpeedDrive {
   works: Works[];
   /** From the start of the drive up to here a person looked for roadworks: outside the marks there are none. */
   works_checked_ns: number | null;
+  /** The kinds of road in their order, their marks on the drive, and how far it was gone through for each (by kind;
+   * a kind nobody went through for is not there). */
+  road_kinds: RoadKind[];
+  road: RoadMark[];
+  road_checked_ns: Record<string, number>;
   /** The drive's first and last ns, where a block may go; null before its logs are scanned. */
   span_ns: [number, number] | null;
   total_s: number;
@@ -51,9 +71,10 @@ export interface SpeedDrive {
 }
 
 export interface SpeedRow extends DriveRow {
-  /** How many blocks and roadworks marks the drive has. */
+  /** How many blocks, roadworks marks and marks of a kind of road the drive has. */
   blocks: number;
   works: number;
+  road: number;
   total_s: number;
   /** As SpeedDrive's: the list shows only the drives where it is not false. */
   dashcam: boolean | null;

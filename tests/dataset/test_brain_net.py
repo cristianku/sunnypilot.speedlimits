@@ -294,6 +294,73 @@ def test_the_comparison_without_the_works_task_has_no_works_output():
     assert gradient_of(model, 'gru') > 0
 
 
+
+def road_answers(t=T, kinds=2, on=(), inside=()):
+    """(answers, weight) (1, t, kinds): on, the (frame, kind) with an answer; inside, those of them inside a mark."""
+    answers, weight = torch.zeros(1, t, kinds), torch.zeros(1, t, kinds)
+    for frame, kind in on:
+        weight[0, frame, kind] = 1
+    for frame, kind in inside:
+        answers[0, frame, kind] = 1
+    return answers, weight
+
+
+def test_the_kinds_of_road_are_a_logit_a_kind_only_when_asked():
+    model = net(road_kinds=3)
+    said = model(*batch(), road=True)
+    assert len(said) == 4 and said[3].shape == (1, T, 3)
+    assert len(model(*batch())) == 3
+    assert net()(*batch(), road=True)[3] is None
+
+
+def test_a_kind_of_road_reaches_the_memory_and_not_the_speed_head():
+    from nnslr_tools.brain_net import brain_loss
+    model = net(road_kinds=2)
+    model.zero_grad()
+    speed_logits, works_logit, _state, road_logits = model(*batch(), road=True)
+    speed, speed_weight, works, works_weight = answers()
+    loss = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                      road=(road_logits, *road_answers(on=[(1, 0), (2, 0)], inside=[(1, 0)])))
+    loss.backward()
+    assert gradient_of(model, 'road_head') > 0 and gradient_of(model, 'gru') > 0 and gradient_of(model, 'project') > 0
+    assert gradient_of(model, 'speed_head') == 0 and gradient_of(model, 'works_head') == 0
+    # Only the kind with an answer learns.
+    assert float(model.road_head.weight.grad[1].abs().sum()) == 0
+
+
+def test_each_kind_of_road_weighs_as_the_roadworks():
+    from nnslr_tools.brain_net import ROAD_LOSS, WORKS_LOSS, brain_loss
+    speed_logits, works_logit, _state, road_logits = net(road_kinds=2)(*batch(), road=True)
+    speed, speed_weight, works, works_weight = answers(speed_on=[0])
+    alone = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight)
+    one = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                     road=(road_logits, *road_answers(on=[(1, 0)])))
+    both = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                      road=(road_logits, *road_answers(on=[(1, 0), (1, 1)])))
+    nothing = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                         road=(road_logits, *road_answers()))
+    assert float(nothing) == pytest.approx(float(alone)) and float(alone) < float(one) < float(both)
+    assert ROAD_LOSS == WORKS_LOSS
+
+
+def test_the_speed_does_not_depend_on_the_road_head():
+    model = net(road_kinds=2)
+    images, extra = batch()
+    with torch.no_grad():
+        speed = model(images, extra)[0]
+        model.road_head.weight.mul_(100).add_(1)
+        again = model(images, extra, road=True)[0]
+    assert torch.equal(speed, again)
+
+
+def test_the_car_gets_neither_the_works_head_nor_the_road_head():
+    from nnslr_tools.brain_net import build_brain_net, car_weights
+    weights = car_weights(net(road_kinds=4))
+    assert not [name for name in weights if name.startswith(('works_head', 'road_head'))]
+    without = build_brain_net(GROUPS, pretrained=False, works=False)
+    assert set(weights) == set(without.state_dict())
+    without.load_state_dict(weights)
+
 def test_a_network_with_another_input_is_the_same_network():
     from nnslr_tools.brain_net import build_brain_net
     from nnslr_tools.brain_targets import INPUT_SIZES

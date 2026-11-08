@@ -54,17 +54,44 @@ def test_the_limit_ahead_has_none_after_the_last_speed(tmp_path, monkeypatch):
     assert shapes['speed'] == [1, 200] and shapes['next'] == [1, 201] and shapes['metres'] == [1, 1]
 
 
-def saved_brain(path, kph=None, ahead=True):
-    """A checkpoint as brain_train writes it, works_head and its table of the speeds among the weights."""
+def saved_brain(path, kph=None, ahead=True, road_kinds=()):
+    """A checkpoint as brain_train writes it, works_head (and road_head with road_kinds) and its table of the speeds among
+    the weights."""
     import torch
 
     from nnslr_tools.brain_net import build_brain_net
     torch.manual_seed(0)
-    model = build_brain_net(GROUPS, pool='grid', works=True, ahead=ahead, pretrained=False, kph=kph)
-    torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True, 'features': 128,
-                'hidden': 128, 'ahead': ahead, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x', 'reader': None,
-                'inputs_sha256': inputs_sha256()}, path)
+    model = build_brain_net(GROUPS, pool='grid', works=True, ahead=ahead, pretrained=False, kph=kph,
+                            road_kinds=len(road_kinds))
+    torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True,
+                'road_kinds': list(road_kinds), 'features': 128, 'hidden': 128, 'ahead': ahead, 'rate_hz': 4.0,
+                'picture': 'brain', 'split': 'x', 'reader': None, 'inputs_sha256': inputs_sha256()}, path)
     return model
+
+
+def test_a_brain_that_learnt_the_kinds_of_road_goes_to_the_car_as_one_that_did_not(tmp_path):
+    # road_head is only in training: the car's network, its weights and its contract are those of a brain without it.
+    import torch
+
+    from nnslr_tools.brain_net import car_weights
+    with_road, without = tmp_path / 'road' / 'brain-last.pt', tmp_path / 'plain' / 'brain-last.pt'
+    with_road.parent.mkdir()
+    without.parent.mkdir()
+    trained = saved_brain(with_road, road_kinds=('narrow', 'country', 'gravel', 'potholes'))
+    assert trained.road_head is not None and 'road_head.weight' in torch.load(with_road, weights_only=False)['weights']
+    saved_brain(without)
+    model, _saved = brain_export.load_brain(with_road)
+    plain, _ = brain_export.load_brain(without)
+    assert model.road_head is None and model.works_head is None
+    weights, kept = car_weights(model), car_weights(trained)
+    assert set(weights) == set(car_weights(plain)) == set(kept)
+    assert all(torch.equal(weights[name], kept[name]) for name in weights)
+    contracts = []
+    for path in (with_road, without):
+        brain_export.export_brain_onnx(path, path.parent / 'brain.onnx')
+        contract = json.loads((path.parent / 'brain.onnx.contract.json').read_text())
+        contracts.append((contract['inputs'], contract['outputs'], contract['output']))
+    assert contracts[0] == contracts[1]
 
 
 def test_a_brain_of_5_km_h_classes_loads_with_its_own_table_and_says_it_to_the_car(tmp_path):

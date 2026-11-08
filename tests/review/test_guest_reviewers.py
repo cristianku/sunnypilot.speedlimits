@@ -420,9 +420,13 @@ def test_sign_distance_and_speed_review_take_the_name_of_the_guest(outside, monk
 
     monkeypatch.setattr(sign_distance, 'mark', mark)
     monkeypatch.setattr(speed_review, 'save_block', save)
+    monkeypatch.setattr(speed_review, 'save_road', save)
     assert server.request('POST', f'/api/sign-distance/drives/{ROUTE}/marks', body={}, headers=proof())[0] == 200
     assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/blocks', body={}, headers=proof())[0] == 200
-    assert who == ['guest/ana', 'guest/ana']
+    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/road', body={}, headers=proof())[0] == 200
+    assert who == ['guest/ana'] * 3
+    # A guest marks with the kinds of road of this server and adds none.
+    assert server.request('POST', '/api/speed-review/road-kinds', body={'label': 'x'}, headers=proof())[0] == 403
     # The token alone still writes neither: as always, only a person.
     keys = {'X-Review-Token': TOKEN}
     assert server.request('POST', f'/api/sign-distance/drives/{ROUTE}/marks', body={}, headers=keys)[0] == 403

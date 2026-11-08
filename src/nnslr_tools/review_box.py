@@ -97,7 +97,12 @@ SPEED_TABLES = {'stretches': ('speed_stretches', ('route', 'start_ns', 'end_ns',
                                                   'reviewer', 'revision')),
                 'blocks': ('speed_blocks', ('route', 'start_ns', 'end_ns', 'kph', 'note', 'reviewer', 'revision')),
                 'works': ('speed_works', ('route', 'start_ns', 'end_ns', 'reviewer', 'revision')),
-                'checked': ('speed_works_checked', ('route', 'end_ns', 'reviewer', 'revision'))}
+                'checked': ('speed_works_checked', ('route', 'end_ns', 'reviewer', 'revision')),
+                'road': ('speed_road', ('route', 'kind', 'start_ns', 'end_ns', 'reviewer', 'revision')),
+                'road_checked': ('speed_road_checked', ('route', 'kind', 'end_ns', 'reviewer', 'revision'))}
+# The kinds of road go with every drive from this server to the box, and never back: a guest marks with them, and adds
+# none (review_access), so a mark of a kind this server does not have is refused.
+KIND_COLUMNS = ('kind', 'label', 'position')
 SPEED_HISTORY_COLUMNS = ('route', 'revision', 'action', 'start_ns', 'end_ns', 'kph', 'state', 'known_ns', 'note',
                          'reviewer', 'at')
 # The stores made of lines, and the kind of work that writes each.
@@ -105,7 +110,8 @@ LINE_STORES = {'distance': 'distance'}
 DRIVE_TABLES = ('scans', 'log_files', 'episodes')
 # The columns that must be numbers in a package from the box, whatever else it holds.
 INTEGERS = frozenset({'revision', 'start_ns', 'end_ns'})
-OPEN_ENDED = SPEED_TABLES['works'][1]
+# Roadworks and kinds of road with no end yet.
+OPEN_ENDED = (SPEED_TABLES['works'][1], SPEED_TABLES['road'][1])
 
 
 class BoxError(RuntimeError):
@@ -200,8 +206,10 @@ def _signs_of(connection: sqlite3.Connection, route: str) -> dict:
 
 
 def _speed_of(connection: sqlite3.Connection, route: str) -> dict:
-    found = {key: _rows(connection, f'SELECT {", ".join(columns)} FROM {table} WHERE route = ? ORDER BY {columns[1]}', route)
+    found = {key: _rows(connection, f'SELECT {", ".join(columns)} FROM {table} WHERE route = ? '
+                                    f'ORDER BY {columns[1]}, {columns[2]}', route)
              for key, (table, columns) in SPEED_TABLES.items()}
+    found['kinds'] = _rows(connection, f'SELECT {", ".join(KIND_COLUMNS)} FROM speed_road_kinds ORDER BY position, kind')
     found['history'] = _rows(connection, f'SELECT {", ".join(SPEED_HISTORY_COLUMNS)} FROM speed_history WHERE route = ? '
                                          'ORDER BY revision', route)
     return found
@@ -336,6 +344,9 @@ def install_drive(root: Path, package: dict) -> None:
                 [row for row in package['signs']['history'] if (row['run_id'], row['frame_key'], row['revision']) not in known])
     with contextlib.closing(_open(speed_review.db_path(root))) as connection, _transaction(connection):
         _replace_speed(connection, route, package['speed'])
+        connection.executemany('INSERT OR IGNORE INTO speed_road_kinds (kind, label, position, reviewer, at) VALUES (?, ?, ?, ?, ?)',
+                               [(row['kind'], row['label'], row['position'], 'nnslr', _now())
+                                for row in package['speed'].get('kinds', [])])
         _insert(connection, 'speed_history', SPEED_HISTORY_COLUMNS, package['speed']['history'], 'INSERT OR IGNORE')
     with contextlib.closing(_open(drive_review.db_path(root))) as connection, _transaction(connection):
         for table, rows in package['drive'].items():
@@ -431,11 +442,10 @@ class _Refused(ValueError):
 
 
 def _is_row(row, columns: tuple[str, ...], key: str, route: str) -> bool:
-    # Roadworks with no end yet have none.
     return (isinstance(row, dict) and all(name in row for name in columns) and row[key] == route
-            and all(type(row[name]) is int or (columns is OPEN_ENDED and name == 'end_ns' and row[name] is None)
+            and all(type(row[name]) is int or (columns in OPEN_ENDED and name == 'end_ns' and row[name] is None)
                     for name in columns if name in INTEGERS)
-            and ('reviewer' not in columns or isinstance(row['reviewer'], str)))
+            and all(isinstance(row[name], str) for name in ('reviewer', 'kind') if name in columns))
 
 
 def _good_speed(kph) -> bool:
@@ -525,6 +535,9 @@ def _merge_speed(connection: sqlite3.Connection, route: str, theirs: dict, base:
     if _speed_rows(ours) != _speed_rows(base):
         return 'conflict'
     if not _new_names(theirs, base) <= allowed:
+        return 'refused'
+    known = {row['kind'] for row in _rows(connection, 'SELECT kind FROM speed_road_kinds')}
+    if any(row['kind'] not in known for key in ('road', 'road_checked') for row in theirs[key]):
         return 'refused'
     _replace_speed(connection, route, theirs)
     top = max((row['revision'] for row in base['history']), default=0)
@@ -687,6 +700,10 @@ def _take_results(root: Path, state: dict, pulled: Path, log: Callable[[str], No
         # A box on code from before 8 Nov 2026 sends no blocks: those sent to it stay in the base for the next round too,
         # else that round finds them only here and takes every later change of the box for a conflict.
         theirs['speed'] = {**{key: rows for key, rows in base['speed'].items() if key in SPEED_TABLES}, **theirs['speed']}
+        # The kinds of road never come back: those sent stay.
+        theirs['speed'].pop('kinds', None)
+        if 'kinds' in base['speed']:
+            theirs['speed']['kinds'] = base['speed']['kinds']
         if {key: theirs[key] for key in base} == base:
             continue
         try:

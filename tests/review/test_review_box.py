@@ -359,6 +359,31 @@ def test_a_package_from_before_the_blocks_still_counts(pair):
     assert state['drives'][ROUTE]['saved']['conflicts'] == 0
 
 
+def test_the_kinds_of_road_go_to_the_box_and_its_marks_come_back_and_a_kind_unknown_here_is_refused(pair):
+    here = speed_review.SpeedReviewStore(pair.root)
+    kind = here.add_road_kind('Cobbles', 'cristianku')
+    pair.give('speed')
+    pair.round()
+    box = speed_review.SpeedReviewStore(pair.data)
+    assert [row['kind'] for row in box.road_kinds()] == [row['kind'] for row in here.road_kinds()]
+    revision = box.tap_road(ROUTE, kind, 'start', 5, 10, 0, GUEST)
+    box.tap_road(ROUTE, 'narrow', 'checked', 9, 10, revision, GUEST)
+    tick(pair.data, pair.box, log=lambda _: None)
+    state = sync(pair.root, log=lambda _: None)
+    assert [(row['kind'], row['start_ns'], row['end_ns']) for row in here.road(ROUTE)] == [(kind, 5, None)]
+    assert here.road_checked(ROUTE) == {'narrow': 9}
+    assert state['drives'][ROUTE]['saved']['refused'] == 0
+    # A kind made on the box alone does not come in.
+    package = json.loads((pair.box / 'outbox' / f'{ROUTE}.json').read_text())
+    package['speed']['road'].append({'route': ROUTE, 'kind': 'invented', 'start_ns': 1, 'end_ns': 2, 'reviewer': GUEST,
+                                     'revision': 9})
+    package['speed']['kinds'].append({'kind': 'invented', 'label': 'Invented', 'position': 9})
+    (pair.box / 'outbox' / f'{ROUTE}.json').write_text(json.dumps(package))
+    state = sync(pair.root, log=lambda _: None)
+    assert [row['kind'] for row in here.road(ROUTE)] == [kind] and state['drives'][ROUTE]['saved']['refused'] == 1
+    assert 'invented' not in {row['kind'] for row in here.road_kinds()}
+
+
 def test_review_completed_takes_the_results_and_the_work_back(pair):
     pair.give()
     pair.round()

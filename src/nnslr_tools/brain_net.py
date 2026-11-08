@@ -7,6 +7,7 @@ The network, per frame: encoder (MobileNetV3-small, as the road-type network) ->
 
     speed  = speed_head(h) + trust(h) * number   the speed to hold, a class of the table: the only output on the car
     works  = works_head(h)                       are we inside roadworks: only in training
+    road   = road_head(h)                        which kinds of road this is, one logit a kind: only in training
 
 The table is the network's own (build_brain_net's kph, the class_kph buffer, kept in every checkpoint): a class a km/h from
 1 to 200 since 8 Nov 2026 (brain_targets.SPEED_CLASSES), a class every 5 km/h before. A brain of before keeps its own: its
@@ -17,6 +18,12 @@ an answer of its own. The works error goes back through h into the GRU and the l
 speed uses too: that is how a mark changes the network, without ever being an input. works_head is one layer, left out of the car's network
 (car_weights), and no code goes from works to speed. Whether it helps is measured: the same training without it
 (works=False), on sites of test and validation.
+
+The kinds of road (a narrow road, a country road, a gravel road, potholes, and those a person adds in Speed review:
+brain_targets.road_kinds) teach the memory the same way: road_head is one layer with a logit a kind, loss += ROAD_LOSS *
+binary cross entropy of each kind on its own frames, so each kind weighs as the roadworks do. It is left out of the car's
+network too (TRAINING_ONLY), so the car's brain is the same network with or without it. A kind is a column in the order of
+the kinds when the training started: a kind added later is a new column of the next training.
 
 His speed is no single class but a bell over the table around it (speed_targets, SPEED_SIGMA_KPH wide): at a km/h a
 class, a hard answer would cost 52 for 53 as much as 52 for 120, and a speed off the dashboard is only so exact. With the
@@ -58,6 +65,7 @@ from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, SPEED_CLASSES, 
 from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_STD, _torch
 
 WORKS_LOSS = 0.3
+ROAD_LOSS = 0.3  # each kind of road
 NEXT_LOSS = 0.5
 METRES_LOSS = 1.0
 METRES_BETA = 0.1  # smooth L1 within 10 m (over METRES_SCALE), then linear
@@ -67,7 +75,7 @@ GRID_CHANNELS = 32
 GRID_CELLS = 8 * 5  # the encoder's map of a 256 x 144 frame
 BACKBONE_CHANNELS = 576
 # Out of the car's network.
-TRAINING_ONLY = 'works_head.'
+TRAINING_ONLY = ('works_head.', 'road_head.')
 
 
 def training_table() -> list[float]:
@@ -86,10 +94,11 @@ def _table(kph) -> list[float]:
 
 
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
-                    pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None):
+                    pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
-    forward (a network built with ahead) also next logits (B, T, classes + 1) and metres (B, T).
+    forward (a network built with ahead) also next logits (B, T, classes + 1) and metres (B, T); with road=True asked of
+    forward, last, the logits of the kinds of road (B, T, road_kinds), or None for a network built without them.
     kph: the km/h of each class, in order (a list, or the class_kph buffer of a checkpoint): the heads have as many classes,
     and a number in force falls on the class within half the table's step of it. None: the table of today's training."""
     torch = _torch()
@@ -123,6 +132,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.speed_head = nn.Linear(hidden, classes)
             self.trust = nn.Linear(hidden, 1)
             self.works_head = nn.Linear(hidden, 1) if works else None
+            self.road_head = nn.Linear(hidden, road_kinds) if road_kinds else None
             self.ahead = ahead
             if ahead:
                 self.next_head = nn.Linear(hidden, classes + 1)
@@ -160,7 +170,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
                 return extra_input.new_zeros(extra_input.shape[:-1])
             return extra_input[..., distance_at]
 
-        def forward(self, images, extra_input, state=None, ahead: bool = False):
+        def forward(self, images, extra_input, state=None, ahead: bool = False, road: bool = False):
             b, t = images.shape[:2]
             extra_input = extra_input.to(images.dtype)
             x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
@@ -168,11 +178,14 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             number = self.number_in_force(extra_input)
             speed = self.speed_head(out) + self.trust(out) * number
             works = None if self.works_head is None else self.works_head(out)[..., 0]
-            if not ahead:
-                return speed, works, last[0]
-            following = self.next_head(out) + self.trust_next(out) * torch.cat([number, number[..., :1] * 0], dim=-1)
-            metres = self.metres_head(out)[..., 0] + self.metres_gate(out)[..., 0] * self.sign_metres(extra_input)
-            return speed, works, last[0], following, metres
+            found = (speed, works, last[0])
+            if ahead:
+                following = self.next_head(out) + self.trust_next(out) * torch.cat([number, number[..., :1] * 0], dim=-1)
+                metres = self.metres_head(out)[..., 0] + self.metres_gate(out)[..., 0] * self.sign_metres(extra_input)
+                found += (following, metres)
+            if road:
+                found += (None if self.road_head is None else self.road_head(out),)
+            return found
 
     return BrainNet()
 
@@ -190,12 +203,13 @@ def speed_targets(speed, kph=None, sigma_kph: float = SPEED_SIGMA_KPH):
 
 
 def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
-               frames: int | None = None, ahead: tuple | None = None, kph=None):
+               frames: int | None = None, ahead: tuple | None = None, kph=None, road: tuple | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
     A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
     The speed's answer is speed_targets' bell over the table kph (the network's class_kph; None: today's training's).
     frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one.
-    ahead: (next logits, metres, next, next_weight, metres answers, metres_weight) of a network with the limit ahead."""
+    ahead: (next logits, metres, next, next_weight, metres answers, metres_weight) of a network with the limit ahead.
+    road: (road logits, road answers, road_weight), (B, T, kinds), of a network with the kinds of road: ROAD_LOSS a kind."""
     torch = _torch()
     from torch.nn import functional
 
@@ -214,9 +228,14 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
         total = total + NEXT_LOSS * mean(errors, next_weight.flatten())
         total = total + METRES_LOSS * mean(functional.smooth_l1_loss(metres, target, reduction='none', beta=METRES_BETA),
                                            metres_weight)
+    if road is not None and road[0] is not None:
+        road_logits, answers, road_weight = road
+        errors = functional.binary_cross_entropy_with_logits(road_logits, answers, reduction='none')
+        for kind in range(road_logits.shape[-1]):
+            total = total + ROAD_LOSS * mean(errors[..., kind], road_weight[..., kind])
     return total
 
 
 def car_weights(model) -> dict:
-    """The weights that go to the car: all but works_head (the heads of the limit ahead go too)."""
+    """The weights that go to the car: all but works_head and road_head (the heads of the limit ahead go too)."""
     return {name: value for name, value in model.state_dict().items() if not name.startswith(TRAINING_ONLY)}

@@ -1438,6 +1438,7 @@ button.rg-row{cursor:pointer}
 .dr-run-text.sr-block-text{fill:var(--accent);font-weight:700}
 .dr-lanes rect.sr-works{fill:var(--warn)}
 .dr-lanes rect.sr-works-open{fill-opacity:.55}.dr-lanes rect.sr-works-checked{fill:var(--muted);stroke:none}
+.dr-lanes rect.sr-works.sr-road{fill:var(--accent)}
 .sr-box-label{background:rgba(52,199,89,.45);border-color:rgba(130,230,150,.9)}
 .sr-box-label.empty{border-color:rgba(52,199,89,.45);color:#919b95}
 .sr-box-label small{letter-spacing:.03em}
@@ -1460,6 +1461,18 @@ button.rg-row{cursor:pointer}
 .sr-tools{display:flex;flex-wrap:wrap;gap:6px}
 .sr-tools .btn[aria-pressed="true"]{background:var(--accent);color:#fff}
 .sr-blocks-title{margin:4px 0 0;font-size:12.5px;font-weight:600;color:var(--muted)}
+.sr-road-card{display:flex;flex-direction:column;gap:8px}
+.sr-kinds{display:flex;flex-wrap:wrap;gap:6px}
+.sr-kind{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 12px;border-radius:999px;border:1px solid var(--line);
+background:var(--surface-2);color:var(--fg);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.sr-kind[aria-checked="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.sr-kind.sr-kind-works[aria-checked="true"]{background:var(--warn);border-color:var(--warn)}
+.sr-kind-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.sr-kind.sr-kind-add{font-size:17px;font-weight:600;color:var(--accent)}
+.sr-kind-new{display:flex;flex-wrap:wrap;gap:6px}
+.sr-kind-new input{flex:1 1 160px;min-width:0;font:inherit;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;
+background:var(--surface-2);color:var(--fg)}
+.sr-kind-new input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
 .sr-blocks ul{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column}
 .sr-blocks li{display:flex;align-items:center;gap:6px}
 .sr-blocks li+li{border-top:1px solid var(--line)}
@@ -1474,7 +1487,8 @@ color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;font-
   .sr-view .dr-now,.sr-view .dr-signs{order:5}
 }
 @media (max-width:860px),(pointer:coarse){
-  .sr-kph .btn,.sr-tools .btn,.sr-wide,.sr-block-go,.sr-block-x{min-height:44px}
+  .sr-kph .btn,.sr-tools .btn,.sr-wide,.sr-block-go,.sr-block-x,.sr-kind-new .btn,.sr-kind-new input{min-height:44px}
+  .sr-kind{min-height:40px;padding:6px 14px}
 }
 /* Data › Sign distance (SignDistanceTab.vue, SignDistanceDrive.vue): the median of how late vision's zero comes, the
    drives with signs to mark, then one sign at a time: the road frame as large as the column leaves with what the car's

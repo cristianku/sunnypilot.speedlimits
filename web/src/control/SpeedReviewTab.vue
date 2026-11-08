@@ -3,7 +3,7 @@
 // drive is the answer, with nothing to confirm; a block corrects it from a time to a time, with another speed or left out
 // of the training, and roadworks are marked on the frames. Nothing here changes the car. Every drive the brain learns
 // from (sunnypilot off in all of it, speed_review.dashcam_drive, or not read yet: DASHCAM MODE on the first), the newest
-// first, with its blocks and roadworks marks; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
+// first, with its blocks, roadworks and kinds of road marked; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
 // list, Read the logs reads the comma's logs of every drive (ReadLogsCard.vue), the list read again every 2 s while it
 // does: a drive has a speed only once its logs are read.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
@@ -35,11 +35,13 @@ const rows = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam
   .sort((a, b) => startOf(b).localeCompare(startOf(a))));
 /** Drives where sunnypilot was on: the brain does not learn from them, the list leaves them out. */
 const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
-/** What a drive has: its length, its blocks and its roadworks marks; before its logs are read, what reading them does. */
+/** What a drive has: its length, its blocks, its roadworks marks and its marks of a kind of road; before its logs are read,
+ * what reading them does. */
 const stateOf = (drive: SpeedRow): string => !drive.total_s ? scanText(drive.scan).text
   : clockOf(drive.total_s) + ' long · ' + (drive.blocks ? plural(drive.blocks, 'block') : 'no block')
-    + (drive.works ? ' · ' + plural(drive.works, 'roadworks', 'roadworks') : '');
-const marked = (drive: SpeedRow): boolean => drive.blocks > 0 || drive.works > 0;
+    + (drive.works ? ' · ' + plural(drive.works, 'roadworks', 'roadworks') : '')
+    + (drive.road ? ' · ' + plural(drive.road, 'road mark') : '');
+const marked = (drive: SpeedRow): boolean => drive.blocks > 0 || drive.works > 0 || drive.road > 0;
 const hrefOf = (drive: SpeedRow): string => '/speed-review?drive=' + encodeURIComponent(drive.route);
 
 // While logs are read, the list again every 2 s (never under an opened drive).
@@ -68,7 +70,7 @@ onBeforeUnmount(() => window.clearTimeout(timer));
       </div>
       <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
         is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
-        time to a time, with that speed or left out of the training; mark the roadworks there too. Nothing here changes the car.</p>
+        time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too. Nothing here changes the car.</p>
       <p v-if="engaged" class="import-why" id="sr-engaged">Only drives with sunnypilot off (sunnylink › Toggles › Enable
         sunnypilot): there the speed is all yours. {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} not listed.</p>
       <p v-if="error" class="empty">{{ error }}</p>

@@ -176,7 +176,7 @@ On each picture you:
 
 An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
-**Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, and you mark the roadworks. Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
+**Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, and you mark the roadworks and the kinds of road (narrow, country, gravel road, potholes, or one you add). Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
 
 ### 4. Import the reviews
 
