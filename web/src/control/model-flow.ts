@@ -6,8 +6,19 @@ import type {BrainModel, ModelVersion} from '../common/panel-types';
 import {BRAIN_GROUPS, BRAIN_PICTURE} from './brain-card';
 import type {FlowBlock, FlowKind} from './brain-flow';
 
+export interface ModelLayout {
+  blocks: FlowBlock[];
+  columns: string[];
+  legend: {kind: FlowKind; label: string}[];
+  divider: {column: number; row: number; text: string} | null;
+}
+
 export const MODEL_COLUMNS = ['What it gets', 'The network', 'What it says'];
 export const MODEL_LEGEND: {kind: FlowKind; label: string}[] = [{kind: 'input', label: 'Input'}, {kind: 'car', label: 'Output'}];
+/** A brain trained with outputs only the training has: those and the labels they were compared with, in a fourth column. */
+const BRAIN_TRAINED_COLUMNS = [...MODEL_COLUMNS, 'Compared with, only in training'];
+const BRAIN_TRAINED_LEGEND: {kind: FlowKind; label: string}[] = [{kind: 'input', label: 'Input'},
+  {kind: 'car', label: 'Output on the car'}, {kind: 'train', label: 'Only in training'}];
 
 const SIGNNET: FlowBlock[] = [
   {id: 'band', title: 'Road camera, top band', sub: '896 × 288', kind: 'input', column: 0,
@@ -94,14 +105,41 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
         facts: [{name: 'metres', what: 'speedLimitAheadDistance, less the metres driven since the step'}]},
     );
   }
+  // The outputs only its training had, each on its row under a line, its correct labels beside it: they taught the shared
+  // weights through their losses and were dropped from the file the car gets (brain_export).
+  const extras = [
+    {on: version.road_types.length > 0, id: 'type', title: 'Road type', sub: 'motorway, rural, town…',
+      what: 'the road type it sees', answer: 'Road types', where: 'OpenStreetMap, offline only, corrected in Speed review',
+      note: 'The map only made these labels, offline: the car never gets it.'},
+    {on: version.works === true, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
+      what: 'whether the car is inside roadworks', answer: 'Roadworks', where: 'your marks in Speed review'},
+    {on: version.road_kinds.length > 0, id: 'road', title: 'Road characteristics', sub: version.road_kinds.join(', '),
+      what: 'the kinds of road it sees', answer: 'Kinds of road', where: 'your marks in Speed review'},
+  ].filter((extra) => extra.on);
+  const trained: FlowBlock[] = [];
+  if (extras.length) {
+    outputs.forEach((block, index) => { block.row = index + 1; });
+    const first = outputs.length + 2;
+    extras.forEach((extra, index) => {
+      trained.push(
+        {id: extra.id, title: extra.title, sub: extra.sub, kind: 'train', column: 2, row: first + index,
+          facts: [{name: extra.title, what: extra.what}],
+          note: 'Only in training: its error updated the shared weights, then it was dropped from the car’s file.'},
+        {id: 'answer-' + extra.id, title: extra.answer, sub: extra.where, kind: 'train', column: 3, row: first + index,
+          facts: [{name: extra.answer, what: 'the correct labels: ' + extra.where}], to: [extra.id], compares: true,
+          ...(extra.note ? {note: extra.note} : {})},
+      );
+    });
+  }
   return [
     ...inputs,
     {id: 'features', title: 'MobileNetV3-small', sub: 'picture → features', kind: 'net', column: 1,
       facts: [{name: 'features', what: 'what it sees in the picture'}], to: ['memory']},
     {id: 'memory', title: 'Memory (GRU)', sub: `h ${version.hidden ?? 128}, one step ${every}`, kind: 'net', column: 1,
       facts: [BRAIN_PICTURE[1]!], note: 'The car gives h back at the next step (hidden_out → hidden).',
-      to: outputs.map((block) => block.id)},
+      to: [...outputs, ...trained.filter((block) => block.column === 2)].map((block) => block.id)},
     ...outputs,
+    ...trained,
   ];
 }
 
@@ -112,4 +150,15 @@ export function modelBlocks(version: ModelVersion): FlowBlock[] | null {
   if (version.role === 'classifier') return CLASSIFIER;
   if (version.role === 'decider') return DECIDER;
   return null;
+}
+
+/** The diagram of a version: a brain trained with outputs only the training has draws them too, under a line, with their
+ * labels in a fourth column. */
+export function modelLayout(version: ModelVersion): ModelLayout | null {
+  const blocks = modelBlocks(version);
+  if (!blocks) return null;
+  const extra = blocks.find((block) => block.kind === 'train' && block.column === 2);
+  if (!extra) return {blocks, columns: MODEL_COLUMNS, legend: MODEL_LEGEND, divider: null};
+  return {blocks, columns: BRAIN_TRAINED_COLUMNS, legend: BRAIN_TRAINED_LEGEND,
+    divider: {column: 2, row: extra.row! - 1, text: 'only in training'}};
 }

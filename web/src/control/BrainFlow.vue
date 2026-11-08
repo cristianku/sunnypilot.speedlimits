@@ -1,10 +1,11 @@
 <script setup lang="ts">
-// Train › Brain, how the next training's brain is built, as one short flow that reads top to bottom on a phone too
-// (docs/brain-training-diagram.md): the picture goes through MobileNetV3-small, the other inputs join its features, all of
-// them go into the memory (GRU), and the memory gives the car's two outputs. Beside it (under it, narrow) what only the
-// training has: the extra predictions that teach the shared network through their losses and the answers it is compared
-// with. The inputs are the groups of brain-card.ts the training gives (the car's, the driver's only with Driver's inputs on):
-// tests/review/test_brain_card.py keeps them those of the code. A tap on a block opens what it is under the flow.
+// Train › Brain, how the next training's brain is built, as one short flow that reads top to bottom on a phone too: the
+// picture goes through MobileNetV3-small, the other inputs join its features, all of them go into the memory (GRU), and the
+// memory gives two groups of outputs: the car's three, and those only the training has (by its switches), which teach the
+// shared weights through their losses and are dropped from the car's file. Under each group, the correct labels it is
+// compared with: the map only offline, for the road type. The inputs are the groups of brain-card.ts the training gives (the
+// car's, the driver's only with Driver's inputs on): tests/review/test_brain_card.py keeps them those of the code. A tap on a
+// block opens what it is under the flow.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import type {BrainChoice} from './brain-choices';
 import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} from './brain-card';
@@ -13,7 +14,7 @@ const props = defineProps<{choices: BrainChoice}>();
 const learns = computed(() => ({driver: props.choices.driver === 'on', works: props.choices.works === 'on',
   road: props.choices.road === 'on', types: props.choices.types === 'on'}));
 
-type Kind = 'input' | 'net' | 'car';
+type Kind = 'input' | 'net' | 'car' | 'train';
 interface Block {id: string; title: string; sub: string; kind: Kind; facts: BrainFact[]; note?: string}
 
 const facts = (names: string[]): BrainFact[] => names.map((name) => {
@@ -42,23 +43,23 @@ const memory: Block = {id: 'memory', title: 'GRU memory', sub: 'one step every �
   note: 'The image features and every other input go into it at each step; both outputs read its state.'};
 const outputs: Block[] = [
   {id: 'speed', title: 'Speed to hold', sub: '1–200 km/h', kind: 'car', facts: [BRAIN_OUTPUTS[0]!]},
-  {id: 'ahead', title: 'Next limit + metres', sub: 'or none', kind: 'car', facts: [BRAIN_OUTPUTS[1]!, BRAIN_OUTPUTS[2]!]},
+  {id: 'next', title: 'Next limit', sub: 'or none', kind: 'car', facts: [BRAIN_OUTPUTS[1]!]},
+  {id: 'metres', title: 'Distance to it', sub: 'metres', kind: 'car', facts: [BRAIN_OUTPUTS[2]!]},
 ];
-const blocks = computed(() => [camera, features, ...inputs.value, memory, ...outputs]);
-
-/** The predictions only the training has, by its switches: each only teaches the shared network through its loss. */
-const extras = computed(() => [
-  {on: learns.value.types, title: 'Road type', what: 'taught by the map’s road types, read offline and corrected in Speed review'},
-  {on: learns.value.works, title: 'Roadworks', what: 'taught by the roadworks marked in Speed review'},
-  {on: learns.value.road, title: 'Road characteristics', what: 'narrow, country, gravel, potholes: taught by the kinds of road '
-    + 'marked in Speed review'},
-].filter((extra) => extra.on));
-const targets = [
-  {title: 'Correct speed', what: 'your recorded speed on dashcam drives, corrected or left out in Speed review: what Speed to hold '
-    + 'learns, never an input'},
-  {title: 'Next limit / metres', what: 'from the sign events our networks read, your Sign review over them: what the car’s next '
-    + 'limit and its metres learn'},
-];
+/** The outputs only the training has, by its switches: each teaches the shared weights through its own loss and is dropped
+ * from the file the car gets (brain_export). source: where its correct labels come from. */
+const extras = computed<(Block & {source: string; map: boolean})[]>(() => [
+  {on: learns.value.types, id: 'type', title: 'Road type', sub: 'motorway, rural, town…', map: true,
+    source: 'OpenStreetMap, read offline, corrected in Speed review',
+    what: 'the road type it sees, compared with the map’s, corrected in Speed review where it is wrong'},
+  {on: learns.value.works, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
+    source: 'your marks in Speed review', what: 'whether the car is inside roadworks, compared with the ones marked in Speed review'},
+  {on: learns.value.road, id: 'road', title: 'Road characteristics', sub: 'narrow, country, gravel, potholes',
+    source: 'your marks in Speed review', what: 'the kinds of road it sees, compared with the ones marked in Speed review'},
+].filter((extra) => extra.on).map((extra) => ({id: extra.id, title: extra.title, sub: extra.sub, kind: 'train' as Kind,
+  source: extra.source, map: extra.map === true, facts: [{name: extra.title, what: extra.what}],
+  note: 'Only in training: its error updates the shared weights, then it is dropped from the car’s file.'})));
+const blocks = computed(() => [camera, features, ...inputs.value, memory, ...outputs, ...extras.value]);
 const out = computed(() => BRAIN_OUT.filter((reason) => learns.value.types || reason.name !== 'no_road_type'));
 
 // -- the detail of a block: a tap (or click) keeps it open under the flow, a second tap or Esc closes it ------------------
@@ -71,7 +72,8 @@ const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') pinn
 // both outputs ---------------------------------------------------------------------------------------------------------
 const main = ref<HTMLElement | null>(null);
 const size = ref({w: 0, h: 0});
-const lines = ref<{key: string; d: string; arrow: boolean}[]>([]);
+interface Line {key: string; d: string; arrow: boolean; compare?: boolean}
+const lines = ref<Line[]>([]);
 
 function box(id: string, origin: DOMRect) {
   const rect = main.value?.querySelector<HTMLElement>(`[data-block="${id}"]`)?.getBoundingClientRect();
@@ -90,13 +92,24 @@ function draw(): void {
   const gru = box('memory', origin);
   if (rows.some((row) => !row) || !gru) return;
   const rail = size.value.w - 9;
-  const found = rows.map((row, index) => ({key: 'in' + index, d: `M${row!.r},${row!.y} H${rail}`, arrow: false}));
+  const found: Line[] = rows.map((row, index) => ({key: 'in' + index, d: `M${row!.r},${row!.y} H${rail}`, arrow: false}));
   const join = (rows.at(-1)!.b + gru.t) / 2;
   found.push({key: 'rail', d: `M${rail},${rows[0]!.y} V${join} H${gru.x} V${gru.t - 2}`, arrow: true});
   const fork = gru.b + 14;
-  for (const id of outputs.map((block) => block.id)) {
+  const car = box('group-car', origin);
+  for (const id of ['group-car', 'group-train']) {
     const to = box(id, origin);
-    if (to) found.push({key: id, d: `M${gru.x},${gru.b} V${fork} H${to.x} V${to.t - 2}`, arrow: true});
+    if (!to) continue;
+    // Narrow, the training group sits under the car's: its line goes down the rail on the right, past the car's outputs.
+    const under = id === 'group-train' && car && to.t > car.b;
+    found.push({key: id, arrow: true, d: under ? `M${gru.r},${gru.y} H${rail} V${to.t - 12} H${to.x} V${to.t - 2}`
+      : `M${gru.x},${gru.b} V${fork} H${to.x} V${to.t - 2}`});
+  }
+  // Each group of outputs and its correct labels: compared in training, nothing flows back into the network as an input.
+  for (const id of ['car', 'train']) {
+    const from = box('group-' + id, origin);
+    const to = box('labels-' + id, origin);
+    if (from && to) found.push({key: 'labels-' + id, d: `M${from.x},${from.b + 3} V${to.t - 3}`, arrow: false, compare: true});
   }
   lines.value = found;
 }
@@ -123,70 +136,91 @@ onBeforeUnmount(() => {
       <span class="bf-key bf-key-input">Input</span>
       <span class="bf-key bf-key-net">The network</span>
       <span class="bf-key bf-key-car">Output on the car</span>
-      <span class="bf-key bf-key-train">Only during training</span>
+      <span class="bf-key bf-key-train">Output only in training</span>
       <span class="bf-hint">Tap a block for what it is.</span>
     </p>
-    <div class="bd-body">
-      <div ref="main" class="bd-main">
-        <svg class="bd-lines" :width="size.w" :height="size.h" :viewBox="`0 0 ${size.w} ${size.h}`" aria-hidden="true">
-          <defs>
-            <marker id="bd-arrow" class="bf-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7"
-              orient="auto"><path d="M0,0 L8,4 L0,8 z"/></marker>
-          </defs>
-          <path v-for="line in lines" :key="line.key" :d="line.d" class="bf-line"
-            :marker-end="line.arrow ? 'url(#bd-arrow)' : undefined"/>
-        </svg>
-        <h4 class="bd-head">Inputs · 4 times a second</h4>
-        <div class="bd-ins">
-          <div class="bd-row">
-            <button v-for="(block, index) in [camera, features]" :key="block.id" type="button" class="bf-block"
-              :class="['bf-' + block.kind, {on: pinned === block.id}, index ? 'bd-after' : '']" :data-block="block.id"
-              :aria-expanded="pinned === block.id" @click="pin(block)">
+    <div ref="main" class="bd-main">
+      <svg class="bd-lines" :width="size.w" :height="size.h" :viewBox="`0 0 ${size.w} ${size.h}`" aria-hidden="true">
+        <defs>
+          <marker id="bd-arrow" class="bf-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7"
+            orient="auto"><path d="M0,0 L8,4 L0,8 z"/></marker>
+          <marker id="bd-dot" class="bf-arrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6">
+            <circle cx="4" cy="4" r="3.2"/></marker>
+        </defs>
+        <path v-for="line in lines" :key="line.key" :d="line.d" class="bf-line" :class="{train: line.compare}"
+          :marker-start="line.compare ? 'url(#bd-dot)' : undefined"
+          :marker-end="line.compare ? 'url(#bd-dot)' : line.arrow ? 'url(#bd-arrow)' : undefined"/>
+      </svg>
+      <h4 class="bd-head">Inputs · 4 times a second</h4>
+      <div class="bd-ins">
+        <div class="bd-row">
+          <button v-for="(block, index) in [camera, features]" :key="block.id" type="button" class="bf-block"
+            :class="['bf-' + block.kind, {on: pinned === block.id}, index ? 'bd-after' : '']" :data-block="block.id"
+            :aria-expanded="pinned === block.id" @click="pin(block)">
+            <span class="bf-title">{{ block.title }}</span>
+            <span class="bf-sub">{{ block.sub }}</span>
+          </button>
+        </div>
+        <button v-for="block in inputs" :key="block.id" type="button" class="bf-block"
+          :class="['bf-' + block.kind, {on: pinned === block.id}]" :data-block="block.id" :aria-expanded="pinned === block.id"
+          @click="pin(block)">
+          <span class="bf-title">{{ block.title }}</span>
+          <span class="bf-sub">{{ block.sub }}</span>
+        </button>
+      </div>
+      <button type="button" class="bf-block bf-net bd-gru" :class="{on: pinned === memory.id}" :data-block="memory.id"
+        :aria-expanded="pinned === memory.id" @click="pin(memory)">
+        <span class="bf-title">{{ memory.title }}</span>
+        <span class="bf-sub">{{ memory.sub }}</span>
+      </button>
+      <div class="bd-outs">
+        <div class="bd-side">
+          <section class="bd-group bd-group-car" data-block="group-car">
+            <h5>On the car · {{ outputs.length }} outputs</h5>
+            <button v-for="block in outputs" :key="block.id" type="button" class="bf-block bf-car" :class="{on: pinned === block.id}"
+              :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
               <span class="bf-title">{{ block.title }}</span>
               <span class="bf-sub">{{ block.sub }}</span>
             </button>
+          </section>
+          <div class="bd-labels" data-block="labels-car">
+            <h5>Compared with</h5>
+            <ul>
+              <li><strong>Your speed</strong> recorded on dashcam drives, corrected in Speed review</li>
+              <li><strong>The signs read</strong> by our networks, your Sign review over them</li>
+            </ul>
           </div>
-          <button v-for="block in inputs" :key="block.id" type="button" class="bf-block"
-            :class="['bf-' + block.kind, {on: pinned === block.id}]" :data-block="block.id" :aria-expanded="pinned === block.id"
-            @click="pin(block)">
-            <span class="bf-title">{{ block.title }}</span>
-            <span class="bf-sub">{{ block.sub }}</span>
-          </button>
         </div>
-        <button type="button" class="bf-block bf-net bd-gru" :class="{on: pinned === memory.id}" :data-block="memory.id"
-          :aria-expanded="pinned === memory.id" @click="pin(memory)">
-          <span class="bf-title">{{ memory.title }}</span>
-          <span class="bf-sub">{{ memory.sub }}</span>
-        </button>
-        <div class="bd-outs">
-          <button v-for="block in outputs" :key="block.id" type="button" class="bf-block bf-car"
-            :class="{on: pinned === block.id}" :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
-            <span class="bf-title">{{ block.title }}</span>
-            <span class="bf-sub">{{ block.sub }}</span>
-          </button>
-        </div>
-        <div v-if="shown" class="bf-detail bf-inline bd-detail">
-          <strong>{{ shown.title }}</strong>
-          <ul><li v-for="fact in shown.facts" :key="fact.name"><code>{{ fact.name }}</code> {{ fact.what }}</li></ul>
-          <p v-if="shown.note" class="bf-note">{{ shown.note }}</p>
+        <div v-if="extras.length" class="bd-side">
+          <section class="bd-group bd-group-train" data-block="group-train">
+            <h5>Only in training · {{ extras.length }} outputs</h5>
+            <button v-for="block in extras" :key="block.id" type="button" class="bf-block bf-train" :class="{on: pinned === block.id}"
+              :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
+              <span class="bf-title">{{ block.title }}</span>
+              <span class="bf-sub">{{ block.sub }}</span>
+            </button>
+          </section>
+          <div class="bd-labels" data-block="labels-train">
+            <h5>Compared with the correct labels</h5>
+            <ul>
+              <li v-for="block in extras" :key="block.id"><strong>{{ block.title }}</strong> {{ block.source }}<span
+                v-if="block.map" class="bd-map">map: offline only</span></li>
+            </ul>
+          </div>
         </div>
       </div>
-      <aside class="bd-train">
-        <h4>Only during training</h4>
-        <p>Extra labels teach the shared network during training; they are not inputs and are not needed in the car.</p>
-        <template v-if="extras.length">
-          <h5>Extra predictions</h5>
-          <ul><li v-for="extra in extras" :key="extra.title"><strong>{{ extra.title }}</strong><span>{{ extra.what }}</span></li></ul>
-        </template>
-        <h5>Training targets</h5>
-        <ul><li v-for="target in targets" :key="target.title"><strong>{{ target.title }}</strong><span>{{ target.what }}</span></li></ul>
-        <p class="bf-note">The map only makes labels offline: nothing of the map goes into the brain on the car.</p>
-        <details class="bd-out">
-          <summary>{{ out.length }} kinds of second answer nothing</summary>
-          <ul><li v-for="reason in out" :key="reason.name"><span>{{ reason.what }}</span></li></ul>
-          <p class="bf-note">They still go through the memory, as on the car.</p>
-        </details>
-      </aside>
+      <div v-if="shown" class="bf-detail bf-inline bd-detail">
+        <strong>{{ shown.title }}</strong>
+        <ul><li v-for="fact in shown.facts" :key="fact.name"><code>{{ fact.name }}</code> {{ fact.what }}</li></ul>
+        <p v-if="shown.note" class="bf-note">{{ shown.note }}</p>
+      </div>
     </div>
+    <p class="bd-sum">In training every output’s error updates the shared weights (the image projection and the GRU; MobileNetV3
+      itself stays frozen). For the comma 4 the training-only outputs are dropped: the car runs {{ outputs.length }}, with no map.</p>
+    <details class="bd-out">
+      <summary>{{ out.length }} kinds of second answer nothing</summary>
+      <ul><li v-for="reason in out" :key="reason.name">{{ reason.what }}</li></ul>
+      <p class="bf-note">They still go through the memory, as on the car.</p>
+    </details>
   </div>
 </template>

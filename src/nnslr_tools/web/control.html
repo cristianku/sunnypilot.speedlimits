@@ -987,29 +987,35 @@ align-items:center;gap:2px 12px;padding:12px 14px}.inuse-role{grid-area:role}.in
 .bf.stacked .bf-col-3::before{inset:-8px -8px}
 .bf.stacked .bf-col-3{margin-top:10px}
 .bf-down{margin:4px 0 0;text-align:center;font-size:18px;line-height:1;color:var(--muted)}
-/* Train › Brain (BrainFlow.vue): one short flow, top to bottom, and what only the training has beside it (under it, narrow) */
 .bf-key-net::before{background:var(--surface-2)}
-.bd-body{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:28px;align-items:start}
-@media (max-width:760px){.bd-body{grid-template-columns:minmax(0,1fr);gap:20px}}
-.bd-main{position:relative;isolation:isolate;min-width:0}
+/* Train › Brain (BrainFlow.vue): one short flow, top to bottom; the car's outputs and those only in training side by side */
+.bd-main{position:relative;isolation:isolate;min-width:0;max-width:820px}
 .bd-lines{position:absolute;inset:0;z-index:0;pointer-events:none;overflow:visible}
 .bd-head{margin:0 0 8px;font-size:12px;font-weight:600;color:var(--muted)}
 .bd-ins{display:flex;flex-direction:column;gap:8px;margin-right:26px}
 .bd-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:22px}
 .bd-after::before{content:"→";position:absolute;left:-18px;top:50%;transform:translateY(-50%);font-size:15px;line-height:1;color:var(--muted)}
 .bd-gru{width:min(100%,280px);margin:34px auto 0;align-items:center;text-align:center}
-.bd-outs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:30px}
+.bd-outs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:30px;align-items:start}
+@media (max-width:560px){.bd-outs{grid-template-columns:minmax(0,1fr);margin-right:26px}}
+.bd-side{display:flex;flex-direction:column;gap:22px;min-width:0}
+.bd-group{position:relative;z-index:1;display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:16px;background:var(--surface)}
+.bd-group-car{border:1.5px solid var(--ok)}
+.bd-group-train{border:1.5px dashed var(--todo)}
+.bd-group h5,.bd-labels h5{margin:0 0 2px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.bd-group-car h5{color:var(--ok)}
+.bd-group-train h5,.bd-labels h5{color:var(--todo)}
+.bd-labels{position:relative;z-index:1;padding:10px 12px;border-radius:14px;border:1.5px dashed var(--todo);
+  background:linear-gradient(var(--todo-soft),var(--todo-soft)),var(--surface)}
+.bd-labels ul{margin:4px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.bd-labels li{font-size:12px;line-height:1.35;color:var(--muted)}
+.bd-labels li strong{color:var(--fg)}
+.bd-map{display:inline-block;margin-left:6px;padding:0 6px;border-radius:6px;font-size:10.5px;font-weight:600;color:var(--todo);border:1px solid var(--todo)}
 .bd-detail{margin-top:12px}
-.bd-train{padding:14px 16px;border-radius:16px;border:1.5px dashed var(--todo);background:linear-gradient(var(--todo-soft),var(--todo-soft)),var(--surface)}
-.bd-train h4{margin:0 0 6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--todo)}
-.bd-train>p:first-of-type{margin:0;font-size:12.5px;line-height:1.4}
-.bd-train h5{margin:12px 0 6px;font-size:12px;font-weight:600;color:var(--muted)}
-.bd-train ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px}
-.bd-train li{font-size:12px;line-height:1.35;color:var(--muted)}
-.bd-train li strong{display:block;font-size:13px;color:var(--fg)}
-.bd-out{margin-top:10px;font-size:12px;color:var(--muted)}
+.bd-sum{max-width:820px;margin:14px 0 0;font-size:12.5px;line-height:1.45;color:var(--muted)}
+.bd-out{margin-top:8px;font-size:12px;color:var(--muted)}
 .bd-out summary{cursor:pointer}
-.bd-out ul{margin-top:6px}
+.bd-out ul{margin:6px 0 0;padding-left:18px}
 .role-use{display:flex;flex-direction:column;gap:1px;padding:12px 14px;border-radius:12px;background:var(--surface-2);min-width:0}
 .role-use.set{background:var(--ok-soft)}
 .role-use.missing{background:var(--warn-soft)}

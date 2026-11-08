@@ -1327,6 +1327,8 @@ export interface BrainModel extends ModelBase {
   hidden: number | null;
   /** The speeds it can say, in km/h. */
   kph: {from: number | null; to: number | null; step: number | null};
+  /** It learnt the roadworks, only in training; missing from a server not restarted since 8 Nov 2026. */
+  works?: boolean | null;
   /** The road kinds and types it learnt, only in training. */
   road_kinds: string[];
   road_types: string[];
