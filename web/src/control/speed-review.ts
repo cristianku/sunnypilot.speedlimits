@@ -88,9 +88,9 @@ export function labelAt(blocks: readonly Block[], speed: readonly SpeedPoint[], 
   return block ? block.kph : speedAt(speed, ns);
 }
 
-/** A kph a block may say: whole, 0..max. */
+/** A kph a block may say: whole, 1..max (below 1 km/h the brain has no class: leave it out instead). */
 export function clampKph(kph: number, max: number): number {
-  return Math.max(0, Math.min(max, Math.round(kph)));
+  return Math.max(1, Math.min(max, Math.round(kph)));
 }
 
 /** The roadworks on a frame, null outside them. */

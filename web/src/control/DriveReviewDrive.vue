@@ -4,15 +4,17 @@
 // /api/drive-review/drives/<route>/timeline): a time of the logs is a picture of the video through the encode index of
 // every frame (drive-review.ts videoTimeOf), never a file's date. On the picture the limit the comma's vision held; under
 // it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
-// at the time shown. Review the signs here opens Sign review on the frame of the time shown, and Sign review links back
-// (?segment=N&second=S opens the drive at that time). Without logs the video plays all the same, with what to do to get
-// them:
+// at the time shown. The commands of the video lie on the picture, at its foot, and the zoom of the lanes next to the
+// title, so that the picture and the lanes keep the room. Review the signs here opens Sign review on the frame of the
+// time shown, and Sign review links back (?segment=N&second=S opens the drive at that time). Without logs the video
+// plays all the same, with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
 // or rlog/qlog files named with their drive and segment). Each page gives its own tab and back label (tab, backLabel)
 // and a choice of playback speed (rates); Speed review also a lane of its own over the others (slot "lane"), only the
 // lanes a speed is judged on (simpleLanes), the switch HD (sharp: standing still, the frame at the comma's full
-// definition over the video), its controls at the top of the side (slot "side") and a box of its own on the picture after
-// the car's speed (slot "hud"); each follows the time shown through the event time and moves it with seek.
+// definition over the video), its controls at the top of the side (slot "side"), a box of its own on the picture after
+// the car's speed (slot "hud"), the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
+// on a limit of the map's lane (pickMap); each follows the time shown through the event time and moves it with seek.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -27,10 +29,12 @@ import Segmented from './Segmented.vue';
 import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
-  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false,
-  startZoom: 'one'});
+  simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
+  pickMap?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one', pickMap: false});
 const guest = isGuest();
-const emit = defineEmits<{time: [seconds: number, t0Ns: number]}>();
+const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number]}>();
+/** The car's speed on the picture and at the side: the page's own (carKph) when it gives one, else vEgo of the logs. */
+const ownSpeed = computed(() => props.carKph !== undefined);
 
 // The squares on the picture, as on the comma: an eye for the vision's limit, a car for the car's speed.
 const HUD_ICONS = {
@@ -43,6 +47,8 @@ const HUD_ICONS = {
 const MARKS = {
   play: 'M8 5.6v12.8a.8.8 0 0 0 1.2.7l10.3-6.4a.8.8 0 0 0 0-1.4L9.2 4.9A.8.8 0 0 0 8 5.6z',
   pause: 'M7 5h3.2v14H7zM13.8 5H17v14h-3.2z',
+  frameBack: 'M6 6h2.2v12H6zM18 6.8v10.4a.8.8 0 0 1-1.25.66L9.6 12.66a.8.8 0 0 1 0-1.32l7.15-5.2A.8.8 0 0 1 18 6.8z',
+  frameOn: 'M15.8 6H18v12h-2.2zM6 6.8v10.4a.8.8 0 0 0 1.25.66l7.15-5.2a.8.8 0 0 0 0-1.32L7.25 6.14A.8.8 0 0 0 6 6.8z',
 } as const;
 
 // -- the drive -----------------------------------------------------------------------------------------------------------
@@ -460,7 +466,10 @@ const now = computed(() => {
   };
 });
 const change = computed(() => previousChange(atSign.value?.limit, cursor.value));
-defineExpose({seek, pause});
+const lanes = useTemplateRef<InstanceType<typeof DriveReviewLanes>>('lanes');
+/** The whole run of the map's limit at a time, as a tap on the map's lane gives it (key m of Speed review). */
+const mapRunAt = (seconds: number): {from: number; to: number; kph: number} | null => lanes.value?.mapRunAt(seconds) ?? null;
+defineExpose({seek, pause, mapRunAt});
 /** The server today at the time shown: our networks' sign within a second, the map's road and limit now. */
 const today = computed(() => {
   const current = view.value;
@@ -545,10 +554,16 @@ watch(() => props.route, () => {
   <section class="card rt-view dr-view" aria-labelledby="dr-view-title">
     <div class="rt-view-head">
       <button type="button" class="link-button rt-back" @click="back"><span aria-hidden="true">‹</span> {{ backLabel }}</button>
-      <div class="rt-view-name">
-        <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }}</h2>
-        <span>{{ facts }}</span>
-        <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
+      <div class="dr-view-top">
+        <div class="rt-view-name">
+          <h2 id="dr-view-title">{{ view?.title ?? (guest ? 'Drive' : 'Places unknown') }}</h2>
+          <span>{{ facts }}</span>
+          <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
+        </div>
+        <div v-if="view && !error" class="dr-zoom-row">
+          <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
+          <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
+        </div>
       </div>
     </div>
     <p v-if="error" class="empty">{{ error }}</p>
@@ -586,27 +601,30 @@ watch(() => props.route, () => {
               <small v-if="now.visionAhead" class="dr-box-ahead">{{ now.visionAhead }}</small></span>
             <span class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
             <span class="dr-box dr-box-car"><svg viewBox="2 4 20 18"><path :d="HUD_ICONS.car" fill="currentColor"/></svg>
-              <b>{{ now.carKph ?? '–' }}</b></span>
+              <b>{{ (ownSpeed ? carKph : now.carKph) ?? '–' }}</b></span>
             <slot name="hud"></slot>
+          </div>
+          <div class="rt-controls dr-bar" @click.stop>
+            <button type="button" class="btn small rt-play dr-bar-icon" :aria-label="playing ? 'Pause' : 'Play'" :title="playing ? 'Pause' : 'Play'"
+                    @click="toggle"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="playing ? MARKS.pause : MARKS.play" fill="currentColor"/></svg></button>
+            <span class="rt-pos"><b>{{ clockOf(cursor) }}</b> / {{ clockOf(end) }}</span>
+            <button type="button" class="btn small" aria-label="Back 5 seconds" @click="seek(cursor - 5)">−5 s</button>
+            <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
+            <button type="button" class="btn small dr-bar-icon" aria-label="Back one frame" title="Back one frame (Shift+←)"
+                    @click="stepFrame(-1)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="MARKS.frameBack" fill="currentColor"/></svg></button>
+            <button type="button" class="btn small dr-bar-icon" aria-label="On one frame" title="On one frame (Shift+→)"
+                    @click="stepFrame(1)"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path :d="MARKS.frameOn" fill="currentColor"/></svg></button>
+            <button v-if="sharp" type="button" class="btn small" :aria-pressed="sharpOn" aria-label="Full definition when paused"
+                    title="Paused, the frame at the comma's full definition; tap the picture to zoom" @click="sharpOn = !sharpOn">HD</button>
+            <button type="button" class="btn small" :disabled="!change" id="dr-last-change"
+                    :title="change ? 'The vision limit last changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change of the vision limit before'"
+                    @click="change && seek(change.at - 2)">Last change</button>
+            <Segmented v-if="RATES.length" v-model="rateKey" :options="RATES" label="Playback speed" class="dr-rate"/>
           </div>
         </div>
 
         <div class="dr-time">
-          <div class="rt-controls">
-            <button type="button" class="btn rt-play" @click="toggle"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path :d="playing ? MARKS.pause : MARKS.play" fill="currentColor"/></svg>{{ playing ? 'Pause' : 'Play' }}</button>
-            <button type="button" class="btn small" aria-label="Back 5 seconds" @click="seek(cursor - 5)">−5 s</button>
-            <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
-            <button type="button" class="btn small" aria-label="Back one frame" title="Shift+←" @click="stepFrame(-1)">−1 frame</button>
-            <button type="button" class="btn small" aria-label="On one frame" title="Shift+→" @click="stepFrame(1)">+1 frame</button>
-            <button v-if="sharp" type="button" class="btn small" :aria-pressed="sharpOn" aria-label="Full definition when paused"
-                    title="Paused, the frame at the comma's full definition; tap the picture to zoom" @click="sharpOn = !sharpOn">HD</button>
-            <button type="button" class="btn small" :disabled="!change" id="dr-last-change"
-                    :title="change ? 'The vision limit changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change before'"
-                    @click="change && seek(change.at - 2)">Last limit change</button>
-            <Segmented v-if="RATES.length" v-model="rateKey" :options="RATES" label="Playback speed" class="dr-rate"/>
-            <span class="rt-pos"><b>{{ clockOf(cursor) }}</b> of {{ clockOf(end) }}</span>
-          </div>
           <p class="dr-sync">{{ syncText }}</p>
           <svg ref="strip" class="dr-strip" viewBox="0 0 1000 20" preserveAspectRatio="none" role="slider" aria-label="The whole drive"
                :aria-valuemin="0" :aria-valuemax="Math.round(end)" :aria-valuenow="Math.round(cursor)" tabindex="0"
@@ -615,12 +633,9 @@ watch(() => props.route, () => {
             <rect :x="sx(windowFrom)" y="0.5" :width="Math.max(2, sx(windowTo) - sx(windowFrom))" height="19" rx="3" class="dr-strip-window"/>
             <rect :x="sx(cursor) - 1.5" y="0" width="3" height="20" class="dr-strip-head"/>
           </svg>
-          <div class="dr-zoom-row">
-            <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
-            <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
-          </div>
-          <DriveReviewLanes v-if="hasLogs" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor"
-                            :simple="simpleLanes" @seek="seek">
+          <DriveReviewLanes v-if="hasLogs" ref="lanes" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor"
+                            :simple="simpleLanes" :pick-map="pickMap" @seek="seek"
+                            @pick-map="(from, to, kph) => emit('pickMap', from, to, kph)">
             <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
           </DriveReviewLanes>
           <p v-else class="dr-hint">{{ NO_LOGS }}</p>
@@ -636,7 +651,7 @@ watch(() => props.route, () => {
               <dt>Last sign read</dt><dd>{{ now.read }}<small v-if="now.signAhead"> · sign ahead in {{ now.signAhead }}</small></dd>
               <dt>Map limit</dt><dd>{{ now.map }}<small v-if="now.ahead"> · then {{ now.ahead }}</small><small v-if="now.road"> · {{ now.road }}</small></dd>
               <dt>Resolver</dt><dd>{{ now.resolver }}<small v-if="now.sla"> · assist {{ now.sla }}</small></dd>
-              <dt>Speed</dt><dd>{{ now.speed }}</dd>
+              <dt>Speed</dt><dd>{{ ownSpeed ? (carKph === null ? 'not in the log' : carKph + ' km/h on the dashboard') : now.speed }}</dd>
               <dt>Set speed</dt><dd>{{ now.set }}</dd>
               <dt>Target</dt><dd>{{ now.target }}</dd>
               <dt>openpilot</dt><dd>{{ now.openpilot }}</dd>

@@ -4,14 +4,15 @@
 // the interventions), what the server finds today (our networks' signs on its frames, the map as it is now), and the
 // episodes found in the logs. A stretch the log does not have is hatched: missing data is never a value. A tap or a drag
 // goes to that time. The slot "top" is a lane of the page that shows them (Speed review's answer, his speed and his
-// blocks), first of all, drawn with the scale of the others. Simple (Speed review) keeps only the vision's limit, the
-// map's and the car's speed under it: what the answer is checked against.
+// blocks), first of all, drawn with the scale of the others. Simple (Speed review) keeps only the vision's limit and the
+// map's under it: what the answer is checked against; his dashboard speed is the top lane's, never the car's vEgo. With
+// pickMap, a tap on a limit of the map's lane (no drag) gives that limit from its start to its end (pickMap).
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {combine, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value, visionAtSign} from './drive-review';
 
-const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; simple?: boolean}>();
-const emit = defineEmits<{seek: [seconds: number]}>();
+const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; simple?: boolean; pickMap?: boolean}>();
+const emit = defineEmits<{seek: [seconds: number]; pickMap: [from: number, to: number, kph: number]}>();
 
 const ruler = useTemplateRef<HTMLDivElement>('ruler');
 const width = ref(600);
@@ -69,6 +70,13 @@ const reasons = computed(() => steps(series('vis_reason'), (value) =>
 const mapSeries = computed(() => combine([series('map_valid'), series('map_limit')], ([valid, limit]) =>
   valid === undefined || valid === null ? null : valid === false ? 0 : limit ?? null));
 const map = computed(() => steps(mapSeries.value, limitStep));
+/** The whole run of the map's limit at a time, beyond the lanes shown: null where it has no number. */
+function mapRunAt(seconds: number): {from: number; to: number; kph: number} | null {
+  const run = runsOf(mapSeries.value, -Infinity, Infinity, (value) => limitOf(value) ?? 0)
+    .find((item) => item.from <= seconds && seconds < item.to);
+  return run && run.value > 0 ? {from: run.from, to: run.to, kph: run.value} : null;
+}
+defineExpose({mapRunAt});
 const resolverSeries = computed(() => combine([series('res_limit'), series('res_source')], ([limit, source]) =>
   limit === undefined || limit === null ? null : (typeof limit === 'number' && limit > 0.5 ? Math.round(limit) : 0) + '|' + (source ?? '')));
 const resolver = computed(() => steps(resolverSeries.value, (value) => {
@@ -191,14 +199,22 @@ const episodes = computed(() => props.view.episodes.filter((item) => item.active
 // -- a tap or a drag on the lanes goes there -----------------------------------------------------------------------------
 const track = useTemplateRef<HTMLDivElement>('track');
 let dragging = false;
-function seekAt(event: PointerEvent): void {
+function secondAt(event: PointerEvent): number | null {
   const box = ruler.value?.getBoundingClientRect();
-  if (!box || box.width <= 0) return;
-  const share = Math.min(1, Math.max(0, (event.clientX - box.left) / box.width));
-  emit('seek', props.from + share * span.value);
+  if (!box || box.width <= 0) return null;
+  return props.from + Math.min(1, Math.max(0, (event.clientX - box.left) / box.width)) * span.value;
 }
+function seekAt(event: PointerEvent): void {
+  const seconds = secondAt(event);
+  if (seconds !== null) emit('seek', seconds);
+}
+/** Where a tap on a limit of the map's lane began: it gives the limit only if the pointer goes up where it went down. */
+let picked: {x: number; seconds: number} | null = null;
 function down(event: PointerEvent): void {
   dragging = true;
+  const seconds = secondAt(event);
+  picked = props.pickMap && seconds !== null && (event.target as Element | null)?.closest?.('.dr-pick')
+    ? {x: event.clientX, seconds} : null;
   track.value?.setPointerCapture(event.pointerId);
   seekAt(event);
 }
@@ -208,6 +224,9 @@ function move(event: PointerEvent): void {
 function up(event: PointerEvent): void {
   dragging = false;
   track.value?.releasePointerCapture?.(event.pointerId);
+  const run = picked && event.type === 'pointerup' && Math.abs(event.clientX - picked.x) < 6 ? mapRunAt(picked.seconds) : null;
+  picked = null;
+  if (run) emit('pickMap', run.from, run.to, run.kph);
 }
 const textFits = (from: number, to: number, text: string): boolean => w(from, to) >= text.length * 6.5 + 6;
 </script>
@@ -243,11 +262,13 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" title="The map's limit the comma had (liveMapDataSP); – no valid limit; hatched: not in the log">
+    <div class="dr-lane" :title="'The map\'s limit the comma had (liveMapDataSP); – no valid limit; hatched: not in the log'
+      + (pickMap ? '. Tap a limit: a block with it, from its start to its end' : '')">
       <span class="dr-lane-name">Map<small>comma</small></span>
       <svg :width="width" height="20" :viewBox="`0 0 ${width} 20`" aria-hidden="true">
         <g v-for="(run, index) in map" :key="index">
-          <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" height="17" rx="2" :class="run.cls"/>
+          <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" height="17" rx="2"
+                :class="[run.cls, {'dr-pick': pickMap && run.cls === 'dr-known'}]"/>
           <text v-if="run.text && textFits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="13.5" class="dr-run-text">{{ run.text }}</text>
         </g>
       </svg>
@@ -261,14 +282,12 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
         </g>
       </svg>
     </div>
-    <div class="dr-lane" :title="simple ? 'The car\'s speed' : 'Speed: the car\'s (solid), the set speed (dashed), openpilot\'s target (dotted)'">
+    <div v-if="!simple" class="dr-lane" title="Speed: the car's (solid), the set speed (dashed), openpilot's target (dotted)">
       <span class="dr-lane-name">Speed<small>0–{{ speedTop }}</small></span>
       <svg :width="width" :height="SPEED_HEIGHT" :viewBox="`0 0 ${width} ${SPEED_HEIGHT}`" aria-hidden="true">
         <line x1="0" :x2="width" :y1="y(0)" :y2="y(0)" class="dr-axis"/>
-        <template v-if="!simple">
-          <path :d="targetPath" class="dr-target"/>
-          <path :d="setPath" class="dr-set-speed"/>
-        </template>
+        <path :d="targetPath" class="dr-target"/>
+        <path :d="setPath" class="dr-set-speed"/>
         <path :d="egoPath" class="dr-ego"/>
       </svg>
     </div>

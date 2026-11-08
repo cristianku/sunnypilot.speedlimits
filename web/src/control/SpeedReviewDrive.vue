@@ -7,8 +7,10 @@
 // it again with the same ends, and removed with its start. The lane draws his speed as a step line, the blocks over it with
 // their kph, the roadworks and how far the drive was gone through for them. Roadworks are marked next to the speed, two
 // taps on the frame shown; a third tap says that the drive was gone through up to the frame shown, so that no mark there
-// means no works, and the drive opens there again. The picture shows the answer next to the car's own speed, so that the
-// number read is the right one.
+// means no works, and the drive opens there again. The picture shows the answer (its square named ANSWER, as the lane)
+// next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
+// is the right one. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
+// remove as any other. Every command has its key, listed under the card on a screen with a keyboard.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -109,7 +111,7 @@ const canStart = computed(() => !props.readOnly && !!drive.value?.span_ns);
 function startBlock(): void {
   if (!canStart.value) return;
   pending.value = within(now.value);
-  pendingKph.value = speedAt(speed.value, pending.value) ?? FALLBACK_KPH;
+  pendingKph.value = clampKph(speedAt(speed.value, pending.value) ?? FALLBACK_KPH, maxKph.value);
   pendingOut.value = false;
 }
 const ends = computed((): [number, number] | null => pending.value === null ? null
@@ -124,6 +126,26 @@ async function endBlock(): Promise<void> {
   if (now.value >= end) player.value?.seek(secondOf(end) - 0.001);
 }
 const cancelBlock = (): void => { pending.value = null; };
+/** A tap on a limit of the map's lane: a block with that limit over the whole stretch the map had it, saved at once. */
+async function fromMap(from: number, to: number, kph: number): Promise<void> {
+  const start = within(Math.round(t0.value + from * 1e9));
+  const end = within(Math.round(t0.value + to * 1e9));
+  if (end - start < MIN_BLOCK_NS) {
+    toast('This limit of the map lasts less than 1 s: no block.');
+    return;
+  }
+  const speed = clampKph(kph, maxKph.value);
+  if (await send('/blocks', {start_ns: start, end_ns: end, kph: speed, note: 'map'})) {
+    toast('A block of ' + speed + ' km/h from the map, ' + clockOf(secondOf(start)) + '–' + clockOf(secondOf(end)) + '.');
+  }
+}
+/** Key m: the block of the map's limit at the time shown, as a tap on it. */
+function mapBlock(): void {
+  if (!canStart.value) return;
+  const run = player.value?.mapRunAt(seconds.value) ?? null;
+  if (run) void fromMap(run.from, run.to, run.kph);
+  else toast('The map has no limit here.');
+}
 function tapBlock(): void {
   if (pending.value === null) startBlock();
   else if (canEnd.value) void endBlock();
@@ -135,6 +157,16 @@ const setBlock = (item: Block, kph: number | null): void => {
   void send('/blocks', {start_ns: item.start_ns, end_ns: item.end_ns, kph, note: item.note});
 };
 const removeBlock = (item: Block): void => { void send('/blocks', {remove: true, start_ns: item.start_ns}); };
+/** Key l: the new block, else the block at the time shown, left out of the training, or given a speed again. */
+function leaveOut(): void {
+  if (pending.value !== null) pendingOut.value = !pendingOut.value;
+  else if (block.value) setBlock(block.value, block.value.kph === null ? kphOf(block.value) : null);
+}
+/** Key x: the block at the time shown removed, his speed back there. */
+function removeHere(): void {
+  if (block.value) removeBlock(block.value);
+  else toast('No block here to remove.');
+}
 /** A step of the kph of the new block, else of the block at the time shown. */
 function step(delta: number): void {
   if (pending.value !== null) {
@@ -165,7 +197,11 @@ function onKey(event: KeyboardEvent): void {
   if (target?.closest('input, textarea, select, [contenteditable]') || event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === 'b') tapBlock();
   else if (event.key === 'Escape' && pending.value !== null) cancelBlock();
+  else if (event.key === 'm') mapBlock();
+  else if (event.key === 'x') removeHere();
+  else if (event.key === 'l') leaveOut();
   else if (event.key === 'w') markWorks();
+  else if (event.key === 'c' && !locked.value && canCheckWorks.value) tapWorks('checked');
   else if (event.key === '-') step(-5);
   else if (event.key === '+' || event.key === '=') step(5);
   else if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && (pending.value !== null || typeof block.value?.kph === 'number')) {
@@ -250,9 +286,10 @@ function worksIn(from: number, to: number) {
 
 <template>
   <DriveReviewDrive ref="player" class="sr-view" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
-                    sharp :rates="RATES" start-zoom="ten" @time="follow">
+                    sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
+                    @pick-map="fromMap">
     <template #hud>
-      <span class="dr-box sr-box-label" :class="{empty: label === null}"><small>{{ block ? (block.kph === null ? 'OUT' : 'BLOCK') : 'LABEL' }}</small>
+      <span class="dr-box sr-box-label" :class="{empty: label === null}"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
@@ -309,7 +346,7 @@ function worksIn(from: number, to: number) {
             </div>
             <div class="sr-tools">
               <button type="button" class="btn small" id="sr-block-out" :aria-pressed="pendingOut"
-                      title="These moments stay out of the training" @click="pendingOut = !pendingOut">Leave out</button>
+                      title="These moments stay out of the training (key l)" @click="pendingOut = !pendingOut">Leave out</button>
               <button type="button" class="btn small" id="sr-block-cancel" title="Esc" @click="cancelBlock">Cancel</button>
             </div>
             <button type="button" class="btn primary sr-wide" id="sr-block-end" :disabled="locked || !canEnd" title="Key b" @click="endBlock">Block to here</button>
@@ -327,11 +364,11 @@ function worksIn(from: number, to: number) {
               <button type="button" class="btn small" :disabled="locked || block.kph === null" title="Key +" @click="step(5)">+5</button>
             </div>
             <div class="sr-tools">
-              <button v-if="block.kph !== null" type="button" class="btn small" id="sr-block-leave" :disabled="locked"
+              <button v-if="block.kph !== null" type="button" class="btn small" id="sr-block-leave" :disabled="locked" title="Key l"
                       @click="setBlock(block, null)">Leave out</button>
-              <button v-else type="button" class="btn small" id="sr-block-give" :disabled="locked"
+              <button v-else type="button" class="btn small" id="sr-block-give" :disabled="locked" title="Key l"
                       @click="setBlock(block, kphOf(block))">Give a speed ({{ kphOf(block) }})</button>
-              <button type="button" class="btn small" id="sr-block-remove" :disabled="locked" @click="removeBlock(block)">Remove block</button>
+              <button type="button" class="btn small" id="sr-block-remove" :disabled="locked" title="Key x" @click="removeBlock(block)">Remove block</button>
             </div>
           </template>
 
@@ -351,10 +388,12 @@ function worksIn(from: number, to: number) {
             <button type="button" class="btn small" id="sr-works" :disabled="locked || !canMarkWorks" title="Key w" @click="markWorks">{{ worksOpen ? 'Roadworks end here' : 'Roadworks start here' }}</button>
             <button v-if="worksHere" type="button" class="btn small" id="sr-works-remove" :disabled="locked" @click="tapWorks('remove')">Remove roadworks</button>
             <button type="button" class="btn small" id="sr-works-checked" :disabled="locked || !canCheckWorks"
-                    title="From the start of the drive to this frame every roadworks is marked: the rest is free of them" @click="tapWorks('checked')">Roadworks checked to here</button>
+                    title="From the start of the drive to this frame every roadworks is marked: the rest is free of them (key c)" @click="tapWorks('checked')">Roadworks checked to here</button>
           </div>
           <p v-if="worksShown" class="dr-hint">Roadworks {{ clockOf(secondOf(worksShown.start_ns)) }}{{ worksShown.end_ns === null ? ', no end yet' : '–' + clockOf(secondOf(worksShown.end_ns)) }}</p>
           <p v-if="worksChecked !== null" class="dr-hint">Checked for roadworks up to {{ clockOf(secondOf(worksChecked)) }}</p>
+          <p v-if="!readOnly" class="dr-hint sr-keys"><b>Keys</b> b block from / to here · m block of the map · x remove the block ·
+            l leave out · ↑ ↓ ±1 · − + ±5 · Esc cancel · w roadworks · c checked to here · space play · ← → 1 s · ⇧ ← → a frame</p>
         </template>
       </section>
     </template>
