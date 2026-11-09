@@ -1440,6 +1440,13 @@ scrollbar-width:none;cursor:default;background:linear-gradient(to bottom,transpa
 .dr-strip-head{fill:var(--fg)}
 .dr-view-top{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 16px;align-self:stretch}
 .dr-zoom-row{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto}
+/* The zoom over the strip of the whole drive: plain words, the one shown in the text colour. */
+.dr-time-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
+.dr-zoom-mini{display:inline-flex;align-items:baseline;gap:2px;margin-left:auto}
+.dr-zoom-mini button{border:0;background:none;padding:2px 6px;border-radius:6px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer}
+.dr-zoom-mini button[aria-checked="true"]{color:var(--fg);font-weight:600}
+.dr-zoom-mini button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.dr-zoom-mini .dr-window{margin-left:6px}
 .dr-window{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .dr-side{grid-area:side;display:flex;flex-direction:column;gap:14px;min-width:0}
 .dr-side h3{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
@@ -1601,6 +1608,10 @@ body:has(.sr-end.dragging){cursor:ew-resize;user-select:none;-webkit-user-select
 /* A drive's switch "OK for brain training" (SpeedTrainingSwitch.vue): an iOS switch, green when on; who set it under it. */
 .sr-training{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:var(--surface-2)}
 .sr-training .dr-hint{margin:0}
+/* On the drive's header, beside the zoom: one line, no card. */
+.sr-training.sr-training-compact{flex-direction:row;padding:0;background:none}
+.sr-training-compact .sr-switch{gap:8px}
+.sr-training-compact .sr-switch-label{font-size:14px;white-space:nowrap}
 .sr-switch{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;min-height:32px}
 .sr-switch.sr-switch-off{cursor:default}
 .sr-switch-label{font-size:15px;font-weight:600}

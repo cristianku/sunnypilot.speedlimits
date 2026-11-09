@@ -4,6 +4,7 @@
 // it stays out of the brain training whole, never in pieces, since the brain has a memory. Under the switch, who set it
 // last and when. Only the administrator sets it: a guest sees it, never changes it, and neither does the access token
 // alone (the server refuses both). It is off, with the reason, on a drive whose logs are not read or with sunnypilot on.
+// compact: only "Review done" and the switch, on the drive's header beside the zoom; who, when and why go in its tooltip.
 import {computed, ref} from 'vue';
 import {messageOf, post} from '../common/api';
 import {isoWhen} from '../common/format';
@@ -11,7 +12,7 @@ import {isGuest} from '../common/guest';
 import {toast} from '../composables/toast';
 import type {SpeedDrive} from './speed-review';
 
-const props = defineProps<{drive: SpeedDrive; readOnly: boolean}>();
+const props = defineProps<{drive: SpeedDrive; readOnly: boolean; compact?: boolean}>();
 /** changed: the drive as the server has it after the switch; failed: read it again. */
 const emit = defineEmits<{changed: [drive: SpeedDrive]; failed: []}>();
 
@@ -30,6 +31,10 @@ const who = computed((): string => {
   if (!set) return '';
   return (set.ok ? 'Marked OK by ' : 'Unmarked by ') + set.reviewer + (isoWhen(set.at) ? ' · ' + isoWhen(set.at) : '');
 });
+
+const hint = computed((): string => reason.value || (on.value
+  ? 'Review done: the brain learns this drive whole. Turn it off if a sign of it is wrong.'
+  : 'Turn it on once you went through the whole drive, speed and signs. Until then the whole drive stays out of the brain training.'));
 
 const saving = ref(false);
 async function toggle(event: Event): Promise<void> {
@@ -54,16 +59,17 @@ async function toggle(event: Event): Promise<void> {
 </script>
 
 <template>
-  <div class="sr-training" id="sr-training" role="group" aria-labelledby="sr-training-title">
+  <div class="sr-training" :class="{'sr-training-compact': compact}" id="sr-training" role="group"
+       aria-labelledby="sr-training-title" :title="compact ? [who, hint].filter(Boolean).join(' · ') : undefined">
     <label class="sr-switch" :class="{'sr-switch-off': !!reason}">
-      <span id="sr-training-title" class="sr-switch-label">Review done · OK for brain training</span>
+      <span id="sr-training-title" class="sr-switch-label">{{ compact ? 'Review done' : 'Review done · OK for brain training' }}</span>
       <input type="checkbox" role="switch" id="sr-training-ok" :checked="on" :aria-checked="on"
              :disabled="!!reason || saving" @change="toggle">
       <span class="sr-switch-track" aria-hidden="true"></span>
     </label>
-    <p v-if="who" class="dr-hint" id="sr-training-who">{{ who }}</p>
-    <p class="dr-hint" id="sr-training-why">{{ reason || (on
-      ? 'Review done: the brain learns this drive whole. Turn it off if a sign of it is wrong.'
-      : 'Turn it on once you went through the whole drive, speed and signs. Until then the whole drive stays out of the brain training.') }}</p>
+    <template v-if="!compact">
+      <p v-if="who" class="dr-hint" id="sr-training-who">{{ who }}</p>
+      <p class="dr-hint" id="sr-training-why">{{ hint }}</p>
+    </template>
   </div>
 </template>

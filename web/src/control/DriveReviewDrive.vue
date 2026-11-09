@@ -14,7 +14,7 @@
 // and a choice of playback speed (rates); Speed review also a lane of its own over the others (slot "lane"), only the
 // lanes a speed is judged on (simpleLanes), the switch HD (sharp: standing still, the frame at the comma's full
 // definition over the video), its controls at the top of the side (slot "side"), a box of its own on the picture after
-// the car's speed (slot "hud"), a label after the drive's name (slot "badge": DASHCAM MODE), the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
+// the car's speed (slot "hud"), a label after the drive's name (slot "badge": DASHCAM MODE), a control on the header's right (slot "tools": Review done), the zoom small over the strip of the whole drive, the speed it shows as the car's (carKph: his dashboard speed in place of vEgo) and a tap
 // on a limit of the map's lane (pickMap); each follows the time shown through the event time and moves it with seek.
 // Speed review also draws over the picture (slot "picture": the boxes of Sign review, given whether the frame shown is a
 // picture of the time shown and not zoomed in), and places the frames of Sign review on the drive with the segments of the
@@ -669,10 +669,7 @@ watch(() => props.route, () => {
           <span>{{ facts }}</span>
           <span v-if="whenNote" class="dr-uncertain">{{ whenNote }}</span>
         </div>
-        <div v-if="view && !error" class="dr-zoom-row">
-          <Segmented v-model="zoom" :options="ZOOMS" label="Time shown in the lanes" class="dr-zoom"/>
-          <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
-        </div>
+        <div v-if="view && !error && $slots.tools" class="dr-zoom-row"><slot name="tools"></slot></div>
       </div>
     </div>
     <p v-if="error" class="empty">{{ error }}</p>
@@ -736,7 +733,14 @@ watch(() => props.route, () => {
 
         <div class="dr-time">
           <StageGrip :stage="stage"/>
-          <p class="dr-sync">{{ syncText }}</p>
+          <div class="dr-time-head">
+            <p class="dr-sync">{{ syncText }}</p>
+            <span class="dr-zoom-mini" role="radiogroup" aria-label="Time shown in the lanes">
+              <button v-for="item in ZOOMS" :key="item.key" type="button" role="radio" :aria-checked="zoom === item.key"
+                      @click="zoom = item.key">{{ item.label }}</button>
+              <span class="dr-window">{{ clockOf(windowFrom) }}–{{ clockOf(windowTo) }}</span>
+            </span>
+          </div>
           <svg ref="strip" class="dr-strip" viewBox="0 0 1000 20" preserveAspectRatio="none" role="slider" aria-label="The whole drive"
                :aria-valuemin="0" :aria-valuemax="Math.round(end)" :aria-valuenow="Math.round(cursor)" tabindex="0"
                @pointerdown="stripDown" @pointermove="stripMove" @pointerup="stripUp" @pointercancel="stripUp">

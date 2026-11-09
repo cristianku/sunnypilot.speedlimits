@@ -895,6 +895,8 @@ function worksIn(from: number, to: number) {
                     @frame="(value) => { presented = value; }" @scan="onScan">
     <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b><b v-if="drive?.training_ok?.ok"
       class="sr-ok-badge" id="sr-ok-badge">OK FOR TRAINING</b></template>
+    <template #tools><SpeedTrainingSwitch v-if="drive && !signsOnly" :drive="drive" :read-only="readOnly" compact
+      @changed="show" @failed="read"/></template>
     <template #hud>
       <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
@@ -983,7 +985,6 @@ function worksIn(from: number, to: number) {
     <template #side>
       <section class="sr-card" aria-labelledby="sr-card-title">
         <Segmented v-if="showSigns && !signsOnly" v-model="panel" :options="PANELS" label="The side: the speed or the signs" class="sr-panel"/>
-        <SpeedTrainingSwitch v-if="drive && !signsOnly" :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
         <template v-if="panel === 'signs' && editing">
           <h3 id="sr-card-title">The signs at {{ clockOf(seconds) }}</h3>
           <p v-if="alone" class="dr-hint" id="sr-editor-alone">{{ player?.videoGone ? 'The video of the drive cannot be shown'
