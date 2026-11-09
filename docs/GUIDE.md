@@ -112,7 +112,7 @@ scripts/install_review_service.sh                 # installs, starts and prints 
 
 The service listens on `0.0.0.0:8765`. It restarts by itself if it stops, and at every boot. Running the install again does no harm: it rewrites the service only when `deploy/speedlimits-web.service` changed, and it does not touch the token.
 
-On the server, `data/derived` (frames and videos, about 160 GB) is on the TrueNAS share, bind-mounted by `scripts/install_derived_mount.sh`, and the service starts only once that mount is up. The review databases stay on the LXC's disk (docs/INSTALL.md, "data/derived on TrueNAS").
+On the server, `data/derived` (frames and videos, about 185 GB) is on the LXC's local disk with the review databases. It was on the TrueNAS share for one day, 9 Nov 2026, and the lists were too slow there (docs/INSTALL.md, "data/derived on the local disk").
 
 ### Signing in from the browser: name and password
 

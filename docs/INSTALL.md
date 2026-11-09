@@ -143,20 +143,22 @@ uvx --from "huggingface_hub>=1,<3" hf auth login
 
 Both stay out of Git. Videos are stored once in the comma-videos folder and linked into the data root, so another project on the same machine (for example openpilot.distill) can use the same files.
 
-### data/derived on TrueNAS
+### data/derived on the local disk
 
-On the LXC, `data/derived` (the frames, videos and sign reads that Prepare rebuilds, about 160 GB) lives on the TrueNAS share at `/data/sunnypilot/SPEEDLIMITS/derived`. It is bind-mounted on `<clone>/data/derived` by `scripts/install_derived_mount.sh` (a systemd mount unit after the share's own mount, and a drop-in that makes `speedlimits-web` wait for it). It is a bind mount and not a symlink because the site checks that every path resolves inside the data root. The databases in `data/annotations` (`review.sqlite`, `drive_review.sqlite`) stay on the local disk, because SQLite does not belong on NFS. The LXC's backup on PBS keeps them.
+On the LXC, `data/derived` (the frames, videos and sign reads that Prepare rebuilds, about 185 GB) is on the local disk, beside the databases in `data/annotations`.
 
-The move, done once on 9 Nov 2026 with the site stopped:
+From the morning to the evening of 9 Nov 2026 it was on the TrueNAS share (`/data/sunnypilot/SPEEDLIMITS/derived`, NFS). There, the lists of Speed review and Sign review read every drive's files over the network and took from 2 s to over 20 s (#12). The mount unit was also the likely reason the LXC hung at boot that day. It came back with the site stopped:
 
 ```sh
-rsync -a --delete data/derived/ /data/sunnypilot/SPEEDLIMITS/derived/   # with the site stopped
-mv data/derived data/derived.local && mkdir data/derived
-scripts/install_derived_mount.sh --dry-run && scripts/install_derived_mount.sh
-# start the site, check a drive's frames and video, then: rm -rf data/derived.local
+rsync -a data/derived/ data/derived.local/            # with the site running, the long part
+rsync -a --delete data/derived/ data/derived.local/   # with the site stopped
+systemctl disable --now root-sunnypilot.speedlimits-data-derived.mount
+# the .mount unit and the speedlimits-web drop-in derived-mount.conf moved out of /etc/systemd/system, then
+systemctl daemon-reload
+rmdir data/derived && mv data/derived.local data/derived
 ```
 
-`scripts/install_derived_mount.sh --uninstall` brings `data/derived` back to the local disk. It unmounts the share and leaves an empty folder that Prepare fills again, or that you copy back from the share.
+`scripts/install_derived_mount.sh` (the bind mount of the share, with a drop-in that makes `speedlimits-web` wait for it) can put it on the share again, and `--uninstall` takes it off. The copy on TrueNAS was left as it was on 9 Nov 2026 and is not kept up to date.
 
 ### The comma, from zero
 

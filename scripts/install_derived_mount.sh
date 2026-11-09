@@ -11,7 +11,7 @@
 #   scripts/install_derived_mount.sh --uninstall unmount and remove (the copy on TrueNAS stays)
 #
 # The mount point must be an empty folder: move the local copy first (docs/INSTALL.md,
-# "data/derived on TrueNAS"). NNSLR_DERIVED_SOURCE overrides the folder on the share.
+# "data/derived on the local disk"). NNSLR_DERIVED_SOURCE overrides the folder on the share.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
