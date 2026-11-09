@@ -870,6 +870,10 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import sign_tracks
                 self._json(200, sign_tracks.summary(app.root))
                 return
+            # The last summaries of Train Fit box (scripts/train_box_fit.sh): the Fit box card of Models.
+            if path == '/api/panel/box-fit':
+                self._json(200, app.panel.box_fit())
+                return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
@@ -1818,6 +1822,10 @@ def make_handler(app: ReviewApp):
                                    if isinstance(body, dict) and body.get(key) is not None)
                     # The drives of the signs on every frame ({"routes": "R1,R2"}), the same way.
                     options.update((key, body[key]) for key in ('routes',)
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    # Whether Train Fit box trains the refiner too ({"refiner": "off"}), the same way: a refiner sent as
+                    # false must be refused, never dropped into the hour of the refiner.
+                    options.update((key, body[key]) for key in ('refiner',)
                                    if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END

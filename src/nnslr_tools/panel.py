@@ -113,6 +113,14 @@ ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
 SIGN_TRACKS_SCRIPT = 'helpers/sign_tracks.sh'
 SIGN_TRACKS_OPTIONS = ('routes',)
 SIGN_TRACKS_ROUTE = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
+# Fit box of the review page (key C, nnslr_tools.box_fit) trained again on the boxes people drew (Models, the Fit box
+# card): the two rankers (colour trees, edge MLPs), then the box refiner, a small CNN with the PyTorch of .venv-gpu, all on
+# the CPU; refiner.onnx is replaced only when it beats the rankers on routes left out. Its options: {'dry': 'on'} only
+# counts the boxes; {'refiner': 'off'} the rankers alone (--no-refiner). Its summaries: BOX_FIT_SUMMARIES of the data root.
+BOX_FIT_SCRIPT = 'scripts/train_box_fit.sh'
+BOX_FIT_PYTHON = '.venv-gpu/bin/python'
+BOX_FIT_OPTIONS = ('refiner',)
+BOX_FIT_SUMMARIES = Path('evaluations') / 'box_fit'
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
 # Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
 LOCATIONS_SCRIPT = 'helpers/mapillary_locations.sh'
@@ -165,6 +173,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'regression': ('openpilot', 'brains'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'sign_tracks': ('dry', 'routes'),
+                  'box_fit_train': ('dry', 'refiner'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
@@ -390,6 +399,9 @@ ACTIONS = {
     # The signs on every frame (SIGN_TRACKS_SCRIPT): the networks in use along every frame of the drives, for the boxes
     # of Speed review. In the train group: the GPU.
     'sign_tracks': {'label': 'Find the signs on every frame', 'group': 'train', 'command': [SIGN_TRACKS_SCRIPT]},
+    # Fit box trained again (BOX_FIT_SCRIPT): the CPU only, about an hour and a quarter with the refiner. A group of its
+    # own: never two at once, but beside a training on the GPU.
+    'box_fit_train': {'label': 'Train Fit box', 'group': 'box_fit', 'command': [BOX_FIT_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -445,6 +457,9 @@ ACTIVITIES = (
     ('train', 'road labeler', 'nnslr road-labeler-predict'),
     ('train', 'sign tracks', SIGN_TRACKS_SCRIPT),
     ('train', 'sign tracks', 'nnslr sign-tracks'),
+    ('box_fit', 'Fit box training', BOX_FIT_SCRIPT),
+    ('box_fit', 'Fit box training', 'nnslr train-box-fit'),
+    ('box_fit', 'Fit box training', 'nnslr_tools.box_fit.refiner_train'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -457,10 +472,11 @@ ACTIVITIES = (
     ('other', 'openpilot.distill training', 'supervised.train'),
 )
 # The groups of this checkout's own helpers (see Panel._ours).
-OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary')
+OWN_GROUPS = ('prepare', 'train', 'update', 'ai', 'publish', 'mapillary', 'box_fit')
 GROUP_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation',
                'train': 'an import or a training', 'update': 'a code update', 'ai': 'an AI review',
-               'publish': 'a package of the networks', 'mapillary': 'a search for the Mapillary positions'}
+               'publish': 'a package of the networks', 'mapillary': 'a search for the Mapillary positions',
+               'box_fit': 'a training of Fit box'}
 # What runs, in the reason of an action that must wait ("A proposer measurement is running"): the job of the site by
 # its action, the work from a terminal by its label (ACTIVITIES); GROUP_NAMES when neither is known.
 RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation', 'prepare_again': 'a preparation',
@@ -471,6 +487,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_brain': 'a brain training', 'regression': 'a regression run',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'sign_tracks': 'a search of the signs on every frame',
+                 'box_fit_train': 'a training of Fit box',
                  'update': 'a code update', 'review_box': 'a copy with the review machine',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
@@ -485,6 +502,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training', 'regression': 'a regression run',
                   'road labeler': 'a road labeler run', 'sign tracks': 'a search of the signs on every frame',
+                  'Fit box training': 'a training of Fit box',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -494,10 +512,12 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on. The search for the
-# Mapillary positions writes a file of its own only (a classifier started meanwhile records the positions it read).
+# Mapillary positions writes a file of its own only (a classifier started meanwhile records the positions it read). The
+# training of Fit box runs on the CPU beside the others, never under an update (it rewrites the models in the checkout).
 CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'), 'train': ('update',),
-             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box'), 'ai': ('prepare', 'update'),
-             'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',)}
+             'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit'),
+             'ai': ('prepare', 'update'), 'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',),
+             'box_fit': ('update',)}
 # The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
@@ -1062,6 +1082,12 @@ class Panel:
                 # The networks in use on the drives' videos: no confirmed sign needed; the GPU is checked when it
                 # starts, as for the road labeler.
                 pass
+            elif name == 'box_fit_train' and not (self.repo / BOX_FIT_SCRIPT).is_file():
+                reason = BOX_FIT_SCRIPT + ' is missing in this installation'
+            elif name == 'box_fit_train':
+                # The CPU only, beside a training on the GPU; the script counts the boxes people drew and stops when
+                # they are too few, and start() refuses the refiner without .venv-gpu.
+                pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
             elif name == 'regression' and gpu is not None and gpu['processes']:
@@ -1165,6 +1191,77 @@ class Panel:
                 raise PanelError(409, 'gpu_taken', 'The GPU is busy with another process: wait for it to finish, or '
                                  'start a dry run on the CPU.')
         return arguments
+
+    def _box_fit_arguments(self, options: dict) -> list[str]:
+        """The arguments of scripts/train_box_fit.sh from the options (strings, checked by start()): --dry-run, and
+        --no-refiner for {'refiner': 'off'}. The refiner (its dry run too) needs the Python of .venv-gpu."""
+        dry = options.get('dry')
+        if dry not in (None, 'on'):
+            raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
+        refiner = options.get('refiner')
+        if refiner not in (None, 'on', 'off'):
+            raise PanelError(400, 'bad_option', 'The refiner is on or off.')
+        arguments = ['--dry-run'] if dry else []
+        if refiner == 'off':
+            arguments.append('--no-refiner')
+        elif not (self.repo / BOX_FIT_PYTHON).is_file():
+            raise PanelError(409, 'not_available', 'No .venv-gpu for the box refiner: install it with '
+                             'scripts/setup_v100_training_env.sh, or train without the refiner.')
+        return arguments
+
+    def box_fit(self) -> dict:
+        """The Fit box card of Models (GET /api/panel/box-fit): the last summary of each part, as
+        scripts/train_box_fit.sh keeps them in evaluations/box_fit of the data root, or None. The rankers
+        (<time>.json): the boxes, the routes and the mean IoU with the person's box on routes left out, the rough box's
+        and the fit's. The refiner (refiner-<time>.json): the rough box's, the rankers' and the refiner's mean IoU on the
+        full frames of the routes left out, in all and on the small signs, and whether refiner.onnx was written. A file
+        that cannot be read is skipped."""
+        folder = self.root / BOX_FIT_SUMMARIES
+
+        def newest(pattern: str) -> tuple[str, dict] | None:
+            for path in sorted(folder.glob(pattern), reverse=True):
+                data = _read_json(path)
+                if isinstance(data, dict):
+                    return path.name, data
+            return None
+
+        def number(value):
+            return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+        def when(name: str) -> str | None:
+            match = re.search(r'(\d{8}T\d{6}Z)\.json$', name)
+            if not match:
+                return None
+            return datetime.strptime(match.group(1), '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc).isoformat()
+
+        rankers = None
+        found = newest('[0-9]*.json')
+        if found is not None:
+            name, data = found
+            overall = (data.get('cross_validation') or {}).get('overall') or {}
+            rankers = {'file': name, 'at': when(name), 'boxes': number(data.get('boxes')),
+                       'routes': number(data.get('routes')), 'folds': number(data.get('folds')),
+                       'rough': number(overall.get('rough_mean_iou')), 'fit': number(overall.get('mean_iou')),
+                       'written': bool(data.get('written'))}
+        refiner = None
+        found = newest('refiner-*.json')
+        if found is not None:
+            name, data = found
+            left_out = data.get('left_out') or {}
+
+            def measure(group: str) -> dict | None:
+                values = left_out.get(group)
+                if not isinstance(values, dict):
+                    return None
+                return {key: number(values.get(key)) for key in ('cases', 'rough', 'rankers', 'refiner')}
+
+            refiner = {'file': name, 'at': when(name), 'boxes': number(data.get('train_boxes')),
+                       'held_out_boxes': number(data.get('held_out_boxes')), 'best_epoch': number(data.get('best_epoch')),
+                       'epochs': number(data.get('epochs')), 'minutes': number(data.get('minutes')),
+                       'all': measure('all'), 'small': measure('size:small'),
+                       'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written'))}
+        return {'rankers': rankers, 'refiner': refiner, 'folder': str(BOX_FIT_SUMMARIES),
+                'refiner_model': (self.repo / 'src' / 'nnslr_tools' / 'box_fit' / 'refiner.onnx').is_file()}
 
     def _sign_tracks_missing(self) -> str:
         """Why the signs on every frame cannot be found now, or '': its helper and .venv-gpu, a drive with its video."""
@@ -1827,6 +1924,13 @@ class Panel:
         if action in AI_ACTIONS:
             start_args += self._ai_arguments(action, options or {})
         # [ai-reviewer] - END
+        # Fit box's refiner, checked before any script is looked for: refused on every other action.
+        for key in BOX_FIT_OPTIONS:
+            value = (options or {}).get(key)
+            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take ' + key + '.')
+            if value is not None and not isinstance(value, str):
+                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
         for key in ROAD_LABELER_OPTIONS:
             value = (options or {}).get(key)
             if value is not None and key not in ACTION_OPTIONS.get(action, ()):
@@ -1847,6 +1951,10 @@ class Panel:
             if not (self.repo / SIGN_TRACKS_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', SIGN_TRACKS_SCRIPT + ' is missing in this installation.')
             start_args += self._sign_tracks_arguments(options or {})
+        if action == 'box_fit_train':
+            if not (self.repo / BOX_FIT_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', BOX_FIT_SCRIPT + ' is missing in this installation.')
+            start_args += self._box_fit_arguments(options or {})
         # [ai-reviewer] - START
         if action == 'fetch':
             # The address set in the comma panel of the top bar; without one the script's ssh host "comma".

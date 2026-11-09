@@ -11,6 +11,10 @@ The answer is the mean of the two boxes, pulled back toward the rough box when i
 (``a = clip((IoU(fit, rough) - LO) / (1 - LO))``, ``box = (1 - a) * fit + a * rough``), so a well drawn box is
 barely moved. The weights are ``colour.npz`` and ``edges.npz`` next to this file, made by ``nnslr train-box-fit``
 from the boxes people drew (:mod:`.train`). numpy and OpenCV only, one OpenCV thread per process.
+
+When ``refiner.onnx`` is next to this file the answer is the refiner's instead (:mod:`.refiner`, a small CNN trained
+on the boxes people confirmed by :mod:`.refiner_train`, written only when it beat the two rankers on routes left
+out): it also fits the signs the colour rules miss, such as the white ring on the black plate of a gantry display.
 """
 from __future__ import annotations
 
@@ -75,11 +79,21 @@ def combine(by_colour, by_edges, rough) -> list[float] | None:
     return out if out[2] - out[0] >= 1 and out[3] - out[1] >= 1 else None
 
 
-def fit_image(img, box, *, colour_model=None, edges_model=None) -> list[float] | None:
+def fit_image(img, box, *, colour_model=None, edges_model=None, use_refiner=True) -> list[float] | None:
     """The fitted box of ``box`` ([x1, y1, x2, y2] in pixels of the decoded BGR image ``img``), or None to keep it.
 
-    None means no better box was found: the sign is not there, or the box is already right."""
-    from nnslr_tools.box_fit import colour, edges
+    None means no better box was found: the sign is not there, or the box is already right. The refiner's answer
+    when ``refiner.onnx`` is there (and ``use_refiner``), else the two rankers'."""
+    from nnslr_tools.box_fit import colour, edges, refiner
+    if use_refiner and colour_model is None and edges_model is None and refiner.available():
+        rough = clip_box(box, img.shape[1], img.shape[0])
+        if rough is None:
+            return None
+        fitted = refiner.refine(img, rough)
+        # No side moved by half a pixel: the box was already right.
+        if fitted is None or max(abs(f - r) for f, r in zip(fitted, rough)) < 0.5:
+            return None
+        return fitted
     if colour_model is None or edges_model is None:
         loaded = models()
         colour_model = loaded[0] if colour_model is None else colour_model

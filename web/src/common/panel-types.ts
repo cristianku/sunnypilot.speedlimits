@@ -4,7 +4,7 @@ import type {AiState} from './ai-types';
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box'
-  | 'road_labeler_train' | 'road_labeler_predict' | 'sign_tracks';
+  | 'road_labeler_train' | 'road_labeler_predict' | 'sign_tracks' | 'box_fit_train';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -92,6 +92,49 @@ export interface ActionOptions {
   /** The signs on every frame (sign_tracks): the drives, separated by commas; none: every drive with its video. A dry
    * run (dry) reads a few frames of one drive on the CPU. */
   routes?: string;
+  /** Train Fit box (box_fit_train): off trains the two rankers alone, without the box refiner (--no-refiner); a dry run
+   * (dry) only counts the boxes. */
+  refiner?: 'on' | 'off';
+}
+/** GET /api/panel/box-fit (nnslr_tools.panel.Panel.box_fit): the last summary of each part of Fit box, null before the
+ * first training. The mean IoU is with the person's box on routes left out, from 0 to 1. */
+export interface BoxFitRankers {
+  file: string;
+  at: string | null;
+  boxes: number | null;
+  routes: number | null;
+  folds: number | null;
+  /** The rough box as drawn, and the box after Fit box's two rankers. */
+  rough: number | null;
+  fit: number | null;
+  written: boolean;
+}
+export interface BoxFitMeasure {
+  cases: number | null;
+  rough: number | null;
+  rankers: number | null;
+  refiner: number | null;
+}
+export interface BoxFitRefiner {
+  file: string;
+  at: string | null;
+  boxes: number | null;
+  held_out_boxes: number | null;
+  best_epoch: number | null;
+  epochs: number | null;
+  minutes: number | null;
+  all: BoxFitMeasure | null;
+  small: BoxFitMeasure | null;
+  /** Better than the rankers in all and on the small signs; written: refiner.onnx replaced. */
+  wins: boolean;
+  written: boolean;
+}
+export interface BoxFitPayload {
+  rankers: BoxFitRankers | null;
+  refiner: BoxFitRefiner | null;
+  folder: string;
+  /** Whether a refiner.onnx is in the checkout (the site uses it after its restart). */
+  refiner_model: boolean;
 }
 /** GET /api/panel/sign-tracks (nnslr_tools.sign_tracks.summary): a drive with its video and its signs on every frame.
  * none: not read yet; done: by the networks in use on these minutes; old: by other networks or on other minutes;

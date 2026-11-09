@@ -38,7 +38,8 @@ fi
 # for this target.
 "$VENV/bin/python" -m pip install   torch==2.14.0   torchvision==0.29.0   --index-url https://download.pytorch.org/whl/cu126
 
-"$VENV/bin/python" -m pip install 'Pillow>=11,<13' onnx onnxscript onnxruntime
+# OpenCV: the crops of the box refiner of Fit box (nnslr_tools.box_fit.refiner_train), as the review site makes them.
+"$VENV/bin/python" -m pip install 'Pillow>=11,<13' onnx onnxscript onnxruntime 'opencv-python-headless>=4.10,<6'
 # The "training" extra of pyproject.toml adds wandb (training-run tracking).
 "$VENV/bin/python" -m pip install -e "${ROOT_DIR}[training]"
 

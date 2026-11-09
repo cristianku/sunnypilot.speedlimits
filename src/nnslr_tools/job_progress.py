@@ -121,6 +121,19 @@ ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Prepa
 # helpers/sign_tracks.sh: "== 1/2 Check the GPU ==", "== 2/2 Find the signs on every frame ==", then nnslr sign-tracks:
 # "drives: N" and one "drive i/N <route>: ..." a drive (done, done already or failed).
 SIGN_TRACKS_STEPS = (('checks', 'Check the GPU', 2), ('frames', 'Find the signs drive by drive', 98))
+# scripts/train_box_fit.sh: "1/3 The boxes drawn by people (dry run)", "2/3 Measure on routes left out, then train on
+# every box (...)" (about 15 minutes), "3/3 The box refiner: ..." (about an hour, its epochs "epoch 3/40 loss ..."); with
+# --no-refiner the first two out of 2; a dry run counts the boxes only (its command line says --dry-run).
+BOX_FIT_STEPS = (('boxes', 'Count the boxes drawn by people', 2), ('rankers', 'Measure and train the two rankers', 20),
+                 ('refiner', 'Train and measure the box refiner', 78))
+BOX_FIT_RANKERS_STEPS = (('boxes', 'Count the boxes drawn by people', 10),
+                         ('rankers', 'Measure and train the two rankers', 90))
+BOX_FIT_DRY_STEPS = (('boxes', 'Count the boxes drawn by people', 100),)
+BOX_FIT_STEP = re.compile(r'^([1-3])/([23]) ')
+BOX_FIT_DRY = re.compile(r'^== scripts/train_box_fit\.sh(?: \S+)* --dry-run\b', re.M)
+BOX_FIT_RANKERS_ONLY = re.compile(r'^(?:== scripts/train_box_fit\.sh(?: \S+)* --no-refiner\b|1/2 )', re.M)
+# nnslr_tools.box_fit.refiner_train: "epoch 3/40 loss 0.1234 61 s, mean IoU left out 0.8123".
+BOX_FIT_EPOCH = re.compile(r'^epoch (\d+)/(\d+) loss ')
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
 AI_REVIEW_STEPS = (('review', 'Review the frames with the AI', 100),)
@@ -134,12 +147,13 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS,
          'road_labeler_train': ROAD_LABELER_TRAIN_STEPS, 'road_labeler_predict': ROAD_LABELER_PREDICT_STEPS,
-         'sign_tracks': SIGN_TRACKS_STEPS}
+         'sign_tracks': SIGN_TRACKS_STEPS, 'box_fit_train': BOX_FIT_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
             'train_brain', 'regression', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
-            'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks')
+            'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks',
+            'box_fit_train')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
 PIPELINE = {1: 'checks', 2: 'checks', 3: 'checks', 4: 'detector', 5: 'reader', 6: 'evaluate', 7: 'export',
@@ -261,6 +275,13 @@ FAILURES = (
      'The GPU was busy with another job: wait for it to finish, or start a dry run on the CPU.'),
     (re.compile(r'^helpers/(?:road_labeler|sign_tracks)\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
      'No GPU answered: a dry run runs on the CPU.'),
+    # scripts/train_box_fit.sh and its refiner.
+    (re.compile(r'^Too few boxes drawn by people to train the box fit', re.M),
+     'Too few boxes drawn by people to train Fit box yet: nothing changed.'),
+    (re.compile(r'^The PyTorch environment \(\.venv-gpu', re.M),
+     'The PyTorch of .venv-gpu is missing (scripts/setup_v100_training_env.sh): the refiner is unchanged.'),
+    (re.compile(r'too few for the refiner'),
+     'Too few confirmed boxes to train the box refiner: the rankers are trained, the refiner is unchanged.'),
 )
 # How far back from the end of a failed log a known failure is looked for.
 FAILURE_LINES = 60
@@ -315,7 +336,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     '' when unknown) for a failed job."""
     signnet = is_signnet(action, text)
     two_stages = (action == 'train_classifier' or signnet) and PRETRAINING.search(text) is not None
-    steps = steps_of(action, two_stages, signnet)
+    steps = box_fit_steps(text) if action == 'box_fit_train' else steps_of(action, two_stages, signnet)
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
     done: set[str] = set()
@@ -364,9 +385,14 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             if step in keys:
                 current = step
                 substep = (number, title)
-        match = EPOCH.match(line)
+        if action == 'box_fit_train' and (match := BOX_FIT_STEP.match(line)):
+            step = {1: 'boxes', 2: 'rankers', 3: 'refiner'}[int(match.group(1))]
+            if step in keys:
+                current = step
+        match = EPOCH.match(line) or (BOX_FIT_EPOCH.match(line) if action == 'box_fit_train' else None)
         if match:
-            epoch = (match.group(1), int(match.group(2)), int(match.group(3)))
+            epoch = (('refiner', int(match.group(1)), int(match.group(2))) if match.re is BOX_FIT_EPOCH
+                     else (match.group(1), int(match.group(2)), int(match.group(3))))
             point: dict = {'epoch': epoch[1]}
             point.update((name, float(value)) for name, value in METRIC.findall(line))
             if 'val_sign_accuracy' in point and 'val_rejection' in point and 'val_balanced_accuracy' not in point:
@@ -555,7 +581,16 @@ CHAIN_RUN_DONE = re.compile(r'^(?:evaluated the chain on |skip evaluated chain )
 PRETRAINING = re.compile(r'^pretraining:\s', re.MULTILINE)
 SECOND_STAGE = re.compile(r'^-- the second stage', re.MULTILINE)
 # A network by its name in the line under the progress bar ("Mapillary · epoch 3 of 30").
-NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary', 'road_labeler': 'Road labeler'}
+NET_NAMES = {'pretrain': 'Mapillary', 'signnet': 'SignNet', 'signnet_pretrain': 'Mapillary', 'road_labeler': 'Road labeler',
+             'refiner': 'Box refiner'}
+
+
+def box_fit_steps(text: str) -> tuple:
+    """The steps of a training of Fit box from its log: a dry run counts the boxes only, --no-refiner trains the two
+    rankers alone (its steps out of 2), else the refiner too."""
+    if BOX_FIT_DRY.search(text):
+        return BOX_FIT_DRY_STEPS
+    return BOX_FIT_RANKERS_STEPS if BOX_FIT_RANKERS_ONLY.search(text) else BOX_FIT_STEPS
 
 
 def is_signnet(action: str, text: str) -> bool:

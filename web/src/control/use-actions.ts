@@ -169,6 +169,21 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
         + 'Speed review draws over the video. A drive already read by these networks is left as it is. It refuses to '
         + 'start while another job has the GPU.'};
   }
+  if (name === 'box_fit_train' && options?.dry === 'on') {
+    return {title: 'Count the boxes for Fit box?', action: 'Dry run',
+      text: 'Counts the boxes people drew' + (options.refiner === 'off' ? '' : ' and those the refiner would learn from')
+        + ', and the drives left out to measure: a few seconds on the CPU. Nothing is trained or written.'};
+  }
+  if (name === 'box_fit_train') {
+    const refiner = options?.refiner !== 'off';
+    return {title: refiner ? 'Train Fit box and its refiner?' : 'Train the rankers of Fit box?', action: 'Start training',
+      text: 'On the CPU, the GPU is not used. First the two rankers (colour trees and edge networks) are measured on '
+        + 'drives left out, then trained on every box people drew: about 15 minutes; they replace colour.npz and edges.npz.'
+        + (refiner ? ' Then the box refiner, a small network, trains for about an hour and replaces refiner.onnx only '
+          + 'if it beats the rankers on the drives left out.' : '')
+        + ' The review page uses the new models after the site restarts. The models are files of the checkout: '
+        + 'commit them, or Update the site stops on the local changes.'};
+  }
   // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
   // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
   return null;
@@ -206,6 +221,8 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
     + 'over on a new run.',
   road_labeler_predict: 'The drives done keep what it wrote; preparing again does every drive again.',
   sign_tracks: 'The drives done stay, and the minutes done of the drive at work: running again carries on from there.',
+  box_fit_train: 'Models already written stay (the rankers once their step is over); the refiner is written only at '
+    + 'its end. Training again starts over.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */
