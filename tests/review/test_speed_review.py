@@ -5,6 +5,7 @@ Every drive and label here is SYNTHETIC: made up by these tests. Nothing here is
 """
 from __future__ import annotations
 
+import contextlib
 import inspect
 import io
 import json
@@ -38,6 +39,9 @@ class FakeDrives:
 
     def summary(self, route):
         return {'t0_ns': T0, 'span_ns': [T0, END]}
+
+    def reading(self):
+        return contextlib.nullcontext()
 
     def scan_state(self, route):
         return {'route': route, 'state': 'done', 'progress': 1, 'error': None, 'files': 1}

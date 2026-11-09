@@ -122,6 +122,9 @@ SCHEMA_STATEMENTS = (
     )""",
     """CREATE INDEX IF NOT EXISTS frame_review_history_frame
         ON frame_review_history (route_id, run_id, frame_key)""",
+    # run_stamps: read from the index alone, not from the rows and their payloads.
+    """CREATE INDEX IF NOT EXISTS frame_reviews_stamp
+        ON frame_reviews (route_id, run_id, revision, confirmed, updated_at)""",
     """CREATE TRIGGER IF NOT EXISTS frame_review_history_no_update
         BEFORE UPDATE ON frame_review_history
         BEGIN SELECT RAISE(ABORT, 'frame_review_history is append-only'); END""",
@@ -441,6 +444,17 @@ class ReviewStore:
         connection = self._connect()
         try:
             return _select_review(connection, route_id, run_id, frame_key)
+        finally:
+            connection.close()
+
+    def run_stamps(self) -> dict[tuple[str, str], tuple]:
+        """{(route, run): a value every save on that run changes}, in one query: what a list of the routes keeps its
+        counts by (ReviewApp.route_summaries)."""
+        connection = self._connect()
+        try:
+            return {(row[0], row[1]): tuple(row[2:]) for row in connection.execute(
+                'SELECT route_id, run_id, COUNT(*), SUM(revision), SUM(confirmed), MAX(updated_at) '
+                'FROM frame_reviews GROUP BY route_id, run_id')}
         finally:
             connection.close()
 

@@ -16,6 +16,8 @@ from functools import lru_cache
 import json
 import math
 from pathlib import Path
+import threading
+import time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -82,8 +84,33 @@ def place_name(root: Path, latitude: float, longitude: float) -> str | None:
     return best[False][1] or best[True][1]
 
 
+# What drive_of reads of every drive of a list, kept per process (the lists ask it of every drive at every call): the
+# ends of a positions file while it stays the same file, and a drive at full definition for good; one without is asked
+# again after FULL_RECHECK_SECONDS.
+_ENDS: dict[str, tuple[tuple[int, int], tuple[dict | None, dict | None]]] = {}
+_FULL: dict[str, tuple[bool, float]] = {}
+_kept_lock = threading.Lock()
+FULL_RECHECK_SECONDS = 60.0
+
+
 def _ends(root: Path, route: str) -> tuple[dict | None, dict | None]:
     path = Path(root) / 'derived' / 'gps' / route / 'positions.jsonl'
+    try:
+        info = path.stat()
+    except OSError:
+        return None, None
+    stamp, key = (info.st_mtime_ns, info.st_size), str(path)
+    with _kept_lock:
+        kept = _ENDS.get(key)
+    if kept is not None and kept[0] == stamp:
+        return kept[1]
+    ends = _read_ends(path)
+    with _kept_lock:
+        _ENDS[key] = stamp, ends
+    return ends
+
+
+def _read_ends(path: Path) -> tuple[dict | None, dict | None]:
     first = last = None
     try:
         lines = path.read_text(encoding='utf-8').splitlines()
@@ -113,8 +140,17 @@ def _times(root: Path, route: str) -> tuple[datetime | None, datetime | None]:
 
 def full_definition(root: Path, route: str) -> bool:
     """A drive recorded at full definition: its pictures have the recorded frame beside them. Asked of every drive of a
-    list, so it reads folders and no video."""
-    return next((Path(root) / 'derived' / 'frames' / route).glob('*/*' + FULL_SUFFIX), None) is not None
+    list, so it reads folders and no video (kept: _FULL)."""
+    folder = Path(root) / 'derived' / 'frames' / route
+    key = str(folder)
+    with _kept_lock:
+        kept = _FULL.get(key)
+    if kept is not None and (kept[0] or time.monotonic() - kept[1] < FULL_RECHECK_SECONDS):
+        return kept[0]
+    full = next(folder.glob('*/*' + FULL_SUFFIX), None) is not None
+    with _kept_lock:
+        _FULL[key] = full, time.monotonic()
+    return full
 
 
 def drive_of(root: Path, route: str) -> dict[str, Any]:

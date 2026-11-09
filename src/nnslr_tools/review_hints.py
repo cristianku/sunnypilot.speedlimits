@@ -61,6 +61,21 @@ def hints_directory(root: Path, route: str) -> Path | None:
     return resolved
 
 
+def hints_stamp(root: Path, route: str) -> tuple:
+    """Name, time and size of each hint file of a route: load_hints reads them again only when this changes."""
+    directory = hints_directory(root, route)
+    if directory is None:
+        return ()
+    stamp = []
+    for path in sorted(directory.glob('*.jsonl')):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        stamp.append((path.name, info.st_mtime_ns, info.st_size))
+    return tuple(stamp)
+
+
 def _number(value) -> bool:
     if isinstance(value, bool):
         return False

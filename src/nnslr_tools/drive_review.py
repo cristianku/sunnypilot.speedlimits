@@ -23,6 +23,7 @@ low priority): CPU only, no image, no network.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -127,6 +128,8 @@ class DriveReviewStore:
         self._merged: dict[str, tuple] = {}
         # Per cached extract (its path): (mtime_ns, stale) - drive_logs.stale_extract, read once per version of it.
         self._stale: dict[str, tuple[int, bool]] = {}
+        # The connection of a thread inside reading(): the queries of a whole list on it.
+        self._local = threading.local()
         self._initialize()
 
     # ---------- database ----------
@@ -174,7 +177,24 @@ class DriveReviewStore:
             finally:
                 connection.close()
 
+    @contextmanager
+    def reading(self):
+        """The reads of a whole list (drives_view, a list of the routes) on one connection, not one per query."""
+        if getattr(self._local, 'connection', None) is not None:
+            yield
+            return
+        connection = self._connect()
+        self._local.connection = connection
+        try:
+            yield
+        finally:
+            self._local.connection = None
+            connection.close()
+
     def _rows(self, sql: str, args=()) -> list[sqlite3.Row]:
+        shared = getattr(self._local, 'connection', None)
+        if shared is not None:
+            return shared.execute(sql, args).fetchall()
         connection = self._connect()
         try:
             return connection.execute(sql, args).fetchall()
@@ -823,6 +843,11 @@ def store_for(root: Path) -> DriveReviewStore:
 def drives_view(store: DriveReviewStore) -> list[dict]:
     """Every drive of the portal (the rows of Speed review's list): its name, when, its logs and scan, whether Read
     the logs reads it (needs_scan, the store's one rule), how many episodes it has."""
+    with store.reading():
+        return _drives_view(store)
+
+
+def _drives_view(store: DriveReviewStore) -> list[dict]:
     from nnslr_tools import drive_video
     from nnslr_tools.drives import drive_of
     episodes = store.episodes()

@@ -809,6 +809,11 @@ def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]
     read) and whether a person marked it "OK for brain training" (training_ok: only those enter the training). The page
     lists only the ones not False; Read the logs and Regression take them all."""
     counts, flags = store.counts(), store.training_flags()
+    with drives.reading():
+        return _drives_list(drives, counts, flags)
+
+
+def _drives_list(drives: DriveReviewStore, counts: dict, flags: dict) -> list[dict]:
     rows = []
     for drive in drives_view(drives):
         span = _span_of(drives, drive['route'])

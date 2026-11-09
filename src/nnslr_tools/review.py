@@ -273,6 +273,9 @@ class ReviewApp(ReviewService):
         # [box-fit] - START
         self.fit_slots = threading.BoundedSemaphore(MAX_LOCAL_FITS)
         # [box-fit] - END
+        # route_summaries' counts of each route, with what they were made from: {route: (stamp, rows, counts)}.
+        self._summaries = {}
+        self._summaries_lock = threading.Lock()
 
     def token_matches(self, supplied) -> bool:
         if self.token is None or not isinstance(supplied, str):
@@ -439,42 +442,61 @@ class ReviewApp(ReviewService):
 
     def route_summaries(self) -> list[dict]:
         from nnslr_tools import drive_review
+        from nnslr_tools.review_hints import hints_stamp
         drives = drive_review.store_for(self.root)
+        with drives.reading():
+            return self._route_summaries(drives, hints_stamp)
+
+    def _route_summaries(self, drives, hints_stamp) -> list[dict]:
+        stamps = self.store.run_stamps()
         summaries = []
         for route, directory in list_reports(self.root):
             try:
                 directory, rows, by_key = self.report(route)
             except (PreannotationError, ValueError, OSError):
                 continue
-            with_proposals = 0
-            for row in rows:
-                detections = row.get('detections')
-                if isinstance(detections, list) and detections:
-                    with_proposals = with_proposals + 1
-            hints_by_frame, hint_stats = self.hints(route, rows)
-            suspicious = self.suspicious(route, directory.name, rows, hints_by_frame)
-            summaries.append({
-                'route_id': route,
-                'run_id': directory.name,
-                'frame_count': len(rows),
-                'frames_with_proposals': with_proposals,
-                'confirmed_count': self.store.confirmed_count(route, directory.name),
-                # Of those, the frames an AI reviewer confirmed (REST API, MCP, Review with AI).
-                'confirmed_by_ai': self.store.confirmed_count(route, directory.name, reviewer_kind='ai'),
-                # Saved by the site's AI reviewer, for a person to confirm (review_db.SITE_AI_REVIEWER).
-                'waiting_for_person': self.store.waiting_count(route, directory.name),
-                'suspicious_count': len(suspicious),
-                'hint_frames': hint_stats['frames'],
-                # Where its signs are reviewed: the Signs side of Speed review.
-                'url': self.signs_url(route),
-                # The route as the drive it was: when, how long, from where to where (nnslr_tools.drives).
-                'drive': drive_of(self.root, route),
-                # Who proposed the signs of this report: vietnam, ours or qwen (run.json).
-                'proposer': _report_proposer(directory),
-                # A dashcam drive (sunnypilot off in all of it): the list shows DASHCAM MODE on it.
-                'dashcam': dashcam_of(drives, route),
-            })
+            # The counts stay while the report's rows (report() makes new ones when its files change), the hint files
+            # and the saves of the run stay the same: kept, as the list is asked at every visit of a page.
+            stamp = (directory.name, id(rows), hints_stamp(self.root, route), stamps.get((route, directory.name)))
+            with self._summaries_lock:
+                kept = self._summaries.get(route)
+            if kept is None or kept[0] != stamp:
+                kept = stamp, rows, self._route_counts(route, directory, rows)
+                with self._summaries_lock:
+                    self._summaries[route] = kept
+            summaries.append({**kept[2],
+                              # The route as the drive it was: when, how long, from where to where (nnslr_tools.drives).
+                              'drive': drive_of(self.root, route),
+                              # A dashcam drive (sunnypilot off in all of it): the list shows DASHCAM MODE on it.
+                              'dashcam': dashcam_of(drives, route)})
         return summaries
+
+    def _route_counts(self, route: str, directory: Path, rows: list[dict]) -> dict:
+        """The part of a route's summary read from its report, hints and reviews (route_summaries keeps it)."""
+        with_proposals = 0
+        for row in rows:
+            detections = row.get('detections')
+            if isinstance(detections, list) and detections:
+                with_proposals = with_proposals + 1
+        hints_by_frame, hint_stats = self.hints(route, rows)
+        suspicious = self.suspicious(route, directory.name, rows, hints_by_frame)
+        return {
+            'route_id': route,
+            'run_id': directory.name,
+            'frame_count': len(rows),
+            'frames_with_proposals': with_proposals,
+            'confirmed_count': self.store.confirmed_count(route, directory.name),
+            # Of those, the frames an AI reviewer confirmed (REST API, MCP, Review with AI).
+            'confirmed_by_ai': self.store.confirmed_count(route, directory.name, reviewer_kind='ai'),
+            # Saved by the site's AI reviewer, for a person to confirm (review_db.SITE_AI_REVIEWER).
+            'waiting_for_person': self.store.waiting_count(route, directory.name),
+            'suspicious_count': len(suspicious),
+            'hint_frames': hint_stats['frames'],
+            # Where its signs are reviewed: the Signs side of Speed review.
+            'url': self.signs_url(route),
+            # Who proposed the signs of this report: vietnam, ours or qwen (run.json).
+            'proposer': _report_proposer(directory),
+        }
 
 
 def dashcam_of(drives, route: str) -> bool | None:
@@ -2380,6 +2402,17 @@ def _base_urls(host: str, port: int) -> list[str]:
     return urls
 
 
+def _warm_lists(app: ReviewApp) -> None:
+    """The lists of the drives read once as the site starts (what they keep: drives._ENDS, ReviewApp._summaries), so
+    the first visit of Speed review does not wait for every drive's files."""
+    from nnslr_tools import drive_review, speed_review
+    try:
+        app.route_summaries()
+        speed_review.drives_list(speed_review.store_for(app.root), drive_review.store_for(app.root))
+    except Exception as exc:  # noqa: BLE001 - only a head start: the pages read them anyway
+        print(f'warm-lists: {exc}', flush=True)
+
+
 def serve_review(route: str | None = None, *, data_root: Path | None=None, host: str='127.0.0.1',
                  port: int=8765) -> None:
     root=resolve_data_root(data_root)
@@ -2397,6 +2430,7 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
     # The video of a drive made as soon as its minutes arrive, before the page asks for it.
     from nnslr_tools import drive_video
     drive_video.start_watch(root)
+    threading.Thread(target=_warm_lists, args=(app,), name='warm-lists', daemon=True).start()
     with server:
         port = server.server_port
         # [site-login] - START
