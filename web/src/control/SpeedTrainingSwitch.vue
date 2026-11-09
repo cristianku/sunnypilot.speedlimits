@@ -56,14 +56,14 @@ async function toggle(event: Event): Promise<void> {
 <template>
   <div class="sr-training" id="sr-training" role="group" aria-labelledby="sr-training-title">
     <label class="sr-switch" :class="{'sr-switch-off': !!reason}">
-      <span id="sr-training-title" class="sr-switch-label">OK for brain training</span>
+      <span id="sr-training-title" class="sr-switch-label">Review done · OK for brain training</span>
       <input type="checkbox" role="switch" id="sr-training-ok" :checked="on" :aria-checked="on"
              :disabled="!!reason || saving" @change="toggle">
       <span class="sr-switch-track" aria-hidden="true"></span>
     </label>
     <p v-if="who" class="dr-hint" id="sr-training-who">{{ who }}</p>
     <p class="dr-hint" id="sr-training-why">{{ reason || (on
-      ? 'The brain learns this drive whole. Turn it off if a sign of it is wrong.'
-      : 'Turn it on once you went through the whole drive and every sign is marked right. Until then the whole drive stays out of the brain training.') }}</p>
+      ? 'Review done: the brain learns this drive whole. Turn it off if a sign of it is wrong.'
+      : 'Turn it on once you went through the whole drive, speed and signs. Until then the whole drive stays out of the brain training.') }}</p>
   </div>
 </template>

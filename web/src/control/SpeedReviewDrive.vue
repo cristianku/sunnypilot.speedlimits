@@ -893,7 +893,8 @@ function worksIn(from: number, to: number) {
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
                     @pick-map="fromMap" @segments="(value) => { segments = value; }" @index="(value) => { videoIndex = value ?? null; }"
                     @frame="(value) => { presented = value; }" @scan="onScan">
-    <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
+    <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b><b v-if="drive?.training_ok?.ok"
+      class="sr-ok-badge" id="sr-ok-badge">OK FOR TRAINING</b></template>
     <template #hud>
       <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
@@ -982,6 +983,7 @@ function worksIn(from: number, to: number) {
     <template #side>
       <section class="sr-card" aria-labelledby="sr-card-title">
         <Segmented v-if="showSigns && !signsOnly" v-model="panel" :options="PANELS" label="The side: the speed or the signs" class="sr-panel"/>
+        <SpeedTrainingSwitch v-if="drive && !signsOnly" :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
         <template v-if="panel === 'signs' && editing">
           <h3 id="sr-card-title">The signs at {{ clockOf(seconds) }}</h3>
           <p v-if="alone" class="dr-hint" id="sr-editor-alone">{{ player?.videoGone ? 'The video of the drive cannot be shown'
@@ -1034,10 +1036,8 @@ function worksIn(from: number, to: number) {
         <p v-else-if="!drive" class="dr-hint">Loading…</p>
         <template v-else-if="!drive.span_ns">
           <p class="dr-hint" id="sr-no-speed">{{ noSpeed }}</p>
-          <SpeedTrainingSwitch :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
         </template>
         <template v-else>
-          <SpeedTrainingSwitch :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
           <p v-if="drive.dashcam === false" class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the brain
             does not learn from it.</strong> It learns only drives with sunnylink › Toggles › Enable sunnypilot off.</p>

@@ -1612,10 +1612,11 @@ body:has(.sr-end.dragging){cursor:ew-resize;user-select:none;-webkit-user-select
 .sr-switch input:checked+.sr-switch-track::after{transform:translateX(20px)}
 .sr-switch input:disabled+.sr-switch-track{opacity:.45}
 .sr-switch input:focus-visible+.sr-switch-track{outline:2px solid var(--accent);outline-offset:2px}
-/* Its mark on the list of the drives, and the choice above the list. A <b>, as the DASHCAM MODE badge. */
-.sr-ok-badge{display:inline-flex;align-items:center;flex:none;padding:2px 8px;border-radius:6px;background:var(--ok-soft);color:var(--ok);
-  font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle}
-.sr-list-tools{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px}
+/* Its mark beside DASHCAM MODE, on the list of the drives and on the drive's title: the same shape, light blue, dark letters,
+   one colour in both themes. A <b>, as the DASHCAM MODE badge. */
+.sr-ok-badge{display:inline-flex;align-items:center;flex:none;margin-left:6px;padding:2px 8px;border-radius:6px;background:#7dd3fc;color:#062c43;
+  font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;
+  box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 .dr-more{display:flex;flex-direction:column;gap:8px}
 .dr-more summary{cursor:pointer;font-size:13px;color:var(--muted);width:max-content}
 .dr-more summary:hover{color:var(--fg)}
