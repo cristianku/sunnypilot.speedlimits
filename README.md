@@ -295,6 +295,22 @@ Signs are tiny: the median sign is 17 pixels wide. The top 416 rows of the pictu
 
 On the server the classifier gets all the boxes of a picture in one call. On the car each box is cut on the CPU and read on its own, at about 5 ms a box.
 
+### Full definition: the picture each network learns from
+
+A drive recorded with the comma's switch **Record road at full resolution** has a road video of 2688 × 1520. Any other drive has 1344 × 760. For each second of a full-definition drive, Prepare keeps two pictures in `data/derived/frames/<drive>/<minute>/`:
+
+- `frame_NNNNNNNN.png`, reduced to 1344 × 760, is the picture of the project. You draw its boxes in Sign review, and every row, box and report uses its size (`media.FRAME_SIZE`).
+- `frame_NNNNNNNN.full.jpg`, 2688 × 1520 at JPEG quality about 92, is the frame as it was recorded (`media.full_picture`).
+
+| Network | What it learns from | Why |
+|---|---|---|
+| Classifier (reads the sign) | A crop of `.full.jpg`: the box drawn at 1344, times 2 (`training.crop_source`, `crop_cache`). | The car cuts the same crop at full resolution (`vision.classifier_input`). |
+| Detector, SignNet (finds the sign) | The 1344 × 760 PNG, its top band. | The car runs it on that same picture. Trained at 2688, it would learn a picture the car never shows it. |
+| Brain | The 1344 × 760 PNG, made 256 × 144 (`road_type_data.resized_frame`). | Its picture is small, so the full definition would add nothing. |
+| Box refiner (`box_fit`) | The 1344 × 760 PNG, **not yet** `.full.jpg`. | Still to change: the box fit would be finer at full definition. |
+
+A drive recorded before the switch has only its 1344 × 760 picture, so its crops are cut from that.
+
 ### Where it runs
 
 Everything runs inside the comma 4, on its own GPU (tinygrad), in `speedvisiond`, at 5 pictures a second next to the driving model: SignNet takes about 12 ms a picture. Chestnut, comma's external GPU, was tried on 27 October and left to the driving model.
