@@ -82,6 +82,7 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
   const sets: [string, string, string[]][] = [
     ['signs', 'Signs read', has('signs', 'plate', 'plate_hours', 'plate_wet')],
     ['place', 'The car and the place', has('hour', 'lead', 'country', 'sign_distance')],
+    ['motion', 'Your turn signals and steering', has('motion')],
     ['driver', 'Your pedals and speed', has('pedals', 'speed')],
   ];
   for (const [id, title, names] of sets) {

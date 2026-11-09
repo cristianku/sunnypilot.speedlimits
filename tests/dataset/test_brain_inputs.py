@@ -195,7 +195,8 @@ def test_a_group_has_the_size_it_says():
     rows = {'signs': signs.features(10.0), 'plate': signs.plate_row(), 'hour': brain.hour_row(12.0),
             'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH'), 'pedals': brain.PedalInputs().row(10.0),
             'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row(),
-            'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0)}
+            'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0),
+            'motion': brain.MotionInputs().row(10.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 
@@ -309,3 +310,63 @@ def test_the_speed_on_the_car_is_the_one_of_the_road_type_network():
     brain, _ = _car()
     for speed in (None, float('nan'), -1.0, 0.0, 13.9, 75.0):
         assert tuple(brain.speed_row(speed)) == pytest.approx(speed_features(speed))
+
+
+def test_the_brain_on_the_car_keeps_loading_after_the_motion_group():
+    brain, _ = _car()
+    assert 'c2303311c6b92f362273754c88fe87321ac0a3ac71967c259c9ad1161be1366d' in brain.SAME_GROUPS
+
+
+def test_a_flashing_blinker_is_on_and_its_age_counts_from_its_last_flash():
+    brain, _ = _car()
+    motion = brain.MotionInputs()
+    for tick in range(0, 300):  # carState at 100 Hz, the lamp flashing 0.4 s on, 0.4 s off for 2 s
+        at = tick / 100
+        motion.add_car_state(at, 12.0, at < 2.0 and (tick // 40) % 2 == 0, False, 0.0)
+    row = motion.row(3.2)  # the lamp went off with the message of 2.00 s
+    assert row[0] == 0 and row[1] == 0 and row[7] == 1
+    assert row[2] == pytest.approx((3.2 - 2.0) / brain.BLINKER_AGE_MAX) and row[3] == 1
+    assert motion.row(2.9)[0] == 1  # off for less than a second between two flashes counts as on
+    assert row[4] == pytest.approx(12.0 / 180)
+    assert motion.row(1.9)[0] == 1
+    # no device yaw and a car without the sensor: yaw unknown; with deviceMotion, its yaw, left positive
+    assert row[6] == 0
+    motion.add_device_motion(2.99, -0.5, True)
+    assert motion.row(2.99)[5] == pytest.approx(__import__('math').degrees(0.5) / 30) and motion.row(2.99)[6] == 1
+    assert list(motion.row(10.0)) == [0, 0, 1, 1, 0, 0, 0, 0]
+
+
+def test_the_motion_group_on_the_car_is_the_one_of_the_training():
+    numpy = pytest.importorskip('numpy')
+    from nnslr_tools.brain_targets import NS, motion_inputs
+    brain, _ = _car()
+    math = __import__('math')
+    car, series = brain.MotionInputs(), {name: [] for name in ('blinker_l', 'blinker_r', 'steer', 'yaw_car', 'yaw_dev')}
+
+    def put(name, t, value):  # drive_extract: a change only
+        if not series[name] or series[name][-1][1] != value:
+            series[name].append([t, value])
+
+    frames, said = list(range(25, 1200, 25)), []  # 4 Hz steps over 12 s
+    for tick in range(1200):
+        t, at = tick * NS // 100, tick / 100
+        left = 300 <= tick < 520 and (tick // 37) % 2 == 0
+        right = 800 <= tick < 830
+        steer = float(round(30 * math.sin(tick / 200)))
+        alive = not 600 <= tick < 780  # carState stops for 1.8 s
+        if alive:
+            car.add_car_state(at, steer, left, right, 0.0)
+            for name, value in (('blinker_l', left), ('blinker_r', right), ('steer', steer), ('yaw_car', 0.0)):
+                put(name, t, value)
+        elif tick == 649:  # drive_extract's gap: None 0.5 s after the last message (5.99 s)
+            for name in ('blinker_l', 'blinker_r', 'steer', 'yaw_car'):
+                put(name, t, None)
+        if tick % 5 == 0:  # deviceMotion at 20 Hz, valid after 2 s
+            yaw = round(-math.radians(steer / 3), 4)
+            car.add_device_motion(at, yaw, tick >= 200)
+            put('yaw_dev', t, -math.degrees(yaw) if tick >= 200 else None)
+        if tick in frames:
+            said.append(car.row(at))
+    found = motion_inputs(series, numpy.array(frames) * NS // 100)
+    numpy.testing.assert_allclose(found, numpy.array(said), atol=1e-6)
+    assert found[:, 0].any() and found[:, 1].any() and not found[:, 7].all() and found[:, 6].any()

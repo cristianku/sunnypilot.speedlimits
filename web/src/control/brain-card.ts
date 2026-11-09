@@ -32,6 +32,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'lead', size: 3, use: 'car', what: 'metres and speed of the car ahead (radarState.leadOne)'},
   {name: 'country', size: 7, use: 'car', what: 'the last country of the GPS: CH, DE, FR, IT, AT, US, none'},
   {name: 'sign_distance', size: 2, use: 'car', what: 'the metres to the round sign ahead (vision.SignDistance), from its box and vEgo'},
+  {name: 'motion', size: 8, use: 'car', what: 'the car’s turn signals (on in the last second, seconds since last on, left and right), '
+    + 'the steering angle and the yaw rate (carState, deviceMotion)'},
   {name: 'pedals', size: 3, use: 'driver', what: 'gas and brake pressed in the last second (carState)'},
   {name: 'speed', size: 2, use: 'driver', what: 'the car’s own speed, vEgo'},
   {name: 'engaged', size: 7, use: 'never', what: 'openpilot on or off (selfdriveState.enabled)'},

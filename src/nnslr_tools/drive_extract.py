@@ -91,6 +91,15 @@ SERIES = (
     ('lead_d', 'radarState', 'leadOne.dRel', 'num', 2, 1),
     ('lead_v', 'radarState', 'leadOne.vLead', 'num', 2, 3.6),
     ('lead_v_rel', 'radarState', 'leadOne.vRel', 'num', 2, 3.6),
+    # The car's turn signals, steering wheel and yaw: the brain's motion group (brain_inputs.MotionInputs). Yaw rates in
+    # deg/s, left positive: carState.yawRate (rad/s, 0 on cars without the sensor) and the device's, whose z points down
+    # (deviceMotion, livePose in older builds), None while it is not valid.
+    ('blinker_l', 'carState', 'leftBlinker', 'bool', 0, 1),
+    ('blinker_r', 'carState', 'rightBlinker', 'bool', 0, 1),
+    ('steer', 'carState', 'steeringAngleDeg', 'num', 1, 1),
+    ('yaw_car', 'carState', 'yawRate', 'num', 0.5, 57.29578),
+    ('yaw_dev', 'deviceMotion', 'angularVelocityDevice.z', 'num', 0.5, -57.29578),
+    ('yaw_dev', 'livePose', 'angularVelocityDevice.z', 'num', 0.5, -57.29578),
 )
 # The fields speedvisiond added on 31 Oct 2026: an older build leaves them unset, read as ''/0/False. speedLimitState
 # is never '' when written, so without it they are None: not in the log, never a value.
@@ -98,11 +107,13 @@ VISION_DETAIL = frozenset(('vis_state', 'vis_reason', 'vis_raw_class', 'vis_raw_
                            'vis_sign_dist', 'vis_sign_size'))
 # The numbers of the car ahead: without one, leadOne still holds numbers that mean nothing, so they are None.
 LEAD_DETAIL = frozenset(('lead_d', 'lead_v', 'lead_v_rel'))
+# The device's yaw while angularVelocityDevice is not valid: None, never a number.
+POSE = ('deviceMotion', 'livePose')
 # After this long without a message of the service (s), its series turn to None. Long enough for a qlog (carState
 # 10 Hz, longitudinalPlanSP 2 Hz, speedVisionSP 1 Hz, liveMapDataSP 1 Hz, radarState 4 Hz).
 GAP_SECONDS = {'carState': 0.5, 'selfdriveState': 0.5, 'selfdriveStateSP': 0.5, 'carControl': 0.5,
                'longitudinalPlanSP': 1.5, 'longitudinalPlan': 1.5, 'speedVisionSP': 3.0, 'liveMapDataSP': 3.0,
-               'radarState': 1.5}
+               'radarState': 1.5, 'deviceMotion': 0.5, 'livePose': 0.5}
 ENCODE = ('roadEncodeIdx', 'narrowRoadEncodeIdx')
 GPS = ('gpsLocationExternal', 'gpsLocation')
 EVENT_FLAGS = ('enable', 'noEntry', 'warning', 'userDisable', 'softDisable', 'immediateDisable', 'preEnable',
@@ -116,6 +127,10 @@ SIGN_DIST_VERSION = 2
 # The series kept as the log has them, never rounded: the car's screen shows round(signDistance) (m, or ft), and a
 # value rounded first (0.504 to 0.5) would reach its zero a sample early.
 UNROUNDED = frozenset(('vis_sign_dist',))
+# The key of meta that says the motion series (blinker_l .. yaw_dev) are read: an extract without it that holds carState is
+# read again (drive_logs.stale_extract).
+MOTION_KEY = 'motion'
+MOTION_VERSION = 1
 
 
 def _get(obj, path: str):
@@ -195,7 +210,7 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
     gps: list[list] = []
     gps_service = None
     counts: dict[str, int] = {}
-    meta: dict = {SIGN_DIST_EXACT: SIGN_DIST_VERSION}
+    meta: dict = {SIGN_DIST_EXACT: SIGN_DIST_VERSION, MOTION_KEY: MOTION_VERSION}
     first = last = None
     total = 0
 
@@ -244,7 +259,8 @@ def extract(path: Path, cereal: Path, car: Path) -> dict:
                     put(spec[0], seen + int(gap * 1e9), None, 0)
             last_seen[which] = t
             absent = (VISION_DETAIL if which == 'speedVisionSP' and not _get(payload, 'speedLimitState')
-                      else LEAD_DETAIL if which == 'radarState' and not _get(payload, 'leadOne.present') else ())
+                      else LEAD_DETAIL if which == 'radarState' and not _get(payload, 'leadOne.present')
+                      else ('yaw_dev',) if which in POSE and not _get(payload, 'angularVelocityDevice.valid') else ())
             for name, _service, field, kind, tolerance, scale in specs:
                 value = None if name in absent else _value(_get(payload, field), kind, scale, name in UNROUNDED)
                 put(name, t, value, tolerance)

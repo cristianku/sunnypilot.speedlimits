@@ -116,7 +116,7 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance: what the car has,
+- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion: what the car has,
   described in sunnypilot/speed_limits/brain_inputs.py. A drive not read yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -124,7 +124,9 @@ before the frame:
   engaged goes through the car's own brain_inputs.EngagedInputs with the changes of sd_enabled, gas and brake in their
   order (engaged_inputs). sign_distance is the car's vision.SignDistance given every reading with its boxes and vEgo on a
   grid of SPEED_GRID_SECONDS, asked at each frame as speedvisiond asks it at each step (sign_distance_inputs); unknown on a
-  drive read before the boxes were kept.
+  drive read before the boxes were kept. motion goes through the car's brain_inputs.MotionInputs with the changes of the
+  turn signals, the steering wheel and the yaw rates (drive_extract: steer within 1 degree, yaw within 0.5 deg/s), the values
+  still held given again at each frame (motion_inputs); unknown on a drive whose logs were read before they were kept.
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
@@ -189,6 +191,7 @@ import bisect
 import hashlib
 import importlib.util
 import json
+import math
 import sqlite3
 import sys
 from pathlib import Path
@@ -196,6 +199,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import brain_signs, drive_logs, drive_review, sign_distance
+from nnslr_tools.drive_extract import GAP_SECONDS
 from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.review_db import NOT_WAITING_SQL, db_path as sign_review_path
@@ -592,6 +596,41 @@ def engaged_inputs(series: dict, ns: np.ndarray) -> np.ndarray:
                 engaged.add_pedals(t / NS, pedals['gas'], pedals['brake'])
             at += 1
         rows[row] = engaged.row(ns[row] / NS)
+    return rows
+
+
+MOTION_CAR = ('blinker_l', 'blinker_r', 'steer', 'yaw_car')
+
+
+def motion_inputs(series: dict, ns: np.ndarray) -> np.ndarray:
+    """The motion group (frames, size): the car's MotionInputs given the changes of the turn signals, the steering wheel
+    and the yaw rates in their order, and the values the log still holds again at each frame (the log keeps a change only,
+    the car hears every message; where carState stops, its last message is GAP_SECONDS before the None). Unknown at a
+    frame with no time."""
+    events = sorted([(t, name, value) for name in (*MOTION_CAR, 'yaw_dev') for t, value in series.get(name) or []],
+                    key=lambda event: event[0])
+    motion = BRAIN_INPUTS.MotionInputs()
+    held = dict.fromkeys((*MOTION_CAR, 'yaw_dev'))
+
+    def give(t: float, car: bool, device: bool) -> None:
+        if car and held['steer'] is not None:
+            motion.add_car_state(t, held['steer'], held['blinker_l'] is True, held['blinker_r'] is True,
+                                 math.radians(held['yaw_car'] or 0.0))
+        if device and held['yaw_dev'] is not None:
+            motion.add_device_motion(t, -math.radians(held['yaw_dev']), True)
+
+    rows = np.zeros((len(ns), INPUT_SIZES['motion']), dtype=np.float32)
+    at = 0
+    for row in sorted(np.flatnonzero(ns >= 0), key=lambda row: ns[row]):
+        while at < len(events) and events[at][0] <= ns[row]:
+            t, name, value = events[at]
+            held[name] = value
+            if value is None and name in MOTION_CAR:  # drive_extract's None: GAP_SECONDS after the last carState
+                motion.car_at = min(motion.car_at, t / NS - GAP_SECONDS['carState'])
+            give(t / NS, name in MOTION_CAR, name == 'yaw_dev')
+            at += 1
+        give(ns[row] / NS, True, True)
+        rows[row] = motion.row(ns[row] / NS)
     return rows
 
 
@@ -1010,7 +1049,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'lead': lead.reshape(len(ns), INPUT_SIZES['lead']), 'country': country.reshape(len(ns), INPUT_SIZES['country']),
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed']),
-            'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes)}
+            'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes),
+            'motion': motion_inputs(series, ns)}
 
 
 def inputs_sha256() -> str:
