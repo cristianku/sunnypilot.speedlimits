@@ -458,6 +458,12 @@ watch(zoom, () => {
 // -- what the comma had at the time shown ----------------------------------------------------------------------------------
 const series = (name: string) => view.value?.series[name];
 const at = (name: string) => valueAt(series(name), cursor.value);
+/** What to say for a value missing at the time shown: before the first message of its series (a drive's first
+ * seconds), it is to come; without the series, the car did not log it. */
+function missing(name: string): string {
+  const first = series(name)?.[0]?.[0];
+  return first !== undefined && first > cursor.value ? 'not yet' : 'not in the log';
+}
 /** The vision limit from its sign on, and the one waiting for its sign (visionAtSign). */
 const atSign = computed(() => view.value ? visionAtSign(view.value.series) : null);
 const now = computed(() => {
@@ -475,32 +481,32 @@ const now = computed(() => {
   const confidence = at('vis_raw_conf');
   const signDistance = at('vis_sign_dist');
   return {
-    why: reason === undefined || reason === null ? 'not in the log' : reason === '' ? 'no rule yet'
+    why: reason === undefined || reason === null ? missing('vis_reason') : reason === '' ? 'no rule yet'
       : REASON_LABEL[String(reason)] ?? String(reason),
     state: state === 'none' ? 'no general limit' : state === 'unknown' ? 'unknown' : '',
-    read: at('vis_raw_class') === undefined || at('vis_raw_class') === null ? 'not in the log' : !read ? 'none yet'
+    read: at('vis_raw_class') === undefined || at('vis_raw_class') === null ? missing('vis_raw_class') : !read ? 'none yet'
       : read + (typeof confidence === 'number' ? ' · ' + Math.round(confidence * 100) + '%' : '')
       + (at('vis_raw_taken') === true ? ' · taken' : ' · dropped'),
     signAhead: typeof signDistance === 'number' && signDistance > 0 ? Math.round(signDistance) + ' m' : '',
-    vision: (vision === undefined ? 'not in the log' : vision === null ? 'none held' : vision + ' km/h')
+    vision: (vision === undefined ? missing('vis_limit') : vision === null ? 'none held' : vision + ' km/h')
       + (visionAhead ? ' · then ' + visionAhead.kph + ' km/h in ' + Math.round(visionAhead.metres) + ' m' : ''),
     visionKph: vision ?? null,
     // The limit the brain read, with the metres to its sign, under the one still in force.
     visionAhead: visionAhead ? visionAhead.kph + ' · ' + Math.round(visionAhead.metres) + ' m' : '',
     model: typeof at('vis_model') === 'string' ? String(at('vis_model')) : '',
-    map: mapValid === undefined || mapValid === null ? 'not in the log' : mapValid === false ? 'no valid limit' : kphText(mapLimit ?? null, 'none'),
+    map: mapValid === undefined || mapValid === null ? missing('map_valid') : mapValid === false ? 'no valid limit' : kphText(mapLimit ?? null, 'none'),
     mapKph: mapValid === true ? mapLimit ?? null : null,
     // The car's own speed, on the picture: what it really drove there, next to the limits.
     carKph: typeof at('v_ego') === 'number' ? Math.round(at('v_ego') as number) : null,
     ahead: typeof ahead === 'number' && typeof aheadDistance === 'number' ? ahead + ' km/h in ' + Math.round(aheadDistance) + ' m' : '',
     road: typeof at('road_name') === 'string' ? String(at('road_name')) : '',
-    resolver: resolver === undefined ? 'not in the log' : (resolver === null ? 'none' : resolver + ' km/h') + (at('res_source') ? ' · ' + String(at('res_source')) : ''),
+    resolver: resolver === undefined ? missing('res_limit') : (resolver === null ? 'none' : resolver + ' km/h') + (at('res_source') ? ' · ' + String(at('res_source')) : ''),
     sla: typeof at('sla_state') === 'string' ? String(at('sla_state')) : '',
     speed: kphText(typeof at('v_ego') === 'number' ? at('v_ego') as number : null),
-    set: at('v_cruise') === undefined || at('v_cruise') === null ? 'not in the log' : kphText(setSpeedOf(at('v_cruise')), 'none'),
+    set: at('v_cruise') === undefined || at('v_cruise') === null ? missing('v_cruise') : kphText(setSpeedOf(at('v_cruise')), 'none'),
     target: typeof at('v_target') === 'number' ? kphText(at('v_target') as number) + (at('long_active') === true ? '' : ' (openpilot not in control)')
-      : 'not in the log',
-    openpilot: at('sd_state') === undefined || at('sd_state') === null ? 'not in the log'
+      : missing('v_target'),
+    openpilot: at('sd_state') === undefined || at('sd_state') === null ? missing('sd_state')
       : String(at('sd_state')) + (at('long_active') === true ? ' · speed and steering' : at('lat_active') === true ? ' · steering' : ''),
   };
 });
