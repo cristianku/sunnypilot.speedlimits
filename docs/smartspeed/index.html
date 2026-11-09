@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Smartspeed for sunnypilot</title>
-<meta name="description" content="A research build of sunnypilot, the openpilot fork, for the comma 4. You press cruise and the car picks its own speed: a small network with memory takes the signs the camera read, the road and the car's own signals, and says the speed to hold once a second.">
+<meta name="description" content="A research build of sunnypilot, the openpilot fork, for the comma 4. You press cruise and the car picks its own speed: a small network with memory takes the signs the camera read, the picture of the road and the car ahead, and says the speed to hold four times a second.">
 <meta name="theme-color" content="#000000">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Smartspeed">
@@ -189,12 +189,12 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <p class="eyebrow">Built into <a href="https://github.com/sunnypilot/sunnypilot">sunnypilot</a>, the <a href="https://github.com/commaai/openpilot">openpilot</a> fork, for the comma 4</p>
   <h1>Smart<span>speed</span></h1>
   <p class="lead">You press cruise and the car picks its own speed.</p>
-  <p class="sub">Two small networks read the signs. A third one, with memory, takes what they read, the road and what the car is doing, and says the speed to hold once a second. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
+  <p class="sub">Two small networks read the signs. A third one, with memory, takes what they read, the picture of the road and the car ahead, and says the speed to hold four times a second. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
   <figure class="screen"><img src="product/product-smartspeed-screen.jpg" width="1608" height="720"
     alt="The comma 4 screen on a wet road: 48 km/h in the middle, and in the top right corner the word SMART in green beside a purple square with an eye and the number 50."></figure>
   <p class="note">Mock-up, not a photo of the comma: the screen's widgets drawn at their real size over a real frame.</p>
   <div class="facts">
-    <div><b>1 Hz</b><span>speed out of the brain</span></div>
+    <div><b>4 Hz</b><span>speed out of the brain</span></div>
     <div><b>5 Hz</b><span>sign finder and reader</span></div>
     <div><b>12 MB</b><span>all three networks, ONNX</span></div>
   </div>
@@ -215,30 +215,30 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 <section class="dark" id="brain"><div class="wrap">
   <p class="eyebrow rise">The brain</p>
   <h2 class="rise">A small network with memory picks the speed.</h2>
-  <p class="intro rise">It's a frozen MobileNetV3-small with a GRU on top. Once a second it gets a 256×144 picture of the road, the number the sign reader confirmed, the car ahead, gas, brake, speed, the local hour and the country. It never reads the map, and what it says goes out unchanged as the vision limit.</p>
+  <p class="intro rise">It's a frozen MobileNetV3-small with a GRU on top. Four times a second it gets a 256×144 picture of the road, the number the sign reader confirmed, the metres to the sign ahead, the car ahead, the local hour and the country. Gas, brake and the car's own speed aren't inputs: the answer it learns is my own speed, and with them it would only copy me. It never reads the map. It says the speed to hold, the next limit and the metres to it, and they go out unchanged as the vision limit.</p>
   <div class="flow rise">
     <ul class="inputs">
-      <li><b>Road camera</b><span>256×144, once a second</span></li>
-      <li><b>Signs read</b><span>SignNet and the classifier</span></li>
-      <li><b>The car</b><span>speed, gas, brake</span></li>
+      <li><b>Road camera</b><span>256×144, four times a second</span></li>
+      <li><b>Signs read</b><span>number and age, from SignNet and the classifier</span></li>
+      <li><b>Distance to the sign</b><span>from its box and the metres driven</span></li>
       <li><b>The car ahead</b><span>distance and speed</span></li>
       <li><b>Hour and country</b><span>from GPS</span></li>
     </ul>
     <div class="arrow"></div>
     <div class="brain"><b>The brain</b><span>MobileNetV3-small + GRU</span></div>
     <div class="arrow"></div>
-    <div class="out"><div class="square">50</div><b>Speed to hold</b><span>once a second</span></div>
+    <div class="out"><div class="square">50</div><b>Speed to hold</b><span>1 to 200 km/h, with the next limit and the metres to it</span></div>
   </div>
   <p class="aside rise">It's a separate network. <span>openpilot's model still does the driving.</span></p>
 </div></section>
 
 <section class="white" id="learn"><div class="wrap">
   <p class="eyebrow rise">How it learns</p>
-  <h2 class="rise">I label the drives myself.</h2>
+  <h2 class="rise">It learns from how I drive.</h2>
   <div class="cards steps">
-    <article class="card rise"><span class="num">1</span><h3>Drive</h3><p>The comma records the video and the car's logs.</p></article>
-    <article class="card rise"><span class="num">2</span><h3>Mark</h3><p>In Speed review I go back through the drive and mark the speed each stretch allows, and where roadworks start and end. How fast I actually drove doesn't count.</p></article>
-    <article class="card on rise"><span class="num">3</span><h3>Train</h3><p>The network goes through each drive in order, and my marks are the answers. Each epoch half of the sign passages get number and answer swapped (50 and 60, 100 and 120), otherwise it learns the road and ignores the sign.</p></article>
+    <article class="card rise"><span class="num">1</span><h3>Drive</h3><p>I drive with sunnypilot off in sunnylink, so the comma doesn't drive: it records the video and the logs, and every speed in them is mine. A drive where openpilot was on is left out.</p></article>
+    <article class="card rise"><span class="num">2</span><h3>Answer</h3><p>The answer is the speed my dashboard showed (<code>vEgoCluster</code>). Where cruise held the speed and not my foot, that moment teaches nothing. Where I drove wrong, a block in Speed review with the right speed is the only correction.</p></article>
+    <article class="card on rise"><span class="num">3</span><h3>Train</h3><p>The network goes through each drive in order. Each epoch half of the sign passages where I drove at the sign's number get number and answer swapped (50 and 60, 100 and 120), otherwise it learns the road and ignores the sign.</p></article>
     <article class="card rise"><span class="num">4</span><h3>Publish</h3><p>Publish in the portal exports the networks to ONNX and rebuilds the branch. On the comma I check for updates and install.</p></article>
   </div>
 </div></section>
@@ -263,7 +263,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <div class="pair">
     <figure class="shot rise"><img src="product/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
       alt="Sign review: a country road with a round 60 sign in a yellow box, the crop of the sign on the right, and the drive's frames below.">
-      <figcaption>Sign review. About 15,000 frames confirmed so far, 6,000 by me and 9,000 by an AI review. SignNet and the classifier also pretrain on Mapillary.</figcaption></figure>
+      <figcaption>Sign review. About 15,200 frames confirmed so far, 6,700 by me and the rest by an AI review. SignNet and the classifier also pretrain on Mapillary.</figcaption></figure>
     <figure class="shot rise"><img src="product/post-portal-networks.png" width="2360" height="1450" loading="lazy"
       alt="The Models page: a card for each network with its version, its measures and whether it is in the branch.">
       <figcaption>Models: each network with its numbers, and which run is in the branch.</figcaption></figure>
@@ -276,7 +276,8 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <dl class="specs rise">
     <div><dt>Sign finder</dt><dd><b>SignNet.</b> Looks only at a band at the top of the picture, where signs stand, 5 times a second, and keeps up to 5 boxes.</dd></div>
     <div><dt>Sign reader</dt><dd><b>Classifier.</b> Reads each box: a speed, the end of a limit, another kind of sign, or not a sign. One rule is still in code here: a number counts once two pictures within 1.5 s agree.</dd></div>
-    <div><dt>Brain</dt><dd><b>MobileNetV3-small and a GRU.</b> Its memory is 128 numbers. The sign's number also reaches the output directly, through a weight the GRU sets, because as a plain input the network ignored it. In training each drive's clock is shifted at random for now, so the hour tells it nothing yet.</dd></div>
+    <div><dt>Brain</dt><dd><b>MobileNetV3-small and a GRU.</b> Its memory is 128 numbers, and it steps four times a second. The speed is one of 200 classes, 1 to 200 km/h. The sign's number also reaches the output directly, through a weight the GRU sets, because as a plain input the network ignored it. The plate under a sign (hours, wet road) is an input too, but no drive in its training had one yet, so the car leaves it out for this brain. In training each drive's clock is shifted at random for now, so the hour tells it nothing yet. Training also asks it for the road type, from the map with my corrections; that head stays on the server, and the car's network never sees the map.</dd></div>
+    <div><dt>Next inputs</dt><dd>The turn signals, the steering angle and the yaw are wired in, in the car's code and in training. The brain on the car now was trained without them, and no brain with them has been trained yet.</dd></div>
     <div><dt>Where it runs</dt><dd>On the comma 4's GPU, next to the driving model. Training runs on my server.</dd></div>
     <div><dt>Same on both sides</dt><dd>Car and training load the same <code>brain_inputs.py</code>, and the car refuses a brain trained with an incompatible version.</dd></div>
   </dl>
@@ -284,14 +285,14 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 
 <section class="paper" id="status"><div class="wrap">
   <p class="eyebrow rise">Where it stands</p>
-  <h2 class="rise">One car, one driver, under two hours of training data.</h2>
+  <h2 class="rise">One car, one driver, 27 drives.</h2>
   <div class="numbers rise">
-    <div><b>84.6 %</b><span>of frames match my marked speed on test: 676 frames from places kept out of training</span></div>
-    <div><b>66.6 %</b><span>on validation: 755 frames, also kept out</span></div>
-    <div><b>5,913</b><span>seconds of driving in training</span></div>
+    <div><b>23.6&nbsp;%</b><span>of test seconds within 2&nbsp;km/h of my dashboard speed: 11,520 seconds from places kept out of training</span></div>
+    <div><b>11.0&nbsp;km/h</b><span>mean error on test. Saying 100 everywhere misses by 35.5</span></div>
+    <div><b>15,274</b><span>seconds that teach it, from 27 dashcam drives of 10.1 hours in all</span></div>
   </div>
-  <p class="intro rise">These numbers are offline. On frames with a sign in force, simply copying the sign still does better: 90.8 % against 88.2 % on test, 93.1 % against 76.6 % on validation. On the training drives it gets 99.9 %, so for now it knows the roads it has seen far better than new ones. What's missing is more drives and more labelled roadworks.</p>
-  <p class="intro rise">On the road there's little so far. A first brain went on the car on 5 November and ran on one 15-minute drive. The brain these numbers come from was published on 6 November and has no drive in the portal yet.</p>
+  <p class="intro rise">These numbers are offline, for the brain on the car now. On validation it's 23.2&nbsp;% and 10.4&nbsp;km/h on 2,695 seconds. Where a sign is in force, simply copying it still does better on test: 42.4&nbsp;% against 24.2&nbsp;%, 11.1&nbsp;km/h of error against 11.4. When I swap the number on the test signs, 50 for 60 and so on, its answer moves on only 173 of 1,662 seconds. On the training drives it gets 69.6&nbsp;%, so it still knows the roads it has seen far better than new ones. In the seconds before a limit changes, it names the next limit on 17&nbsp;% of them on test, against 99&nbsp;% on train.</p>
+  <p class="intro rise">On the road there's little so far. This brain went on the car on 8 November and ran on one 14-minute drive on 9 November, with sunnypilot off, so the car didn't act on it. It gave a speed for 819 of the drive's 819.5 seconds. The server now has 29 dashcam drives, 10.4 hours.</p>
   <div class="links rise">
     <a href="https://github.com/cristianku/sunnypilot.speedlimits"><b>sunnypilot.speedlimits</b><span>The portal, the training, the tools</span></a>
     <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
