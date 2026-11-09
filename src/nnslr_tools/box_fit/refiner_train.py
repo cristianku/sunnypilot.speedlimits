@@ -16,8 +16,9 @@ routes left out is kept.
 
 Then the measure the decision rests on, on the full frames of the routes left out with the rough boxes of the
 rankers' benchmark (:func:`.train.make_cases`): the rough box, the rankers (:func:`nnslr_tools.box_fit.fit_image`
-without the refiner) and the refiner. ``refiner.onnx`` is written (replaced in one step) only when the refiner's mean
-IoU is higher than the rankers', in all and on the small signs; otherwise nothing changes. The summary is printed
+without the refiner) and Fit box as the site runs it with the new refiner (under ``refiner.GATE`` pixels the refiner,
+then the rankers). ``refiner.onnx`` is written (replaced in one step) only when that mean IoU is higher than the
+rankers', in all and on the small signs; otherwise nothing changes. The summary is printed
 as JSON on the last line.
 
 usage: .venv-gpu/bin/python -m nnslr_tools.box_fit.refiner_train [--epochs 40] [--out DIR] [--dry-run]
@@ -233,7 +234,8 @@ def _compare_one(case):
     if rough is None:
         return None
     rankers = box_fit.fit_image(img, rough, use_refiner=False) or rough
-    refined = refiner.refine(img, rough) or rough
+    # Fit box as the site runs it with this refiner: under refiner.GATE the refiner, then the rankers.
+    refined = box_fit.fit_image(img, rough) or rough
     return {'size': case['size'], 'kind': case['kind'], 'family': case['family'], 'rough': iou(rough, case['truth']),
             'rankers': iou(rankers, case['truth']), 'refiner': iou(refined, case['truth'])}
 

@@ -105,6 +105,34 @@ def test_unreadable_image_is_an_os_error(tmp_path):
         box_fit.fit_many(bad, [[0, 0, 10, 10]])
 
 
+def test_the_refiner_moves_only_small_boxes_and_the_rankers_finish_its_box(monkeypatch):
+    from nnslr_tools.box_fit import refiner
+    calls = []
+
+    def refine(img, box):
+        calls.append(box)
+        return [box[0] + 2, box[1] + 2, box[2] - 2, box[3] - 2]
+
+    monkeypatch.setattr(refiner, 'available', lambda: True)
+    monkeypatch.setattr(refiner, 'refine', refine)
+    img = ring_image()
+    big = [10, 10, 10 + refiner.GATE + 10, 10 + refiner.GATE + 10]
+    assert box_fit.fit_image(img, big) == box_fit.fit_image(img, big, use_refiner=False) and not calls
+    small = [90, 65, 112, 87]
+    fitted = box_fit.fit_image(img, small)
+    assert calls == [small]
+    assert fitted == (box_fit.fit_image(img, [92, 67, 110, 85], use_refiner=False) or [92, 67, 110, 85])
+
+
+def test_the_shipped_refiner_runs_and_keeps_a_small_box_inside_the_picture():
+    from nnslr_tools.box_fit import refiner
+    if not refiner.available():
+        pytest.skip('no refiner.onnx in this checkout')
+    img = ring_image()
+    box = refiner.refine(img, [88, 63, 113, 88])
+    assert box is not None and 0 <= box[0] < box[2] <= 200 and 0 <= box[1] < box[3] <= 150
+
+
 def test_on_the_boxes_people_drew_the_fit_is_closer_than_the_loose_box():
     objects = REAL_DATA / 'annotations' / 'objects.jsonl'
     if not objects.exists() or not (REAL_DATA / 'derived' / 'frames').is_dir():

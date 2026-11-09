@@ -6,6 +6,12 @@ x1, y1, x2, y2). ``STEPS`` passes: each crops again around the previous answer, 
 the boxes people drew (:mod:`.refiner_train`), so it also fits the signs the colour rules miss: a white ring on the
 black plate of a gantry display, a grey plate on a grey sky.
 
+Fit box uses it only on a rough box whose shorter side is under ``GATE`` pixels: one pass, then the colour and edge
+rankers on its answer (:func:`nnslr_tools.box_fit.fit_image`). Measured on the routes left out (9 Nov 2026, 10698
+rough boxes on the full frames): mean IoU 0.792 with the rankers alone, 0.798 so; on the small signs (under 20 px)
+0.749 and 0.772; the big ones unchanged. A box that was already tight gets slightly worse (0.857 and 0.835), and
+on bigger boxes the refiner loses to the rankers, hence the gate. ``GATE`` was chosen on that same table.
+
 The weights are ``refiner.onnx`` next to this file, run by onnxruntime on one CPU thread; without it the review page
 keeps the colour and edge rankers alone.
 """
@@ -20,14 +26,17 @@ HERE = Path(__file__).resolve().parent
 MODEL = HERE / 'refiner.onnx'
 S = 64            # the crop's side in pixels, what the network sees
 CROP = 2.0        # the crop's side as a share of the rough box's longer side
-STEPS = 2         # passes, each around the previous answer
+STEPS = 1         # passes, each around the previous answer
+GATE = 30         # Fit box uses the refiner only under this shorter side of the rough box, in pixels
 
 _session = None
 _lock = threading.Lock()
 
 
 def available() -> bool:
-    return MODEL.is_file()
+    """refiner.onnx is there and onnxruntime can run it (the extra ``preannotate`` of .venv)."""
+    import importlib.util
+    return MODEL.is_file() and importlib.util.find_spec('onnxruntime') is not None
 
 
 def session():

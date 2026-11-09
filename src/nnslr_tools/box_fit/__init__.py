@@ -82,18 +82,20 @@ def combine(by_colour, by_edges, rough) -> list[float] | None:
 def fit_image(img, box, *, colour_model=None, edges_model=None, use_refiner=True) -> list[float] | None:
     """The fitted box of ``box`` ([x1, y1, x2, y2] in pixels of the decoded BGR image ``img``), or None to keep it.
 
-    None means no better box was found: the sign is not there, or the box is already right. The refiner's answer
-    when ``refiner.onnx`` is there (and ``use_refiner``), else the two rankers'."""
+    None means no better box was found: the sign is not there, or the box is already right. The two rankers' answer;
+    on a box under ``refiner.GATE`` pixels with ``refiner.onnx`` there (and ``use_refiner``), the rankers' answer on
+    the box the refiner moved it to, or that box when they keep it."""
     from nnslr_tools.box_fit import colour, edges, refiner
     if use_refiner and colour_model is None and edges_model is None and refiner.available():
         rough = clip_box(box, img.shape[1], img.shape[0])
         if rough is None:
             return None
-        fitted = refiner.refine(img, rough)
-        # No side moved by half a pixel: the box was already right.
-        if fitted is None or max(abs(f - r) for f, r in zip(fitted, rough)) < 0.5:
-            return None
-        return fitted
+        if min(rough[2] - rough[0], rough[3] - rough[1]) < refiner.GATE:
+            moved = refiner.refine(img, rough)
+            if moved is not None:
+                fitted = fit_image(img, moved, use_refiner=False) or moved
+                # No side moved by half a pixel: the box was already right.
+                return None if max(abs(f - r) for f, r in zip(fitted, rough)) < 0.5 else fitted
     if colour_model is None or edges_model is None:
         loaded = models()
         colour_model = loaded[0] if colour_model is None else colour_model
