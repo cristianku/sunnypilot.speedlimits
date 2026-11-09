@@ -376,13 +376,24 @@ def test_env_reports_videos_dir(capfd, monkeypatch, tmp_path):
     }
 
 
-def test_the_slow_only_mark_is_linked_with_the_files(tmp_path, capfd, monkeypatch):
+def test_a_file_that_is_not_a_video_or_a_log_is_not_linked_and_an_old_link_to_one_stops_nothing(tmp_path, capfd,
+                                                                                                    monkeypatch):
+    """The fetch's gear answer, or a mark an older fetch left in the shared folder and linked: left alone, the camera
+    and the log linked."""
     videos = tmp_path / "comma-videos"
     root = tmp_path / "data"
-    make_segment(videos, f"{ROUTE}--0", ("fcamera.hevc", "ecamera.hevc", "rlog.zst", "slow-only"))
+    make_segment(videos, f"{ROUTE}--0", ("fcamera.hevc", "ecamera.hevc", "rlog.zst", "gear", "mark"))
+    make_segment(videos, f"{ROUTE}--1", ("fcamera.hevc", "ecamera.hevc", "rlog.zst", "mark"))
+    old = root / "raw/routes" / ROUTE / "1/mark"
+    old.parent.mkdir(parents=True)
+    old.symlink_to(videos / f"{ROUTE}--1/mark")
     monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
     monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
     code, out, err = run(capfd)
     assert code == 0, err
-    mark = root / "raw/routes" / ROUTE / "0/slow-only"
-    assert mark.is_symlink() and os.readlink(mark) == str(videos / f"{ROUTE}--0/slow-only")
+    for segment in ("0", "1"):
+        for name in ("fcamera.hevc", "ecamera.hevc", "rlog.zst"):
+            link = root / "raw/routes" / ROUTE / segment / name
+            assert link.is_symlink() and os.readlink(link) == str(videos / f"{ROUTE}--{segment}" / name)
+    assert sorted(path.name for path in (root / "raw/routes" / ROUTE / "0").iterdir()) == [
+        "ecamera.hevc", "fcamera.hevc", "rlog.zst"]

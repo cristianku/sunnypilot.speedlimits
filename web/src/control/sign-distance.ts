@@ -3,14 +3,14 @@
 // a round sign by its size, a motorway or expressway sign by its height); a person marks, sign by sign, the frame of the road video they call "zero" (the sign is about to leave
 // the picture), and the page shows how far from it vision's own zero comes. Only the comma's camera-side logs, the
 // car's speed and the marks: never the map. The server (nnslr_tools.sign_distance) finds the signs, picks the frames
-// that may be shown (never a second kept only at a car park's speed) and works out every figure: the page only shows
-// them. Here: the types of /api/sign-distance and the words and numbers of the page.
+// that may be shown (those of a minute with its video) and works out every figure: the page only shows them. Here:
+// the types of /api/sign-distance and the words and numbers of the page.
 
 /** What Sign distance can do with a drive (sign_distance.STATUS_MESSAGES). */
 export type DriveStatus = 'reading' | 'unread' | 'unreadable' | 'no_logs' | 'build_too_old' | 'no_sign_seen' | 'no_video'
   | 'signs';
 /** Why a sign is left out of the figures (sign_distance.EXCLUDED_MESSAGES). */
-export type Excluded = 'cut' | 'dropped' | 'coarse' | 'no_index' | 'no_video' | 'slow_only';
+export type Excluded = 'cut' | 'dropped' | 'coarse' | 'no_index' | 'no_video';
 export type MarkName = 'zero' | 'cant_tell' | 'clear';
 /** How a minute's video and logs agree (drive_logs.precision): to the frame, or a mark is kept out of the medians. */
 export type SyncPrecision = 'frame' | 'degraded' | 'unknown' | 'no_video' | 'no_index';
@@ -194,7 +194,7 @@ export function statusTone(status: DriveStatus): 'muted' | 'todo' | 'ok' | 'bad'
 /** After a number of signs: "3 cut short by the logs, 1 without video yet". */
 export const EXCLUDED_LABEL: Record<Excluded, string> = {
   cut: 'cut short by the logs', dropped: 'lost by vision', coarse: 'in qlogs only', no_index: 'without an encode index',
-  no_video: 'without video yet', slow_only: 'with slow-only video',
+  no_video: 'without video yet',
 };
 
 const ROUND = (value: number, digits: number): string => (Math.round(Math.abs(value) * 10 ** digits) / 10 ** digits).toFixed(digits);

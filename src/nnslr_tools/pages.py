@@ -363,12 +363,11 @@ def _ai_sheet_rules(sheet: str) -> str:
 def review_data(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
                 hints: dict | None = None, hint_stats: dict | None = None, suspicious: dict | None = None,
                 routes: list[dict] | None = None, proposer: str | None = None, busy: dict | None = None,
-                videos: dict | None = None, kept_seconds: dict | None = None) -> dict:
+                videos: dict | None = None) -> dict:
     """What the review page of a drive starts from (render_review embeds it; GET /api/route/<route>/page sends it to
-    the editor of Sign review in Speed review). kept_seconds: {segment: its seconds kept} of the segments kept only at
-    a car park's speed (ReviewService.kept_seconds): a frame of their video in another second cannot be saved."""
+    the editor of Sign review in Speed review)."""
     return {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
-            'busy': busy, 'videos': videos, 'kept_seconds': kept_seconds if kept_seconds is not None else {},
+            'busy': busy, 'videos': videos,
             'hints': hints if hints is not None else {},
             'hint_stats': hint_stats if hint_stats is not None else empty_stats(),
             'suspicious': suspicious if suspicious is not None else {},
@@ -380,15 +379,14 @@ def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: 
                   nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
                   suspicious: dict | None = None, routes: list[dict] | None = None,
                   proposer: str | None = None, busy: dict | None = None, videos: dict | None = None,
-                  kept_seconds: dict | None = None, guest: bool = False) -> str:
+                  guest: bool = False) -> str:
     """The review page with its data embedded. Hints and suspicious flags travel apart from the
     frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
     signs of the report (vietnam, ours, qwen; None when not known), for the page's "More". busy: the drive is read
     only, Propose again works on it (nnslr_tools.reproposing.public), else None. videos: the segments with their road
     video on the server (ReviewService.videos), None offline. guest: for a reviewer from outside (guest_bar)."""
     data = review_data(rows, run_id, route_id=route_id, server=server, hints=hints, hint_stats=hint_stats,
-                       suspicious=suspicious, routes=routes, proposer=proposer, busy=busy, videos=videos,
-                       kept_seconds=kept_seconds)
+                       suspicious=suspicious, routes=routes, proposer=proposer, busy=busy, videos=videos)
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False)
     payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     # The same top bar as every page (the Review tab marked); the offline report has no site: only the brand.

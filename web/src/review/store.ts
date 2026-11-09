@@ -44,9 +44,6 @@ export interface Report {
    * null offline. A cell of the timeline is the 20 frames of its second (seconds.ts). Replaced, never changed in
    * place, when video.ts learns a count. */
   videos: Readonly<Record<number, number | null>> | null;
-  /** Segment: its seconds kept, for the segments kept only at a car park's speed (a frame of their video in another
-   * second cannot be saved); a segment not here is whole. */
-  keptSeconds: Readonly<Record<number, ReadonlySet<number>>>;
   /** Where the pictures of the drive are (preview_path is relative to it): '' on the page of the drive itself,
    * /route/<drive>/ for the editor on another page (embed.ts). */
   pictureBase: string;
@@ -57,7 +54,7 @@ export interface Report {
 // Shallow: only its fields are followed (the rows of the drive at work grow while the page is open, appendRows).
 export const report: Report = shallowReactive({
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
-  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null, keptSeconds: {},
+  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null,
   pictureBase: '', embedded: false,
 });
 
@@ -190,7 +187,6 @@ export function initStore(raw: Partial<Payload>, pictureBase = ''): void {
     readOnly: isRecord(raw.busy),
     atWork: isRecord(raw.busy) && raw.busy['phase'] === 'proposing again',
     videos: raw.server && isRecord(raw.videos) ? videosOf(raw.videos) : null,
-    keptSeconds: isRecord(raw.kept_seconds) ? keptOf(raw.kept_seconds) : {},
     pictureBase,
     embedded: pictureBase !== '',
   } satisfies Report);
@@ -205,16 +201,6 @@ function videosOf(raw: Record<string, unknown>): Record<number, number | null> {
     if (/^[0-9]+$/.test(segment)) videos[Number(segment)] = typeof count === 'number' && count > 0 ? count : null;
   }
   return videos;
-}
-
-function keptOf(raw: Record<string, unknown>): Record<number, ReadonlySet<number>> {
-  const kept: Record<number, ReadonlySet<number>> = {};
-  for (const [segment, seconds] of Object.entries(raw)) {
-    if (/^[0-9]+$/.test(segment) && Array.isArray(seconds)) {
-      kept[Number(segment)] = new Set(seconds.filter((second): second is number => Number.isInteger(second)));
-    }
-  }
-  return kept;
 }
 
 /** The frames of a segment's video, learnt from the server (video.ts). */
@@ -378,7 +364,7 @@ export function resetStore(): void {
   } satisfies Partial<ReviewState>);
   Object.assign(report, {runId: '', routeId: '', rows: [], routes: [], hintStats: null, routeHasHints: false,
     apiBase: null, storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null,
-    keptSeconds: {}, pictureBase: '', embedded: false} satisfies Partial<Report>);
+    pictureBase: '', embedded: false} satisfies Partial<Report>);
   reindex();
 }
 

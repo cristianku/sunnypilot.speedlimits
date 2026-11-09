@@ -48,9 +48,6 @@ MOTION_DECIMATE = 5  # carState at 100 Hz kept at 20 Hz (the blinkers of the ski
 STEP_SECONDS = 1.0
 BLINKER_SECONDS = 2.0
 MIN_SHARE = 0.5  # of the samples expected in a step (20 a second) for its yaw or steer to be known
-# The start and the end of a drive are taken only where the car is parked or crawls (the car's PARKING_MAX_SPEED in
-# vision.py): a garage, a car park, the stop at a gate; the streets around the home are left out.
-SLOW_ONLY_SPEED = 25 / 3.6
 SAMPLE_HZ = 20.0
 VEGO_MAX_AGE = 0.5
 CAR_YAW_MIN = 1e-4  # rad/s: a car whose yawRate never leaves 0 has no sensor behind it
@@ -302,18 +299,6 @@ def motion_features(item: dict | None) -> tuple[float, ...]:
             out[4] = 1.0
         out[5], out[6], out[7] = float(bool(item.get('left'))), float(bool(item.get('right'))), 1.0
     return tuple(out)
-
-
-def slow_seconds(log: Path, *, below: float = SLOW_ONLY_SPEED, python: str | None = None) -> set[int]:
-    """The seconds of a segment (its 1 Hz frames) whose vEgo is known and below `below` m/s, from its log; none when
-    the log cannot be read: a second is never taken as slow without the car saying so."""
-    try:
-        read = read_logs([log], python=python)
-    except MotionError:
-        return set()
-    rows = build_route(log.parent, '', {0: log}, read)['segments']['0']['seconds']
-    at = ROW.index('v_ego')
-    return {second for second, row in enumerate(rows) if row[at] is not None and row[at] < below}
 
 
 def coverage_text(record: dict) -> str:

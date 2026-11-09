@@ -138,9 +138,6 @@ export interface Payload {
   /** The segments with their road video on the server, with its frames when counted (review_service.videos); null
    * offline. */
   videos?: Record<string, number | null> | null;
-  /** The seconds kept of the segments kept only at a car park's speed (review_service.kept_seconds): a frame of their
-   * video in another second cannot be saved. Absent before the server sent it. */
-  kept_seconds?: Record<string, number[]>;
 }
 
 /** A drive Propose again works on, read only until its new proposals are in. */

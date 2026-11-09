@@ -35,12 +35,10 @@ def test_a_gap_starts_a_new_run_and_a_read_outside_the_frames_is_dropped():
     assert [(r['decoded'], r['kph']) for r in found[0]] == [(2, 50.0)]
 
 
-def test_wanted_reads_skip_the_pictures_at_one_a_second_and_slow_only_seconds():
+def test_wanted_reads_skip_the_pictures_at_one_a_second():
     reads = [{'decoded': 20, 'kph': 50.0}, {'decoded': 25, 'kph': 50.0}, {'decoded': 65, 'kph': 30.0}]
     pictures = [{'output_index': 1, 'decoded_frame_index': 20}, {'output_index': 3, 'decoded_frame_index': 60}]
-    assert [r['decoded'] for r in wanted_reads(reads, pictures, False)] == [25, 65]
-    # Slow-only: only in the seconds kept (1 and 3): 25 is in second 1, 65 in second 3.
-    assert [r['decoded'] for r in wanted_reads(reads, pictures[1:], True)] == [65]
+    assert [r['decoded'] for r in wanted_reads(reads, pictures)] == [25, 65]
 
 
 def test_frame_order_puts_reads_between_the_seconds():

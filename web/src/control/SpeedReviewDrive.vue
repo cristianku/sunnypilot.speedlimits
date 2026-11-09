@@ -46,7 +46,6 @@ import {toast} from '../composables/toast';
 import {boxColor, describe, shortName} from '../review/catalog';
 import {row as editRow} from '../review/current';
 import {frameKeyAt, loadSignEditor, stopSignEditor, videoFrameOf} from '../review/embed';
-import {CAMERA_FPS} from '../review/order';
 import {frameStatus} from '../review/frames';
 import {linkedFrame, openFrame} from '../review/navigation';
 import SignEditorPanel from '../review/SignEditorPanel.vue';
@@ -634,13 +633,6 @@ const timeOfEdited = computed(() => {
 /** The editor on the frame's own picture, the player not standing on it: the drive has no video to show (none on the
  * server, or it could not be made), or the video has not that frame (a minute missing from it). So no frame is out of
  * reach on this side, as on the page of Sign review; ← → go on from frame to frame. */
-/** The player stands on a second Prepare left out: the first and last two minutes of a drive (and reverse gear) keep
- * only their pictures below 25 km/h (helpers/fetch_comma_segments.sh, slow-only), so there is no frame to box there. */
-const leftOut = computed(() => {
-  const at = player.value?.shownFrame;
-  const kept = at ? editReport.keptSeconds[at.segment] : undefined;
-  return !!at && kept !== undefined && !kept.has(Math.floor(at.frame / CAMERA_FPS));
-});
 const alone = computed(() => editing.value && editRow.value !== null && !onFrame.value
   && (!!player.value?.videoGone || videoIndex.value !== null && timeOfEdited.value === null));
 watch(playerKey, (key) => {
@@ -994,8 +986,6 @@ function worksIn(from: number, to: number) {
           <SignEditorPanel v-if="onFrame || alone"/>
           <p v-else-if="player?.playing" class="dr-hint" id="sr-editor-playing">Playing. Pause on a frame (Space) to edit its
             signs; ← → then go frame by frame.</p>
-          <p v-else-if="leftOut" class="dr-hint" id="sr-editor-left-out">No frame here: the first and the last two minutes of a
-            drive keep only the moments below 25 km/h (the streets around home), so this one has no box and no Car networks.</p>
           <p v-else class="dr-hint" id="sr-editor-none">No frame to review at this moment of the drive.</p>
           <p v-if="trackLine" class="dr-hint sr-track-line">{{ trackLine }}</p>
         </template>

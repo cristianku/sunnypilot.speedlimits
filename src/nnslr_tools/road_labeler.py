@@ -153,8 +153,8 @@ def sure_stretches(ns: np.ndarray, chance: np.ndarray, threshold: float = SURE, 
                    join_s: float = JOIN_S) -> list[tuple[int, int]]:
     """[(start_ns, end_ns)] where chance stays at threshold or more, step after step with a time: from its first step to
     the end of its last (a step is 1 / STEP_HZ long), stretches at most join_s apart joined, those shorter than min_s
-    left out. A hole in time between two steps (a minute without its encode index or its frames, a slow-only minute)
-    ends a stretch: nothing is said sure across what the network did not see."""
+    left out. A hole in time between two steps (a minute without its encode index or its frames) ends a stretch:
+    nothing is said sure across what the network did not see."""
     found: list[list[int]] = []
     length = NS // STEP_HZ
     last = None

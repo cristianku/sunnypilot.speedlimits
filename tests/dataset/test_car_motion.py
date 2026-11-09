@@ -107,24 +107,3 @@ def test_a_turn_is_its_heading_change_on_a_tight_radius_never_a_speed_threshold(
     assert turn_events(yaw, speed) == [6]
     assert turn_events(yaw, speed, radius_m=200.0) == [6, 15]
     assert turn_events(yaw, speed, degrees=95.0) == []
-
-
-def test_the_slow_seconds_of_a_segment_are_those_the_car_says_are_below_the_car_parks_speed(tmp_path, monkeypatch):
-    from nnslr_tools import car_motion
-    log = tmp_path / '0' / 'rlog.zst'
-    log.parent.mkdir()
-    log.write_bytes(b'log')
-    # 3 s parked, 3 s at 50 km/h, 3 s at 15 km/h; then the car says nothing. Second k is the step that ends at the
-    # first frame + k s: the last of 15 km/h is second 9.
-    car = _car(3, v_ego=0.0) + _car(3, v_ego=50 / 3.6, start=3) + _car(3, v_ego=15 / 3.6, start=6)
-    read = {str(log): {'first_frame_mono': int(1e9 / 20), 'error': None,
-                       'pose': [[int(t * 1e9), z, v] for t, z, v in _pose(12, 0.0)],
-                       'car': [[int(t * 1e9), *rest] for t, *rest in car]}}
-    monkeypatch.setattr(car_motion, 'read_logs', lambda paths, python=None: read)
-    assert car_motion.slow_seconds(log) == {0, 1, 2, 6, 7, 8, 9}
-
-    def broken(paths, python=None):
-        raise car_motion.MotionError('no reader')
-    # A log that cannot be read: no second is slow.
-    monkeypatch.setattr(car_motion, 'read_logs', broken)
-    assert car_motion.slow_seconds(log) == set()

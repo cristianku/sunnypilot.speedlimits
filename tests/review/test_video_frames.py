@@ -78,7 +78,7 @@ def test_a_gop_has_the_pixels_of_a_decode_of_the_whole_video(drive, tmp_path):
     status, _response, data = server.request('GET', f'/api/route/{ROUTE}/video/0/25')
     assert status == 200, data
     gop = json_of(data)
-    assert gop['frame_count'] == 60 and gop['gop'] == [20, 39] and gop['seconds'] is None
+    assert gop['frame_count'] == 60 and gop['gop'] == [20, 39] and 'seconds' not in gop
     keys = {frame['decoded']: frame['frame_key'] for frame in gop['frames']}
     assert keys[20] == '0/1' and keys[25] == '0/1025' and len(keys) == 20
     status, response, data = server.request('GET', f'/route/{ROUTE}/video/0/25.jpg')
@@ -240,24 +240,12 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     assert status == 200 and json_of(data)['videos'] == {'0': 60}
 
 
-def test_the_page_names_the_seconds_kept_of_a_segment_kept_only_at_a_car_parks_speed(drive):
-    """The editor on the Signs side of Speed review offers a frame of the video only in a second the server saves
-    (video_frames.materialize): the page lists the seconds kept of a slow-only segment, none of a whole one."""
-    from nnslr_tools.sync import SLOW_ONLY_MARK
+def test_a_frame_of_any_second_of_the_video_is_saved(drive):
+    """The whole drive is in Sign review: a frame of the video between the seconds is saved in every second of its
+    segment, a second whose picture at 1 a second is missing too."""
     root, _video, _rows, server = drive
-    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
-    assert status == 200 and json_of(data)['kept_seconds'] == {}
-    (root / 'raw/routes' / ROUTE / '0' / SLOW_ONLY_MARK).write_text('start of the drive')
     pictures = root / 'derived/frames' / ROUTE / '0' / 'frames.jsonl'
     kept = [line for line in pictures.read_text().splitlines() if json.loads(line)['output_index'] == 1]
     pictures.write_text(kept[0] + '\n')
-    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
-    assert status == 200
-    seconds = json_of(data)['kept_seconds']
-    assert list(seconds) == ['0'] and len(seconds['0']) == 1
-    # A frame of another second is refused on save, as the page knows; one of the second kept is saved.
-    kept_second = seconds['0'][0]
-    other = next(second for second in (0, 1, 2) if second != kept_second)
-    status, _response, data = server.post_frame(ROUTE, f'0/{1000 + other * 20 + 5}', body([BOX]))
-    assert status == 404 and json_of(data)['error'] == 'no_video_frame'
-    assert server.post_frame(ROUTE, f'0/{1000 + kept_second * 20 + 5}', body([BOX]))[0] == 200
+    for second in (0, 1, 2):
+        assert server.post_frame(ROUTE, f'0/{1000 + second * 20 + 5}', body([BOX]))[0] == 200

@@ -26,7 +26,6 @@ capnp = pytest.importorskip('capnp')
 zstandard = pytest.importorskip('zstandard')
 
 from nnslr_tools import drive_logs, drive_review, sign_distance  # noqa: E402
-from nnslr_tools.sync import SLOW_ONLY_MARK  # noqa: E402
 from review_helpers import ADMIN, ROUTE, TOKEN, RunningServer, json_of, sign_in  # noqa: E402
 
 SCHEMA = Path(__file__).parent / 'fixtures' / 'drive_schema'
@@ -145,15 +144,6 @@ def real_video(root: Path, segment: int = 0, route: str = ROUTE, name: str = 'fc
     assert made.returncode == 0, made.stderr
 
 
-def slow_only(root: Path, segment: int, seconds, route: str = ROUTE) -> None:
-    """A minute kept only at a car park's speed, its pictures at 1 a second only at these seconds."""
-    (root / 'raw/routes' / route / str(segment) / SLOW_ONLY_MARK).write_text('')
-    folder = root / 'derived/frames' / route / str(segment)
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / 'frames.jsonl').write_text(''.join(json.dumps({'segment_index': segment, 'output_index': second}) + '\n'
-                                                 for second in seconds))
-
-
 @pytest.fixture(autouse=True)
 def synthetic(tmp_path, monkeypatch):
     monkeypatch.setenv(drive_logs.SCHEMA_ENV, str(SCHEMA))
@@ -254,14 +244,14 @@ def test_driven_metres_are_signed_and_unknown_without_speed():
 
 
 class _NoVideo:
-    def __init__(self, videos=(), seconds=None):
-        self.videos, self.seconds = set(videos), seconds
+    def __init__(self, videos=()):
+        self.videos = set(videos)
 
     def video(self, segment):
         return Path('/v') if segment in self.videos else None
 
     def allowed(self, segment, decoded):
-        return segment in self.videos and (self.seconds is None or int(decoded / 20) in self.seconds)
+        return segment in self.videos
 
 
 def test_reasons_a_sign_is_left_out_in_order():
@@ -274,9 +264,11 @@ def test_reasons_a_sign_is_left_out_in_order():
     assert sign_distance._excluded({**base, 'qlog': True}, video)[0] == 'coarse'
     assert sign_distance._excluded({**base, 'frames': []}, video)[0] == 'no_index'
     assert sign_distance._excluded(base, _NoVideo())[0] == 'no_video'
-    assert sign_distance._excluded(base, _NoVideo({0}, seconds={3}))[0] == 'slow_only'
-    reason, visible = sign_distance._excluded(base, _NoVideo({0}, seconds={1}))
-    assert reason is None and visible == [(0, 30, 16 * NS)]
+    reason, visible = sign_distance._excluded(base, _NoVideo({0}))
+    assert reason is None and visible == base['frames']
+    # A minute of the window without its video: its frames are not shown, the sign stays in.
+    reason, visible = sign_distance._excluded({**base, 'frames': [(0, 10, 15 * NS), (1, 30, 16 * NS)]}, _NoVideo({0}))
+    assert reason is None and visible == [(0, 10, 15 * NS)]
     assert sign_distance.EXCLUDED_MESSAGES['no_video'] == 'Video not linked yet: run Prepare.'
 
 
@@ -617,38 +609,22 @@ def test_a_mark_moves_with_the_run_of_its_old_key_before_the_nearest_window():
     assert sign_distance._resolve(lines, signs) == ['1500', '100', '60', '70']
 
 
-# ---------- the seconds never shown, and the video ----------
+# ---------- the frames never shown, and the video ----------
 
-def test_slow_only_seconds_are_never_listed_nor_served(tmp_path):
+def test_a_minute_without_its_video_is_never_listed_nor_served(tmp_path):
     comma_drive(tmp_path)
     store = scanned(tmp_path)
     (tmp_path / 'raw/routes' / ROUTE / '1' / 'fcamera.hevc').unlink()
-    slow_only(tmp_path, 0, [3])
     view = sign_distance.drive_view(store, ROUTE)
     sign = view['signs'][0]
-    assert sign['included'] and sign['frames'] == 20
     viewed = sign_distance.sign_view(store, ROUTE, sign['key'])
     frames = viewed['window']['frames']
-    assert {item['frame'] // 20 for item in frames} == {3} and {item['segment'] for item in frames} == {0}
+    assert sign['included'] and sign['frames'] == len(frames) > 0
+    assert {item['segment'] for item in frames} == {0}
     # Minute 1 of its window has no video: said, its frames not shown.
     assert {(item['code'], item.get('segment')) for item in viewed['warnings']} == {('sync_unknown', 0),
                                                                                     ('sync_no_video', 1)}
-    assert sign_distance.frame_allowed(store, ROUTE, 0, 70)
-    assert not sign_distance.frame_allowed(store, ROUTE, 0, MARK_FRAME)
-    server = RunningServer(tmp_path)
-    try:
-        status, _response, data = get(server, f'/api/sign-distance/drives/{ROUTE}/frames/0/{MARK_FRAME}.jpg')
-        assert (status, json_of(data)['error']) == (404, 'unknown_frame')
-        status, answer = post(server, f'/api/sign-distance/drives/{ROUTE}/marks', mark_body(view))
-        assert (status, answer['error']) == (400, 'bad_frame')
-    finally:
-        server.close()
-    # No second of the window kept: the sign is left out, none of its frames served.
-    slow_only(tmp_path, 0, [0])
-    view = sign_distance.drive_view(store, ROUTE)
-    assert view['signs'][0]['excluded'] == 'slow_only' and view['signs'][0]['frames'] == 0
-    assert not sign_distance.frame_allowed(store, ROUTE, 0, 10)
-    assert sign_distance.sign_view(store, ROUTE, view['signs'][0]['key'])['window']['frames'] == []
+    assert sign_distance.frame_allowed(store, ROUTE, 0, MARK_FRAME)
 
 
 def test_a_frame_is_allowed_from_the_signs_and_the_video_only(tmp_path, monkeypatch):
@@ -665,8 +641,8 @@ def test_a_frame_is_allowed_from_the_signs_and_the_video_only(tmp_path, monkeypa
     # Before the window of sign A (5 s before its last sighting) and in the window of B (cut): not shown.
     assert not sign_distance.frame_allowed(store, ROUTE, 0, 5)
     assert not sign_distance.frame_allowed(store, ROUTE, 1, 190)
-    # The kept seconds are looked at on every call.
-    slow_only(tmp_path, 0, [3])
+    # The video is looked at on every call.
+    (tmp_path / 'raw/routes' / ROUTE / '0' / 'fcamera.hevc').unlink()
     assert not sign_distance.frame_allowed(store, ROUTE, 0, MARK_FRAME)
 
 

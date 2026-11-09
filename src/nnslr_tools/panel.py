@@ -518,7 +518,7 @@ CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'
              'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit'),
              'ai': ('prepare', 'update'), 'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',),
              'box_fit': ('update',)}
-# The fetch reads the comma logs (trip length, reverse gear) with openpilot's LogReader; the
+# The fetch reads the comma logs (trip length; reverse gear in Distill) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
 DISTILL_PYTHON = 'openpilot.distill/.venv/bin/python'

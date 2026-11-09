@@ -48,8 +48,7 @@ from nnslr_tools.comma_log import (
     map_speed_events,
     read_log_metadata,
 )
-from nnslr_tools.media import (MediaToolError, extract_frames, make_clip, probe_frame_timestamps, probe_video,
-                               remove_picture)
+from nnslr_tools.media import MediaToolError, extract_frames, make_clip, probe_frame_timestamps, probe_video
 # [frame-provenance] - START
 from nnslr_tools.media import extracted_frame_rows
 from nnslr_tools.manifest import sha256_of
@@ -63,8 +62,7 @@ EXTRACT_WORKERS = 10
 # [route-extract] - END
 # [nnslr-sync] - START
 # [route-extract] - START
-from nnslr_tools.sync import (DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR, SLOW_ONLY_MARK, link_videos, resolve_videos_dir,
-                              sync_route)
+from nnslr_tools.sync import DEFAULT_DATA_ROOT, DEFAULT_VIDEOS_DIR, link_videos, resolve_videos_dir, sync_route
 # [route-extract] - END
 # [nnslr-sync] - END
 
@@ -438,9 +436,7 @@ def _cmd_extract_frames(args: argparse.Namespace) -> int:
 
 # [route-extract] - START
 def _cmd_extract_route(args: argparse.Namespace) -> int:
-    """Apply the existing video extraction to every locally available segment (of a segment marked slow-only, the
-    pictures at a car park's speed only)."""
-    from nnslr_tools.car_motion import SLOW_ONLY_SPEED, segment_logs, slow_seconds
+    """Apply the existing video extraction to every locally available segment."""
     parse_route_id(args.route)
     root = Path(args.data_root or os.environ.get("NNSLR_DATA_ROOT") or DEFAULT_DATA_ROOT).expanduser().resolve()
     route_rel = Path("raw/routes") / args.route
@@ -471,44 +467,23 @@ def _cmd_extract_route(args: argparse.Namespace) -> int:
         if args.alignment and not alignment_path.is_file():
             raise ValueError(f"alignment missing: {alignment_path}")
         plans.append((identity.segment_index, video, segment_output,
-                      alignment_path if alignment_path.is_file() else None, directory))
+                      alignment_path if alignment_path.is_file() else None))
         # [dataset-review] - END
 
     def extract_segment(plan):
-        index, video, segment_output, alignment_path, directory = plan
+        index, video, segment_output, alignment_path = plan
         print(f"Extracting segment {index}: {video}", file=sys.stderr, flush=True)
         frames = extract_frames(
             video, segment_output, fps=None if args.all_frames else args.fps,
             start_s=args.start, end_s=args.end, ffmpeg=args.ffmpeg, ffprobe=args.ffprobe, overwrite=args.overwrite,
             alignment=alignment_path, route_id=args.route, segment_index=index,
         )
-        summary = {}
-        if (directory / SLOW_ONLY_MARK).exists():
-            # The start or the end of a drive, or reverse gear: its pictures at a car park's speed only (a garage, a
-            # car park), the others removed; the frame numbers stay as they were.
-            log = segment_logs(root, args.route).get(index)
-            slow = slow_seconds(log) if log is not None else set()
-            origin = frames[0].media_time_s - (args.start or 0.0) if frames and frames[0].media_time_s is not None else None
-
-            def second(frame):
-                # The second of the segment the picture is in (at 1 a second, its number).
-                if origin is None or frame.media_time_s is None:
-                    return None
-                return int(frame.media_time_s - origin + 1e-6)
-            kept = [frame for frame in frames if second(frame) in slow]
-            for frame in frames:
-                if second(frame) not in slow:
-                    remove_picture(frame.image_path)
-            summary["slow_only"] = {"kept": len(kept), "of": len(frames)}
-            print(f"Segment {index} (start or end of the drive): {len(kept)} of {len(frames)} pictures below "
-                  f"{SLOW_ONLY_SPEED * 3.6:.0f} km/h kept", file=sys.stderr, flush=True)
-            frames = kept
         rows = extracted_frame_rows(frames, route_id=args.route, segment_index=index,
                                     alignment=alignment_path)
         manifest = segment_output / "frames.jsonl"
         _write_jsonl(manifest, rows)
         return rows, {"segment_index": index, "frame_count": len(rows),
-                      "output": str(segment_output), "manifest": str(manifest), **summary}
+                      "output": str(segment_output), "manifest": str(manifest)}
 
     # Several segments at once: ffprobe reads a whole video on one core, so one segment at a time left most of the
     # server idle. The work is in ffmpeg/ffprobe processes, so threads are enough; the results keep the segments' order.

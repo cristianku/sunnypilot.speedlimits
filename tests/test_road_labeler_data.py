@@ -149,7 +149,7 @@ def test_a_hole_in_time_ends_a_sure_stretch():
     ns = np.array([at(s / 2) for s in range(20)] + [-1] * 120 + [at(70 + s / 2) for s in range(20)])
     chance = np.full(len(ns), 0.95)
     assert road_labeler.sure_stretches(ns, chance) == [(at(0), at(10)), (at(70), at(80))]
-    # the same with the steps of the hole missing altogether (a slow-only minute keeps few frames)
+    # the same with the steps of the hole missing altogether (a minute without its frames)
     ns = np.array([at(s / 2) for s in range(20)] + [at(70 + s / 2) for s in range(20)])
     assert road_labeler.sure_stretches(ns, np.full(len(ns), 0.95)) == [(at(0), at(10)), (at(70), at(80))]
 

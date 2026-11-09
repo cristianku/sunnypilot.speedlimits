@@ -117,34 +117,6 @@ def test_invalid_or_ambiguous_input_does_not_write(dataset, capsys, args):
     assert code != 0
     assert not (dataset / "derived").exists()
 
-
-def test_a_slow_only_segment_keeps_its_pictures_below_the_car_parks_speed(dataset, capsys, monkeypatch):
-    """The start or the end of a drive (helpers/fetch_comma_segments.sh marks it): the seconds the car says are slow,
-    the frame numbers left as they were."""
-    from nnslr_tools import car_motion
-    segment = dataset / "raw/routes" / ROUTE / "2"
-    (segment / "fcamera.hevc").unlink()
-    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=red:s=64x48:r=20:d=3",
-                    "-c:v", "libx265", "-x265-params", "pools=1:frame-threads=1:log-level=error",
-                    str(segment / "fcamera.hevc")], check=True, capture_output=True)
-    (segment / "slow-only").write_text("start of the drive")
-    (segment / "rlog.zst").write_bytes(b"log")
-    asked = []
-    monkeypatch.setattr(car_motion, "slow_seconds", lambda log: asked.append(log) or {0, 2})
-    code, out, err = run(capsys, "--route", ROUTE)
-    assert code == 0, err
-    report = json.loads(out)
-    assert asked == [segment / "rlog.zst"]
-    marked = next(row for row in report["segments"] if row["segment_index"] == 2)
-    assert marked["slow_only"] == {"kept": 2, "of": 3} and marked["frame_count"] == 2
-    folder = dataset / "derived/frames" / ROUTE / "2"
-    assert sorted(path.name for path in folder.glob("frame_*.png")) == ["frame_00000000.png", "frame_00000002.png"]
-    rows = [json.loads(line) for line in (folder / "frames.jsonl").read_text().splitlines()]
-    assert [row["output_index"] for row in rows] == [0, 2]
-    # The other segments are not marked: all their pictures.
-    assert all("slow_only" not in row for row in report["segments"] if row["segment_index"] != 2)
-    assert report["frame_count"] == 4
-
 # [route-extract] - END
 
 # [dataset-review] - START

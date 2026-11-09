@@ -36,12 +36,9 @@ REMOTE_ROOT = "/data/media/0/realdata"
 _CAMERAS = {"narrow": ("fcamera.hevc",), "wide": ("ecamera.hevc",),
             "both": ("fcamera.hevc", "ecamera.hevc")}
 _LOG_NAMES = ("rlog.zst", "rlog", "rlog.bz2")
-# The mark of a segment downloaded only for its slow seconds (helpers/fetch_comma_segments.sh: the start and the end of
-# a new drive, a segment with reverse gear): nnslr extract-frames keeps its pictures below car_motion.SLOW_ONLY_SPEED.
-SLOW_ONLY_MARK = "slow-only"
 # Raw files that link_videos links when it finds them in a shared segment folder.
 _LINKABLE_NAMES = ("fcamera.hevc", "ecamera.hevc", "dcamera.hevc", "qcamera.ts",
-                   "rlog.zst", "rlog", "rlog.bz2", "qlog.zst", "qlog", "qlog.bz2", SLOW_ONLY_MARK)
+                   "rlog.zst", "rlog", "rlog.bz2", "qlog.zst", "qlog", "qlog.bz2")
 _SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
 _HOST_RE = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9_][A-Za-z0-9_.-]*")
 

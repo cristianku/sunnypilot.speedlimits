@@ -1239,7 +1239,7 @@ def make_handler(app: ReviewApp):
             videos = app.videos(route, rows)
             return dict(rows=clean(rows), run_id=run_id, route_id=route, server=True, hints=clean(hints_by_frame),
                         hint_stats=hint_stats, suspicious=clean(suspicious), routes=routes, proposer=proposer, busy=busy,
-                        videos=clean(videos), kept_seconds=app.kept_seconds(route, videos))
+                        videos=clean(videos))
 
         def _send_route_page(self, route):
             args = self._review_args(route, False)

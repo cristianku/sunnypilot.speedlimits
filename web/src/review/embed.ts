@@ -16,7 +16,7 @@ import {resetAiLive, watchAiLive} from './ai-live';
 import {resetBusy, watchBusy} from './busy';
 import {resetCar} from './car';
 import {openFrame} from './navigation';
-import {CAMERA_FPS, READ_INDEX_BASE} from './order';
+import {READ_INDEX_BASE} from './order';
 import {hasVideo} from './seconds';
 import {loadServer, retryUnsaved, SaveError, call} from './server';
 import {initStore, report, resetStore, restore, rowOf, state} from './store';
@@ -129,8 +129,7 @@ export function videoFrameOf(row: FrameRow): number | null {
 /** The key of Sign review of frame `frame` of a segment's road video, as the server gives it (video_gop): the report's
  * row with that frame, else a picture at 1 a second without its frame number taken at that frame, else the frame of the
  * video not saved yet (READ_INDEX_BASE + frame; never frame 0, which the server does not take; only where the server has
- * the segment's video, and in a segment kept only at a car park's speed only in a second it kept: the server saves no
- * other, video_frames.materialize). Null where Sign review has nothing of that frame. */
+ * the segment's video). Null where Sign review has nothing of that frame. */
 export function frameKeyAt(segment: number, frame: number): string | null {
   if (report.apiBase === null) return null;
   let inSegment = false;
@@ -144,7 +143,5 @@ export function frameKeyAt(segment: number, frame: number): string | null {
   }
   if (loose !== null) return loose;
   // A frame not saved yet only where the server has the segment's road video (seconds.ts hasVideo).
-  const kept = report.keptSeconds[segment];
-  if (kept !== undefined && !kept.has(Math.floor(frame / CAMERA_FPS))) return null;
   return inSegment && frame > 0 && hasVideo(segment) ? segment + '/' + (READ_INDEX_BASE + frame) : null;
 }

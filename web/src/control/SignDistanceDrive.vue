@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Data › Sign distance, a drive opened ("/sign-distance?drive=<route>&sign=<key>"): one sign at a time. The road video
-// frame by frame over the sign's window (only the frames the server lists: never a second kept only at a car park's
-// speed), with what the car's screen showed on each frame (the "Vision 14 m" chip under the picture, in the car's
-// unit). Under it vision's distance over the window, with the last sighting, vision's zero and the person's zero on it;
+// frame by frame over the sign's window (only the frames the server lists: those of a minute with its video), with
+// what the car's screen showed on each frame (the "Vision 14 m" chip under the picture, in the car's unit).
+// Under it vision's distance over the window, with the last sighting, vision's zero and the person's zero on it;
 // a tap or a drag there or on the slider moves to a frame. The person marks the frame they call zero (the sign is about
 // to leave the picture), or that they cannot tell: always the frame whose picture is on screen, and only once the one
 // asked for is (never a frame still loading). Clear takes the mark away and Undo takes back the last line of the sign on

@@ -23,8 +23,6 @@ interface Gop {
   segment_index: number;
   frame_count: number;
   gop: [number, number];
-  /** The seconds a segment kept only at the signs has (the others were never extracted), else null: all. */
-  seconds: number[] | null;
   frames: VideoFrame[];
 }
 
@@ -62,17 +60,10 @@ function decodedOf(row: FrameRow): number | null {
   return typeof row.decoded_frame_index === 'number' ? row.decoded_frame_index : null;
 }
 
-/** The frame delta (±1) away in the segment's video, over the seconds a segment kept at the signs does not have;
- * null past its first or last frame. */
+/** The frame delta (±1) away in the segment's video; null past its first or last frame. */
 function nextInSegment(gop: Gop, decoded: number, delta: number): number | null {
   const target = decoded + delta;
-  if (target < 0 || target >= gop.frame_count) return null;
-  const seconds = gop.seconds;
-  const second = Math.floor(target / CAMERA_FPS);
-  if (seconds === null || seconds.includes(second)) return target;
-  const kept = delta > 0 ? seconds.find((item) => item > second) : [...seconds].reverse().find((item) => item < second);
-  if (kept === undefined) return null;
-  return delta > 0 ? kept * CAMERA_FPS : Math.min(gop.frame_count - 1, kept * CAMERA_FPS + CAMERA_FPS - 1);
+  return target < 0 || target >= gop.frame_count ? null : target;
 }
 
 async function keyOf(segment: number, decoded: number): Promise<string | null> {

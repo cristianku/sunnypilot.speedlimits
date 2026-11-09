@@ -21,8 +21,7 @@ first sample where it rounds to 0 (the screen hides the number there). d == 0 it
 A sign is left out of the figures (excluded, with its reason) when vision's zero is not an approach to compare:
 'cut' (no screen zero), 'dropped' (no sighting for vision's DISTANCE_SECONDS: the zero is its time-out), 'coarse' (a
 qlog: speedVisionSP decimated), 'no_index' (no encode index around it), 'no_video' (no road video linked yet: run
-Prepare), 'slow_only' (the video around it was kept only at a car park's speed and none of its seconds is: those
-seconds are never shown).
+Prepare).
 
 The marks. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
 on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI, no automatic
@@ -51,7 +50,6 @@ from pathlib import Path
 
 from nnslr_tools import drive_logs, drive_review, video_frames
 from nnslr_tools.annotations import atomic_write, jsonl_bytes, strict_json_loads
-from nnslr_tools.sign_reads import CAMERA_FPS
 
 NS = 1_000_000_000
 MARKS = ('zero', 'cant_tell', 'clear')
@@ -78,14 +76,13 @@ SUNNYPILOT_ENV = 'NNSLR_SUNNYPILOT_CLONE'
 SUNNYPILOT_DEFAULT = '/root/sunnypilot'
 COMMIT_RE = re.compile(r'[0-9a-f]{7,40}')
 ROUTE_RE = re.compile(r'[0-9a-f]{8}--[0-9a-f]{10}')
-EXCLUDED = ('cut', 'dropped', 'coarse', 'no_index', 'no_video', 'slow_only')
+EXCLUDED = ('cut', 'dropped', 'coarse', 'no_index', 'no_video')
 EXCLUDED_MESSAGES = {
     'cut': 'The logs stop before vision reaches zero.',
     'dropped': 'Vision lost the sign: its zero is the time-out, not the approach.',
     'coarse': 'Only a qlog here: vision is logged too rarely to time its zero.',
     'no_index': 'No encode index around this sign: its frames cannot be found.',
     'no_video': 'Video not linked yet: run Prepare.',
-    'slow_only': 'The video around this sign was kept only at a car park\'s speed: not shown.',
 }
 STATUS_MESSAGES = {
     'reading': 'Reading the logs of this drive…',
@@ -356,7 +353,6 @@ class _Video:
     def __init__(self, root: Path, route: str) -> None:
         self.root, self.route = Path(root), route
         self._videos: dict[int, Path | None] = {}
-        self._seconds: dict[int, set | None] = {}
         self._counts: dict[int, int | None] = {}
 
     def video(self, segment: int) -> Path | None:
@@ -368,15 +364,8 @@ class _Video:
         return self._videos[segment]
 
     def allowed(self, segment: int, decoded: int) -> bool:
-        """A frame that may be shown: its segment has a video and, in a segment kept only at a car park's speed, its
-        second is one kept (the rule of review_service: never a second that was not kept)."""
-        if self.video(segment) is None:
-            return False
-        if segment not in self._seconds:
-            seconds = video_frames.kept_seconds(self.root, self.route, segment)
-            self._seconds[segment] = None if seconds is None else set(seconds)
-        seconds = self._seconds[segment]
-        return seconds is None or int(decoded / CAMERA_FPS) in seconds
+        """A frame that may be shown: its segment has a video."""
+        return self.video(segment) is not None
 
     def frame_count(self, segment: int) -> int | None:
         if segment not in self._counts:
@@ -401,10 +390,7 @@ def _excluded(sign: dict, video: _Video) -> tuple[str | None, list[tuple]]:
         return 'no_index', []
     if not any(video.video(segment) is not None for segment in {item[0] for item in sign['frames']}):
         return 'no_video', []
-    visible = [item for item in sign['frames'] if video.allowed(item[0], item[1])]
-    if not visible:
-        return 'slow_only', []
-    return None, visible
+    return None, [item for item in sign['frames'] if video.allowed(item[0], item[1])]
 
 
 def _sync_of(layer: dict, video: _Video, segment: int) -> dict:
@@ -792,9 +778,9 @@ def _wide_segments(root: Path, route: str, frames: list[dict]) -> list[int]:
 
 
 def frame_allowed(store: drive_review.DriveReviewStore, route: str, segment: int, decoded: int) -> bool:
-    """A frame of the road video the page may show: in the window of an included sign, never a second that was not
-    kept. Light, as it runs for every picture: the drive's summary and its cached signs, then the video and its kept
-    seconds (looked at live) only for the signs whose window holds this frame; no scan state, no marks."""
+    """A frame of the road video the page may show: in the window of an included sign, in a minute with its video.
+    Light, as it runs for every picture: the drive's summary and its cached signs, then the video (looked at live)
+    only for the signs whose window holds this frame; no scan state, no marks."""
     _route_known(store.root, route)
     summary = store.summary(route)
     if summary is None:

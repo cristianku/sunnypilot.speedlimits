@@ -183,7 +183,7 @@ export NNSLR_OPENDBC_ROOT=/path/to/compatible/opendbc
 bash helpers/fetch_comma_segments.sh
 ```
 
-The script connects via SSH/rsync to `COMMA_HOST` (default `comma`), uses `COMMA_VIDEOS_DIR` (shared with Distill), and links accepted files into `NNSLR_DATA_ROOT/raw/routes` (default `data/raw/routes`). In automatic mode it takes every route still on the comma (dashcam or not, no date cutoff) with at least 300 seconds from first to last qlog, and excludes the first/last two available segments plus any segment with reverse gear in the full rlog. A missing/unreadable qlog/rlog causes conservative exclusion. Manual route/`--segments` selections are exempt so explicit transfers remain possible. This is distinct from `nnslr sync-routes`, which does not auto-filter. For synthetic offline tests: `python -m unittest discover -s helpers -p 'test_*.py'`.
+The script connects via SSH/rsync to `COMMA_HOST` (default `comma`), uses `COMMA_VIDEOS_DIR` (shared with Distill), and links accepted files into `NNSLR_DATA_ROOT/raw/routes` (default `data/raw/routes`). In automatic mode it takes every route still on the comma (dashcam or not, no date cutoff) with at least 300 seconds from first to last qlog, and downloads every segment of it, the first/last two and those with reverse gear too. The same script in a Distill checkout excludes the first/last two available segments plus any segment with reverse gear in the full rlog. A missing/unreadable qlog/rlog causes conservative exclusion. Manual route/`--segments` selections are exempt so explicit transfers remain possible. This is distinct from `nnslr sync-routes`, which does not auto-filter. For synthetic offline tests: `python -m unittest discover -s helpers -p 'test_*.py'`.
 
 ## 4. Check the installation
 

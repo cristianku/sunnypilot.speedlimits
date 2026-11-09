@@ -12,8 +12,7 @@ taken out of the video as the others are (``video_<output index>.png`` next to t
 of the segment, the rows of frames.jsonl), with the key scheme of the frames of the comma's reads: output index
 READ_INDEX_BASE + decoded frame index. The keys at 1 a second (0..59) never change, so the reviews saved stay where
 they are, and a frame that is already a row of the report (a picture at 1 a second, a read) keeps its key. The report
-shows the frames saved this way (added_rows) and the next Propose again proposes on them (discover_frames). In a segment
-kept only at a car park's speed (the start or the end of a drive), only the seconds kept.
+shows the frames saved this way (added_rows) and the next Propose again proposes on them (discover_frames).
 Only the camera: no map, no logs.
 """
 from __future__ import annotations
@@ -30,7 +29,7 @@ from pathlib import Path
 
 from nnslr_tools.media import (FRAME_SIZE, FULL_SIZE, REDUCE_FILTER, MediaToolError, extract_frames,
                                extracted_frame_rows, full_picture, remove_picture, video_dimensions)
-from nnslr_tools.sign_reads import CAMERA_FPS, READ_INDEX_BASE, frame_second
+from nnslr_tools.sign_reads import READ_INDEX_BASE
 
 WIDE_VIDEO = 'ecamera.hevc'
 VIDEO_MANIFEST = 'video_frames.jsonl'
@@ -224,15 +223,6 @@ def nv12_frame(video: Path, decoded: int, *, native: bool = False) -> tuple[byte
     return frames[at:at + size], width, height
 
 
-def kept_seconds(root: Path, route: str, segment: int) -> list[int] | None:
-    """The seconds of a segment kept only at a car park's speed (nnslr_tools.sync), None for a whole segment."""
-    from nnslr_tools.sync import SLOW_ONLY_MARK
-    if not (Path(root) / 'raw/routes' / route / str(int(segment)) / SLOW_ONLY_MARK).exists():
-        return None
-    pictures = _rows(Path(root) / 'derived/frames' / route / str(int(segment)) / 'frames.jsonl')
-    return sorted({int(frame_second(row)) for row in pictures})
-
-
 def _cache_dir(root: Path, route: str, segment: int, video: Path, wide: bool = False) -> Path:
     """The cache folder of a segment (<segment>-wide for the wide camera), emptied when its video is not the one the
     previews came from."""
@@ -320,9 +310,6 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
     root = Path(root)
     video = video_of(root, route, segment)
     first, last = gop_of(video, decoded)
-    seconds = kept_seconds(root, route, segment)
-    if seconds is not None and int(decoded / CAMERA_FPS) not in seconds:
-        raise VideoFrameError('this second of the segment was not kept (only a car park\'s speed)')
     directory = root / 'derived/frames' / route / str(int(segment))
     manifest = directory / VIDEO_MANIFEST
     with _lock('manifest', route, int(segment)):

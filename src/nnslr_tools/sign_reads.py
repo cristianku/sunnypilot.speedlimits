@@ -5,8 +5,7 @@ reads them: drive_extract) is often between two of the pictures at 1 a second, s
 car saw. ``nnslr sign-reads --route R`` (run by helpers/1_prepare.sh after the pictures are taken out) takes the frame
 of fcamera.hevc the car was reading at each such moment: the last frame whose exposure started (timestampSof of the
 road camera's encode index) at or before the read. One frame per read, the first of each run of the same value
-(a value that changes, or READ_GAP_S without a read); none where a picture at 1 a second is that very frame; in a
-segment kept only at a car park's speed (the start or the end of a drive), only in the seconds kept.
+(a value that changes, or READ_GAP_S without a read); none where a picture at 1 a second is that very frame.
 
 The pictures are ``read_<output index>.png`` next to the others, listed in ``sign_reads.jsonl`` of the segment (the
 rows of frames.jsonl, plus the value read, ``comma_read_kph``, and its time, ``comma_read_mono_ns``). Their output
@@ -82,13 +81,10 @@ def _rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def wanted_reads(reads: list[dict], pictures: list[dict], slow_only: bool) -> list[dict]:
-    """The reads of a segment to add: not on a picture at 1 a second, and in a slow-only segment only in its
-    seconds kept (pictures: the rows of its frames.jsonl)."""
+def wanted_reads(reads: list[dict], pictures: list[dict]) -> list[dict]:
+    """The reads of a segment to add: not on a picture at 1 a second (pictures: the rows of its frames.jsonl)."""
     taken = {row.get('decoded_frame_index') for row in pictures}
-    seconds = {int(frame_second(row)) for row in pictures}
-    return [read for read in reads if read['decoded'] not in taken
-            and (not slow_only or int(read['decoded'] / CAMERA_FPS) in seconds)]
+    return [read for read in reads if read['decoded'] not in taken]
 
 
 def _current(directory: Path, manifest: list[dict], wanted: list[dict], video_sha: str | None) -> bool:
@@ -107,7 +103,6 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
     from nnslr_tools import drive_review
     from nnslr_tools.media import extract_frames, extracted_frame_rows, remove_picture
     from nnslr_tools.route_io import discover_segment_dirs
-    from nnslr_tools.sync import SLOW_ONLY_MARK
     root = Path(root)
     frames_dir = root / 'derived/frames' / route
     if not frames_dir.is_dir():
@@ -128,7 +123,7 @@ def extract_reads(root: Path, route: str, *, ffmpeg: str | None = None, ffprobe:
         segment = int(directory.name)
         pictures = _rows(directory / 'frames.jsonl')
         source = videos.get(segment)
-        wanted = wanted_reads(reads.get(segment, []), pictures, bool(source and (source / SLOW_ONLY_MARK).exists()))
+        wanted = wanted_reads(reads.get(segment, []), pictures)
         manifest_path = directory / READS_MANIFEST
         manifest = _rows(manifest_path)
         video = source / 'fcamera.hevc' if source else None

@@ -1,6 +1,6 @@
-"""helpers/fetch_comma_segments.sh in automatic mode, against a fake comma (ssh and rsync run on local folders): a drive
-new to speedlimits also brings the segments the automatic filters leave out, marked slow-only; a drive already in
-data/ does not."""
+"""helpers/fetch_comma_segments.sh in automatic mode, against a fake comma (ssh and rsync run on local folders): in
+speedlimits every segment of every drive comes in full, the first two, the last two and reverse gear too, whether the
+drive is new to data/ or not."""
 from __future__ import annotations
 
 import os
@@ -27,11 +27,12 @@ args=("$@")
 source="${args[-2]#*:}"
 cp "${source//\/data\/media\/0\/realdata/$FAKE_COMMA}" "${args[-1]}"
 """
-# helpers/comma_fetch_log.py: every drive is long enough, a log with "reverse" in it is reverse gear.
+# helpers/comma_fetch_log.py: every drive is long enough unless SHORT is in the environment, a log with "reverse" in it
+# is reverse gear.
 FAKE_LOG_READER = r"""#!/bin/bash
 shift
 case "$1" in
-  duration) echo 600 ;;
+  duration) if [ -n "${SHORT:-}" ]; then echo 200; else echo 600; fi ;;
   reverse) if grep -q reverse "$2"; then echo reverse; else echo forward; fi ;;
 esac
 """
@@ -68,53 +69,62 @@ def comma(tmp_path):
     return repo, data, tmp_path / "videos", env
 
 
-def fetched(data: Path, route: str) -> dict[int, bool]:
-    """{segment: marked slow-only} of the segments with their camera linked in data/."""
+def fetched(data: Path, route: str) -> list[int]:
+    """The segments with their camera linked in data/."""
     folder = data / "raw/routes" / route
-    return {int(segment.name): (segment / "slow-only").is_symlink()
-            for segment in folder.iterdir() if (segment / "fcamera.hevc").is_symlink()}
+    return sorted(int(segment.name) for segment in folder.iterdir() if (segment / "fcamera.hevc").is_symlink())
 
 
-def test_a_new_drive_brings_its_start_end_and_reverse_gear_marked_slow_only(comma):
-    repo, data, videos, env = comma
+def fetch(repo: Path, env: dict) -> subprocess.CompletedProcess:
     process = subprocess.run(["bash", str(repo / "helpers/fetch_comma_segments.sh")], env=env, text=True,
                              capture_output=True, timeout=60)
     assert process.returncode == 0, process.stdout + process.stderr
-    # The first two, the reverse gear (4) and the last two only for their slow pictures; 2, 3, 5 whole.
-    assert fetched(data, NEW) == {0: True, 1: True, 2: False, 3: False, 4: True, 5: False, 6: True, 7: True}
-    assert (videos / f"{NEW}--0/slow-only").read_text().startswith("Start or end of the drive")
-    # A drive already in data/ gets only what fits, as before.
-    assert fetched(data, OLD) == {2: False, 3: False, 5: False}
+    return process
 
 
-def test_a_fetch_stopped_halfway_finishes_the_start_and_end_of_a_new_drive(comma):
+def test_every_segment_of_every_drive_comes_in_full(comma):
     repo, data, videos, env = comma
-    # The first run stopped after segment 0's mark: the drive is in data/ but still new.
-    segment = data / "raw/routes" / NEW / "0"
-    segment.mkdir(parents=True)
-    (videos / f"{NEW}--0").mkdir(parents=True)
-    (videos / f"{NEW}--0/slow-only").write_text("Start or end of the drive")
-    (segment / "slow-only").symlink_to(videos / f"{NEW}--0/slow-only")
-    process = subprocess.run(["bash", str(repo / "helpers/fetch_comma_segments.sh")], env=env, text=True,
-                             capture_output=True, timeout=60)
-    assert process.returncode == 0, process.stdout + process.stderr
-    assert sorted(segment for segment, slow in fetched(data, NEW).items() if slow) == [0, 1, 4, 6, 7]
+    process = fetch(repo, env)
+    # The first two, reverse gear (4) and the last two too, of a new drive and of one already in data/.
+    assert fetched(data, NEW) == list(range(8))
+    assert fetched(data, OLD) == list(range(8))
+    for segment in (data / "raw/routes" / NEW).iterdir():
+        assert sorted(path.name for path in segment.iterdir()) == ["ecamera.hevc", "fcamera.hevc", "rlog.zst"]
+    for segment in videos.iterdir():
+        assert sorted(path.name for path in segment.iterdir()) == ["ecamera.hevc", "fcamera.hevc", "rlog.zst"]
+    # One line per drive for the panel's count (job_progress.ON_COMMA), with every segment to download.
+    assert f"{NEW} on the comma: 0 1 2 3 4 5 6 7. Skip:. Download: 0 1 2 3 4 5 6 7" in process.stdout
+
+
+def test_a_drive_shorter_than_300_s_is_still_left_out(comma):
+    repo, data, _videos, env = comma
+    fetch(repo, {**env, "SHORT": "1"})
+    assert not (data / "raw/routes" / NEW).exists()
+    assert fetched(data, OLD) == []
 
 
 def test_a_second_run_reads_no_rlog_and_copies_nothing_again(comma):
     repo, data, videos, env = comma
     calls = videos.parent / "calls"
-    script(videos.parent / "log_reader", f'#!/bin/bash\necho "$2" >> {calls}\n' + FAKE_LOG_READER.split("\n", 1)[1])
+    script(videos.parent / "log_reader", f'#!/bin/bash\necho "$1 $2" >> {calls}\n' + FAKE_LOG_READER.split("\n", 1)[1])
     rsync_log = videos.parent / "rsync_calls"
     script(videos.parent / "bin/rsync", f'#!/bin/bash\necho "$@" >> {rsync_log}\n' + FAKE_RSYNC.split("\n", 1)[1])
     for _ in range(2):
         calls.unlink(missing_ok=True)
         rsync_log.unlink(missing_ok=True)
-        process = subprocess.run(["bash", str(repo / "helpers/fetch_comma_segments.sh")], env=env, text=True,
-                                 capture_output=True, timeout=60)
-        assert process.returncode == 0, process.stdout + process.stderr
-    # The gear of every rlog is kept next to it, the files already here are not asked again.
+        process = fetch(repo, env)
+    # No rlog is read for reverse gear (only the drive's length, from its qlogs), the files already here are not
+    # asked again.
     assert "reverse" not in calls.read_text()
-    assert ".hevc" not in rsync_log.read_text()
+    assert ".hevc" not in rsync_log.read_text() and "rlog" not in rsync_log.read_text()
     assert "already here" in process.stdout
-    assert (videos / f"{NEW}--4/gear").read_text().startswith("reverse ")
+    assert not (videos / f"{NEW}--4/gear").exists()
+
+
+def test_the_distill_layout_still_leaves_out_the_start_the_end_and_reverse_gear(comma):
+    repo, _data, _videos, env = comma
+    shutil.rmtree(repo / "src")
+    fetch(repo, env)
+    linked = sorted(folder.name for folder in (repo / "data").iterdir() if (folder / "fcamera.hevc").is_symlink())
+    hex_new, hex_old = NEW.replace("-", ""), OLD.replace("-", "")
+    assert linked == sorted(f"{route}{segment:02d}" for route in (hex_new, hex_old) for segment in (2, 3, 5))

@@ -229,8 +229,7 @@ class ReviewService:
     def video_gop(self, route, segment: int, decoded: int) -> dict:
         """The frames of the road video around one, a GOP (nnslr_tools.video_frames), for the arrows of Sign review:
         each with its key (the report's row when it is one), their previews ready in the cache. ``frame_count``: the
-        frames of the segment's video; ``seconds``: the seconds kept of a segment kept only at a car park's speed
-        (None: every second)."""
+        frames of the segment's video."""
         directory, rows, _by_key = self.known_report(route)
         try:
             video = video_frames.video_of(self.root, route, segment)
@@ -241,18 +240,16 @@ class ReviewService:
             video_frames.read_timings_soon(video)
         except (video_frames.VideoFrameError, OSError) as exc:
             raise ReviewRejected(404, 'no_video_frame', 'This frame of the video cannot be shown: ' + str(exc)) from exc
-        seconds = video_frames.kept_seconds(self.root, route, segment)
         keys = {}
         for row in rows:
             if row.get('segment_index') == segment and type(row.get('decoded_frame_index')) is int:
                 keys[row['decoded_frame_index']] = row['frame_key']
         frames = []
         for index in range(first, last + 1):
-            if seconds is None or int(index / CAMERA_FPS) in seconds:
-                frames.append({'decoded': index, 'media_time_s': index / CAMERA_FPS,
-                               'frame_key': keys.get(index, f'{segment}/{READ_INDEX_BASE + index}')})
+            frames.append({'decoded': index, 'media_time_s': index / CAMERA_FPS,
+                           'frame_key': keys.get(index, f'{segment}/{READ_INDEX_BASE + index}')})
         return {'route_id': route, 'run_id': directory.name, 'segment_index': segment, 'frame_count': count,
-                'gop': [first, last], 'seconds': seconds, 'frames': frames}
+                'gop': [first, last], 'frames': frames}
 
     def video_frame_row(self, route, frame_key: str, body) -> tuple[dict | None, bool]:
         """(report row, made now) of a frame between the seconds the page confirms (with its boxes, or as no sign):
@@ -288,8 +285,6 @@ class ReviewService:
         if valid:
             try:
                 video_frames.gop_of(video_frames.video_of(self.root, snapshot.route, segment), decoded)
-                seconds = video_frames.kept_seconds(self.root, snapshot.route, segment)
-                valid = seconds is None or int(decoded / CAMERA_FPS) in seconds
             except (video_frames.VideoFrameError, OSError):
                 valid = False
         if not valid:
@@ -373,19 +368,6 @@ class ReviewService:
                 found[str(segment)] = video_frames.frame_count(video) if segment in saved else None
             except (video_frames.VideoFrameError, OSError):
                 continue
-        return found
-
-    def kept_seconds(self, route: str, videos: dict) -> dict[str, list[int]]:
-        """{segment: its seconds kept} of the segments of ``videos`` (self.videos) kept only at a car park's speed: the
-        page offers a frame of their video only in those seconds, the ones video_gop gives and materialize saves."""
-        found = {}
-        for segment in videos:
-            try:
-                seconds = video_frames.kept_seconds(self.root, route, int(segment))
-            except (OSError, ValueError):
-                continue
-            if seconds is not None:
-                found[str(segment)] = seconds
         return found
 
     def forget_video_frame(self, route, frame_key: str) -> None:
