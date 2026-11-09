@@ -36,12 +36,24 @@ export function commaReadText(row: FrameRow): string {
   return 'the comma read ' + (typeof kph === 'number' ? kph : 'a sign') + ' here';
 }
 
-/** How far into the drive the frame is, "12:46" (1:02:05 past an hour): the segment's minute and the second in it;
- * null when the extraction did not record the second. */
+/** The first segment of the drive's frames: the drive's 0:00, as Speed review's player counts (a drive whose first
+ * minutes were not uploaded starts at its first segment there, not at segment 0). */
+let firstOf: {rows: readonly FrameRow[]; first: number} = {rows: [], first: 0};
+function firstSegment(): number {
+  if (firstOf.rows !== report.rows) {
+    let first = Infinity;
+    for (const row of report.rows) if (row.segment_index < first) first = row.segment_index;
+    firstOf = {rows: report.rows, first: Number.isFinite(first) ? first : 0};
+  }
+  return firstOf.first;
+}
+
+/** How far into the drive the frame is, "12:46" (1:02:05 past an hour), on the clock of Speed review's player: the
+ * minutes since the drive's first segment and the second in it; null when the extraction did not record the second. */
 export function driveTime(row: FrameRow): string | null {
   const second = segmentSecond(row);
   if (second === null) return null;
-  const total = Math.floor(row.segment_index * 60 + second + 1e-6);
+  const total = Math.max(0, Math.floor((row.segment_index - firstSegment()) * 60 + second + 1e-6));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const pad = (value: number): string => String(value).padStart(2, '0');
