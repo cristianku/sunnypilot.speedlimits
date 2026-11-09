@@ -368,7 +368,7 @@ const numbers = computed(() => {
           <strong>OK for training</strong> in Data › Speed review, each whole:
           <strong>{{ plural(brainLabels.training.drives, 'drive') }}</strong> marked,
           <strong>{{ brainLabels.training.hours.toFixed(1) }}</strong> h.<template v-if="brainLabels.training.waiting">
-          {{ plural(brainLabels.training.waiting, 'dashcam drive') }} {{ brainLabels.training.waiting === 1 ? 'waits' : 'wait' }}
+          {{ ' ' + plural(brainLabels.training.waiting, 'dashcam drive') }} {{ brainLabels.training.waiting === 1 ? 'waits' : 'wait' }}
           for the mark and {{ brainLabels.training.waiting === 1 ? 'stays' : 'stay' }} out whole until then.</template></p>
         <p v-if="brainLabels?.problem" class="latest-none warn-text" id="train-brain-labels">{{ brainLabels.problem }}</p>
         <p v-else-if="brainLabels?.partitions" class="latest-none" id="train-brain-labels">Your speed on
