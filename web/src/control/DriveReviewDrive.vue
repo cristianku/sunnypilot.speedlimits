@@ -43,7 +43,7 @@ const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: C
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
   segments: [segments: SyncSegment[]]; index: [index: VideoState['index']];
-  frame: [frame: {segment: number; frame: number} | null]}>();
+  frame: [frame: {segment: number; frame: number} | null]; scan: [scan: ScanState]}>();
 /** The car's speed on the picture and at the side: the page's own (carKph) when it gives one, else vEgo of the logs. */
 const ownSpeed = computed(() => props.carKph !== undefined);
 
@@ -88,10 +88,12 @@ const hasLogs = computed(() => view.value !== null && view.value.t0_ns !== null)
 const end = computed(() => view.value?.span_s?.[1] ?? video.value?.index?.duration ?? 0);
 const t0 = computed(() => view.value?.t0_ns ?? 0);
 
-/** While a search of the logs runs, its state every 2 s; the drive again when it ends. */
+/** While a search of the logs runs, its state every 2 s; the drive again when it ends. Each state goes to the page around
+ * (scan), which reads its own view of the drive again when the search ends. */
 let scanTimer: number | undefined;
 function followScan(state: ScanState): void {
   window.clearTimeout(scanTimer);
+  emit('scan', state);
   if (state.state !== 'queued' && state.state !== 'scanning') return;
   scanTimer = window.setTimeout(async () => {
     try {
@@ -741,7 +743,7 @@ watch(() => props.route, () => {
                             @pick-map="(from, to, kph) => emit('pickMap', from, to, kph)">
             <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
           </DriveReviewLanes>
-          <p v-else class="dr-hint">{{ NO_LOGS }}</p>
+          <p v-else class="dr-hint">{{ !scan || scan.state === 'no_logs' ? NO_LOGS : scanText(scan).text }}</p>
         </div>
 
         <aside class="dr-side">

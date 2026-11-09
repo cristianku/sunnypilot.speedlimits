@@ -727,15 +727,18 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
     (held: held_spans), its blocks, its roadworks, the kinds of road (road_kinds), their marks (road) and how far each was
     gone through (road_checked_ns, by kind), the road types of the map with a person's corrections (road_types:
     road_type_stretches; road_type_names, in their order), its first and last ns (span_ns, where a block may go), its
-    length and whether the brain learns from it (dashcam: dashcam_drive). A drive whose logs are not scanned has no speed,
-    no span, no road types and dashcam None."""
+    length and whether the brain learns from it (dashcam: dashcam_drive), and the reading of its logs (scan: state,
+    progress, error of DriveReviewStore.scan_state). A drive whose logs are not scanned has no speed, no span, no road
+    types and dashcam None."""
     span = _span_of(drives, route)
+    scan = drives.scan_state(route)
     view = {'ok': True, 'route': route, 'revision': store.revision(route), 'blocks': store.blocks(route),
             'works': store.works(route), 'works_checked_ns': store.works_checked(route), 'road_kinds': store.road_kinds(),
             'road': store.road(route), 'road_checked_ns': store.road_checked(route), 'road_types': [],
             'road_type_names': list(road_types.ROAD_TYPES), 'speed': [], 'held': [],
             'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
-            'dashcam': None if span is None else dashcam_drive(drives.summary(route))}
+            'dashcam': None if span is None else dashcam_drive(drives.summary(route)),
+            'scan': {key: scan[key] for key in ('state', 'progress', 'error')}}
     if span is not None:
         merged = drives.merged(route)
         view.update(speed=speed_curve(merged, span), held=held_spans(merged, span), span_ns=list(span),

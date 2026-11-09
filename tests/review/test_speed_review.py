@@ -39,6 +39,9 @@ class FakeDrives:
     def summary(self, route):
         return {'t0_ns': T0, 'span_ns': [T0, END]}
 
+    def scan_state(self, route):
+        return {'route': route, 'state': 'done', 'progress': 1, 'error': None, 'files': 1}
+
     def merged(self, route):
         return merged(self.points)
 
@@ -267,10 +270,15 @@ def test_a_drive_without_a_scan_has_no_speed_and_takes_no_block(store):
     class NoLogs(FakeDrives):
         def summary(self, route):
             return None
+
+        def scan_state(self, route):
+            return {'route': route, 'state': 'scanning', 'progress': 0.407, 'error': None, 'files': 14}
     view = speed_review.drive_view(store, NoLogs(), ROUTE)
     assert view['speed'] == [] and view['held'] == [] and view['blocks'] == [] and view['revision'] == 0
     assert view['total_s'] == 0
     assert view['span_ns'] is None
+    # The page says the reading at work and how far, and follows it.
+    assert view['scan'] == {'state': 'scanning', 'progress': 0.407, 'error': None}
     with pytest.raises(SpeedReviewError) as refused:
         speed_review.save_block(store, NoLogs(), ROUTE, {}, 'a')
     assert refused.value.status == 404

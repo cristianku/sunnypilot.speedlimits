@@ -450,7 +450,7 @@ class DriveReviewStore:
 
     def scan_state(self, route: str) -> dict:
         """What the page says of a drive's logs and scan: state no_logs, unreadable_logs (logs found that this server
-        cannot open, and no other), not_scanned, queued, scanning, failed, outdated (new logs, a newer scanner or
+        cannot open, and no other), not_scanned (logs imported or only found on this server, not read yet), queued, scanning, failed, outdated (new logs, a newer scanner or
         extractor, or a cached extract to read again), no_episodes or done. unreadable_files: the logs found that
         cannot be opened, in any state (a drive can have some of each)."""
         files = self._rows("SELECT segment, kind, sha256, state FROM log_files WHERE route = ?", (route,))
@@ -468,6 +468,10 @@ class DriveReviewStore:
         if scan and scan['state'] in ('queued', 'scanning', 'failed'):
             return {**base, 'state': scan['state']}
         if not files:
+            # Logs on this server not imported yet (a drive just copied from the comma): to read, not missing.
+            unreadable = {row['path'] for row in self._rows('SELECT path FROM log_errors WHERE route = ?', (route,))}
+            if any(item['path'] not in unreadable for item in drive_logs.discover(self.root, route)):
+                return {**base, 'state': 'not_scanned'}
             return {**base, 'state': 'unreadable_logs' if errors else 'no_logs'}
         if scan is None or scan['state'] != 'done':
             return {**base, 'state': 'not_scanned'}

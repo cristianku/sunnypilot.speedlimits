@@ -51,7 +51,7 @@ import {linkedFrame, openFrame} from '../review/navigation';
 import SignEditorPanel from '../review/SignEditorPanel.vue';
 import SignEditorStage from '../review/SignEditorStage.vue';
 import {report as editReport, rowOf, state as editState} from '../review/store';
-import {clockOf, secondOf as frameSecondOf, type SyncSegment} from './drive-review';
+import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import Segmented from './Segmented.vue';
 import {isOtherRoad, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
@@ -98,6 +98,27 @@ async function read(): Promise<void> {
     error.value = '';
   } catch (problem) {
     error.value = messageOf(problem);
+  }
+}
+/** Before its logs are read, what keeps the speed away: the search at work with its share, or what to do. */
+const noSpeed = computed((): string => {
+  const scan = drive.value?.scan;
+  if (scan?.state === 'queued' || scan?.state === 'scanning') {
+    return 'No speed to show yet: the logs of this drive are being read' + (scan.state === 'scanning' ? ', '
+      + Math.round((scan.progress || 0) * 100) + '%' : '') + '. The speed shows here when they are.';
+  }
+  if (scan?.state === 'failed') return 'No speed to show: reading the logs failed (' + (scan.error ?? 'unknown error') + ').';
+  if (scan?.state === 'no_logs') return 'No speed to show: this drive has no logs on the server.';
+  return 'No speed to show: the logs of this drive are not read yet. Search the logs, at the top, reads them.';
+});
+/** The player's search of the logs: its share while it runs, and the drive again when it ends. */
+function onScan(state: ScanState): void {
+  if (!drive.value) return;
+  if (state.state === 'queued' || state.state === 'scanning') {
+    drive.value = {...drive.value, scan: {state: state.state, progress: state.progress, error: state.error}};
+  } else if (drive.value.scan?.state === 'queued' || drive.value.scan?.state === 'scanning'
+    || (!drive.value.span_ns && ['done', 'no_episodes', 'outdated'].includes(state.state))) {
+    void read();
   }
 }
 const blocks = computed(() => drive.value?.blocks ?? []);
@@ -868,7 +889,7 @@ function worksIn(from: number, to: number) {
                     :arrows="!(editing && onFrame)"
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
                     @pick-map="fromMap" @segments="(value) => { segments = value; }" @index="(value) => { videoIndex = value ?? null; }"
-                    @frame="(value) => { presented = value; }">
+                    @frame="(value) => { presented = value; }" @scan="onScan">
     <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
     <template #hud>
       <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
@@ -1008,7 +1029,7 @@ function worksIn(from: number, to: number) {
         </template>
         <p v-else-if="error" class="dr-hint">{{ error }}</p>
         <p v-else-if="!drive" class="dr-hint">Loading…</p>
-        <p v-else-if="!drive.span_ns" class="dr-hint">No speed to show: the logs of this drive are not read yet.</p>
+        <p v-else-if="!drive.span_ns" class="dr-hint" id="sr-no-speed">{{ noSpeed }}</p>
         <template v-else>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
           <p v-if="drive.dashcam === false" class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the brain

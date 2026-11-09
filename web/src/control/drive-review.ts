@@ -186,7 +186,7 @@ export function scanText(scan: ScanState): {text: string; tone: 'muted' | 'todo'
   switch (scan.state) {
     case 'no_logs': return {text: NO_LOGS, tone: 'muted'};
     case 'unreadable_logs': return {text: 'Logs found, but this server cannot open them (their file permissions).', tone: 'bad'};
-    case 'not_scanned': return {text: 'Logs imported, not searched yet.', tone: 'todo'};
+    case 'not_scanned': return {text: 'The logs are on the server, not searched yet.', tone: 'todo'};
     case 'queued': return {text: 'Waiting to search the logs…', tone: 'busy'};
     case 'scanning': return {text: 'Searching the logs… ' + Math.round((scan.progress || 0) * 100) + '%', tone: 'busy'};
     case 'failed': return {text: 'The search failed: ' + (scan.error ?? 'unknown error') + '.', tone: 'bad'};

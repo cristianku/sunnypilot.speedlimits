@@ -2,7 +2,7 @@
 // the rules of its commands. Everything is on the comma's clock, in ns. The driver's dashboard speed is the answer the brain
 // learns, at every moment of the drive: nothing needs a confirmation. A block is the only correction, from a time to a time:
 // its kph replaces his speed there, and a block with kph null leaves those moments out of the training.
-import type {DriveRow} from './drive-review';
+import type {DriveRow, ScanState} from './drive-review';
 
 /** A point of the driver's speed, where it changes: [t_ns, kph], kph null where the logs have no speed. */
 export type SpeedPoint = [number, number | null];
@@ -102,6 +102,8 @@ export interface SpeedDrive {
   /** Whether the brain learns from the drive: sunnypilot off in all of it (speed_review.dashcam_drive); null before its
    * logs are read. */
   dashcam: boolean | null;
+  /** The reading of its logs (DriveReviewStore.scan_state); missing from a server older than it. */
+  scan?: Pick<ScanState, 'state' | 'progress' | 'error'>;
 }
 
 export interface SpeedRow extends DriveRow {

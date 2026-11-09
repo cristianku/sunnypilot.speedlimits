@@ -265,7 +265,8 @@ def test_a_drive_without_logs_says_so_and_its_video_review_still_works(tmp_path)
 def test_import_states_from_found_to_scanned_to_outdated_and_unreadable(tmp_path):
     comma_drive(tmp_path, segments=(0, 1))
     store = drive_review.store_for(tmp_path)
-    assert store.scan_state(ROUTE)['state'] == 'no_logs'
+    # Found on the server and not imported yet: to read, not missing (a drive just copied from the comma).
+    assert store.scan_state(ROUTE)['state'] == 'not_scanned' and store.needs_scan(ROUTE)
     assert store.import_logs(ROUTE) == {'found': 2, 'new': 2, 'files': 2}
     assert store.scan_state(ROUTE)['state'] == 'not_scanned'
     assert store.scan(ROUTE)['state'] == 'done'
