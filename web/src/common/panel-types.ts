@@ -1617,7 +1617,8 @@ export type TrainSettingsAction = 'train_cutter' | 'train_classifier' | 'train_d
  * inside a block left out, at the edge of a block, no picture, a machine held the speed, no road type. */
 export type BrainOut = 'no_speed' | 'stopped' | 'left_out' | 'boundary' | 'no_frame' | 'cruise' | 'no_road_type';
 /** GET /api/panel/brain-labels (brain_targets.summary): what the brain's training gets today from every drive with its logs
- * read and its frames, in seconds of the drives. speed: his own speed, or a block's of Speed review; works_in/works_out:
+ * read and its frames that a person marked OK for training in Speed review (each whole), in seconds of the drives;
+ * training: brain_targets.training_counts, those drives, their hours, and the dashcam drives that wait for the mark. speed: his own speed, or a block's of Speed review; works_in/works_out:
  * the roadworks answers; next: the next limit from the signs our networks read, his Sign review over them; sites: the
  * roadworks sites. Per drive the same, with why the rest is out and whether our networks read it (networks_read); to_read:
  * the drives the training reads again first as the car does; signs_to_read: those our networks in use read first (null
@@ -1644,6 +1645,17 @@ export interface BrainLabels {
   road_labels?: Record<string, string>;
   to_read?: number;
   signs_to_read?: number | null;
+  /** Missing from a server older than the switch "OK for brain training" (9 Nov 2026). */
+  training?: BrainTraining;
+}
+/** The drives the brain learns from (brain_targets.training_counts): marked OK for training in Speed review and their hours
+ * from the start of their logs to the end; waiting: the dashcam drives not marked yet, left out whole; sunnypilot_on: the
+ * drives read with sunnypilot on, never learnt. */
+export interface BrainTraining {
+  drives: number;
+  hours: number;
+  waiting: number;
+  sunnypilot_on: number;
 }
 export interface TrainSettings {
   label: string;

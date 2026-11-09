@@ -3,7 +3,8 @@
 // frames, drives; the reviews not imported yet), a link to Data › Training dataset, where they are imported. Then one network at a time, chosen
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
-// experiment B), the brain (scripts/run_brain.sh: its three seeds, from every dashcam drive with its logs read: his own speed with
+// experiment B), the brain (scripts/run_brain.sh: its three seeds, from every dashcam drive with its logs read and marked OK for
+// training in Speed review, each whole: his own speed with
 // the blocks of Speed review, the next limit of the signs our networks read with his Sign review over them, which it says before the click), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
@@ -208,7 +209,8 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   const shown = value.state === 'running' || Object.values(curves).some((curve) => Boolean(curve?.points.length));
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
-/** What every dashcam drive with its logs read gives the brain today (his speed, the blocks of Speed review as its corrections, the
+/** What every dashcam drive with its logs read and marked OK for training in Speed review, each whole, gives the brain
+ * today (his speed, the blocks of Speed review as its corrections, the
  * next limit of the signs our networks read, his Sign review over them), asked when its section opens and when a training of it ends (about 10 s on the server:
  * never with the status). */
 const brainLabels = shallowRef<BrainLabels | null>(null);
@@ -362,9 +364,15 @@ const numbers = computed(() => {
       <template v-else-if="section === 'brain'">
         <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null"
                     @run="(name, state) => emit('run', name, state, undefined, brainChoices.option)"/>
+        <p v-if="brainLabels?.training" class="latest-none" id="train-brain-marked">It learns only the drives marked
+          <strong>OK for training</strong> in Data › Speed review, each whole:
+          <strong>{{ plural(brainLabels.training.drives, 'drive') }}</strong> marked,
+          <strong>{{ brainLabels.training.hours.toFixed(1) }}</strong> h.<template v-if="brainLabels.training.waiting">
+          {{ plural(brainLabels.training.waiting, 'dashcam drive') }} {{ brainLabels.training.waiting === 1 ? 'waits' : 'wait' }}
+          for the mark and {{ brainLabels.training.waiting === 1 ? 'stays' : 'stay' }} out whole until then.</template></p>
         <p v-if="brainLabels?.problem" class="latest-none warn-text" id="train-brain-labels">{{ brainLabels.problem }}</p>
         <p v-else-if="brainLabels?.partitions" class="latest-none" id="train-brain-labels">Your speed on
-          {{ plural(brainLabels.drives?.length ?? 0, 'drive') }} with sunnypilot off and their logs read, the blocks of Speed review as its corrections:
+          {{ plural(brainLabels.drives?.length ?? 0, 'drive') }} of those marked (one whose logs show openpilot driving, or whose frames changed, stays out), the blocks of Speed review as its corrections:
           <strong>{{ thousands(brainLabels.partitions.train.speed) }}</strong> seconds to learn from,
           <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
           <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. The signs our networks read, yours of Sign review over

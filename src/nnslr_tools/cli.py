@@ -1645,7 +1645,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_tunnels.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_tunnels.set_defaults(func=_cmd_tunnels)
     p_brain = sub.add_parser("brain-targets", help="what the brain's training gets today from every dashcam drive "
-                                                   "(sunnypilot off) with its logs read and its frames: per partition and per drive the frames "
+                                                   "(sunnypilot off) with its logs read and its frames, marked OK for "
+                                                   "training in Speed review: per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
                                                    "with an answer on roadworks and with the next limit (the signs our "
                                                    "networks in use read, Sign review's over them where the frames "
@@ -1653,7 +1654,8 @@ def build_parser() -> argparse.ArgumentParser:
                                                    "and why the others are out. Reads only: it writes nothing and "
                                                    "trains nothing")
     p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the brain "
-                                                          "can learn from (its logs read to the end and its frames)")
+                                                          "learns from (its logs read to the end and its frames, "
+                                                          "marked OK for training in Speed review)")
     p_brain.add_argument("--json", action="store_true", help="the same as JSON")
     p_brain.add_argument("--no-road-types", action="store_true",
                          help="as a training with --no-road-types: the seconds without a road type answer too")
@@ -1667,7 +1669,8 @@ def build_parser() -> argparse.ArgumentParser:
                                                        "by these networks is not read again; nothing in Sign review "
                                                        "changes")
     p_brain_signs.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the "
-                                                                "brain can learn from")
+                                                                "brain learns from (marked OK for training in Speed "
+                                                                "review)")
     p_brain_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_signs.set_defaults(func=_cmd_brain_signs)
     p_regression_plan = sub.add_parser("regression-plan", help="what a run of Models › Regression still has to compute: a "
@@ -1683,7 +1686,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_regression_brain.add_argument("--device", default="cuda", help="cuda or cpu")
     p_regression_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_regression_brain.set_defaults(func=_cmd_regression_brain)
-    p_brain_net = sub.add_parser("train-brain", help="train the brain on every drive with its logs read (GPU, "
+    p_brain_net = sub.add_parser("train-brain", help="train the brain on every dashcam drive with its logs read that "
+                                                     "a person marked OK for training in Speed review, each whole (GPU, "
                                                      ".venv-gpu): the speed to hold, the driver's own corrected by the "
                                                      "blocks of Speed review, with the roadworks and the kinds of road "
                                                      "as tasks of the same network and the next limit of the signs our "
@@ -1692,6 +1696,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "sites it never learned. Writes brain-last.pt and result.json "
                                                      "into --run-dir")
     p_brain_net.add_argument("--run-dir", required=True, help="the folder of this run")
+    p_brain_net.add_argument("--route", action="append",
+                             help="route id; repeat for more: only these drives, those still marked OK for training "
+                                  "(scripts/run_brain.sh passes the drives of its start to every seed). Default: every "
+                                  "drive the brain learns from")
     p_brain_net.add_argument("--no-works", action="store_true", help="the comparison: the same training without the roadworks")
     p_brain_net.add_argument("--no-road", action="store_true",
                              help="the comparison: the same training without the kinds of road of Speed review")
@@ -1768,7 +1776,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                          "its contract, checked against PyTorch and along a real drive (CPU, "
                                                          ".venv-gpu). Writes <run>/export/brain.onnx")
     p_brain_export.add_argument("--run-dir", required=True, help="the folder of the run with brain-last.pt")
-    p_brain_export.add_argument("--route", help="the drive of the check; default: the one with the most frames in test")
+    p_brain_export.add_argument("--route", help="the drive of the check, any dashcam drive with the brain's pictures; "
+                                                "default: the one with the most frames in test among those marked OK "
+                                                "for training")
     p_brain_export.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_export.set_defaults(func=_cmd_export_brain)
     p_junctions = sub.add_parser("junctions", help="the intersections the car drives through, from its GPS track and "
@@ -1877,8 +1887,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--device", choices=("auto", "cpu"), default="auto",
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
+    p_road_signs.add_argument("--route", action="append",
+                              help="route id; repeat for more: only these drives, instead of every one of the list "
+                                   "chosen (with --labelled: scripts/run_brain.sh passes the drives of its start; "
+                                   "--certified always takes its own)")
     p_road_signs.add_argument("--labelled", action="store_true",
-                              help="every drive the brain learns from (its logs read to the end and its frames) "
+                              help="every drive the brain learns from (its logs read to the end and its frames, "
+                                   "marked OK for training in Speed review) "
                                    "instead of those with road types, with the brain's pictures: what the brain "
                                    "needs (scripts/run_brain.sh)")
     p_road_signs.add_argument("--certified", action="store_true",
@@ -2678,8 +2693,8 @@ def _cmd_brain_signs(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     routes = list(args.route or []) or training_routes(root)
     if not routes:
-        print("nnslr brain-signs: no drive to learn from (sunnypilot off, its logs read to the end and its frames)",
-              file=sys.stderr)
+        print("nnslr brain-signs: no drive to learn from (sunnypilot off, its logs read to the end and its frames, "
+              "marked OK for training in Data › Speed review)", file=sys.stderr)
         return 2
     try:
         setup = brain_signs.reader_setup(root)
@@ -2732,7 +2747,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, driver=args.driver, road=not args.no_road,
                                      types=not args.no_road_types, device=args.device,
-                                     dry_run=args.dry_run,
+                                     dry_run=args.dry_run, routes=args.route,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
@@ -3123,9 +3138,10 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
             print("nnslr road-type-signs: no certified drive is prepared", flush=True)
             return 0
     else:
-        routes = training_routes(root) if args.labelled else road_type_routes(root)
+        routes = list(args.route or []) or (training_routes(root) if args.labelled else road_type_routes(root))
     if not routes:
-        print("nnslr road-type-signs: " + ("no drive to learn from (sunnypilot off, its logs read to the end and its frames)"
+        print("nnslr road-type-signs: " + ("no drive to learn from (sunnypilot off, its logs read to the end and its frames, "
+                                           "marked OK for training in Data › Speed review)"
                                            if args.labelled else "no drive with road types (nnslr road-types)"),
               file=sys.stderr)
         return 2

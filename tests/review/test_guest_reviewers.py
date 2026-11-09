@@ -431,6 +431,10 @@ def test_sign_distance_and_speed_review_take_the_name_of_the_guest(outside, monk
     assert who == ['guest/ana'] * 3
     # A guest marks with the kinds of road of this server and adds none.
     assert server.request('POST', '/api/speed-review/road-kinds', body={'label': 'x'}, headers=proof())[0] == 403
+    # Nor marks a drive OK for brain training, even one given to them: only the administrator does.
+    monkeypatch.setattr(speed_review, 'save_training', lambda *args: pytest.fail('a guest marked a drive'))
+    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/training', body={'ok': True},
+                          headers=proof())[0] == 403
     # The token alone still writes neither: as always, only a person.
     keys = {'X-Review-Token': TOKEN}
     assert server.request('POST', f'/api/sign-distance/drives/{ROUTE}/marks', body={}, headers=keys)[0] == 403

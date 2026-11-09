@@ -8,7 +8,9 @@
 // does: a drive has a speed only once its logs are read. Under it, the drives with frames of their signs still for a
 // person to confirm (GET /api/routes, sunnypilot on or off; a frame the AI saved waits for a person too), a tap opening
 // the drive on its Signs side at the first of them, and folded under them the drives with every frame confirmed, to
-// open again: the list of Sign review, now that its page is retired (9 Nov 2026).
+// open again: the list of Sign review, now that its page is retired (9 Nov 2026). Each drive says whether a person marked
+// it OK for brain training (only those enter the training, each whole: brain_targets.training_routes), and a choice above
+// the list shows all of them, only those, or only those not yet (remembered in this browser).
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isGuest} from '../common/guest';
@@ -17,6 +19,7 @@ import {signsHref} from '../common/sign-link';
 import {clockOf, scanText} from './drive-review';
 import ReadLogsCard from './ReadLogsCard.vue';
 import SectionHead from './SectionHead.vue';
+import Segmented from './Segmented.vue';
 import type {SpeedRow} from './speed-review';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {tabDrive} from './tabs';
@@ -35,8 +38,35 @@ async function load(): Promise<void> {
 }
 // By date and time ("when" ends in the time): the number of a drive is not its date, the comma's count started again.
 const startOf = (drive: SpeedRow): string => (drive.day ?? '') + (drive.when ?? '').slice(-5);
-const rows = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
+/** The drives the list can show: not those with sunnypilot on, the newest first. */
+const listed = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
   .sort((a, b) => startOf(b).localeCompare(startOf(a))));
+
+// -- OK for brain training ---------------------------------------------------------------------------------------------
+type TrainingFilter = 'all' | 'ok' | 'not_yet';
+const TRAINING_FILTERS = [{key: 'all', label: 'All'}, {key: 'ok', label: 'OK for training'},
+  {key: 'not_yet', label: 'Not yet'}] as const;
+const FILTER_KEY = 'speed-review-training-filter';
+function readFilter(): TrainingFilter {
+  try {
+    const stored = localStorage.getItem(FILTER_KEY);
+    return stored === 'ok' || stored === 'not_yet' ? stored : 'all';
+  } catch {
+    return 'all';
+  }
+}
+const filter = ref<TrainingFilter>(readFilter());
+watch(filter, (value) => {
+  try {
+    localStorage.setItem(FILTER_KEY, value);
+  } catch {
+    // A private window keeps nothing: all of them next time.
+  }
+});
+const trainingOk = (drive: SpeedRow): boolean => drive.training_ok === true;
+const okCount = computed(() => listed.value.filter(trainingOk).length);
+const rows = computed(() => filter.value === 'all' ? listed.value
+  : listed.value.filter((drive) => trainingOk(drive) === (filter.value === 'ok')));
 /** Drives where sunnypilot was on: the brain does not learn from them, the list leaves them out. */
 const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
 /** What a drive has: its length, its blocks, its roadworks marks and its marks of a kind of road; before its logs are read,
@@ -110,20 +140,28 @@ onBeforeUnmount(() => window.clearTimeout(timer));
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>
-        <span v-if="drives" class="ds-when">{{ plural(rows.length, 'drive') }}</span>
+        <span v-if="drives" class="ds-when">{{ plural(listed.length, 'drive') }} · {{ okCount }} OK for training</span>
       </div>
       <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
         is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
         time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too. Nothing here changes the car.</p>
       <p v-if="engaged" class="import-why" id="sr-engaged">Only drives with sunnypilot off (sunnylink › Toggles › Enable
         sunnypilot): there the speed is all yours. {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} not listed.</p>
+      <p class="import-why" id="sr-training-why">The brain learns only from the drives marked <b>OK for training</b>, each
+        whole: open a drive, go through all of it, and once every sign is marked right, turn its switch on.</p>
+      <div class="sr-list-tools">
+        <Segmented v-model="filter" :options="TRAINING_FILTERS" label="Which drives"/>
+      </div>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
+      <p v-else-if="!rows.length && listed.length" class="empty">{{ filter === 'ok'
+        ? 'No drive is marked OK for training yet.' : 'Every drive is marked OK for training.' }}</p>
       <ul v-else class="rt-list">
         <li v-for="drive in rows" :key="drive.route" class="rt-drive dr-drive">
           <a class="rt-open" :href="hrefOf(drive)">
             <div class="rt-name">
-              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
+              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b>
+                <b v-if="trainingOk(drive)" class="sr-ok-badge">OK FOR TRAINING</b></strong>
               <span><template v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</template>{{
                 drive.minutes !== null ? ' · ' + drive.minutes + ' min' : '' }}</span>
             </div>

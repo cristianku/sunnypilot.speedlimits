@@ -35,7 +35,9 @@
 // same, without them. This side is where the signs are reviewed since the page of Sign review was retired (9 Nov 2026):
 // a link of the signs (common/sign-link.ts, "?side=signs&frame=<key>&segment=N&second=S", the server's address of Sign
 // review leading there) opens it on that frame, else the frame nearest the moment, else the first still to review; there
-// too "Review with AI" (components/AiRouteSheet.vue). A guest given only the drive's signs has only this side.
+// too "Review with AI" (components/AiRouteSheet.vue). A guest given only the drive's signs has only this side. At the top
+// of the Speed side, the drive's switch "OK for brain training" (SpeedTrainingSwitch.vue): only the drives with it on
+// enter the brain training, each whole.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -54,6 +56,7 @@ import {report as editReport, rowOf, state as editState} from '../review/store';
 import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import Segmented from './Segmented.vue';
+import SpeedTrainingSwitch from './SpeedTrainingSwitch.vue';
 import {isOtherRoad, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, reviewedFrames, type SignTrack, trackFrames, type VideoFrame, type VideoIndex} from './sign-track';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
@@ -1029,8 +1032,12 @@ function worksIn(from: number, to: number) {
         </template>
         <p v-else-if="error" class="dr-hint">{{ error }}</p>
         <p v-else-if="!drive" class="dr-hint">Loading…</p>
-        <p v-else-if="!drive.span_ns" class="dr-hint" id="sr-no-speed">{{ noSpeed }}</p>
+        <template v-else-if="!drive.span_ns">
+          <p class="dr-hint" id="sr-no-speed">{{ noSpeed }}</p>
+          <SpeedTrainingSwitch :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
+        </template>
         <template v-else>
+          <SpeedTrainingSwitch :drive="drive" :read-only="readOnly" @changed="show" @failed="read"/>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
           <p v-if="drive.dashcam === false" class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the brain
             does not learn from it.</strong> It learns only drives with sunnylink › Toggles › Enable sunnypilot off.</p>

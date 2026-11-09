@@ -102,8 +102,20 @@ export interface SpeedDrive {
   /** Whether the brain learns from the drive: sunnypilot off in all of it (speed_review.dashcam_drive); null before its
    * logs are read. */
   dashcam: boolean | null;
+  /** "OK for brain training" as a person last set it (who and when); null if nobody did, missing from a server older
+   * than it. Only a dashcam drive with ok true enters the brain training, whole (brain_targets.training_routes). */
+  training_ok?: TrainingOk | null;
   /** The reading of its logs (DriveReviewStore.scan_state); missing from a server older than it. */
   scan?: Pick<ScanState, 'state' | 'progress' | 'error'>;
+}
+
+/** A drive's switch "OK for brain training" (speed_review.SpeedReviewStore.training_ok): a person went through the whole
+ * drive and all its signs were marked right. */
+export interface TrainingOk {
+  ok: boolean;
+  reviewer: string;
+  /** UTC, ISO 8601. */
+  at: string;
 }
 
 export interface SpeedRow extends DriveRow {
@@ -114,6 +126,8 @@ export interface SpeedRow extends DriveRow {
   total_s: number;
   /** As SpeedDrive's: the list shows only the drives where it is not false. */
   dashcam: boolean | null;
+  /** Marked OK for brain training (SpeedDrive's training_ok on); missing from a server older than it. */
+  training_ok?: boolean;
 }
 
 /** A block is at least this long (MIN_BLOCK_SECONDS of speed_review.py). */

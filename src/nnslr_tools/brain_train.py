@@ -89,7 +89,8 @@ from nnslr_tools.brain_targets import (BRAIN_INPUTS, DRIVER_INPUTS, INPUT_SIZES,
                                        ahead_weights,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
-                                       road_weights, sign_kph, swap_passages, swapped, type_weights, wet_in_train)
+                                       road_weights, sign_kph, swap_passages, swapped, training_counts,
+                                       training_counts_text, type_weights, wet_in_train)
 from nnslr_tools.road_types import ROAD_TYPES
 from nnslr_tools.road_type_net import FEATURES, FrameStore, HIDDEN, LEARNING_RATE, WEIGHT_DECAY, _augment, _print, _torch
 from nnslr_tools.road_type_signs import load_pictures
@@ -99,6 +100,9 @@ CHUNK = int(64 * RATE_HZ)  # a piece of 64 s, as the 64 frames of the 1 Hz brain
 CLIP = 5.0
 CHECKPOINT = 'brain-last.pt'
 RESULT = 'result.json'
+# The drives a training took (dataset's, before the dry run's cut), written first: scripts/run_brain.sh keeps the dry
+# run's for the whole run, so that every step and every seed has the same drives whatever is marked meanwhile.
+ROUTES = 'routes.json'
 END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
 RIGHT_KPH = 2  # a speed said this near the answer is right (the site says "within 2 km/h")
@@ -569,13 +573,15 @@ def _spoken(speeds: list[int]) -> str:
 
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True, driver: bool = False,
                 road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
-                dry_run: bool = False, seed: int = 0, log=_print) -> dict:
-    """Train on train, keep the last epoch, measure once. Writes brain-last.pt and result.json into run_dir; the checkpoint
+                dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, log=_print) -> dict:
+    """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
+    and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
     would train wrong: brain_targets.check_drives. driver: with his pedals and the car's speed among the inputs, the
     comparison. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
-    types); False, the comparison."""
+    types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
+    the ones still marked OK for training; None, every drive of training_routes."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -583,16 +589,35 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     torch.manual_seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
     groups = LEARNED_INPUTS if driver else ROAD_INPUTS
-    drives = dataset(root, merged_of, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types)
+    # Only the drives a person marked OK for training in Speed review, each whole (brain_targets.training_routes): how
+    # many and how long, and how many wait for the mark, before the dry run keeps only a piece of the first.
+    counts = training_counts(root)
+    log(training_counts_text(counts))
+    if routes is not None:
+        log(f'Only the {len(routes)} drive{"" if len(routes) == 1 else "s"} of the start of this run (--route): '
+            'one marked since waits for the next run.')
+    drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types)
+    if not drives and not counts['drives']:
+        raise ValueError('no drive marked OK for training: mark the drives whose signs are all right in '
+                         'Data › Speed review')
+    if not drives:
+        raise ValueError(f'none of the {counts["drives"]} drives marked OK for training gave the brain a drive to '
+                         'learn: see the lines above for why each was left out'
+                         + ('' if routes is None else ' (only those of the start of this run: a new NAME takes the '
+                                                      'drives marked today)'))
+    # On every drive, before the dry run keeps a piece of one: the split may have put some of them all in val and test.
+    if not any(loss_weights(drive, 'train')[0].any() for drive in drives):
+        raise ValueError('no speed labels in train: the drives marked OK for training in Data › Speed review fall in '
+                         'val and test of the split; mark more drives')
+    (run_dir / ROUTES).write_text(json.dumps([drive['route'] for drive in drives]), encoding='utf-8')
     if dry_run:
-        drives = [_short(drive, DRY_FRAMES) for drive in drives[:1]]
+        # The first drive with an answer in train (one all in val or test would leave the dry run nothing to learn).
+        drives = [_short(next(drive for drive in drives if loss_weights(drive, 'train')[0].any()), DRY_FRAMES)]
         epochs, chunk = 1, DRY_FRAMES // 2
     else:
         check_drives(drives)
     for drive in drives:
         drive['extra'] = pack_inputs(drive['inputs'], groups)
-    if not any(loss_weights(drive, 'train')[0].any() for drive in drives):
-        raise ValueError('no speed labels in train')
     if works:
         _works_needs_both(drives, log)
     kinds = list(drives[0].get('road_kinds', ())) if road and drives else []

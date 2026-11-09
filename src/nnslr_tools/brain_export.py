@@ -116,11 +116,22 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
 
 def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None, device: str = 'cpu',
                   rate: float = 1.0) -> tuple[dict, FrameStore]:
-    """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test."""
-    drives = dataset(root, merged_of, [route] if route else None, rate=rate)
+    """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test. With
+    no route, among the drives the brain learns from (training_routes: marked OK for training in Speed review), the ones
+    with their pictures (a drive marked after the training has none until the next one: it is passed by); a route named
+    may be any dashcam drive, marked or not (dataset's marked False): this only runs the brain along it to check the car's
+    step, it trains nothing. A drive without the brain's pictures is refused: the check would run on black pictures and
+    say nothing."""
+    drives = dataset(root, merged_of, [route] if route else None, rate=rate, marked=route is None)
     if not drives:
-        raise ValueError(f'{route or "no drive"}: not a drive the brain learns from (brain_targets.training_routes)')
-    drive = max(drives, key=lambda item: sum(partition == 'test' for partition in item['partitions']))
+        raise ValueError(f'{route or "no drive"}: not a drive the brain can run along '
+                         f'(brain_targets.{"dashcam_routes" if route else "training_routes"})')
+    pictured = [drive for drive in drives if drive.get('pictures', True)]
+    if not pictured:
+        names = ' '.join(f"--route {drive['route']}" for drive in drives)
+        raise ValueError(f"{route or 'every drive marked OK for training'}: the brain's pictures are not made. Run "
+                         f"nnslr road-type-signs --labelled {names}")
+    drive = max(pictured, key=lambda item: sum(partition == 'test' for partition in item['partitions']))
     drive['extra'] = pack_inputs(drive['inputs'], groups)
     return drive, FrameStore(_pictures(root, [drive], dry_run=False, log=lambda text: None), device)
 

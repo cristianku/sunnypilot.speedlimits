@@ -7,13 +7,17 @@ import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-# The stand-in nnslr: says what it was given, and writes the result of a seed.
+# The stand-in nnslr: says what it was given, writes the drives of the dry run (NNSLR_FAKE_ROUTES, brain_train.ROUTES)
+# and the result of a seed.
 FAKE_NNSLR = '''#!/bin/sh
 echo "args: $*"
 if [ "$1" = train-brain ]; then
-  case " $* " in *" --dry-run "*) exit 0 ;; esac
+  dry=0
+  case " $* " in *" --dry-run "*) dry=1 ;; esac
   while [ $# -gt 0 ]; do [ "$1" = --run-dir ] && dir=$2; shift; done
-  mkdir -p "$dir"; echo '{}' > "$dir/result.json"
+  mkdir -p "$dir"; echo "${NNSLR_FAKE_ROUTES:-[\"00000001--aaaaaaaaaa\"]}" > "$dir/routes.json"
+  [ "$dry" = 1 ] && exit 0
+  echo '{}' > "$dir/result.json"
 fi
 exit 0
 '''
@@ -89,3 +93,35 @@ def test_bad_settings_and_another_kind_of_run_are_refused(tmp_path):
     other.mkdir(parents=True)
     process = run_script(tmp_path, name='n2')
     assert process.returncode == 3 and 'another kind of run' in process.stderr
+
+
+def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
+    """The drives the dry run took (marked OK for training at the start) are kept in routes.json and passed to every
+    step after it and every seed: a drive marked meanwhile waits for the next run, and the seeds stay alike."""
+    first = '["00000001--aaaaaaaaaa", "00000002--bbbbbbbbbb"]'
+    assert run_script(tmp_path, env={'NNSLR_FAKE_ROUTES': first}).returncode == 0
+    pinned = '--route 00000001--aaaaaaaaaa --route 00000002--bbbbbbbbbb'
+    lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
+    calls = [line for line in lines if line.startswith('args: ')]
+    assert calls[0].startswith('args: train-brain --dry-run') and '--route' not in calls[0]
+    assert all(pinned in line for line in calls[1:] if not line.startswith('args: env')), calls
+    # road-type-signs, brain-signs, brain-targets and the three seeds.
+    assert len([line for line in calls if pinned in line]) == 6
+    assert 'drives:       2 (routes.json)' in lines
+    # The same NAME again, a third drive marked meanwhile: the dry run too takes the drives of the start.
+    for seed in range(3):
+        (tmp_path / 'data' / 'runs' / f'n1-s{seed}' / 'result.json').unlink()
+    (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').unlink()
+    process = run_script(tmp_path, env={'NNSLR_FAKE_ROUTES': first[:-1] + ', "00000003--cccccccccc"]'})
+    assert process.returncode == 0, process.stderr + process.stdout
+    calls = [line for line in (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
+             if line.startswith('args: ') and not line.startswith('args: env')]
+    assert len(calls) == 7 and all(pinned in line for line in calls)
+    assert not any('00000003--cccccccccc' in line for line in calls)
+
+
+def test_a_dry_run_that_does_not_say_its_drives_stops_the_run(tmp_path):
+    process = run_script(tmp_path, env={'NNSLR_FAKE_ROUTES': '[]'})
+    assert process.returncode == 3 and 'error: no drive in' in process.stdout + process.stderr
+    # Nothing is kept: the same NAME again takes the drives marked then.
+    assert not (tmp_path / 'data' / 'runs' / 'n1' / 'routes.json').exists()

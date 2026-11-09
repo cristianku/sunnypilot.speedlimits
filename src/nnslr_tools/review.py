@@ -83,6 +83,8 @@ DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-an
 # 127.0.0.1, changes the providers, tests them or asks the AI; the access token (an agent) only reads the settings,
 # the AI state and the measures, none of which holds a key.
 SESSION_REQUIRED_MESSAGE = 'Sign in on the site to use the AI reviewer.'
+# Speed review's "OK for brain training": the administrator's own, never a reviewer from outside nor the token alone.
+TRAINING_SESSION_MESSAGE = 'Only the administrator signed in on the site marks a drive OK for training.'
 # At most this many suggestions (and Tests) wait for the model at once: each holds a request thread for minutes.
 MAX_AI_SUGGESTIONS = 2
 # [box-fit] - START
@@ -1557,7 +1559,7 @@ def make_handler(app: ReviewApp):
                     return
                 self._json(200, {'ok': True, **track})
                 return
-            if re.fullmatch(drive + '/(blocks|works|road|road-type)', path) or path == '/api/speed-review/road-kinds':
+            if re.fullmatch(drive + '/(blocks|works|road|road-type|training)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             self._problem(404, 'not_found', 'Not found.', True)
@@ -1617,8 +1619,11 @@ def make_handler(app: ReviewApp):
             true, "start_ns", "base_revision"} removes one), a tap on its roadworks
             (/works: {"tap", "at_ns", "base_revision"}) or on a kind of road (/road: the same and "kind"), a road type
             (/road-type: {"road_type", "at_ns" or "from_ns" and "to_ns", "base_revision"}, road_type null when it cannot be
-            told), or a new kind of road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on
-            the site (never the access token alone: an agent never writes these) and a panel that is not read-only."""
+            told), a new kind of road (/api/speed-review/road-kinds: {"label"}), or the drive's switch "OK for brain
+            training" (/training: {"ok": true or false}; only the administrator signed in, or the person at a site without
+            sign-in, never a reviewer from outside: review_access does not let a guest reach it either): same origin,
+            JSON, a person signed in on the site (never the access token alone: an agent never writes these) and a panel
+            that is not read-only."""
             from nnslr_tools import drive_review, speed_review
             if re.fullmatch(r'/api/speed-review/drives/[0-9a-f]{8}--[0-9a-f]{10}/sign-track', path):
                 # Made by nnslr sign-tracks only: read here, never written.
@@ -1631,14 +1636,20 @@ def make_handler(app: ReviewApp):
             if content_type.split(';')[0].strip().lower() != 'application/json':
                 self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
                 return
+            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works|road|road-type|training)',
+                                 path)
+            # The switch first, so that the access token alone hears why (not _require_person's words on the AI reviewer).
+            if match is not None and match.group(2) == 'training' and not self._can_use_ai():
+                raise ReviewRejected(403, 'session_required', TRAINING_SESSION_MESSAGE)
             self._require_person()
             if not app.panel.actions_enabled:
                 raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
-            match = re.fullmatch(r'/api/speed-review/drives/([0-9a-f]{8}--[0-9a-f]{10})/(blocks|works|road|road-type)', path)
             if match is None and path != '/api/speed-review/road-kinds':
                 self._problem(404, 'not_found', 'Not found.', True)
                 return
             body = self._read_json()
+            if not isinstance(body, dict):
+                raise ReviewRejected(400, 'invalid_json', 'A JSON object is required.')
             who, _via = self._who()
             reviewer = who or 'local'
             if match is None:
@@ -1652,13 +1663,18 @@ def make_handler(app: ReviewApp):
                 return
             route = match.group(1)
             write = {'blocks': speed_review.save_block, 'works': speed_review.save_works,
-                     'road': speed_review.save_road, 'road-type': speed_review.save_road_type}[match.group(2)]
+                     'road': speed_review.save_road, 'road-type': speed_review.save_road_type,
+                     'training': speed_review.save_training}[match.group(2)]
             try:
                 answer = write(speed_review.store_for(app.root), drive_review.store_for(app.root), route, body, reviewer)
             except speed_review.SpeedReviewError as exc:
                 self._problem(exc.status, exc.reason, exc.message, True)
                 return
-            print(f'Speed review: {route} revision {answer["revision"]} ({terminal_text(reviewer)})', flush=True)
+            if match.group(2) == 'training':
+                print(f'Speed review: {route} OK for training {"on" if answer["training_ok"]["ok"] else "off"} '
+                      f'({terminal_text(reviewer)})', flush=True)
+            else:
+                print(f'Speed review: {route} revision {answer["revision"]} ({terminal_text(reviewer)})', flush=True)
             self._json(200, answer)
         # [speed-review] - END
 

@@ -1,5 +1,6 @@
 """The training loop on a tiny drive, and the measure by hand. The measure needs only numpy: the rest is skipped without
 torch (see test_brain_net.py for how to run it)."""
+import json
 import random
 import re
 
@@ -899,3 +900,107 @@ def test_no_brain_learns_engaged():
     from nnslr_tools import brain_train
     assert 'engaged' not in brain_train.LEARNED_INPUTS + brain_train.ROAD_INPUTS
     assert set(brain_train.LEARNED_INPUTS) - set(brain_train.ROAD_INPUTS) == {'pedals', 'speed'}
+
+
+def test_the_log_says_the_drives_marked_ok_for_training_and_a_train_without_them_names_the_mark(tmp_path, monkeypatch):
+    """Only the drives a person marked OK for training in Speed review are learnt, each whole: the first line says how
+    many, how long and how many wait, before the dry run keeps a piece of the first. Nothing is trained: it stops at the
+    labels, before any network is built."""
+    import types
+
+    from nnslr_tools import brain_train
+    monkeypatch.setattr(brain_train, '_torch', lambda: types.SimpleNamespace(manual_seed=lambda _seed: None,
+                                                                             device=lambda name: name))
+    counts = {'drives': 0, 'hours': 0.0, 'waiting': 1, 'sunnypilot_on': 0}
+    monkeypatch.setattr(brain_train, 'training_counts', lambda root: counts)
+    monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [])
+    lines = []
+    with pytest.raises(ValueError, match='no drive marked OK for training: mark the drives whose signs are all right'):
+        brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, log=lines.append)
+    # Drives marked, none of them usable (no frame, no pictures...): the lines of the dataset say why, not the mark.
+    counts.update(drives=2, hours=1.25)
+    lines.clear()
+    with pytest.raises(ValueError, match='none of the 2 drives marked OK for training gave the brain a drive to learn'):
+        brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, log=lines.append)
+    assert lines == ['Drives marked OK for training (Speed review): 2, 1.2 h; 1 dashcam drive not marked yet, left out whole.']
+    # Drives marked, but none of them in train: the split put them in val and test, and the message says to mark more.
+    monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [{'route': 'r1', 'inputs': None}])
+    monkeypatch.setattr(brain_train, '_short', lambda drive, _frames: drive)
+    monkeypatch.setattr(brain_train, 'pack_inputs', lambda _inputs, _groups: None)
+    monkeypatch.setattr(brain_train, 'loss_weights', lambda _drive, _part: (brain_train.np.zeros(4, dtype=bool),))
+    with pytest.raises(ValueError, match='fall in val and test of the split; mark more drives'):
+        brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, log=lines.append)
+
+
+def test_the_dry_run_takes_the_first_drive_with_an_answer_in_train(tmp_path, monkeypatch):
+    """A drive the frozen split put all in val or test comes first by route: the dry run passes it by and takes the next
+    one with an answer in train, instead of saying the drives marked fall in val and test."""
+    import types
+
+    import numpy
+
+    from nnslr_tools import brain_train
+    monkeypatch.setattr(brain_train, '_torch', lambda: types.SimpleNamespace(manual_seed=lambda _seed: None,
+                                                                             device=lambda name: name))
+    monkeypatch.setattr(brain_train, 'training_counts',
+                        lambda root: {'drives': 2, 'hours': 1.0, 'waiting': 0, 'sunnypilot_on': 0})
+
+    def drive(route, partition):
+        return {'route': route, 'partitions': [partition] * 4, 'speed_weight': numpy.ones(4, dtype=numpy.float32),
+                'works_weight': numpy.zeros(4, dtype=numpy.float32), 'inputs': None}
+
+    asked = []
+
+    def dataset(_root, _merged_of, routes, **_options):
+        asked.append(routes)
+        return [drive('a', 'validation'), drive('b', 'train')]
+
+    monkeypatch.setattr(brain_train, 'dataset', dataset)
+    taken = []
+
+    class Taken(Exception):
+        pass
+
+    def short(drive, _frames):
+        taken.append(drive['route'])
+        raise Taken
+
+    monkeypatch.setattr(brain_train, '_short', short)
+    lines = []
+    with pytest.raises(Taken):
+        brain_train.train_brain(tmp_path, tmp_path / 'run', None, dry_run=True, routes=['a', 'b'], log=lines.append)
+    assert taken == ['b'] and asked == [['a', 'b']]
+    assert lines[1] == 'Only the 2 drives of the start of this run (--route): one marked since waits for the next run.'
+    # Every drive it takes, before the dry run's cut: what run_brain.sh keeps for its steps and seeds.
+    assert json.loads((tmp_path / 'run' / brain_train.ROUTES).read_text()) == ['a', 'b']
+
+
+def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictures(tmp_path, monkeypatch):
+    """Publish's check of the car's step along a real drive (brain_export.rollout_drive): with no route, a drive marked OK
+    for training (the ones whose pictures run_brain.sh made); a route named may be any dashcam drive. A drive without the
+    brain's pictures is refused: the check would run on black pictures."""
+    from nnslr_tools import brain_export
+    asked = []
+    found = [{'route': 'r1', 'partitions': ['test'], 'inputs': None, 'pictures': True}]
+
+    def dataset(_root, _merged_of, routes, *, rate, marked):
+        asked.append((routes, marked))
+        return [dict(drive) for drive in found]
+
+    monkeypatch.setattr(brain_export, 'dataset', dataset)
+    monkeypatch.setattr(brain_export, 'pack_inputs', lambda _inputs, _groups: None)
+    monkeypatch.setattr(brain_export, '_pictures', lambda *_args, **_options: None)
+    monkeypatch.setattr(brain_export, 'FrameStore', lambda pictures, device: (pictures, device))
+    assert brain_export.rollout_drive(tmp_path, None, ())[0]['route'] == 'r1'
+    brain_export.rollout_drive(tmp_path, None, (), 'r1')
+    assert asked == [(None, True), (['r1'], False)]
+    # r1 marked after the training (more seconds in test, no pictures yet) is passed by: Publish still checks along r2.
+    found[:] = [{'route': 'r1', 'partitions': ['test'] * 3, 'inputs': None, 'pictures': False},
+                {'route': 'r2', 'partitions': ['test'], 'inputs': None, 'pictures': True}]
+    assert brain_export.rollout_drive(tmp_path, None, ())[0]['route'] == 'r2'
+    found[1]['pictures'] = False
+    with pytest.raises(ValueError, match="pictures are not made. Run nnslr road-type-signs --labelled --route r1 --route r2"):
+        brain_export.rollout_drive(tmp_path, None, ())
+    found[:] = found[:1]
+    with pytest.raises(ValueError, match="r1: the brain's pictures are not made"):
+        brain_export.rollout_drive(tmp_path, None, (), 'r1')

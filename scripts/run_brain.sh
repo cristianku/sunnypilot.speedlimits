@@ -2,28 +2,32 @@
 set -euo pipefail
 
 # The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, four times a second, from the picture and the
-# car's own signals, learnt from every drive with its logs read: the driver's own speed, corrected by the blocks of
+# car's own signals, learnt from every dashcam drive with its logs read that a person marked OK for training in Speed
+# review, each whole (a drive without the mark stays out whole): the driver's own speed, corrected by the blocks of
 # Speed review, the roadworks and the kinds of road marked there and the next limit of the signs our networks read,
 # those of Sign review where the frames were confirmed there. On one
 # GPU, one step after the other:
 #
-#   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run);
+#   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run; its log says the
+#      drives and hours marked OK for training and the dashcam drives waiting, and it stops while none is marked); the
+#      drives it takes are the run's, kept in runs/NAME/routes.json and passed with --route to every step after it and
+#      to every seed: a drive marked meanwhile waits for the next run, one unmarked meanwhile is left out;
 #   2. a CUDA smoke test;
-#   3. reads the signs of every drive it learns from as the car does today (nnslr road-type-signs --labelled; a drive
-#      already read by the car's reader of today is not read again: a new vision.py or a new network reads them all
-#      again, and the training refuses anything else), the signs it is given; then reads them with our networks in use,
-#      cutter, classifier and applicability, on the pictures at 1 a second (nnslr brain-signs, the same: a new network
-#      reads them all again), the next limit and its metres it is taught where nobody confirmed the frames in Sign
-#      review; then says what the labels give (nnslr brain-targets);
+#   3. reads the signs of every drive it learns from (those marked OK for training) as the car does today
+#      (nnslr road-type-signs --labelled; a drive already read by the car's reader of today is not read again: a new
+#      vision.py or a new network reads them all again, and the training refuses anything else), the signs it is given;
+#      then reads them with our networks in use, cutter, classifier and applicability, on the pictures at 1 a second
+#      (nnslr brain-signs, the same: a new network reads them all again), the next limit and its metres it is taught
+#      where nobody confirmed the frames in Sign review; then says what the labels give (nnslr brain-targets);
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
 #      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart.
 #
 # usage: scripts/run_brain.sh NAME
 #
-# Writes only into $DATA_ROOT/runs/NAME/ (brain.log, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
+# Writes only into $DATA_ROOT/runs/NAME/ (brain.log, routes.json, dry-run/), $DATA_ROOT/runs/NAME-s{0,1,2}/ (brain-last.pt, result.json),
 # the sign readings (derived/road_type_signs, derived/brain_signs) and the frame cache. It never imports reviews, changes the labels, the model in use or the car, and
 # exports nothing: Publish exports the brain chosen in Models and checks it along a real drive. Run it again with the same
-# NAME to finish: a finished seed is not repeated, the signs already read are not read again.
+# NAME to finish: a finished seed is not repeated, the signs already read are not read again, the drives are the same.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
 # (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
@@ -165,7 +169,31 @@ echo "settings:     ${SETTINGS[*]}"
 echo
 
 echo "== 1/6 Check the labels, the split and the training (CPU-only) =="
-CUDA_VISIBLE_DEVICES="" "$NN" train-brain --dry-run --run-dir "$RUN_ROOT/dry-run" "${SETTINGS[@]}"
+# The drives of the run: those its first dry run took (brain_train.ROUTES), kept for every step and every seed whatever
+# is marked OK for training in Speed review meanwhile; a NAME run again keeps them too.
+ROUTES_FILE="$RUN_ROOT/routes.json"
+ROUTE_ARGS=()
+read_routes() {
+  local found route
+  found="$(grep -soE '[0-9a-f]{8}--[0-9a-f]{10}' "$1" || true)"
+  if [[ -z "$found" ]]; then
+    echo "error: no drive in $1" >&2
+    exit 3
+  fi
+  ROUTE_ARGS=()
+  while IFS= read -r route; do
+    ROUTE_ARGS+=(--route "$route")
+  done <<< "$found"
+}
+if [[ -f "$ROUTES_FILE" ]]; then
+  read_routes "$ROUTES_FILE"
+fi
+CUDA_VISIBLE_DEVICES="" "$NN" train-brain --dry-run --run-dir "$RUN_ROOT/dry-run" "${SETTINGS[@]}" "${ROUTE_ARGS[@]}"
+if [[ ! -f "$ROUTES_FILE" ]]; then
+  read_routes "$RUN_ROOT/dry-run/routes.json"
+  cp "$RUN_ROOT/dry-run/routes.json" "$ROUTES_FILE"
+fi
+echo "drives:       $(( ${#ROUTE_ARGS[@]} / 2 )) (routes.json)"
 
 echo "== 2/6 Explicit CUDA smoke test =="
 "$NN" env --gpu-smoke --gpu-device 0
@@ -174,13 +202,13 @@ echo "== 3/6 Read the signs of the drives as the car does today =="
 # The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
-"$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
+"$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
 # The next limit and its metres it is taught: our networks in use read the pictures (their worker on .venv-gpu's torch).
-"$NN" brain-signs --data-root "$DATA_ROOT"
+"$NN" brain-signs --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
 if [[ "$TYPES" == "0" ]]; then
-  "$NN" brain-targets --data-root "$DATA_ROOT" --no-road-types
+  "$NN" brain-targets --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}" --no-road-types
 else
-  "$NN" brain-targets --data-root "$DATA_ROOT"
+  "$NN" brain-targets --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
 fi
 
 step=4
@@ -191,7 +219,7 @@ for seed in "${SEEDS[@]}"; do
     echo "skip seed $seed: already trained"
     continue
   fi
-  "$NN" train-brain --run-dir "$RUN_ROOT-s$seed" --seed "$seed" "${SETTINGS[@]}"
+  "$NN" train-brain --run-dir "$RUN_ROOT-s$seed" --seed "$seed" "${SETTINGS[@]}" "${ROUTE_ARGS[@]}"
 done
 
 echo "Brain complete: choose a seed in Models › Brain, then Publish."

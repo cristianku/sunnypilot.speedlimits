@@ -647,6 +647,14 @@ def scanned(root, route, summary=None):
     connection.close()
 
 
+def marked(root, *routes, ok=True):
+    """A person's switch "OK for brain training" of Speed review on these drives, through the store as the site sets it."""
+    from nnslr_tools.speed_review import SpeedReviewStore
+    store = SpeedReviewStore(root)
+    for route in routes:
+        store.set_training_ok(route, ok, 'cristian')
+
+
 def frozen(root, partitions=(), frame_keys=()):
     folder = root / 'splits'
     folder.mkdir(parents=True, exist_ok=True)
@@ -663,6 +671,12 @@ def test_the_drives_are_those_scanned_with_their_frames_with_a_block_or_not(tmp_
     scanned(tmp_path, other)
     scanned(tmp_path, unfinished, {'t0_ns': 0, 'span_ns': [0, None], **DASHCAM})
     scanned(tmp_path, bare)
+    # Not marked OK for training yet: none, each with its reason; a drive with no frames or no end is no drive at all.
+    left_out = {}
+    assert targets.training_routes(tmp_path, left_out) == []
+    assert left_out == {ROUTE: targets.NOT_MARKED, other: targets.NOT_MARKED}
+    assert targets.dashcam_routes(tmp_path) == [ROUTE, other]
+    marked(tmp_path, ROUTE, other, unfinished, bare)
     assert targets.training_routes(tmp_path) == [ROUTE, other]
     assert targets.training_routes(tmp_path / 'nothing') == []
     # Labels of a drive with no frames: said, and left out.
@@ -695,6 +709,7 @@ def test_the_brain_learns_only_from_dashcam_drives_and_says_why_it_leaves_the_ot
     scanned(tmp_path, old, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'dashcam_only': True}}})
     scanned(tmp_path, older, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'dashcam_only': False}}})
     scanned(tmp_path, steered)
+    marked(tmp_path, ROUTE, old, steered)
     left_out = {}
     assert targets.training_routes(tmp_path, left_out) == [ROUTE, old, steered]
     assert sorted(left_out) == [engaged, unknown, older] and all('sunnypilot was on' in why for why in left_out.values())
@@ -707,6 +722,48 @@ def test_the_brain_learns_only_from_dashcam_drives_and_says_why_it_leaves_the_ot
     assert [drive['route'] for drive in drives] == [ROUTE, old]
     assert f'{steered}: openpilot drove (mads_active on), left out' in said
     assert all(any(route in line and 'sunnypilot was on' in line for line in said) for route in (engaged, unknown, older))
+
+
+def test_only_the_drives_marked_ok_for_training_are_learnt_each_whole(tmp_path):
+    """Speed review's switch "OK for brain training" (9 Nov 2026): the brain has a memory, so a drive goes in whole once
+    a person said all its signs are right, and one without the switch stays out whole, said in the log and counted."""
+    from nnslr_tools.speed_review import db_path
+    targets = _targets()
+    unmarked, unset, on = '00000002--abcdef0123', '00000003--abcdef0123', '00000004--abcdef0123'
+    for route in (ROUTE, unmarked, unset, on):
+        write_drive(tmp_path, route, [(0, i) for i in range(3)])
+    scanned(tmp_path, ROUTE, {'t0_ns': 0, 'span_ns': [0, 1800 * NS], **DASHCAM})
+    scanned(tmp_path, unmarked)
+    scanned(tmp_path, unset)
+    scanned(tmp_path, on, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'passive': False}}})
+    # No file of Speed review, or one without the switch (the site's code of before 9 Nov 2026): no drive is marked.
+    assert targets.marked_routes(tmp_path) == set()
+    db_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    sqlite3.connect(db_path(tmp_path)).close()
+    assert targets.marked_routes(tmp_path) == set() and targets.training_routes(tmp_path) == []
+    db_path(tmp_path).unlink()
+    # Set, and set then unset: only the switch on counts.
+    marked(tmp_path, ROUTE, unset)
+    marked(tmp_path, unset, ok=False)
+    assert targets.marked_routes(tmp_path) == {ROUTE}
+    left_out = {}
+    assert targets.training_routes(tmp_path, left_out) == [ROUTE]
+    assert left_out == {unmarked: targets.NOT_MARKED, unset: targets.NOT_MARKED, on: targets.SUNNYPILOT_ON}
+    counts = targets.training_counts(tmp_path)
+    assert counts == {'drives': 1, 'hours': 0.5, 'waiting': 2, 'sunnypilot_on': 1}
+    assert targets.training_counts_text(counts) == ('Drives marked OK for training (Speed review): 1, 0.5 h; '
+                                                    '2 dashcam drives not marked yet, left out whole.')
+    frozen(tmp_path)
+    said = []
+    plain = {'frames': encoded(3), 'series': {'v_ego': [[0, 50.0]]}, 'span': [0, 3 * NS], 'gps': []}
+    drives = targets.dataset(tmp_path, lambda route: plain, log=said.append)
+    assert [drive['route'] for drive in drives] == [ROUTE]
+    assert f'{unmarked}: {targets.NOT_MARKED}, left out' in said and f'{unset}: {targets.NOT_MARKED}, left out' in said
+    # Asked by name, an unmarked drive is still out; marked False (only running the brain along it) takes it.
+    assert targets.dataset(tmp_path, lambda route: plain, routes=[unmarked], log=said.append) == []
+    assert said[-1] == f'{unmarked}: {targets.NOT_MARKED}, left out'
+    assert [drive['route'] for drive in targets.dataset(tmp_path, lambda route: plain, log=said.append, marked=False)] == [
+        ROUTE, unmarked, unset]
 
 
 def test_a_frozen_drive_whose_frames_changed_is_named():

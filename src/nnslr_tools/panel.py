@@ -1066,8 +1066,9 @@ class Panel:
             elif name == 'train_brain' and gpu is not None and gpu['processes']:
                 reason = 'the GPU is busy with another process'
             elif name == 'train_brain':
-                # Its labels are his own speed on every drive with its logs read (the blocks of Speed review correct
-                # it): it needs no confirmed sign; the next limit is our networks' reading, his Sign review over it.
+                # Its labels are his own speed on every dashcam drive with its logs read that he marked OK for training
+                # in Speed review, each whole (the blocks of Speed review correct it): no frame needs a confirmation;
+                # the next limit is our networks' reading, his Sign review over it.
                 pass
             elif name in ROAD_LABELER_ACTIONS and (missing := self._road_labeler_missing(name)):
                 reason = missing
@@ -1307,8 +1308,10 @@ class Panel:
 
     def _brain_drives_missing(self) -> str:
         """Why the brain has no drive to learn from now, or '': a drive is one with sunnypilot off (a dashcam drive), its
-        logs read to the end and its frames (brain_targets.training_routes, the one rule of the training; what they give:
-        brain_labels). A drive is labelled by being driven, so no mark of Speed review is needed."""
+        logs read to the end and its frames, that a person marked "OK for brain training" on its page of Speed review
+        (brain_targets.training_routes, the one rule of the training; what they give: brain_labels). A drive is labelled
+        by being driven, so no block or mark of Speed review is needed, only the switch: a drive without it stays out
+        whole. A dashcam drive waiting for the switch says so first, before the drives with sunnypilot on."""
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone (once a process).
             from nnslr_tools import brain_targets
@@ -1318,14 +1321,21 @@ class Panel:
             return str(exc) or 'the drives of the brain cannot be read'
         if found:
             return ''
-        if left_out:
-            return (f'no drive to learn from: sunnypilot was on in every drive with its logs read ({len(left_out)}); '
+        waiting = sum(reason == brain_targets.NOT_MARKED for reason in left_out.values())
+        if waiting:
+            return (f'no drive marked OK for training: {waiting} dashcam '
+                    f'drive{"" if waiting == 1 else "s"} wait{"s" if waiting == 1 else ""} for it; '
+                    'mark the drives whose signs are all right in Data › Speed review')
+        on = sum(reason == brain_targets.SUNNYPILOT_ON for reason in left_out.values())
+        if on:
+            return (f'no drive to learn from: sunnypilot was on in every drive with its logs read ({on}); '
                     'drive with sunnylink › Toggles › Enable sunnypilot off')
         return 'no drive to learn from yet: prepare one, then Read the logs on Data › Speed review'
 
     def brain_labels(self) -> dict:
-        """Train › Brain, what a training gets today from every drive it can learn from (training_routes): his speed
-        with the blocks of Speed review, the roadworks, the next limit of our networks' signs with his Sign review over
+        """Train › Brain, what a training gets today from every drive it learns from (training_routes: only the drives
+        marked OK for training in Speed review, each whole; training: brain_targets.training_counts, their number and
+        hours and the dashcam drives that wait for the mark): his speed with the blocks of Speed review, the roadworks, the next limit of our networks' signs with his Sign review over
         them, as brain_targets.summary, with the drives the next training reads again first (to_read: not read, read by
         another reader than the car's of today, or without the brain's pictures; signs_to_read: not read by our networks
         in use, brain_signs.unread) and the names of the kinds of road (road_labels). Without the inputs, which it
@@ -1341,9 +1351,10 @@ class Panel:
                                                                 need_pictures=False, inputs=False, types=True))
             labels = brain_targets.road_labels(self.root)
             signs_to_read = brain_signs.unread(self.root, [row['route'] for row in found['drives']])
+            training = brain_targets.training_counts(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
-        return {**found, 'road_labels': labels, 'signs_to_read': signs_to_read,
+        return {**found, 'road_labels': labels, 'signs_to_read': signs_to_read, 'training': training,
                 'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------
@@ -2127,6 +2138,10 @@ class Panel:
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
         if action == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', BRAIN_SCRIPT + ' is missing in this installation.')
+        if action == 'train_brain' and (missing := self._brain_drives_missing()):
+            # Not only the button: a POST of its own or a pipeline's Brain step (checked when the pipeline starts) is
+            # refused the same way while no drive is marked OK for training in Speed review.
+            raise PanelError(409, 'not_available', missing[0].upper() + missing[1:] + '.')
         if action == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', REGRESSION_SCRIPT + ' is missing in this installation.')
         if action in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
