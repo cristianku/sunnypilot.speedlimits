@@ -754,8 +754,11 @@ class Panel:
         return self.comma()
 
     def system(self) -> dict:
-        """The machine, for the Stato page (as distill-web's Status): GPU, CPU per core, RAM, disk."""
-        info = {'gpu': None, 'disk': None, 'cpus': os.cpu_count(), 'load': None, 'loads': None,
+        """The machine, for the Stato page (as distill-web's Status): each GPU, CPU per core, RAM, disk.
+
+        'gpus': each card on its own (_gpu_cards), by nvidia-smi's index. 'gpu': what the pages read before there were
+        two cards, kept for a page loaded before an update: the first card's numbers and the processes of all of them."""
+        info = {'gpu': None, 'gpus': [], 'disk': None, 'cpus': os.cpu_count(), 'load': None, 'loads': None,
                 'cpu': _cpu_usage(), 'memory': _memory()}
         try:
             loads = os.getloadavg()
@@ -768,25 +771,14 @@ class Panel:
             info['disk'] = {'free_gb': round(usage.free / 1e9, 1), 'total_gb': round(usage.total / 1e9, 1)}
         except OSError:
             pass
-        gpu = _nvidia(['--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw',
-                       '--format=csv,noheader,nounits'])
-        if gpu:
-            fields = [part.strip() for part in gpu.splitlines()[0].split(',')]
-            if len(fields) == 6:
-                apps = _nvidia(['--query-compute-apps=pid,process_name,used_memory', '--format=csv,noheader,nounits']) or ''
-                process_list = []
-                for line in apps.splitlines():
-                    parts = line.split(',')
-                    if len(parts) < 3:
-                        continue
-                    pid = parts[0].strip()
-                    process_list.append({'pid': int(pid) if pid.isdigit() else None,
-                                         'name': ','.join(parts[1:-1]).strip(), 'memory_mb': _number(parts[-1])})
-                # 'processes' stays a count: the training actions refuse a busy GPU with it.
-                info['gpu'] = {'name': fields[0], 'utilization': _number(fields[1]),
-                               'memory_used_mb': _number(fields[2]), 'memory_total_mb': _number(fields[3]),
-                               'temperature': _number(fields[4]), 'power_w': _number(fields[5]),
-                               'processes': len(process_list), 'process_list': process_list}
+        cards = _gpu_cards()
+        info['gpus'] = cards
+        if cards:
+            every = [process for card in cards for process in card['process_list']]
+            # 'processes' stays a count: the training actions refuse a busy GPU with it.
+            info['gpu'] = {**{key: cards[0][key] for key in ('name', 'utilization', 'memory_used_mb', 'memory_total_mb',
+                                                             'temperature', 'power_w')},
+                           'processes': len(every), 'process_list': every}
         return info
 
     def ai_live(self, jobs: list[dict] | None = None) -> dict | None:
@@ -2721,6 +2713,43 @@ def _memory() -> dict | None:
     available = values['MemAvailable']
     return {'total_gb': round(total / 1e9, 1), 'available_gb': round(available / 1e9, 1),
             'used_percent': round((total - available) * 100 / total, 1)}
+
+
+def _gpu_cards() -> list[dict]:
+    """Each GPU on its own, in nvidia-smi's order: its index (the one NNSLR_GPU_INDEX takes, and CUDA's with
+    CUDA_DEVICE_ORDER=PCI_BUS_ID), PCI bus ('81:00.0'), name, use, memory, temperature, power and the compute processes
+    on it. A process is tied to its card by the bus: nvidia-smi gives the pids of the host, not of this container."""
+    rows = _nvidia(['--query-gpu=index,pci.bus_id,name,utilization.gpu,memory.used,memory.total,temperature.gpu,'
+                    'power.draw', '--format=csv,noheader,nounits'])
+    if not rows:
+        return []
+    apps = _nvidia(['--query-compute-apps=gpu_bus_id,pid,process_name,used_memory', '--format=csv,noheader,nounits'])
+    processes = {}
+    for line in (apps or '').splitlines():
+        parts = line.split(',')
+        if len(parts) < 4:
+            continue
+        pid = parts[1].strip()
+        processes.setdefault(_bus(parts[0]), []).append({'pid': int(pid) if pid.isdigit() else None,
+                                                         'name': ','.join(parts[2:-1]).strip(),
+                                                         'memory_mb': _number(parts[-1])})
+    cards = []
+    for line in rows.splitlines():
+        fields = [part.strip() for part in line.split(',')]
+        if len(fields) != 8 or not fields[0].isdigit():
+            continue
+        found = processes.get(_bus(fields[1]), [])
+        cards.append({'index': int(fields[0]), 'bus_id': _bus(fields[1]), 'name': fields[2],
+                      'utilization': _number(fields[3]), 'memory_used_mb': _number(fields[4]),
+                      'memory_total_mb': _number(fields[5]), 'temperature': _number(fields[6]),
+                      'power_w': _number(fields[7]), 'processes': len(found), 'process_list': found})
+    return cards
+
+
+def _bus(text: str) -> str:
+    """A PCI bus as nvidia-smi ('00000000:81:00.0') or the driver ('0000:c1:00.0') write it: '81:00.0', 'c1:00.0'."""
+    text = text.strip().lower()
+    return text.split(':', 1)[1] if text.count(':') >= 2 else text
 
 
 def _nvidia(arguments: list[str]) -> str | None:

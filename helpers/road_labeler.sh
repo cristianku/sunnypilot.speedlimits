@@ -31,6 +31,8 @@ DATA="${NNSLR_DATA_ROOT:-$ROOT/data}"
 NN="$ROOT/.venv-gpu/bin/nnslr"
 PY="$ROOT/.venv-gpu/bin/python"
 GPU_INDEX="${NNSLR_GPU_INDEX:-0}"
+# The run is on the card checked: nvidia-smi's index, which CUDA counts in the same order (by PCI bus).
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 BUSY_PERCENT="${NNSLR_GPU_BUSY_PERCENT:-10}"
 usage() {
     echo "usage: helpers/road_labeler.sh train [--dry-run] [--route R ...] [--epochs N]" >&2
@@ -71,6 +73,7 @@ done
 check_gpu() {
     if [ "${NNSLR_ALLOW_BUSY_GPU:-0}" = 1 ]; then
         echo "GPU $GPU_INDEX: shared on request (NNSLR_ALLOW_BUSY_GPU=1), not checked"
+        export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
         return
     fi
     command -v nvidia-smi > /dev/null 2>&1 || refuse "no nvidia-smi, no GPU to run on (a --dry-run runs on the CPU)"
@@ -87,6 +90,7 @@ check_gpu() {
         refuse "the GPU $GPU_INDEX is busy ($used of $total MiB used, $apps other compute processes): wait for it to finish, or --dry-run on the CPU"
     fi
     echo "GPU $GPU_INDEX free: $used of $total MiB used, no other compute process"
+    export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 }
 
 # How many drives it goes through, for the progress: the drives named, and with every=1 every scanned drive with its

@@ -76,11 +76,11 @@ def test_a_real_run_on_a_free_gpu_takes_every_drive_or_those_named(repo):
     lines = done.stdout.splitlines()
     assert lines[:3] == ['== 1/2 Check the GPU ==', 'GPU 0 free: 300 of 32768 MiB used, no other compute process',
                          '== 2/2 Find the signs on every frame ==']
-    assert lines[-1] == f'nnslr sign-tracks --data-root {repo / "data"} --all cuda=unset'
+    assert lines[-1] == f'nnslr sign-tracks --data-root {repo / "data"} --all cuda=0'
     assert '--query-gpu=memory.used,memory.total' in calls and '--query-compute-apps=pid' in calls
     done, _ = run(repo, '--route=000000ca--eb394eea21', '--force')
     assert done.stdout.splitlines()[-1] == (
-        f'nnslr sign-tracks --data-root {repo / "data"} --route=000000ca--eb394eea21 --force cuda=unset')
+        f'nnslr sign-tracks --data-root {repo / "data"} --route=000000ca--eb394eea21 --force cuda=0')
 
 
 def test_a_dry_run_never_looks_at_the_gpu(repo):

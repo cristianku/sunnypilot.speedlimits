@@ -26,13 +26,20 @@
 # classifier and decider in use, on the GPU) or qwen; unset, the choice of the Prepare tab (data/web/proposer.json),
 # vietnam only before any choice.
 # -h, --help: this help.
-# Env: COMMA_VIDEOS_DIR (default ../comma-videos next to this repo), NNSLR_DATA_ROOT (default data/)
+# Env: COMMA_VIDEOS_DIR (default ../comma-videos next to this repo), NNSLR_DATA_ROOT (default data/), NNSLR_GPU_INDEX (the GPU, nvidia-smi's
+# index; default CUDA's first)
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export COMMA_VIDEOS_DIR="${COMMA_VIDEOS_DIR:-$(dirname "$ROOT")/comma-videos}"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT/data}"
+# The GPU: NNSLR_GPU_INDEX, nvidia-smi's index (the panel gives a free one), which CUDA counts in the same order
+# (by PCI bus); without it CUDA's first card.
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+if [ -n "${NNSLR_GPU_INDEX:-}" ]; then
+    export CUDA_VISIBLE_DEVICES="$NNSLR_GPU_INDEX"
+fi
 NN="$ROOT/.venv/bin/nnslr"
 PY="$ROOT/.venv/bin/python"
 LOG_DIR="$DATA_ROOT/logs/prepare"

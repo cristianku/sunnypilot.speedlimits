@@ -76,6 +76,9 @@ fi
 export DISTILL_GPU_LOCK_PID=$$
 
 export NNSLR_DATA_ROOT="$DATA_ROOT"
+# The index is nvidia-smi's, the card checked above: CUDA counts the cards in the same order, by PCI bus (its
+# default order, fastest first, leaves two identical V100s in no stated order).
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 # The service's PATH has no uv, which runs openpilot.distill's helpers.
 export PATH="$HOME/.local/bin:$PATH"

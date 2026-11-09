@@ -78,7 +78,8 @@ fi
 echo "== 3/3 Try it on the GPU"
 frame="$(ls "$DATA_ROOT"/derived/frames/*/*/frame_*.png 2>/dev/null | head -1 || true)"
 [[ -n "$frame" ]] || { echo "no extracted frame to try it on: installed, not tried"; exit 0; }
-CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}" "$VENV/bin/python" - "$TARGET" "$frame" <<'PY'
+# NNSLR_GPU_INDEX is nvidia-smi's index: CUDA counts the cards in the same order, by PCI bus.
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}" "$VENV/bin/python" - "$TARGET" "$frame" <<'PY'
 import sys, time
 import torch
 from transformers import AutoModelForImageTextToText, AutoProcessor
