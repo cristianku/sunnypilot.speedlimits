@@ -16,7 +16,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
-  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train',
+  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train', sign_tracks: 'train',
 };
 
 /** The icon of each action, on its button. */
@@ -26,7 +26,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
-  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes',
+  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes', sign_tracks: 'routes',
 };
 
 /**
@@ -41,7 +41,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
-  road_labeler_train: '/models', road_labeler_predict: '/models',
+  road_labeler_train: '/models', road_labeler_predict: '/models', sign_tracks: '/models',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
@@ -56,7 +56,7 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
  * and windows Train's (its classifier and its cutter). */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.group === 'mapillary') return '/train';
-  if (activity.label === 'networks on the comma') return '/models';
+  if (activity.label === 'networks on the comma' || activity.label === 'sign tracks') return '/models';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
   if (activity.group === 'publish') return '/publish';
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;

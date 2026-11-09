@@ -395,7 +395,7 @@ def test_panel_page_status_and_run_over_http(served):
         status, response, data = served.request('GET', path)
         assert status == 200 and f'<title>Speed limits · {title}</title>' in data.decode(), path
     for path, target in (('/pannello', '/'), ('/stato', '/'), ('/panoramica', '/'), ('/prepara', '/prepare'),
-                         ('/allena', '/train'), ('/settings', '/account'), ('/review', '/routes')):
+                         ('/allena', '/train'), ('/settings', '/account'), ('/review', '/speed-review')):
         status, response, data = served.request('GET', path)
         assert status == 303 and response.getheader('Location') == target, path
     payload = json_of(served.request('GET', '/api/panel/status')[2])

@@ -57,6 +57,16 @@ export const VERDICT: Record<AiAction | 'delete', [label: string, kind: string]>
 
 let trialRead = false;
 
+/** Forgets the drive (the editor on the Signs side of Speed review opens another one, review/embed.ts): its questions
+ * and their answers, its trial, the reviewer read for it. The keys of the frames are the same on every drive. */
+export function resetAi(): void {
+  for (const key of Object.keys(ai.asks)) delete ai.asks[key];
+  ai.state = null;
+  ai.error = '';
+  trialRead = false;
+  trialKeys.clear();
+}
+
 /** Reads (again) which AI reviewer the server has and whether this browser may ask it; the first time, the trial. */
 export async function loadAiState(): Promise<void> {
   if (!report.apiBase) return;
@@ -85,7 +95,8 @@ async function loadAiTrial(): Promise<void> {
     return;
   }
   const trial = answer.trial;
-  if (trial === null || trial.run_id !== report.runId) return;
+  // Another drive opened meanwhile (the editor in Speed review): not its trial.
+  if (trial === null || report.apiBase !== apiBase || trial.run_id !== report.runId) return;
   for (const frame of trial.frames) {
     const row = rowOf(frame.frame_key);
     if (!row) continue;

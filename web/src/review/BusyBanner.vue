@@ -4,11 +4,14 @@
 // (on the newest the page follows by itself); a reload once the drive is done.
 import {computed} from 'vue';
 import {behind, busyBanner, showNewest} from './busy';
+import {reloadSignEditor} from './embed';
 import {report} from './store';
 
 const banner = computed(() => busyBanner());
+/** The page again; the editor on the Signs side of Speed review reads its drive again, on the frame open. */
 function reload(): void {
-  window.location.reload();
+  if (report.embedded) void reloadSignEditor();
+  else window.location.reload();
 }
 </script>
 

@@ -109,12 +109,16 @@ export function showNewest(): void {
 }
 
 let asking = false;
+// Tells the drive asked about from a later one (resetBusy): an answer for the drive before is dropped.
+let generation = 0;
 async function ask(): Promise<void> {
   if (!report.apiBase || asking) return;
   asking = true;
+  const mine = generation;
   try {
     const url = report.apiBase + '/busy' + (report.atWork ? '/' + report.rows.length : '');
     const answer = await call<{busy: Busy | null; run_id?: string; rows?: FrameRow[]}>('GET', url);
+    if (mine !== generation) return;
     answeredAt = performance.now();
     now.value = answeredAt;
     state.busy = answer.busy;
@@ -136,6 +140,15 @@ async function ask(): Promise<void> {
 function stop(): void {
   window.clearInterval(timer);
   window.clearInterval(ticker);
+}
+
+/** Stops following and forgets the drive (the editor on the Signs side of Speed review opens another one,
+ * review/embed.ts); watchBusy starts again for the next. */
+export function resetBusy(): void {
+  generation += 1;
+  stop();
+  timer = undefined;
+  ticker = undefined;
 }
 
 /** Follows a read-only drive until Propose again is done with it. */

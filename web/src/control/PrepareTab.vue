@@ -206,8 +206,8 @@ function openComma(): void {
 
   <!-- The routes still on their way; the ready ones are on the Review tab, as drives. -->
   <RouteTable v-if="notReady.length" :routes="notReady"/>
-  <p v-if="toReview" class="last-line"><a href="/routes">{{ plural(toReview, 'drive') }} to review ›</a></p>
-  <p v-else-if="review.reviewed" class="last-line"><a href="/routes">Every drive is reviewed ›</a></p>
+  <p v-if="toReview" class="last-line"><a href="/speed-review">{{ plural(toReview, 'drive') }} to review ›</a></p>
+  <p v-else-if="review.reviewed" class="last-line"><a href="/speed-review">Every drive is reviewed ›</a></p>
 
   <!-- What the networks learn from: the reviews imported, by sign family, who confirmed them, the split. -->
 </template>

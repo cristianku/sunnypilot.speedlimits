@@ -100,13 +100,13 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'ai_review' && options?.save === 'yes') {
     return {title: 'Review and save with the AI?', action: 'Review and save', danger: true,
-      text: 'What it saves waits for you: each frame goes into training only once you confirm it on the review page. '
+      text: 'What it saves waits for you: each frame goes into training only once you confirm it on the Signs side of its drive. '
         + 'Frames a person confirmed are never touched.'};
   }
   if (name === 'ai_review') {
     return {title: 'Try the AI reviewer?', action: 'Try',
       text: 'It suggests the boxes of ' + (options?.limit ? 'up to ' + options.limit + ' ' : 'the ')
-        + 'frames still to review; the review page shows them on each frame. Nothing is saved.'};
+        + 'frames still to review; the Signs side of the drive shows them on each frame. Nothing is saved.'};
   }
   if (name === 'measure_ai_reviewer') {
     return {title: 'Measure ' + (options?.provider ?? 'the AI reviewer') + '?', action: 'Measure',
@@ -155,6 +155,20 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Runs the road labeler along every scanned drive on the GPU and keeps its chances in '
         + 'derived/road_labeler.' + marks};
   }
+  if (name === 'sign_tracks' && options?.dry === 'on') {
+    return {title: 'Try the signs on every frame?', action: 'Dry run',
+      text: 'The first 41 frames of the first minute of ' + (options.routes?.split(',')[0] ?? 'the first drive')
+        + ' on the CPU, checked against the frames of Sign review: a minute or so. It goes into derived/sign_tracks/dry, '
+        + 'what Speed review shows is not touched; the GPU is not used.'};
+  }
+  if (name === 'sign_tracks') {
+    const drives = options?.routes ? options.routes.split(',').length : 0;
+    return {title: 'Find the signs on every frame?', action: 'Start',
+      text: 'Runs the cutter and the classifier in use on every frame of ' + (drives ? drives + (drives === 1 ? ' drive' : ' drives')
+        : 'every drive with its video') + ' on the GPU, about 50 frames a second (some 9 hours for every drive): the boxes '
+        + 'Speed review draws over the video. A drive already read by these networks is left as it is. It refuses to '
+        + 'start while another job has the GPU.'};
+  }
   // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
   // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
   return null;
@@ -191,6 +205,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   road_labeler_train: 'The pictures of the drives already read stay: training again reads only the others, then starts '
     + 'over on a new run.',
   road_labeler_predict: 'The drives done keep what it wrote; preparing again does every drive again.',
+  sign_tracks: 'The drives done stay, and the minutes done of the drive at work: running again carries on from there.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

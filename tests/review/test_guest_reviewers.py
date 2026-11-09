@@ -326,9 +326,11 @@ def test_only_the_drives_and_the_kinds_given(outside):
     assert server.request('GET', f'/route/{OTHER_ROUTE}/', headers=proof())[0] == 403
     assert server.request('GET', f'/route/{OTHER_ROUTE}/images/00000000.jpg', headers=proof())[0] == 403
     assert server.request('GET', f'/api/route/{OTHER_ROUTE}/reviews', headers=proof())[0] == 403
-    # The signs of a drive do not open its other work.
+    # The signs of a drive do not open its other work: the player of Speed review shows them (its Signs side), its
+    # speed is not saved.
     assert server.request('GET', f'/api/panel/road-types/{ROUTE}', headers=proof())[0] == 403
-    assert server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=proof())[0] == 403
+    assert server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=proof())[0] == 200
+    assert server.request('POST', f'/api/speed-review/drives/{ROUTE}/blocks', body={}, headers=proof())[0] == 403
     assert server.request('GET', f'/api/sign-distance/drives/{ROUTE}', headers=proof())[0] == 403
 
 
@@ -352,6 +354,8 @@ def test_my_list_holds_my_drives_by_date_with_their_pages(outside, tmp_path):
     assert answer['user'] == 'ana' and [item['route'] for item in answer['drives']] == [ROUTE]
     assert [item['kind'] for item in answer['drives'][0]['work']] == ['signs', 'speed']
     assert answer['drives'][0]['work'][1]['href'] == f'/speed-review?drive={ROUTE}'
+    # No road video of it here: its signs keep the page of Sign review.
+    assert answer['drives'][0]['work'][0]['href'] == f'/route/{ROUTE}/'
     assert 'title' not in answer['drives'][0] and 'from' not in answer['drives'][0]
 
 
@@ -464,6 +468,48 @@ def test_the_review_page_of_a_guest_holds_no_place_and_no_path(tmp_path, proxied
     assert '47.351' in admin and ADDRESS in admin
     assert '47.351' not in guest and ADDRESS not in guest and '"gps"' not in guest
     assert 'data-guest="true"' in guest and 'href="/prepare"' not in guest
+
+
+# [sign-review-retired] - START
+def test_a_guest_reviews_the_signs_on_the_signs_side_of_speed_review(tmp_path, proxied):
+    rows = make_report(tmp_path)
+    (tmp_path / 'raw/routes' / ROUTE / '0').mkdir(parents=True)
+    (tmp_path / 'raw/routes' / ROUTE / '0' / 'fcamera.hevc').write_bytes(b'video')
+    directory = tmp_path / 'derived/preannotations' / ROUTE / rows[0]['run_id']
+    for row in rows:
+        row['model']['cutter_path'] = ADDRESS
+    (directory / 'preannotations.jsonl').write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    positions = positions_path(tmp_path, ROUTE)
+    positions.parent.mkdir(parents=True)
+    positions.write_text(''.join(json.dumps({'frame_key': row['frame_key'], 'latitude': 47.351, 'longitude': 7.903,
+                                             'speed_mps': 20.0, 'bearing_deg': 90.0}) + '\n' for row in rows))
+    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
+    try:
+        server.app.assignments.add_person('ana')
+        server.app.assignments.set_work('ana', ROUTE, 'signs', True)
+        # The page of Sign review leads to the Signs side, at the frame asked.
+        status, response, _ = server.request('GET', f'/route/{ROUTE}/?frame=0/1', headers=proof())
+        assert status == 303 and response.getheader('Location') == f'/speed-review?drive={ROUTE}&side=signs&frame=0/1'
+        # Its list links there.
+        work = json_of(server.request('GET', '/api/reviewer/work', headers=proof())[2])
+        assert work['drives'][0]['work'][0]['href'] == f'/speed-review?drive={ROUTE}&side=signs'
+        # The editor's data, without the places and the paths of the server.
+        guest = server.request('GET', f'/api/route/{ROUTE}/page', headers=proof())
+        admin = server.request('GET', f'/api/route/{ROUTE}/page', headers={'X-Review-Token': TOKEN})
+        assert guest[0] == 200 and admin[0] == 200
+        assert b'47.351' in admin[2] and ADDRESS.encode() in admin[2]
+        assert b'47.351' not in guest[2] and ADDRESS.encode() not in guest[2] and b'"gps"' not in guest[2]
+        assert server.request('GET', f'/api/speed-review/drives/{ROUTE}/signs', headers=proof())[0] == 200
+        # Given only the speed: no signs, no editor, no page of Sign review.
+        server.app.assignments.set_work('ana', ROUTE, 'signs', False)
+        server.app.assignments.set_work('ana', ROUTE, 'speed', True)
+        assert server.request('GET', f'/api/route/{ROUTE}/page', headers=proof())[0] == 403
+        assert server.request('GET', f'/api/speed-review/drives/{ROUTE}/signs', headers=proof())[0] == 403
+        assert server.request('GET', f'/route/{ROUTE}/', headers=proof())[0] == 403
+        assert server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=proof())[0] == 200
+    finally:
+        server.close()
+# [sign-review-retired] - END
 
 
 def test_the_json_of_a_guest_is_scrubbed(outside, monkeypatch):

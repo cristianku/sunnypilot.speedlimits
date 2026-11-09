@@ -576,9 +576,9 @@ def test_the_drive_review_only_shows_and_sends_to_sign_review(tmp_path, monkeypa
     monkeypatch.setattr(drive_episodes, 'SCANNER_VERSION', drive_episodes.SCANNER_VERSION + 1)
     assert store.scan(ROUTE)['state'] == 'done'
     assert next(item for item in active(store) if item['channel'] == 'disagreement')['id'] == run['id']
-    # Both ways between the two pages: the drive player to the frame of a moment, Sign review back to the drive.
+    # The drive player to the signs of a moment: the Signs side of Speed review (sign-link.ts), the only review page.
     script = CONTROL_JS.read_text(encoding='utf-8')
-    assert '?segment=' in script and '&second=' in script
+    assert '&side=signs' in script and '&segment=' in script and '&second=' in script
     assert '/speed-review?drive=' in (CONTROL_JS.parent / 'review.js').read_text(encoding='utf-8')
 
 

@@ -23,7 +23,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
 ## 2. Accesso
 
 1. Aprire l'indirizzo ricevuto (`http://<IP del server>:8765/`). Il sito chiede **nome e password**: nel Chrome di Cristian di solito è già connesso. Un agente con Playwright non usa la password: manda il token di accesso nell'header `X-Review-Token` di ogni richiesta (`browser.newContext({extraHTTPHeaders: {'X-Review-Token': process.env.NNSLR_REVIEW_TOKEN}})`), con il token configurato da Cristian nell'ambiente, mai nell'indirizzo. Se compare la pagina di accesso o **Accesso richiesto**, chiedere a Cristian.
-2. La pagina iniziale **Route** elenca le route con un report. Ogni card mostra "N di M confermati", i sospetti e un'azione: **Inizia →**, **Riprendi →** o **Ricontrolla →**. Aprire la route indicata da Cristian.
+2. **Since 9 Nov 2026 signs are reviewed only on the Signs side of Speed review.** The page of Sign review (`/route/<route_id>/`) and its list (`/routes`) are gone: open `/speed-review?drive=<route_id>&side=signs&frame=<segment>/<image>` (or the old `/route/<route_id>/?frame=<key>`, which leads there with the frame kept; without `frame`, on the first frame still to review). The drives with frames left are the **Signs to review** card of `/speed-review` (data: `GET /api/routes`, or `GET /api/v1/routes`). The editor on the right is the same as described below, beside the drive player: the player's frame is the frame edited, so pause it (Space) before editing. The editor works on a read-only site too, with Ask AI (I), Car networks (T), Fit with AI (Shift C) and the AI trial filter; where the player has no video for the frame, the editor shows the frame's own picture and ← → step frame by frame. Only a drive with no road video on the server keeps the old page.
 3. Lavorare con la **pagina** larga almeno 1000 px. Con il pannello laterale dell'estensione aperto la pagina è più stretta della finestra: allargare la finestra.
 
    Sotto i 981 px la pagina passa al layout da telefono: sotto la foto vengono subito i cartelli; timeline, legenda e "Confermati con dubbi" sono chiusi sotto il pulsante **Timeline** (lo stato aperto/chiuso resta nel browser). Il pulsante Conferma diventa la barra fissa in basso, tra ‹ e ›, e dice cosa salva in breve: **Conferma · 60**, **Nessun cartello**, **Avanti →** (cioè "Già confermato · avanti →") o **Salvataggio…**.
@@ -206,6 +206,8 @@ Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non c
 
 La pagina espone il proprio stato con attributi che non cambiano il layout. Conviene usarli al posto di colori, testi e coordinate:
 
+On the Signs side of Speed review (the only review page since 9 Nov 2026) the state the table puts on `body` is on the editor's `.sign-editor` element instead: `data-frame-key`, `data-server`, `data-save-count`, `data-unsaved` and `data-last-save` (`<key> <result>`). `#stage[data-photo-key]`, `#boxList`, `#confirm` and the chips are the same; there is no `#timeline`: open a frame with `?frame=<key>` in the address, or move the player (← → one frame).
+
 | Dove | Attributo | Significato |
 | --- | --- | --- |
 | `body` | `data-frame-key` | Fotogramma mostrato (`segmento/immagine`) |
@@ -279,6 +281,7 @@ Più indicazioni:
 
   Al massimo 100 riquadri per fotogramma; il nome del revisore al massimo 100 caratteri.
 - **Stato iniziale.** Il JSON dei fotogrammi è nello script `#payload` della pagina ed è grande: non stamparlo tutto, estrarre solo chiavi, `preview_path` e numero di proposte. Le revisioni non sono lì: leggerle con `GET /api/route/<route_id>/reviews` (sezione 8).
+- **Speed review, Signs side.** It is the same editor on the frame the player shows, saved through the same endpoint, so the same rules hold there: the reviewer is the signed-in person, a 409 reloads the frame. `GET /api/route/<route_id>/page` gives its data (frames, `run_id`, hints) without the `#payload` of the page.
 - **Sessione.** Per una sessione lunga conservare lo stesso `context` (cookie) e registrare gli eventi `pageerror` e le risposte HTTP con stato ≥ 400, stampando solo stato e percorso, senza query string né token.
 
 ## 10. Per agenti che usano MCP o la REST API

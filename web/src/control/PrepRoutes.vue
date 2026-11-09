@@ -4,6 +4,7 @@
 // report opens its review page: read only while Propose again works on it (the new proposals made so far).
 import {thousands} from '../common/format';
 import type {RouteProgress} from '../common/panel-types';
+import {signsHref} from '../common/sign-link';
 import Bar from '../components/Bar.vue';
 
 defineProps<{routes: RouteProgress[]}>();
@@ -18,7 +19,7 @@ const OPENS = new Set(['ready', 'pronta', 'waiting', 'proposing again']);
   <ul v-if="routes.length" class="prep-routes">
     <li v-for="route in routes" :key="route.route">
       <component :is="OPENS.has(route.phase) ? 'a' : 'div'" class="prep-drive"
-                 :href="OPENS.has(route.phase) ? '/route/' + encodeURIComponent(route.route) + '/' : undefined">
+                 :href="OPENS.has(route.phase) ? signsHref(route.route) : undefined">
         <span class="prep-route">{{ route.title || route.route.replace(/^0+(?=[0-9a-f]+--)/, '') }}</span>
         <span class="prep-phase">{{ PHASE[route.phase] ?? route.phase }}<template v-if="route.total && route.phase !== 'waiting'"> · {{ thousands(route.done) }}
           of {{ thousands(route.total) }} {{ route.unit }}</template><span v-if="OPENS.has(route.phase)" class="prep-chev" aria-hidden="true">›</span></span>

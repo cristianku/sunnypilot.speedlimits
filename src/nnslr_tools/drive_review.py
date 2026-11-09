@@ -652,7 +652,7 @@ def inference_lane(root: Path, route: str) -> dict | None:
 
 # The fields of a box the drive player draws and lists (review/catalog.ts shortName, describe): the rest stays in Sign
 # review.
-SIGN_BOX_FIELDS = ('bbox_xyxy', 'family', 'value_kph', 'sign_unit', 'sign_type', 'painted', 'plate_hours',
+SIGN_BOX_FIELDS = ('bbox_xyxy', 'family', 'applicability', 'value_kph', 'sign_unit', 'sign_type', 'painted', 'plate_hours',
                    'supplementary_panel', 'score')
 # A frame added at a sign the comma read is 1000 + its frame in the minute's video (sign_reads, review/order.ts).
 READ_INDEX_BASE = 1000

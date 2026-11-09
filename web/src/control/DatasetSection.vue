@@ -5,6 +5,7 @@
 import {computed} from 'vue';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {DatasetSummary} from '../common/panel-types';
+import {signsHref} from '../common/sign-link';
 
 const props = defineProps<{dataset: DatasetSummary | null; loading: boolean}>();
 
@@ -140,7 +141,7 @@ const imported = computed(() => props.dataset?.last_import ?? null);
             <th class="num">People</th><th class="num">AI</th></tr></thead>
           <tbody>
             <tr v-for="row in routes" :key="row.route">
-              <td class="route"><a :href="'/route/' + encodeURIComponent(row.route) + '/'" :title="row.route"><span v-if="row.pad" class="rid-pad">{{ row.pad }}</span>{{
+              <td class="route"><a :href="signsHref(row.route)" :title="row.route"><span v-if="row.pad" class="rid-pad">{{ row.pad }}</span>{{
                 row.route.slice(row.pad.length) }}</a></td>
               <td class="num">{{ thousands(row.frames) }}</td><td class="num">{{ thousands(row.objects) }}</td>
               <td class="num">{{ thousands(row.speed_signs) }}</td><td class="num">{{ thousands(row.human) }}</td><td class="num">{{ thousands(row.ai) }}</td>

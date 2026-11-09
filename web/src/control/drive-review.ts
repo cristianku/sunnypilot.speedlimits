@@ -1,8 +1,9 @@
 // The drives as the comma recorded them, against its own logs, for the drive player of Speed review and Regression
-// (DriveReviewDrive.vue) and Sign review's car bar; the signs of a moment are reviewed in Sign review (signReviewHref).
+// (DriveReviewDrive.vue) and Sign review's car bar; the signs of a moment are reviewed on the Signs side (signReviewHref).
 // The server reads the logs (nnslr_tools.drive_review: no networks, CPU only). Here: the types of /api/drive-review, a
 // series' value at a time, and a time of the logs as a time of the drive's video (the encode index of every frame: never
 // a file's date).
+import {signsHref} from '../common/sign-link';
 
 /** A point of a series of the comma's logs: seconds from the drive's first video frame, and the value (null: the
  * service was not in the log there). */
@@ -477,11 +478,9 @@ export function segmentSecondOf(segments: readonly SyncSegment[], s: number): {s
   return {segment: item.segment, second: Math.max(0, Math.round(second * 10) / 10)};
 }
 
-/** Sign review of the drive opened on its frame nearest to a time of the logs (review/navigation.ts linkedFrame). */
+/** The Signs side of the drive opened on its frame nearest to a time of the logs (common/sign-link.ts). */
 export function signReviewHref(route: string, segments: readonly SyncSegment[], s: number): string {
-  const at = segmentSecondOf(segments, s);
-  const base = '/route/' + encodeURIComponent(route) + '/';
-  return at ? base + '?segment=' + at.segment + '&second=' + at.second : base;
+  return signsHref(route, segmentSecondOf(segments, s));
 }
 
 /** The time of the logs of a picture of the video: second N of a segment (the server's frames, one a second). */

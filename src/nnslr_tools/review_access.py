@@ -58,8 +58,9 @@ NOT_ASSIGNED = 'This is not part of the work given to you.'
 # The kinds of work, in the order of the pages: (key, what the person does).
 WORK_KINDS = (('signs', 'Sign review'), ('distance', 'Sign distance'), ('speed', 'Speed review'))
 KIND_KEYS = tuple(key for key, _ in WORK_KINDS)
-# The page of each kind for a drive.
-WORK_LINKS = {'signs': '/route/{route}/', 'distance': '/sign-distance?drive={route}', 'speed': '/speed-review?drive={route}'}
+# The page of each kind for a drive. Signs are reviewed on the Signs side of Speed review (9 Nov 2026; pages.signs_address).
+WORK_LINKS = {'signs': '/speed-review?drive={route}&side=signs', 'distance': '/sign-distance?drive={route}',
+              'speed': '/speed-review?drive={route}'}
 
 DRIVE = r'([0-9a-f]{8}--[0-9a-f]{10})'
 FRAME = r'[0-9]{1,4}/[0-9]{1,6}'
@@ -75,8 +76,11 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('POST', r'/api/reviewer/done', None),
     # The list behind "Next drive" of Sign distance: the server keeps only the guest's drives.
     ('GET', r'/api/sign-distance/drives', None),
-    # Sign review.
+    # Sign review, on the Signs side of Speed review: its old address (it leads there), its pictures, its frames and
+    # saves, and what the side reads (the editor's data, the boxes of the drive's frames, the signs on every frame).
     ('GET', r'/route/' + DRIVE + r'(/(index\.html)?)?', ('signs',)),
+    ('GET', r'/api/route/' + DRIVE + r'/page', ('signs',)),
+    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/(signs|sign-track)', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/images/[0-9]{8}\.jpg', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/video/' + FRAME + r'\.jpg', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/(reviews|live|busy(/[0-9]{1,7})?)', ('signs',)),
@@ -87,13 +91,13 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('GET', r'/api/sign-distance/drives/' + DRIVE + r'/signs/[0-9]{1,20}', ('distance',)),
     ('GET', r'/api/sign-distance/drives/' + DRIVE + r'/frames/' + FRAME + r'(-wide)?\.jpg', ('distance',)),
     ('POST', r'/api/sign-distance/drives/' + DRIVE + r'/(marks|undo)', ('distance',)),
-    # Speed review, on the lanes and the video of the drive.
-    ('GET', r'/api/speed-review/drives/' + DRIVE, ('speed',)),
-    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/frames/' + FRAME + r'\.jpg', ('speed',)),
+    # Speed review, on the lanes and the video of the drive: its player for both sides, its saves only for the speed.
+    ('GET', r'/api/speed-review/drives/' + DRIVE, ('speed', 'signs')),
+    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/frames/' + FRAME + r'\.jpg', ('speed', 'signs')),
     ('POST', r'/api/speed-review/drives/' + DRIVE + r'/(blocks|works|road)', ('speed',)),
-    ('GET', r'/api/drive-review/drives/' + DRIVE + r'(/timeline)?', ('speed',)),
-    ('GET', r'/api/panel/drive-video/' + DRIVE, ('speed',)),
-    ('GET', r'/route/' + DRIVE + r'/video\.mp4', ('speed',)),
+    ('GET', r'/api/drive-review/drives/' + DRIVE + r'(/timeline)?', ('speed', 'signs')),
+    ('GET', r'/api/panel/drive-video/' + DRIVE, ('speed', 'signs')),
+    ('GET', r'/route/' + DRIVE + r'/video\.mp4', ('speed', 'signs')),
 ))
 
 # What a guest never receives, at any depth of an answer: where the drive was.

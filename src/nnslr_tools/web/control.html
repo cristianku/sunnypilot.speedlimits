@@ -1662,7 +1662,6 @@ color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;font-
 the box of the video (the same letterbox), solid confirmed, dashed proposed, lighter when the frame is near and not the one
 shown; the lane of the confirmed speed signs; the switch Speed | Signs at the top of the side, and the boxes listed. */
 .sr-sign-boxes{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
-.sr-sign-boxes.near{opacity:.6}
 .sr-sign-box{fill:none;stroke:currentColor;stroke-width:2.5;vector-effect:non-scaling-stroke}
 .sr-sign-box.proposed{stroke-dasharray:6 4}
 .sr-sign-tag{fill:currentColor;stroke:var(--ov-halo);stroke-opacity:.9;stroke-width:.16em;stroke-linejoin:round;paint-order:stroke;
@@ -1684,6 +1683,29 @@ font-family:var(--font-ui);font-weight:700}
 .sr-sign-list small{max-width:45%;color:var(--muted);font-size:12.5px;text-align:right;overflow-wrap:anywhere}
 .sr-sign-dot{width:13px;height:13px;flex:none;box-sizing:border-box;border-radius:3px;border:2.5px solid currentColor;background:var(--stage)}
 .sr-sign-dot.proposed{border-style:dashed}
+/* Sign review's editor on the Signs side (review/SignEditorStage.vue, SignEditorPanel.vue). Its own style is review.html's,
+kept to .sign-editor at the end of this page (pages.sign_editor_css); here only where it sits: the photo over the player's
+picture in the same letterbox (the player's bar and squares stay over it), the bar of the frame and the inspector in the
+width of the side. */
+.sign-editor.sr-editor-stage{position:absolute;inset:0}
+.sign-editor.sr-editor-stage .stage{position:absolute;inset:0;display:block;min-height:0;border:0;border-radius:0;box-shadow:none;
+background:transparent;overflow:visible}
+.sign-editor.sr-editor-stage #scene{width:100%;height:100%;max-height:none}
+.sign-editor.sr-editor-stage .stage-hint{bottom:64px}
+/* While the editor is on the picture, the clear part of the player's bar lets a touch reach the boxes under it. */
+.sign-editor.sr-editor-stage ~ .dr-bar{pointer-events:none}
+.sign-editor.sr-editor-stage ~ .dr-bar>*{pointer-events:auto}
+/* No video for the frame (SpeedReviewDrive.vue, alone): the frame's own picture stands over the stage, without the
+player's note about the video. */
+.sign-editor.sr-editor-stage.sr-editor-alone{background:#000}
+.sign-editor.sr-editor-alone ~ .dr-stage-note{display:none}
+.sign-editor.sr-editor-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.sign-editor.sr-editor-side .stage-bar{flex-wrap:wrap;row-gap:8px;margin-top:0}
+.sign-editor.sr-editor-side .stage-bar .data{order:5;flex-basis:100%;white-space:normal}
+.sign-editor.sr-editor-side .stage-tools{margin-left:auto}
+.sign-editor.sr-editor-side .panel{border-radius:14px;box-shadow:none}
+.sign-editor.sr-editor-side .panel section{padding:14px}
+.sign-editor.sr-editor-side .route-status{margin-top:0}
 @media (max-width:860px){
   .sr-view .dr-main{display:flex;flex-direction:column;align-items:stretch}
   .sr-view .dr-side,.sr-view .dr-time{display:contents}
@@ -1825,6 +1847,10 @@ color:var(--fg);font:inherit;font-size:16px}
 .rw-kind[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .rw-kind:disabled{opacity:.4;cursor:default}
 @media (pointer:coarse){.rw-kind,.rw-name{min-height:40px}}
+/* __NNSLR_SIGN_EDITOR_CSS__ */
+/* __NNSLR_AI_SHEET_CSS__ */
+.sr-ai{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:12px}
+.sr-ai .dr-hint{flex:1 1 180px;margin:0}
 </style>
 </head>
 <body>

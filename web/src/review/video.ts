@@ -110,7 +110,7 @@ function preload(segment: number, decoded: number, delta: number): void {
     }
     // Only the frames of the video may be kept by the browser (the pictures of the report are never cached).
     const source = rowOf(frame.frame_key)?.preview_path;
-    if (source === undefined || !source.startsWith('video/') || preloaded.has(source)) continue;
+    if (source === undefined || !source.startsWith(report.pictureBase + 'video/') || preloaded.has(source)) continue;
     preloaded.add(source);
     new Image().src = source;
   }
@@ -249,4 +249,12 @@ export function stepFrame(delta: number): void {
       walking = false;
     }
   })();
+}
+
+/** Another drive on the same page (embed.ts): the GOPs and the steps of the one before are forgotten. */
+export function resetVideo(): void {
+  gops.clear();
+  asked.clear();
+  preloaded.clear();
+  queued = 0;
 }

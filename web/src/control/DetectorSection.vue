@@ -5,6 +5,7 @@
 import {computed, ref} from 'vue';
 import {thousands} from '../common/format';
 import type {DetectorEvaluation} from '../common/panel-types';
+import {signsHref} from '../common/sign-link';
 import {pct, plain} from './evaluate';
 import Segmented from './Segmented.vue';
 
@@ -59,7 +60,7 @@ const routePad = (route: string): string => /^0+(?=[0-9a-f]+--)/.exec(route)?.[0
           <th class="num">False</th><th class="num">Recall</th><th class="num">Precision</th></tr></thead>
         <tbody>
           <tr v-for="row in detector.routes" :key="row.route">
-            <td class="route"><a :href="'/route/' + encodeURIComponent(row.route) + '/'" :title="row.route"><span v-if="routePad(row.route)" class="rid-pad">{{
+            <td class="route"><a :href="signsHref(row.route)" :title="row.route"><span v-if="routePad(row.route)" class="rid-pad">{{
               routePad(row.route) }}</span>{{ row.route.slice(routePad(row.route).length) }}</a></td>
             <td class="num">{{ thousands(row.images ?? 0) }}</td><td class="num">{{ thousands(row.truth_boxes) }}</td>
             <td class="num">{{ thousands(row.found) }}</td><td class="num">{{ thousands(row.missed) }}</td><td class="num">{{ thousands(row.false_boxes) }}</td>

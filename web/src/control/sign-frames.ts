@@ -2,6 +2,7 @@
 // /api/speed-review/drives/<route>/signs, drive_review.sign_frames), the confirmed ones where a frame is confirmed, else
 // the model's proposals, each frame placed at its time of the drive with the drive player's own mapping (drive-review.ts
 // secondOf, as the Server lane places our networks' signs). Only shown here: the boxes are changed in Sign review.
+import {signsHref} from '../common/sign-link';
 import {isSpeedFamily} from '../review/catalog';
 import type {Detection} from '../review/types';
 
@@ -65,6 +66,10 @@ export function nearestFrame(placed: readonly PlacedFrame[], s: number, within =
 export const isSpeedSign = (box: Detection): boolean => isSpeedFamily(box.family) || box.family === 'cancellation'
   || box.family === 'zone_end';
 
+/** A sign confirmed for another road (applicability other_road, "Another" in Sign review): grey on the picture, never on
+ * the lane of our road's speed signs; the brain leaves it out too (brain_targets). */
+export const isOtherRoad = (box: Detection): boolean => box.applicability === 'other_road';
+
 /** The text of a speed sign on the lane: its number, "Z30" for a zone, "end" for an end of limit, "Z end" of a zone. */
 export function signText(box: Detection): string {
   if (box.family === 'cancellation') return 'end';
@@ -87,7 +92,7 @@ export function signRuns(placed: readonly PlacedFrame[]): SignRun[] {
   const runs: SignRun[] = [];
   for (const frame of placed) {
     if (!frame.confirmed) continue;
-    const texts = [...new Set(frame.boxes.filter(isSpeedSign).map(signText))];
+    const texts = [...new Set(frame.boxes.filter((box) => isSpeedSign(box) && !isOtherRoad(box)).map(signText))];
     if (!texts.length) continue;
     const text = texts.join(' ');
     const last = runs[runs.length - 1];
@@ -101,7 +106,7 @@ export function signRuns(placed: readonly PlacedFrame[]): SignRun[] {
   return runs;
 }
 
-/** Sign review of the drive opened on this frame (review/navigation.ts linkedFrame picks the frame at that second). */
+/** The Signs side of the drive opened on this very frame (common/sign-link.ts). */
 export function frameHref(route: string, frame: SignFrame): string {
-  return '/route/' + encodeURIComponent(route) + '/?segment=' + frame.segment + '&second=' + frame.second;
+  return signsHref(route, {segment: frame.segment, second: frame.second}, frame.frame_key);
 }

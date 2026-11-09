@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // The site of a reviewer from outside (nnslr_tools.review_access): "My reviews", the drives given to them with a link for
-// each kind of work, and the pages of Speed review and Sign distance for one of those drives; Sign review is its
-// own page (/route/<id>/). No status of the server here, no tab of the administrator: every address without a drive shows
-// the list, and the server answers only for the work given.
+// each kind of work, and the pages of Speed review and Sign distance for one of those drives. Signs are reviewed on the
+// Signs side of Speed review (the drive's Signs work; with only that, the page has only that side). No status of the
+// server here, no tab of the administrator: every address without a drive shows the list, and the server answers only
+// for the work given.
 import {computed, onMounted, ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -25,6 +26,8 @@ onMounted(async () => {
 });
 /** Until the list is in nothing can be saved: a drive opened from a link waits for it. */
 const readOnly = computed(() => mine.value?.read_only ?? true);
+/** The kinds of work given on the drive opened: which sides of Speed review it has. */
+const kinds = computed(() => mine.value?.drives.find((drive) => drive.route === tabDrive.value)?.work.map((item) => item.kind) ?? []);
 const minutesOf = (minutes: number | null): string => minutes === null ? '' : plural(minutes, 'minute');
 async function complete(drive: GivenDrive): Promise<void> {
   const ok = await askConfirm({title: 'Review completed?', action: 'Completed',
@@ -40,7 +43,9 @@ async function complete(drive: GivenDrive): Promise<void> {
 
 <template>
   <main class="page" :data-tab="currentTab">
-    <SpeedReviewDrive v-if="currentTab === 'speedreview' && tabDrive" :key="tabDrive" :route="tabDrive" :read-only="readOnly"/>
+    <!-- Once the list is in: the work given on the drive says its sides. -->
+    <SpeedReviewDrive v-if="currentTab === 'speedreview' && tabDrive && mine" :key="tabDrive" :route="tabDrive" :read-only="readOnly"
+                      :kinds="kinds"/>
     <SignDistanceDrive v-else-if="currentTab === 'signdistance' && tabDrive" :route="tabDrive" :read-only="readOnly"/>
     <template v-else>
       <header class="section-head"><h1 class="head-title">My reviews</h1></header>

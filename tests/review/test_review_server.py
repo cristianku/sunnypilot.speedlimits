@@ -40,15 +40,12 @@ def cookie_header(server, value=TOKEN):
 def test_loopback_needs_no_token_and_index_lists_routes_with_counts(loopback, tmp_path):
     server, root, rows = loopback
     make_report(root, route=OTHER_ROUTE, count=2)
-    # The route list is /routes (the home page is the Overview).
+    # The route list of Sign review (/routes) leads to Speed review's, which lists the drives of /api/routes.
     status, response, data = server.request('GET', '/routes')
-    assert status == 200
-    page = data.decode()
-    assert ROUTE in page and OTHER_ROUTE in page and '/route/' + ROUTE + '/' in page
-    assert 'review.sqlite' in page
-    assert "frame-ancestors 'none'" in response.getheader('Content-Security-Policy')
+    assert status == 303 and response.getheader('Location') == '/speed-review'
     status, response, data = server.request('GET', '/api/routes')
     routes = json_of(data)['routes']
+    assert {ROUTE, OTHER_ROUTE} <= {r['route_id'] for r in routes}
     first = next(r for r in routes if r['route_id'] == ROUTE)
     assert first == {'route_id': ROUTE, 'run_id': RUN_ID, 'frame_count': 3, 'frames_with_proposals': 2,
                      'confirmed_count': 0, 'confirmed_by_ai': 0, 'waiting_for_person': 0, 'suspicious_count': 0,

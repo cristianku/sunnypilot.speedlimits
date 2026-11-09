@@ -27,7 +27,7 @@ def served(tmp_path):
 
 # Each page and the section its tab marks; the review page of a drive has no tab bar (its controls are at the bottom).
 PAGES = [('/', 'Overview'), ('/prepare', 'Data'), ('/dataset', 'Data'), ('/train', 'Training'), ('/evaluate', 'Models'),
-         ('/models', 'Models'), ('/publish', 'Models'), ('/routes', 'Data'),
+         ('/models', 'Models'), ('/publish', 'Models'), ('/speed-review', 'Data'),
          ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
 
@@ -55,7 +55,7 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
         assert '<nav class="tabbar"' not in page
 
 
-@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Drives'), ('/routes', 'Sign review'),
+@pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Drives'), ('/speed-review', 'Speed review'),
                                          ('/account', 'Settings'), (f'/route/{ROUTE}/', 'Sign review'),
                                          ('/nonexistent', 'Page not found')])
 def test_every_page_title_names_the_page_as_the_bar_does(served, path, title):
@@ -74,7 +74,7 @@ def test_error_pages_speak_plainly_and_lead_back(served):
     page = data.decode()
     assert status == 404 and '<h1>Drive not found</h1>' in page
     assert 'This drive is not on the server, or it is not prepared yet.' in page and 'pre-annotation' not in page
-    assert '<a class="btn back" href="/routes">← Sign review</a>' in page
+    assert '<a class="btn back" href="/speed-review">← Speed review</a>' in page
 
 
 def test_the_empty_route_list_says_what_to_do_in_words(tmp_path):

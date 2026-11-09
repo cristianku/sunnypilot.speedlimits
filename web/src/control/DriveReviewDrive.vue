@@ -6,8 +6,8 @@
 // it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
 // at the time shown. The commands of the video lie on the picture, at its foot, and the zoom of the lanes next to the
 // title, so that the picture and the lanes keep the room; on a computer the grip under the picture makes it bigger than
-// the page's own (StageGrip.vue): the drive then leaves the page's width, its side under the lanes when they no longer fit. Review the signs here opens Sign review on the frame of the
-// time shown, and Sign review links back (?segment=N&second=S opens the drive at that time). Without logs the video
+// the page's own (StageGrip.vue): the drive then leaves the page's width, its side under the lanes when they no longer fit. Review the signs here (Regression) opens the Signs side of Speed
+// review on the frame of the time shown (?segment=N&second=S opens a drive at that time, common/sign-link.ts). Without logs the video
 // plays all the same, with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
 // or rlog/qlog files named with their drive and segment). Each page gives its own tab and back label (tab, backLabel)
@@ -23,7 +23,7 @@ import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, w
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
-import {setReviewSwitch} from '../common/review-switch';
+import {signsHref} from '../common/sign-link';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
 import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
@@ -38,10 +38,12 @@ import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
   simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
-  pickMap?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one', pickMap: false});
+  pickMap?: boolean; arrows?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one', pickMap: false,
+  arrows: true});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
-  segments: [segments: SyncSegment[]]}>();
+  segments: [segments: SyncSegment[]]; index: [index: VideoState['index']];
+  frame: [frame: {segment: number; frame: number} | null]}>();
 /** The car's speed on the picture and at the side: the page's own (carKph) when it gives one, else vEgo of the logs. */
 const ownSpeed = computed(() => props.carKph !== undefined);
 
@@ -170,6 +172,8 @@ async function askVideo(start: boolean): Promise<void> {
 }
 const segments = computed(() => view.value?.segments ?? []);
 watch(segments, (value) => emit('segments', value), {immediate: true});
+/** The video's encode index (where each minute starts in it), for a page that draws over a frame of it. */
+watch(() => video.value?.index, (value) => emit('index', value), {immediate: true});
 /** The picture of the time shown: its time in the video, or null where the video has none. */
 const videoTime = computed(() => ready.value && hasLogs.value ? videoTimeOf(segments.value, cursor.value) : null);
 /** Without logs the video's own time is the drive's (no sync to make). */
@@ -191,6 +195,8 @@ function seek(seconds: number): void {
   const at = plainVideo.value ? cursor.value : videoTime.value;
   if (at !== null) {
     element.currentTime = at;
+    // The frame of that time at once, should a browser not call back for a seek while paused.
+    present(at);
   } else if (!element.paused) {
     element.pause();
   }
@@ -225,6 +231,7 @@ function tick(now: number): void {
   } else if (element && !element.paused) {
     const at = plainVideo.value ? element.currentTime : logTimeOf(segments.value, element.currentTime);
     if (at !== null) cursor.value = at;
+    if (!frameCallbacks) present(element.currentTime);
   } else {
     // No picture here: the logs go on at their own pace, the video takes over where it has the time again.
     cursor.value = clamp(cursor.value + (last ? (now - last) / 1000 * rate.value : 0));
@@ -294,9 +301,28 @@ watch(sharpOn, (on) => {
 });
 /** The video's own time while it stands still (after a seek, at a pause); null while it plays or seeks. */
 const stillAt = ref<number | null>(null);
-function onStill(): void {
+function onStill(event?: Event): void {
   const element = player.value;
+  // Paused after playing: the browser may still show a frame or two ahead of currentTime (and one more after the
+  // event). The video is stood on the middle of the frame on screen, so its time, the cursor, HD, the editor and the
+  // boxes name one frame; its seeked comes back here.
+  if (event?.type === 'pause' && element && !element.seeking && !playing.value) {
+    const index = video.value?.index;
+    const shown = presentedFrame.value ?? rawFrameOf(index, element.currentTime);
+    const item = shown && index?.segments.find((entry) => entry.segment === shown.segment);
+    if (shown && item && shown.frame < item.frames) {
+      const middle = (Math.round(item.start * FPS) + shown.frame + 0.5) / FPS;
+      if (Math.abs(element.currentTime - middle) > 1e-4) {
+        stillAt.value = null;
+        element.currentTime = middle;
+        const logs = plainVideo.value ? middle : logTimeOf(segments.value, middle);
+        if (logs !== null) cursor.value = logs;
+        return;
+      }
+    }
+  }
   stillAt.value = element && element.paused && !element.seeking ? element.currentTime : null;
+  if (!frameCallbacks && stillAt.value !== null) present(stillAt.value);
 }
 const sharpFrame = computed(() => {
   if (!props.sharp || !sharpOn.value || playing.value || stillAt.value === null || (!plainVideo.value && videoTime.value === null)) return null;
@@ -367,7 +393,8 @@ function onKey(event: KeyboardEvent): void {
   if (event.key === ' ') {
     event.preventDefault();
     toggle();
-  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+  } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && props.arrows) {
+    // arrows false: the page's own editor takes them (Speed review's Signs side, frame by frame of Sign review).
     event.preventDefault();
     const direction = event.key === 'ArrowLeft' ? -1 : 1;
     // ← → a frame, ⇧ ← → a second.
@@ -394,17 +421,12 @@ const syncText = computed((): string => {
   return 'No frame index in this minute\'s log: video not in step.';
 });
 
-/** Sign review of this drive on the frame nearest to the time shown (without logs: by the minute of the video). */
+/** The Signs side of this drive on the frame nearest to the time shown (without logs: by the minute of the video). */
 const signHref = computed((): string => {
   if (hasLogs.value) return signReviewHref(props.route, segments.value, cursor.value);
   const minute = [...(video.value?.index?.segments ?? [])].reverse().find((item) => item.start <= cursor.value + 1e-6);
-  const base = '/route/' + encodeURIComponent(props.route) + '/';
-  return minute ? base + '?segment=' + minute.segment + '&second=' + Math.max(0, Math.round((cursor.value - minute.start) * 10) / 10) : base;
+  return signsHref(props.route, minute ? {segment: minute.segment, second: Math.max(0, Math.round((cursor.value - minute.start) * 10) / 10)} : null);
 });
-// The same address in the top bar's switch, always at the same place (common/review-switch.ts).
-watch(() => props.tab === 'speedreview' && !guest && view.value?.sign_review ? signHref.value : null,
-  (href) => setReviewSwitch(href === null ? null : 'speed', href), {immediate: true});
-onBeforeUnmount(() => setReviewSwitch(null, null));
 
 // -- the window of the lanes ------------------------------------------------------------------------------------------------
 type Zoom = 'one' | 'two' | 'ten' | 'all';
@@ -488,7 +510,66 @@ const layout = computed(() => grownLayout(stageHeight.value));
 /** The whole run of the map's limit at a time, as a tap on the map's lane gives it (key m of Speed review). */
 const mapRunAt = (seconds: number): {from: number; to: number; kph: number} | null => lanes.value?.mapRunAt(seconds) ?? null;
 const mapEdges = (): number[] => lanes.value?.mapEdges() ?? [];
-defineExpose({seek, pause, mapRunAt, mapEdges});
+/** The frame of the comma's road video on screen while it stands still (its minute and its frame in that minute's
+ * fcamera.hevc, as the HD frame and Sign review number it); null while it plays or where the video has no picture. */
+const shownFrame = computed(() => {
+  if (!ready.value || playing.value) return null;
+  const at = plainVideo.value ? cursor.value : videoTime.value;
+  return at === null ? null : rawFrameOf(video.value?.index, at);
+});
+/** The time of the logs that shows frame `frame` of a minute of the road video (the middle of it, as a step does), or
+ * null where the drive's video does not have it. */
+function timeOfFrame(segment: number, frame: number): number | null {
+  const item = video.value?.index?.segments.find((entry) => entry.segment === segment);
+  if (!item || frame < 0 || frame >= item.frames) return null;
+  const at = (Math.round(item.start * FPS) + frame + 0.5) / FPS;
+  return plainVideo.value ? at : logTimeOf(segments.value, at);
+}
+/** No picture of the drive's video to stand on: none on the server, it could not be made, or the browser cannot play
+ * it (a page that edits a frame then shows it on its own picture, SpeedReviewDrive.vue). */
+const videoGone = computed(() => video.value?.state === 'failed' || video.value?.state === 'missing'
+  || ready.value && videoProblem.value !== '');
+defineExpose({seek, pause, mapRunAt, mapEdges, playing, shownFrame, timeOfFrame, videoGone});
+/** The frame of the comma's road video the browser presents, playing or standing still (its minute and its frame k): what
+ * a page draws over the picture at 20 frames a second (emitted as `frame`). From the presented frame's own time
+ * (requestVideoFrameCallback, also after a seek or a step while paused) where the browser has it, else from the video's
+ * time at every frame of the page while it plays and when it stands still. Set only when the frame changes. */
+const presentedFrame = shallowRef<{segment: number; frame: number} | null>(null);
+function present(videoTime: number): void {
+  const at = rawFrameOf(video.value?.index, videoTime);
+  const was = presentedFrame.value;
+  if (at?.segment === was?.segment && at?.frame === was?.frame) return;
+  presentedFrame.value = at ? {segment: at.segment, frame: at.frame} : null;
+}
+watch(presentedFrame, (value) => emit('frame', value));
+/** The browser names the frame it presents (requestVideoFrameCallback): the fallback in tick and onStill is off. */
+let frameCallbacks = false;
+let watchedVideo: HTMLVideoElement | null = null;
+let frameCallback = 0;
+function watchFrames(element: HTMLVideoElement): void {
+  frameCallback = element.requestVideoFrameCallback((_now, metadata) => {
+    if (watchedVideo !== element) return;
+    // A quarter of a frame on: the time of a frame is where it starts, and may come a hair before it.
+    present(metadata.mediaTime + 0.25 / FPS);
+    watchFrames(element);
+  });
+}
+function unwatchFrames(): void {
+  if (watchedVideo && frameCallbacks) watchedVideo.cancelVideoFrameCallback(frameCallback);
+  watchedVideo = null;
+}
+watch(player, (element) => {
+  unwatchFrames();
+  frameCallbacks = !!element && 'requestVideoFrameCallback' in element;
+  if (!element) presentedFrame.value = null;
+  else if (frameCallbacks) {
+    watchedVideo = element;
+    watchFrames(element);
+  }
+}, {immediate: true});
+// Another drive's video: no frame until it presents one.
+watch(() => props.route, () => { presentedFrame.value = null; });
+onBeforeUnmount(unwatchFrames);
 /** The server today at the time shown: our networks' sign within a second, the map's road and limit now. */
 const today = computed(() => {
   const current = view.value;
@@ -698,10 +779,10 @@ watch(() => props.route, () => {
             </dl>
           </section>
 
-          <section v-if="!guest" class="dr-signs" aria-labelledby="dr-signs-title">
+          <section v-if="!guest && tab !== 'speedreview'" class="dr-signs" aria-labelledby="dr-signs-title">
             <h3 id="dr-signs-title">The signs at {{ clockOf(cursor) }}</h3>
             <template v-if="view.sign_review">
-              <p v-if="!simpleLanes" class="dr-hint">Sign review opens on the frame of this moment: confirm or correct the signs there.</p>
+              <p v-if="!simpleLanes" class="dr-hint">The Signs side of Speed review opens on the frame of this moment: confirm or correct the signs there.</p>
               <a class="btn primary" id="dr-sign-review" :href="signHref">Review the signs here</a>
             </template>
             <p v-else class="dr-hint">This drive has no frames in Sign review yet: prepare it in Drives first.</p>

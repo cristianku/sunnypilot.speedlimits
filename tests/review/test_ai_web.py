@@ -120,8 +120,9 @@ def test_the_pages_that_hold_the_ai_parts_carry_their_scripts(served):
     status, _response, data = served.request('GET', '/account')
     assert status == 200
     assert asset('js/account.js')[:200] in data.decode()
-    status, _response, data = served.request('GET', '/routes')
-    assert status == 200
+    # The pages without a script of their own (an error page) carry the site's.
+    status, _response, data = served.request('GET', '/route/ffffffff--ffffffffff/')
+    assert status == 404
     assert asset('js/site.js')[:200] in data.decode()
     status, _response, data = served.request('GET', f'/route/{ROUTE}/')
     assert status == 200

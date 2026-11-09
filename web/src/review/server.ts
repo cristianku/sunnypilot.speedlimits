@@ -7,12 +7,16 @@ import {countryOf, fromServer, unsavedKeys} from './frames';
 import {insertRow, isVirtual, report, rowOf, state, store} from './store';
 import type {FrameRow, Problem, ReviewsAnswer, SaveAnswer, Suspicious} from './types';
 
-/** A failed call; retry is true when trying again later can help (no network, server error). */
+/** A failed call; retry is true when trying again later can help (no network, server error); status and code: the
+ * server's answer (0 and '' when none came). */
 export class SaveError extends Error {
-  constructor(message: string, readonly retry: boolean) {
+  constructor(message: string, readonly retry: boolean, readonly status = 0, readonly code = '') {
     super(message);
   }
 }
+
+/** What the page says when a frame was saved elsewhere meanwhile (another tab, another person): it shows that save. */
+export const CONFLICT_TEXT = 'Changed elsewhere meanwhile: this frame now shows what is saved. Check it, then confirm again.';
 
 // Not common/api.ts: a signed-out page must keep its unsaved confirmations on screen (no jump to the sign-in
 // page), and the messages say whether the save is retried.
@@ -38,7 +42,7 @@ export async function call<T>(method: 'GET' | 'POST', url: string, body?: unknow
   if (!response.ok) {
     const problem = result as Problem | null;
     throw new SaveError(problem && problem.message ? problem.message : 'HTTP error ' + response.status + '.',
-      response.status >= 500);
+      response.status >= 500, response.status, problem && typeof problem.error === 'string' ? problem.error : '');
   }
   return result as T;
 }
@@ -60,9 +64,13 @@ export async function send(key: string): Promise<boolean> {
   const apiBase = report.apiBase;
   if (!apiBase || !s || state.inFlight.has(key)) return false;
   const version = s.version || 0;
+  // The drive whose frame this is: a page that changes drive (Speed review's editor, embed.ts) never takes the answer
+  // into another drive's frame of the same key.
+  const runId = report.runId;
   state.inFlight.add(key);
   state.lastSave = {key, result: 'saving', revision: s.revision || 0};
   let ok = false;
+  let conflict = false;
   // A frame edited before the kind was dropped with the family (it would be refused at every retry).
   s.detections.forEach(dropStaleKind);
   try {
@@ -76,6 +84,7 @@ export async function send(key: string): Promise<boolean> {
       country: countryOf(rowOf(key) ?? {country_proposed: null} as FrameRow, s),
       base_revision: s.revision || 0,
     });
+    if (report.runId !== runId) return true;
     if (state.edits[key] === s && (s.version || 0) === version) {
       state.edits[key] = fromServer(result.review);
     } else {
@@ -91,14 +100,23 @@ export async function send(key: string): Promise<boolean> {
     if (added !== null) insertRow(added);
     ok = true;
   } catch (error) {
+    if (report.runId !== runId) return false;
     s.error = messageOf(error);
     s.retry = error instanceof SaveError && error.retry;
+    conflict = error instanceof SaveError && error.status === 409 && error.code === 'revision_conflict';
   } finally {
+    if (report.runId !== runId) return ok;
     state.inFlight.delete(key);
     state.saveCount += 1;
     const saved = ok ? state.edits[key] : s;
     state.lastSave = {key, result: ok ? 'ok' : 'error', revision: saved?.revision || 0};
     store();
+  }
+  // Saved elsewhere on a newer revision: never sent again on top of it; the frame is read again (loadServer replaces
+  // the working copy made on the older one) and the reviewer is told.
+  if (conflict) {
+    await loadServer();
+    state.notice = {key, text: CONFLICT_TEXT, error: true};
   }
   return ok;
 }
@@ -120,8 +138,11 @@ export async function retryUnsaved(all: boolean): Promise<void> {
 export async function loadServer(): Promise<void> {
   const apiBase = report.apiBase;
   if (!apiBase) return;
+  const runId = report.runId;
   try {
     const body = await call<ReviewsAnswer>('GET', apiBase + '/reviews');
+    // Another drive meanwhile (Speed review's editor, embed.ts): this answer is not its own.
+    if (report.runId !== runId || report.apiBase !== apiBase) return;
     if (body.run_id !== report.runId) {
       state.serverWarning = 'The report of this route was made again: reload the page.';
       state.server = 'stale';
@@ -160,6 +181,7 @@ export async function loadServer(): Promise<void> {
     store();
     void retryUnsaved(true);
   } catch (error) {
+    if (report.runId !== runId) return;
     state.serverWarning = 'Reviews not read from the server: ' + messageOf(error)
       + ' The changes stay in this browser.';
     state.server = 'error';

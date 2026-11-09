@@ -29,7 +29,8 @@ const options = computed(() => {
 
 function changeRoute(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
-  if (value.startsWith('/route/')) window.location.assign(value);
+  // A drive with its road video opens on the Signs side of Speed review; one without keeps its page here.
+  if (value.startsWith('/route/') || value.startsWith('/speed-review?')) window.location.assign(value);
 }
 </script>
 

@@ -1,4 +1,4 @@
-"""The route list (/routes) and the data of the review page: what the cards count, the AI's share, one link to set
+"""The list of drives with signs (GET /api/routes; the page /routes is gone since 9 Nov 2026) and the data of the review page: what the cards count, the AI's share, one link to set
 up the AI reviewer, who proposed the signs, the drive's two lines in the route menu."""
 from __future__ import annotations
 
@@ -41,18 +41,17 @@ def test_route_list_counts_proposals_while_to_review_and_the_share_of_the_ai(ser
     store = ReviewStore(db_path(root))
     assert store.confirmed_count(ROUTE, RUN_ID) == 1 and store.confirmed_count(ROUTE, RUN_ID, reviewer_kind='ai') == 1
     assert store.confirmed_count(ROUTE, RUN_ID, reviewer_kind='human') == 0
-    page = server.request('GET', '/routes')[2].decode()
-    doing = card_of(page, ROUTE)
-    # The model's proposals, not signs: said only while there is something to review.
-    assert '2 with proposals' in doing and 'with signs' not in page
-    assert '<span class="by-ai">1 by AI</span>' in doing
-    # The bar: none by people, a third by the AI, hatched.
-    assert '<span style="width:0%"></span><span class="ai" style="width:33%"></span>' in doing
-    done = card_of(page, OTHER_ROUTE)
-    assert 'with proposals' not in done and '2 by AI' in done and 'class="ai" style="width:100%"' in done
-    # No AI reviewer in Settings: one link to set it up, no button on every drive.
-    assert page.count('Set up AI review') == 1 and 'href="/account#ai-reviewer"' in page
-    assert 'data-ai-route="' not in page
+    # The list of Speed review's card "Signs to review" (the list page /routes is gone since 9 Nov 2026).
+    routes = {item['route_id']: item for item in json.loads(server.request('GET', '/api/routes')[2])['routes']}
+    doing, done = routes[ROUTE], routes[OTHER_ROUTE]
+    # The model's proposals: two of the three frames; one confirmed, by the AI.
+    assert (doing['frame_count'], doing['frames_with_proposals']) == (3, 2)
+    assert (doing['confirmed_count'], doing['confirmed_by_ai']) == (1, 1)
+    assert (done['frame_count'], done['confirmed_count'], done['confirmed_by_ai']) == (2, 2, 2)
+    # The same rows still make the old cards (render_index): proposals said only while there is something to review.
+    page = render_index(list(routes.values()), db_path(root), ai_reviewer=False)
+    assert '2 with proposals' in card_of(page, ROUTE) and '<span class="by-ai">1 by AI</span>' in card_of(page, ROUTE)
+    assert 'with proposals' not in card_of(page, OTHER_ROUTE) and '2 by AI' in card_of(page, OTHER_ROUTE)
 
 
 def test_route_list_offers_review_with_ai_on_each_drive_left_once_a_reviewer_is_chosen():
@@ -131,7 +130,7 @@ def test_a_dashcam_drive_says_dashcam_mode_on_the_list_and_in_the_route_menu(ser
     scan(root, OTHER_ROUTE, False)
     routes = json.loads(server.request('GET', '/api/routes')[2])['routes']
     assert {r['route_id']: r['dashcam'] for r in routes} == {ROUTE: True, OTHER_ROUTE: False}
-    page = server.request('GET', '/routes')[2].decode()
+    page = render_index(routes, db_path(root))
     assert 'DASHCAM MODE' in card_of(page, ROUTE) and 'DASHCAM MODE' not in card_of(page, OTHER_ROUTE)
     links = {item['route_id']: item for item in payload_of(server.request('GET', f'/route/{ROUTE}/')[2].decode())['routes']}
     assert links[ROUTE]['dashcam'] is True and links[OTHER_ROUTE]['dashcam'] is False
@@ -141,4 +140,4 @@ def test_a_drive_whose_logs_are_not_read_has_no_dashcam_mode(served):
     server, root = served
     routes = json.loads(server.request('GET', '/api/routes')[2])['routes']
     assert all(r['dashcam'] is None for r in routes)
-    assert 'class="dashcam-badge"' not in server.request('GET', '/routes')[2].decode()
+    assert 'class="dashcam-badge"' not in render_index(routes, db_path(root))

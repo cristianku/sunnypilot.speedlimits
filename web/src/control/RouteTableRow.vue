@@ -5,6 +5,7 @@ import {computed} from 'vue';
 import {thousands} from '../common/format';
 import type {RouteRow, RouteState} from '../common/panel-types';
 import Bar from '../components/Bar.vue';
+import {signsHref} from '../common/sign-link';
 
 const props = defineProps<{row: RouteRow}>();
 
@@ -25,7 +26,7 @@ const reviewed = computed(() => props.row.report_frames ? Math.min(100, props.ro
 
 <template>
   <tr>
-    <td class="route"><a :href="'/route/' + encodeURIComponent(row.route) + '/'" :title="row.route"><span v-if="pad"
+    <td class="route"><a :href="signsHref(row.route)" :title="row.route"><span v-if="pad"
       class="rid-pad">{{ pad }}</span>{{ row.route.slice(pad.length) }}</a></td>
     <td class="num">{{ row.extracted }} / {{ row.segments }}</td>
     <td class="num">{{ thousands(row.frames) }}</td>

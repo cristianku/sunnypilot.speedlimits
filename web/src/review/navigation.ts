@@ -154,8 +154,8 @@ export function pickFilter(filter: Filter): void {
   else setFilter(filter);
 }
 
-/** Opened from Speed review ("?segment=3&second=12.5"): the frame nearest that moment, else null. */
-function linkedFrame(): string | null {
+/** Opened at a moment ("?segment=3&second=12.5"): the frame nearest that moment, else null (also the Signs side of Speed review). */
+export function linkedFrame(): string | null {
   const query = new URLSearchParams(window.location.search);
   const segment = Number(query.get('segment'));
   const second = Number(query.get('second') ?? 0);

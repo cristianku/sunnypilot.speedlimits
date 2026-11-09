@@ -51,7 +51,7 @@ from nnslr_tools.review_access import (GUEST_PREFIX, KIND_KEYS, NOT_ASSIGNED, RE
                                        GuestAccess, guest_rule, scrubbed)
 # [guest-reviewers] - END
 from nnslr_tools.pages import (CONTROL_TABS, GUEST_HOME, OLD_ADDRESSES, render_account, render_control, render_guest,
-                               render_index, render_login, render_problem, render_review)
+                               render_login, render_problem, render_review, review_data, signs_address)
 from nnslr_tools.review_service import ReviewService
 
 TOKEN_ENV = 'NNSLR_REVIEW_TOKEN'
@@ -69,6 +69,10 @@ AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', 
 PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|regression|publish|reviewers|reviews|panoramica|prepara|allena|pannello|stato|account|'
                      r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
+# [sign-review-retired] - START
+# A drive Speed review opens (its addresses take only these): where the page of Sign review of a route leads.
+SPEED_DRIVE = r'[0-9a-f]{8}--[0-9a-f]{10}'
+# [sign-review-retired] - END
 # A drive page whose route has no report (or an id that is no route), in words.
 UNKNOWN_DRIVE_MESSAGE = 'This drive is not on the server, or it is not prepared yet.'
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
@@ -342,6 +346,32 @@ class ReviewApp(ReviewService):
         except (PreannotationError, ValueError, OSError):
             return {}
 
+    # [sign-review-retired] - START
+    def first_to_review(self, route: str) -> dict:
+        """Where the Signs side of Speed review opens a drive asked without a moment: its first frame not confirmed by
+        a person (signs_address's segment, second and frame), else nothing (the start of the drive)."""
+        from nnslr_tools import drive_review
+        try:
+            _directory, run_id, rows, _busy, _proposer = self.view(route)
+        except (PreannotationError, ValueError, OSError):
+            return {}
+        for frame in drive_review.sign_frames(run_id, rows, self.store.reviews(route, run_id))['frames']:
+            if not frame['confirmed']:
+                return {'segment': frame['segment'], 'second': frame['second'], 'frame': frame['frame_key']}
+        return {}
+
+    def opens_in_speed_review(self, route: str) -> bool:
+        """Whether the Signs side of Speed review shows this drive's frames: a drive's name, and its road video on the
+        server (drive_video.minutes: the player makes the video from it), the frames being edited on the frame the
+        player stands on. A route without it keeps its page of Sign review, so that no frame is out of reach."""
+        from nnslr_tools import drive_video
+        return bool(re.fullmatch(SPEED_DRIVE, route)) and bool(drive_video.minutes(self.root, route))
+
+    def signs_url(self, route: str) -> str:
+        """Where the signs of a route are reviewed: the Signs side of its Speed review, else its page of Sign review."""
+        return signs_address(route) if self.opens_in_speed_review(route) else '/route/' + quote(route) + '/'
+    # [sign-review-retired] - END
+
     def route_links(self) -> list[dict]:
         """Every route with a report, for the route menu of the review page, named as the drive it was
         ("Herznach → Zürich · Fri 23 Oct 2026 · 08:01", nnslr_tools.drives); its title and when apart, for the
@@ -352,7 +382,7 @@ class ReviewApp(ReviewService):
         for route, directory in list_reports(self.root):
             drive = drive_of(self.root, route)
             name = ' · '.join(part for part in (drive['title'], drive['when']) if part) or None
-            links.append({'route_id': route, 'url': '/route/' + route + '/', 'name': name, 'title': drive['title'],
+            links.append({'route_id': route, 'url': self.signs_url(route), 'name': name, 'title': drive['title'],
                           'when': drive['when'], 'minutes': drive['minutes'],
                           'full_definition': drive['full_definition'], 'dashcam': dashcam_of(drives, route)})
         return links
@@ -373,7 +403,9 @@ class ReviewApp(ReviewService):
             labels = dict(WORK_KINDS)
             drives.append({'route': route, 'when': drive['when'], 'start': drive['start'], 'minutes': drive['minutes'],
                            'completed': all(kind in done.get(route, {}) for kind in kinds),
-                           'work': [{'kind': kind, 'label': labels[kind], 'href': WORK_LINKS[kind].format(route=route)}
+                           # The signs on the Signs side of Speed review; a drive it cannot show keeps its page.
+                           'work': [{'kind': kind, 'label': labels[kind],
+                                     'href': self.signs_url(route) if kind == 'signs' else WORK_LINKS[kind].format(route=route)}
                                     for kind in kinds]})
         drives.sort(key=lambda item: (item['start'] or '', item['route']), reverse=True)
         return {'ok': True, 'user': name, 'read_only': not self.panel.actions_enabled, 'drives': drives,
@@ -431,7 +463,8 @@ class ReviewApp(ReviewService):
                 'waiting_for_person': self.store.waiting_count(route, directory.name),
                 'suspicious_count': len(suspicious),
                 'hint_frames': hint_stats['frames'],
-                'url': '/route/' + route + '/',
+                # Where its signs are reviewed: the Signs side of Speed review.
+                'url': self.signs_url(route),
                 # The route as the drive it was: when, how long, from where to where (nnslr_tools.drives).
                 'drive': drive_of(self.root, route),
                 # Who proposed the signs of this report: vietnam, ours or qwen (run.json).
@@ -474,7 +507,7 @@ def _report_proposer(directory: Path) -> str:
 def make_handler(app: ReviewApp):
     from nnslr_tools.annotations import strict_json_loads
     from nnslr_tools.panel import PanelError
-    from nnslr_tools.review_db import ReviewRejected, db_path, public_review, save_frame_review
+    from nnslr_tools.review_db import ReviewRejected, public_review, save_frame_review
     from nnslr_tools.review_service import review_schema
 
     class Handler(BaseHTTPRequestHandler):
@@ -714,16 +747,8 @@ def make_handler(app: ReviewApp):
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
             # [site-login] - END
-            if path in ('/routes', '/index.html'):
-                nonce = secrets.token_urlsafe(18)
-                from nnslr_tools import llm_providers
-                # No AI reviewer chosen in Settings: one link to set it up instead of a button on every drive.
-                page = render_index(app.route_summaries(), db_path(app.root), nonce,
-                                    ai_reviewer=llm_providers.ai_state(app.root)['provider'] is not None)
-                self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'),
-                           "default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                           "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
-                return
+            # Sign review's list of drives (/routes) is gone (9 Nov 2026): OLD_ADDRESSES leads to Speed review's, whose
+            # list shows each drive's signs from /api/routes.
             if path == '/api/routes':
                 self._json(200, {'routes': app.route_summaries()})
                 return
@@ -839,6 +864,12 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import labeler_runs
                 self._json(200, labeler_runs.summary(app.root))
                 return
+            # The drives with their signs on every frame or without, and the networks in use (nnslr_tools.sign_tracks):
+            # the Signs on every frame card of Models.
+            if path == '/api/panel/sign-tracks':
+                from nnslr_tools import sign_tracks
+                self._json(200, sign_tracks.summary(app.root))
+                return
             if path == '/api/panel/models/active':
                 self._problem(405, 'method_not_allowed', 'Use POST, with {"role", "id"}.', True)
                 return
@@ -928,6 +959,17 @@ def make_handler(app: ReviewApp):
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
                 return
+            # [sign-editor] - START
+            # What the page of Sign review starts from, for its editor on the Signs side of Speed review
+            # (web/src/review/embed.ts): the same data, without the menu of the drives. A guest only with the drive's signs
+            # given (GUEST_ROUTES), its answer without places (_json, scrubbed).
+            match = re.fullmatch(r'/api/route/([^/]+)/page', path)
+            if match:
+                args = self._review_args(match.group(1), True, links=False)
+                if args is not None:
+                    self._json(200, {'ok': True, **review_data(**args)})
+                return
+            # [sign-editor] - END
             # The frames of the road video around one, for the arrows of Sign review (nnslr_tools.video_frames).
             match = re.fullmatch(r'/api/route/([^/]+)/video/([0-9]{1,4})/([0-9]{1,6})', path)
             if match:
@@ -940,16 +982,21 @@ def make_handler(app: ReviewApp):
                 self._json(200, {'ok': True, **app.car_reading(match.group(1),
                                                                 match.group(2) + '/' + match.group(3))})
                 return
-            match = re.fullmatch(r'/route/([^/]+)', path)
+            # [sign-review-retired] - START
+            # The page of Sign review of a drive: its signs are reviewed on the Signs side of Speed review (9 Nov 2026),
+            # where its address leads, at the same moment and frame. Only a route Speed review cannot show (no drive's
+            # name, or no road video on the server: ReviewApp.opens_in_speed_review) keeps the page.
+            match = re.fullmatch(r'/route/([^/]+)(/(index\.html)?)?', path)
             if match:
                 route = self._route_or_none(match.group(1))
-                if route is not None:
+                if route is not None and app.opens_in_speed_review(route):
+                    self._redirect(self._signs_address(route), None)
+                elif route is not None and match.group(2) is None:
                     self._redirect('/route/' + quote(route) + '/', None)
+                elif route is not None:
+                    self._send_route_page(route)
                 return
-            match = re.fullmatch(r'/route/([^/]+)/(index\.html)?', path)
-            if match:
-                self._send_route_page(match.group(1))
-                return
+            # [sign-review-retired] - END
             match = re.fullmatch(r'/route/([^/]+)(/images/[0-9]{8}\.jpg)', path)
             if match:
                 self._send_image(match.group(1), match.group(2))
@@ -1125,6 +1172,25 @@ def make_handler(app: ReviewApp):
                     extra.append((name, value))
             self._send(status, content_type, data, DEFAULT_CSP, extra)
 
+        # [sign-review-retired] - START
+        def _signs_address(self, route):
+            """The Signs side of Speed review for an address of Sign review's page: its moment (?segment=N&second=S)
+            and its frame (?frame=<segment>/<image>) as they were asked; without them, the first frame still to review
+            (not confirmed by a person), else the start of the drive."""
+            query = parse_qs(urlsplit(self.path).query)
+            asked = {name: (query.get(name) or [''])[0] for name in ('segment', 'second', 'frame')}
+            at = {}
+            if re.fullmatch(r'[0-9]{1,4}', asked['segment']):
+                second = asked['second'] or '0'
+                at.update(segment=int(asked['segment']),
+                          second=float(second) if re.fullmatch(r'[0-9]{1,6}(\.[0-9]{1,6})?', second) else 0.0)
+            if re.fullmatch(r'[0-9]{1,9}/[0-9]{1,9}', asked['frame']):
+                at['frame'] = asked['frame']
+            if not at:
+                at = app.first_to_review(route)
+            return signs_address(route, **at)
+        # [sign-review-retired] - END
+
         def _route_or_none(self, route):
             # Unknown routes, malformed ids and paths outside the data root all end as 404.
             try:
@@ -1153,21 +1219,30 @@ def make_handler(app: ReviewApp):
             print(f'Panel: car settings {record["values"] or "all default"} ({terminal_text(who or via)})', flush=True)
             self._json(200, {'ok': True, **self._car_settings_view()})
 
-        def _send_route_page(self, route):
+        def _review_args(self, route, api, links=True):
+            """What the review page of a drive starts from (pages.review_data's arguments); None when the drive is
+            unknown, answered. links: the drives of the menu at the top of the page (not for the editor in Speed review)."""
             try:
                 directory, run_id, rows, busy, proposer = app.view(route)
             except (PreannotationError, ValueError, OSError):
-                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, False)
-                return
+                self._problem(404, 'unknown_route', UNKNOWN_DRIVE_MESSAGE, api)
+                return None
             hints_by_frame, hint_stats = app.hints(route, rows)
             suspicious = app.suspicious(route, run_id, rows, hints_by_frame)
-            nonce = secrets.token_urlsafe(18)
             guest = self.guest is not None
             clean = scrubbed if guest else (lambda value: value)
-            page = render_review(clean(rows), run_id, route_id=route, server=True, nonce=nonce,
-                                 hints=clean(hints_by_frame), hint_stats=hint_stats, suspicious=clean(suspicious),
-                                 routes=app.guest_links(self.guest) if guest else app.route_links(), proposer=proposer,
-                                 busy=busy, videos=clean(app.videos(route, rows)), guest=guest)
+            routes = (app.guest_links(self.guest) if guest else app.route_links()) if links else []
+            videos = app.videos(route, rows)
+            return dict(rows=clean(rows), run_id=run_id, route_id=route, server=True, hints=clean(hints_by_frame),
+                        hint_stats=hint_stats, suspicious=clean(suspicious), routes=routes, proposer=proposer, busy=busy,
+                        videos=clean(videos), kept_seconds=app.kept_seconds(route, videos))
+
+        def _send_route_page(self, route):
+            args = self._review_args(route, False)
+            if args is None:
+                return
+            nonce = secrets.token_urlsafe(18)
+            page = render_review(nonce=nonce, guest=self.guest is not None, **args)
             csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
                    "img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
@@ -1467,6 +1542,17 @@ def make_handler(app: ReviewApp):
                 reviews = app.store.reviews(match.group(1), run_id)
                 self._json(200, {'ok': True, **drive_review.sign_frames(run_id, rows, reviews)})
                 return
+            # The signs on every frame of the drive's video (nnslr_tools.sign_tracks), for the boxes over the video at
+            # 20 frames a second: the file as it is, and whether the networks in use on these minutes made it.
+            match = re.fullmatch(drive + '/sign-track', path)
+            if match:
+                from nnslr_tools import sign_tracks
+                track = sign_tracks.read(app.root, match.group(1))
+                if track is None:
+                    self._problem(404, 'no_sign_track', sign_tracks.NO_TRACK, True)
+                    return
+                self._json(200, {'ok': True, **track})
+                return
             if re.fullmatch(drive + '/(blocks|works|road|road-type)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
@@ -1530,6 +1616,10 @@ def make_handler(app: ReviewApp):
             told), or a new kind of road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in on
             the site (never the access token alone: an agent never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
+            if re.fullmatch(r'/api/speed-review/drives/[0-9a-f]{8}--[0-9a-f]{10}/sign-track', path):
+                # Made by nnslr sign-tracks only: read here, never written.
+                self._problem(405, 'method_not_allowed', 'Use GET.', True)
+                return
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                 return
@@ -1725,6 +1815,9 @@ def make_handler(app: ReviewApp):
                     # The road labeler's dry run, run and marks, the same way: a dry run sent as true must be refused,
                     # never dropped into a real training on the GPU.
                     options.update((key, body[key]) for key in ('dry', 'labeler', 'marks')
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    # The drives of the signs on every frame ({"routes": "R1,R2"}), the same way.
+                    options.update((key, body[key]) for key in ('routes',)
                                    if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END
@@ -2288,7 +2381,8 @@ def serve_review(route: str | None = None, *, data_root: Path | None=None, host:
         # [site-login] - END
         path = '/'
         if route is not None:
-            path = '/route/' + route + '/'
+            # The server leads it to the Signs side of Speed review where that shows the drive.
+            path = '/route/' + quote(route) + '/'
         print(f'Revisione NNSLR in ascolto su {host}:{port}', flush=True)
         print('Apri nel browser:', flush=True)
         for base in _base_urls(host, port):

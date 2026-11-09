@@ -373,16 +373,14 @@ def test_the_review_page_reads_the_last_trial(lan, fake):
 
 def test_the_route_list_offers_the_ai_on_routes_not_done(local, fake):
     server, root = local
-    # No AI reviewer chosen: one link to set it up, no button on each drive.
-    page = server.request('GET', '/routes')[2].decode()
-    assert 'Set up AI review' in page and 'data-ai-route="' not in page
+    # The route list is retired (9 Nov 2026): "Review with AI" is on the Signs side of Speed review, whose page carries
+    # the style of its sheet (the sheet says itself when no AI reviewer is chosen).
+    status, response, _data = server.request('GET', '/routes')
+    assert status == 303 and response.getheader('Location') == '/speed-review'
     add_provider(root, fake.base_url)
-    status, response, data = server.request('GET', '/routes')
-    assert status == 200
-    page = data.decode()
-    assert 'Set up AI review' not in page
-    assert (f'<button type="button" class="btn small ai-route" data-ai-route="{ROUTE}" data-ai-name="{ROUTE}" '
-            f'data-ai-left="3">Review with AI</button></li>') in page
+    page = server.request('GET', '/speed-review')[2].decode()
+    assert '.ai-choices{' in page and '.ai-sheet' in page and '__NNSLR_AI_SHEET_CSS__' not in page
+    # The pages of Sign review (unserved but for a route Speed review cannot show) still render the button.
     summary = {'route_id': ROUTE, 'url': f'/route/{ROUTE}/', 'frame_count': 1200, 'confirmed_count': 200,
                'frames_with_proposals': 900, 'drive': {'title': 'Herznach → <Zürich>', 'when': 'Fri 23 Oct 2026 · 08:01',
                                                        'minutes': 20}}

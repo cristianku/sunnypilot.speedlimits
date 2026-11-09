@@ -4,7 +4,7 @@ import type {AiState} from './ai-types';
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box'
-  | 'road_labeler_train' | 'road_labeler_predict';
+  | 'road_labeler_train' | 'road_labeler_predict' | 'sign_tracks';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -89,6 +89,28 @@ export interface ActionOptions {
   dry?: 'on';
   labeler?: string;
   marks?: 'on' | 'off';
+  /** The signs on every frame (sign_tracks): the drives, separated by commas; none: every drive with its video. A dry
+   * run (dry) reads a few frames of one drive on the CPU. */
+  routes?: string;
+}
+/** GET /api/panel/sign-tracks (nnslr_tools.sign_tracks.summary): a drive with its video and its signs on every frame.
+ * none: not read yet; done: by the networks in use on these minutes; old: by other networks or on other minutes;
+ * partial: a run stopped on it (the minutes done are kept). video: its video matches its minutes (else Drive view makes
+ * it again first). */
+export interface SignTracksDrive {
+  route: string;
+  minutes: number;
+  done_minutes: number;
+  state: 'none' | 'done' | 'old' | 'partial';
+  made_at: string | null;
+  frames: number;
+  boxes: number;
+  video: boolean;
+}
+export interface SignTracksPayload {
+  /** The cutter and the classifier in use ({id, size, mtime_ns}); null when one is missing. */
+  networks_in_use: Record<string, {id: string}> | null;
+  drives: SignTracksDrive[];
 }
 /** GET /api/panel/road-labeler (nnslr_tools.labeler_runs): a head of a road labeler run, a kind of road or the
  * roadworks, measured on validation, and whether it writes into Speed review (or why not). */

@@ -137,9 +137,10 @@ def test_a_frame_between_the_seconds_is_saved_with_a_box_and_kept_by_propose_aga
     added = server.app.report(ROUTE)[2]['0/1025']
     assert added['image_path'] == str(picture.relative_to(root)) and added['preview_path'] == 'video/0/25.jpg'
     assert [row['frame_key'] for row in server.app.report(ROUTE)[1]] == ['0/0', '0/1', '0/1025', '0/2']
-    # The page made again (a reload) has it among its frames.
-    status, _response, data = server.request('GET', f'/route/{ROUTE}/')
-    assert status == 200 and b'"frame_key": "0/1025"' in data
+    # The page made again (a reload) has it among its frames: the data of the Signs side of Speed review (the drive has
+    # its video, so its old page leads there).
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
+    assert status == 200 and '0/1025' in [row['frame_key'] for row in json_of(data)['frames']]
     store = ReviewStore(db_path(root))
     saved = store.review(ROUTE, RUN_ID, '0/1025')
     assert saved['confirmed'] and saved['payload']['image_path'] == added['image_path']
@@ -227,13 +228,36 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     assert status == 409 and json_of(data)['error'] == 'stale_report'
     assert not manifest.exists() and not list(manifest.parent.glob('video_*.png'))
     # The page knows the segments with their video, and how long it is once a frame of it is saved.
-    status, _response, data = server.request('GET', f'/route/{ROUTE}/')
-    assert status == 200 and b'"videos": {"0": null}' in data
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
+    assert status == 200 and json_of(data)['videos'] == {'0': None}
     # A box still to check is refused, as on any frame; checked ("Here", or Fit box on its sign) it is saved.
     assert server.post_frame(ROUTE, '0/1025', body(carried))[0] == 400 and not manifest.exists()
     checked = [{name: value for name, value in box.items() if name != 'check_position'} for box in carried]
     assert server.post_frame(ROUTE, '0/1025', body(checked))[0] == 200
     status, answer = apply('0/1026')
     assert status == 200 and answer['source_frame_key'] == '0/1025'
-    status, _response, data = server.request('GET', f'/route/{ROUTE}/')
-    assert status == 200 and b'"videos": {"0": 60}' in data
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
+    assert status == 200 and json_of(data)['videos'] == {'0': 60}
+
+
+def test_the_page_names_the_seconds_kept_of_a_segment_kept_only_at_a_car_parks_speed(drive):
+    """The editor on the Signs side of Speed review offers a frame of the video only in a second the server saves
+    (video_frames.materialize): the page lists the seconds kept of a slow-only segment, none of a whole one."""
+    from nnslr_tools.sync import SLOW_ONLY_MARK
+    root, _video, _rows, server = drive
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
+    assert status == 200 and json_of(data)['kept_seconds'] == {}
+    (root / 'raw/routes' / ROUTE / '0' / SLOW_ONLY_MARK).write_text('start of the drive')
+    pictures = root / 'derived/frames' / ROUTE / '0' / 'frames.jsonl'
+    kept = [line for line in pictures.read_text().splitlines() if json.loads(line)['output_index'] == 1]
+    pictures.write_text(kept[0] + '\n')
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
+    assert status == 200
+    seconds = json_of(data)['kept_seconds']
+    assert list(seconds) == ['0'] and len(seconds['0']) == 1
+    # A frame of another second is refused on save, as the page knows; one of the second kept is saved.
+    kept_second = seconds['0'][0]
+    other = next(second for second in (0, 1, 2) if second != kept_second)
+    status, _response, data = server.post_frame(ROUTE, f'0/{1000 + other * 20 + 5}', body([BOX]))
+    assert status == 404 and json_of(data)['error'] == 'no_video_frame'
+    assert server.post_frame(ROUTE, f'0/{1000 + kept_second * 20 + 5}', body([BOX]))[0] == 200

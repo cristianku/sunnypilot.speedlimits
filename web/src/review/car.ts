@@ -84,11 +84,15 @@ export function carAvailable(): boolean {
 async function readCar(key: string): Promise<void> {
   const known = car.asks[key];
   if (known && known.phase !== 'failed') return;
+  const apiBase = report.apiBase;
   car.asks[key] = {phase: 'reading', reading: null, error: ''};
   try {
-    const reading = await call<CarReading>('GET', report.apiBase + '/car/' + key);
+    const reading = await call<CarReading>('GET', apiBase + '/car/' + key);
+    // Another drive opened meanwhile (the editor in Speed review): its frames have the same keys.
+    if (report.apiBase !== apiBase) return;
     car.asks[key] = {phase: 'ready', reading, error: ''};
   } catch (error) {
+    if (report.apiBase !== apiBase) return;
     car.asks[key] = {phase: 'failed', reading: null, error: error instanceof Error ? error.message : String(error)};
   }
   const keys = Object.keys(car.asks);
@@ -133,6 +137,15 @@ export function useCarReading(): void {
     const row = currentRow();
     if (reading && row) placeCarSigns(row, reading);
   }, {immediate: true});
+}
+
+/** Forgets the drive's readings (the editor on the Signs side of Speed review opens another one, review/embed.ts);
+ * whether the networks are shown stays. */
+export function resetCar(): void {
+  for (const key of Object.keys(car.asks)) delete car.asks[key];
+  placed.clear();
+  wanted = null;
+  window.clearTimeout(settle);
 }
 
 /** T: on (the frame on screen is read now, then every frame shown) or off. */

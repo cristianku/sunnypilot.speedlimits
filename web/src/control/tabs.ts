@@ -1,10 +1,10 @@
 // Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
 // ("/", "/prepare", "/dataset", "/speed-review", "/sign-distance", "/train", "/evaluate",
-// "/models", "/regression", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives, Review,
+// "/models", "/regression", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives,
 // Speed review, Sign distance, Training dataset, Reviewers), Training, Models (Versions, Results, Regression, Publish); the
 // section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
-// (SectionHead.vue) and the brand switch tab here without a reload; the route list (/routes) and the review pages stay
-// normal links. A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Speed review, Sign distance or Regression is "/speed-review?drive=<route>"
+// (SectionHead.vue) and the brand switch tab here without a reload. Signs are reviewed on the Signs side of Speed review
+// (the route list /routes and the page of Sign review lead there since 9 Nov 2026). A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Speed review, Sign distance or Regression is "/speed-review?drive=<route>"
 // ("/sign-distance?drive=<route>&sign=<key>"):
 // an address of its own, Back returns to the list.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
@@ -25,16 +25,16 @@ const TAB_TITLE: Record<ControlTab, string> = {
   speedreview: 'Speed review', signdistance: 'Sign distance', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
   regression: 'Regression', publish: 'Publish',
 };
-/** A page of a section: its address and name; the route list (/routes) is Data's, outside this app. */
+/** A page of a section: its address and name. */
 export interface SectionPage {
-  key: ControlTab | 'review';
+  key: ControlTab;
   href: string;
   label: string;
 }
 /** The sections, as pages.SECTIONS: their title, and their pages under it. */
 export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = {
   overview: {title: 'Overview', pages: []},
-  data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'}, {key: 'review', href: '/routes', label: 'Sign review'},
+  data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'},
     {key: 'speedreview', href: '/speed-review', label: 'Speed review'},
     {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'},
     {key: 'dataset', href: '/dataset', label: 'Training dataset'}, {key: 'reviewers', href: '/reviewers', label: 'Reviewers'}]},

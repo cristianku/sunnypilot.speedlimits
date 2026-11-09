@@ -44,12 +44,21 @@ export interface Report {
    * null offline. A cell of the timeline is the 20 frames of its second (seconds.ts). Replaced, never changed in
    * place, when video.ts learns a count. */
   videos: Readonly<Record<number, number | null>> | null;
+  /** Segment: its seconds kept, for the segments kept only at a car park's speed (a frame of their video in another
+   * second cannot be saved); a segment not here is whole. */
+  keptSeconds: Readonly<Record<number, ReadonlySet<number>>>;
+  /** Where the pictures of the drive are (preview_path is relative to it): '' on the page of the drive itself,
+   * /route/<drive>/ for the editor on another page (embed.ts). */
+  pictureBase: string;
+  /** The editor on another page (Speed review's Signs side, embed.ts): no menu of the drives. */
+  embedded: boolean;
 }
 
 // Shallow: only its fields are followed (the rows of the drive at work grow while the page is open, appendRows).
 export const report: Report = shallowReactive({
   runId: '', routeId: '', rows: [], routes: [], countries: {}, hintStats: null, routeHasHints: false, apiBase: null,
-  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null,
+  storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null, keptSeconds: {},
+  pictureBase: '', embedded: false,
 });
 
 let hintsByFrame: Record<string, Hint[]> = {};
@@ -155,14 +164,21 @@ export function toggleKeys(): void {
   writeLocal(KEYS_SHOWN, state.showKeys ? '1' : '0');
 }
 
-/** The payload of the page (<script id="payload">), read once before the app mounts. */
-export function initStore(raw: Partial<Payload>): void {
+/** A picture of the drive: its preview_path where the page is the drive's own, else under pictureBase. */
+function pictureOf(path: string, base: string): string {
+  return base === '' || path.startsWith('/') ? path : base + path;
+}
+
+/** The payload of the page (<script id="payload">), read once before the app mounts; pictureBase: where the pictures
+ * are when the page is not the drive's own (embed.ts). */
+export function initStore(raw: Partial<Payload>, pictureBase = ''): void {
   const routeId = raw.route_id ?? '';
   hintsByFrame = isRecord(raw.hints) ? raw.hints as Record<string, Hint[]> : {};
+  const rows: FrameRow[] = Array.isArray(raw.frames) ? raw.frames : [];
   Object.assign(report, {
     runId: String(raw.run_id),
     routeId,
-    rows: Array.isArray(raw.frames) ? raw.frames : [],
+    rows: pictureBase === '' ? rows : rows.map((row) => ({...row, preview_path: pictureOf(row.preview_path, pictureBase)})),
     routes: Array.isArray(raw.routes) ? raw.routes : [],
     countries: isRecord(raw.countries) ? raw.countries as Record<string, string> : {},
     hintStats: isRecord(raw.hint_stats) ? raw.hint_stats as unknown as HintStats : null,
@@ -174,6 +190,9 @@ export function initStore(raw: Partial<Payload>): void {
     readOnly: isRecord(raw.busy),
     atWork: isRecord(raw.busy) && raw.busy['phase'] === 'proposing again',
     videos: raw.server && isRecord(raw.videos) ? videosOf(raw.videos) : null,
+    keptSeconds: isRecord(raw.kept_seconds) ? keptOf(raw.kept_seconds) : {},
+    pictureBase,
+    embedded: pictureBase !== '',
   } satisfies Report);
   state.busy = isRecord(raw.busy) ? raw.busy as unknown as Busy : null;
   reindex();
@@ -186,6 +205,16 @@ function videosOf(raw: Record<string, unknown>): Record<number, number | null> {
     if (/^[0-9]+$/.test(segment)) videos[Number(segment)] = typeof count === 'number' && count > 0 ? count : null;
   }
   return videos;
+}
+
+function keptOf(raw: Record<string, unknown>): Record<number, ReadonlySet<number>> {
+  const kept: Record<number, ReadonlySet<number>> = {};
+  for (const [segment, seconds] of Object.entries(raw)) {
+    if (/^[0-9]+$/.test(segment) && Array.isArray(seconds)) {
+      kept[Number(segment)] = new Set(seconds.filter((second): second is number => Number.isInteger(second)));
+    }
+  }
+  return kept;
 }
 
 /** The frames of a segment's video, learnt from the server (video.ts). */
@@ -207,7 +236,8 @@ function reindex(): void {
 
 /** The new proposals of the drive at work (review/busy.ts), after the rows the page has. */
 export function appendRows(rows: readonly FrameRow[]): void {
-  const fresh = rows.filter((row) => !rowIndex.has(row.frame_key));
+  const fresh = rows.filter((row) => !rowIndex.has(row.frame_key))
+    .map((row) => report.pictureBase === '' ? row : {...row, preview_path: pictureOf(row.preview_path, report.pictureBase)});
   if (fresh.length === 0) return;
   report.rows = [...report.rows, ...fresh];
   reindex();
@@ -263,7 +293,8 @@ export function virtualRowOf(key: string): FrameRow | null {
   }
   const row: FrameRow = {
     frame_key: key, segment_index: segment, output_index: index, decoded_frame_index: decoded, media_time_s: second,
-    width: near.width, height: near.height, preview_path: 'video/' + segment + '/' + decoded + '.jpg', detections: [],
+    width: near.width, height: near.height, preview_path: report.pictureBase + 'video/' + segment + '/' + decoded + '.jpg',
+    detections: [],
     gps: near.gps ?? null, country_proposed: near.country_proposed ?? null,
     country_from: near.country_proposed ? 'nearest_fix' : null,
   };
@@ -331,6 +362,24 @@ export function store(): void {
         + 'saved on the server.'
       : 'Saving in this browser is not available: download the JSONL before closing.';
   }
+}
+
+/** A page that shows one drive after another (the editor of Speed review, embed.ts): nothing of the drive before stays,
+ * neither its frames of the video nor what was on screen. */
+export function resetStore(): void {
+  virtualRows.clear();
+  hintsByFrame = {};
+  Object.assign(state, {
+    edits: {}, suspicious: {}, currentKey: null, selected: -1, selectedByUser: false, typing: '', drawing: false,
+    drag: null, draft: null, filterNote: '', reviewerNeeded: false, valueError: false, exportMessage: null,
+    inFlight: new Set<string>(), notice: null, storageWarning: '', serverWarning: '', retrying: false,
+    withdrawArmed: null, duplicateAsked: null, saveCount: 0, lastSave: null, server: 'offline', busy: null,
+    newestSave: null,
+  } satisfies Partial<ReviewState>);
+  Object.assign(report, {runId: '', routeId: '', rows: [], routes: [], hintStats: null, routeHasHints: false,
+    apiBase: null, storageKey: '', lastKeyStorage: '', proposer: null, readOnly: false, atWork: false, videos: null,
+    keptSeconds: {}, pictureBase: '', embedded: false} satisfies Partial<Report>);
+  reindex();
 }
 
 /** What this browser kept: the working copies of the frames, reviewer, filter, timeline fold, hints shown. */

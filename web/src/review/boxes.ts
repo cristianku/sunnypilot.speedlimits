@@ -3,7 +3,7 @@
 import type {AiAction} from '../common/ai-types';
 import {CAR_BOX, describe, shortName} from './catalog';
 import {proposalsOf} from './frames';
-import {overlap} from './geometry';
+import {boxArea, overlap} from './geometry';
 import type {Detection, FrameEdit, FrameRow} from './types';
 
 /** "added by hand", "added by the AI (claude)", "model · 87%", or what the reviewer changed: "model 40 " + "→ 60". */
@@ -62,10 +62,22 @@ function sourceOf(row: FrameRow, work: FrameEdit, d: Detection): Source {
   return {text: 'model · ' + Math.round(Number(original.score) * 100) + '%', changed: null};
 }
 
-/** For each box, the earlier box it repeats (the same sign drawn twice: it covers most of it), or null. */
+/** A box this much smaller than the one around it is a sign on it (a limit on a panel of lanes), not the same sign
+ * drawn twice. */
+const NESTED_AREA = 0.4;
+
+/** Two boxes of about one size where one covers most of the other: the same sign drawn twice. */
+function sameSign(a: Detection, b: Detection): boolean {
+  const small = Math.min(boxArea(a.bbox_xyxy), boxArea(b.bbox_xyxy));
+  const large = Math.max(boxArea(a.bbox_xyxy), boxArea(b.bbox_xyxy));
+  return overlap(a.bbox_xyxy, b.bbox_xyxy) > 0.6 && large > 0 && small / large >= NESTED_AREA;
+}
+
+/** For each box, the earlier box it repeats (the same sign drawn twice: about its size, it covers most of it), or null.
+ * A small box inside a large one is a sign on a panel, never a repeat. */
 export function duplicatesOf(work: FrameEdit): (number | null)[] {
   return work.detections.map((d, i) => {
-    const earlier = work.detections.slice(0, i).findIndex((other) => overlap(other.bbox_xyxy, d.bbox_xyxy) > 0.6);
+    const earlier = work.detections.slice(0, i).findIndex((other) => sameSign(other, d));
     return earlier >= 0 ? earlier : null;
   });
 }

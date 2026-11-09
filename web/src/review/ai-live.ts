@@ -26,6 +26,8 @@ export const aiLive = ref<AiLive | null>(null);
 export const following = ref(false);
 let followed: string | null = null;
 let timer: number | undefined;
+// Tells the drive asked about from a later one (resetAiLive): an answer for the drive before is dropped.
+let generation = 0;
 
 function follow(key: string | null | undefined): void {
   if (!key) return;
@@ -41,11 +43,13 @@ export function toggleFollow(): void {
 
 async function ask(): Promise<void> {
   const apiBase = report.apiBase;
+  const mine = generation;
   if (!apiBase) return;
   let next = IDLE_MS;
   try {
     const since = state.newestSave;
     const answer = await call<LiveAnswer>('GET', apiBase + '/live' + (since ? '?since=' + encodeURIComponent(since) : ''));
+    if (mine !== generation) return;
     if (answer.run_id !== report.runId) return;
     for (const item of answer.reviews) {
       if (state.newestSave === null || item.updated_at > state.newestSave) state.newestSave = item.updated_at;
@@ -64,7 +68,18 @@ async function ask(): Promise<void> {
   } catch {
     // The network or a restart of the site: asked again later.
   }
-  timer = window.setTimeout(() => void ask(), next);
+  if (mine === generation) timer = window.setTimeout(() => void ask(), next);
+}
+
+/** Stops asking and forgets the drive (the editor on the Signs side of Speed review opens another one,
+ * review/embed.ts); watchAiLive starts again for the next. */
+export function resetAiLive(): void {
+  generation += 1;
+  window.clearTimeout(timer);
+  timer = undefined;
+  aiLive.value = null;
+  following.value = false;
+  followed = null;
 }
 
 /** Starts asking, once the saved reviews are read (state.newestSave). */

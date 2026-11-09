@@ -15,12 +15,16 @@ Placeholders of the templates:
 - ``__NNSLR_BAR_END__``: only the Account menu (the review page has its own bar);
 - ``__NNSLR_TITLE__``: the window title, "Speed limits · " and the name of the page as the bar says it;
 - ``__NNSLR_SCRIPT__``: the page script; ``__NNSLR_NONCE__``: the nonce, where a template needs it;
-- ``__NNSLR_DATA__``: the frames of the review page.
+- ``__NNSLR_DATA__``: the frames of the review page;
+- ``/* __NNSLR_SIGN_EDITOR_CSS__ */``: the style of Sign review, kept to ``.sign-editor`` (sign_editor_css), for
+  its editor on the Signs side of Speed review; a comment where nothing replaces it.
 """
 from __future__ import annotations
 
 import html
 import json
+import re
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 
@@ -48,15 +52,15 @@ TABS_MACHINE = '<div class="tabs-machine" id="tabs-machine" data-feed="{feed}"><
 COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 
 # The four sections of the site, in the order of the work: (key, address, label, its pages). A section with pages
-# shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, their
-# sign review, Speed review (the speed a person wants held along a drive, with the map's limits it proposes), Sign distance
+# shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, Speed
+# review (the one review page of a drive: the speed a person wants held along it on its Speed side, the boxes of its
+# signs on its Signs side, which took the place of the page of Sign review on 9 Nov 2026), Sign distance
 # (where the comma's vision says a sign is passed against the frame a person marks) and the training dataset; Models the
 # versions to choose, their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
-    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('review', '/routes', 'Sign review'),
-                                  ('speedreview', '/speed-review', 'Speed review'),
+    ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('speedreview', '/speed-review', 'Speed review'),
                                   ('signdistance', '/sign-distance', 'Sign distance'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
@@ -67,8 +71,7 @@ SECTIONS = (
 SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (pages or ((key, href, label),)))
 # The section of each page ("review" → "data").
 SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
-# The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address. The
-# route list (/routes) is a page of its own.
+# The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset',
                 '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
                 '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
@@ -82,12 +85,28 @@ SECTION_ICONS = {
 }
 # Earlier addresses of these pages, kept working, and the names of the bar typed as addresses (Settings, Review). Drive
 # review is gone (7 Nov 2026): its drive player is Speed review's, where its links lead with their drive and moment.
+# Sign review's list of drives (/routes, /review, /index.html) is gone too (9 Nov 2026): its drives are in Speed review's
+# list, and a drive's page of Sign review (/route/<id>/) leads to the Signs side of Speed review (signs_address).
 # The home of a reviewer from outside. / cannot be: on the public names it is the page of the project, open to all, and
 # what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
 GUEST_HOME = '/reviews'
 OLD_ADDRESSES = {GUEST_HOME: '/', '/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
-                 '/settings': '/account', '/review': '/routes', '/roads': '/speed-review',
-                 '/drive-review': '/speed-review'}
+                 '/settings': '/account', '/review': '/speed-review', '/routes': '/speed-review',
+                 '/index.html': '/speed-review', '/roads': '/speed-review', '/drive-review': '/speed-review'}
+
+
+def signs_address(route: str, *, segment: int | None = None, second: float | None = None, frame: str | None = None) -> str:
+    """Where a drive's signs are reviewed: the Signs side of its Speed review, at second `second` of segment
+    `segment` (the player goes there) and on the frame of Sign review `frame` ("<segment>/<image>", the editor opens
+    it: the exact frame, also one of those between the seconds), each when given (web/src/common/sign-link.ts says
+    the same)."""
+    from urllib.parse import quote
+    address = '/speed-review?drive=' + quote(route, safe='') + '&side=signs'
+    if segment is not None:
+        address += '&segment=' + str(int(segment)) + '&second=' + format(float(second or 0), 'g')
+    if frame is not None:
+        address += '&frame=' + quote(frame, safe='/')
+    return address
 # The name of each page in the window title.
 TAB_TITLES = {key: label for key, _, label in SITE_TABS}
 # Dark (the default) or the choice kept in this browser, applied before the first paint
@@ -203,29 +222,173 @@ def fill(template: str, nonce: str, page: str, current: str = '', *, live: bool 
         # Last: the frames are data and must never be scanned for placeholders.
         '__NNSLR_DATA__': data,
     }
+    if SIGN_EDITOR_MARK in template:
+        template = template.replace(SIGN_EDITOR_MARK, sign_editor_css())
+    if AI_SHEET_MARK in template:
+        template = template.replace(AI_SHEET_MARK, ai_sheet_css())
     for name, value in values.items():
         if name in template:
             template = template.replace(name, value)
     return template
 
 
-def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
-                  nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
-                  suspicious: dict | None = None, routes: list[dict] | None = None,
-                  proposer: str | None = None, busy: dict | None = None, videos: dict | None = None,
-                  guest: bool = False) -> str:
-    """The review page with its data embedded. Hints and suspicious flags travel apart from the
-    frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
-    signs of the report (vietnam, ours, qwen; None when not known), for the page's "More". busy: the drive is read
-    only, Propose again works on it (nnslr_tools.reproposing.public), else None. videos: the segments with their road
-    video on the server (ReviewService.videos), None offline. guest: for a reviewer from outside (guest_bar)."""
-    data = {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
-            'busy': busy, 'videos': videos,
+# [sign-editor] - START
+# Where control.html takes the style of Sign review's editor (a comment until a server that knows it replaces it).
+SIGN_EDITOR_MARK = '/* __NNSLR_SIGN_EDITOR_CSS__ */'
+# The class of the elements that hold Sign review's editor on another page (web/src/review/SignEditor*.vue).
+SIGN_EDITOR_ROOT = '.sign-editor'
+# The marker in review.html after which its own style starts (before it: shared.css).
+REVIEW_CSS_START = '/* The sign review (web/src/review/ReviewApp.vue): patterns built from the shared tokens. */'
+
+
+def sign_editor_css() -> str:
+    """The style of Sign review (review.html, kept in one place), for its editor inside another page: every selector
+    under SIGN_EDITOR_ROOT, its tokens (:root) on that element, nothing for body; its media queries on the window's
+    size left out, since the editor lies in a column of its own whatever the window (what is for a touch screen stays),
+    and the animations as they are."""
+    return _scoped_css(asset('review.html'))
+
+
+@lru_cache(maxsize=4)
+def _scoped_css(page: str) -> str:
+    start = page.find(REVIEW_CSS_START)
+    end = page.find('</style>', start)
+    if start < 0 or end < 0:
+        raise ValueError('review.html: its style is not where sign_editor_css looks for it')
+    text = re.sub(r'/\*.*?\*/', '', page[start + len(REVIEW_CSS_START):end], flags=re.DOTALL)
+    out: list[str] = []
+    for prelude, body in _blocks(text):
+        if prelude.startswith('@keyframes'):
+            out.append(prelude + ' {' + body + '}')
+        elif prelude.startswith('@media'):
+            query = ', '.join(part for part in _split_top(prelude[len('@media'):])
+                              if 'width' not in part and 'height' not in part)
+            rules = ''.join(_scoped_rule(inner, inner_body) for inner, inner_body in _blocks(body))
+            if query and rules:
+                out.append('@media ' + query + ' {\n' + rules + '}')
+        elif not prelude.startswith('@'):
+            out.append(_scoped_rule(prelude, body))
+    return '\n'.join(part for part in out if part) + '\n'
+
+
+def _blocks(text: str) -> list[tuple[str, str]]:
+    """The top-level blocks of a style sheet without comments: (prelude, body between its braces)."""
+    blocks = []
+    position = 0
+    while True:
+        opening = text.find('{', position)
+        if opening < 0:
+            return blocks
+        depth = 0
+        quote = ''
+        for index in range(opening, len(text)):
+            char = text[index]
+            if quote:
+                quote = '' if char == quote else quote
+            elif char in '"\'':
+                quote = char
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+        else:
+            raise ValueError('review.html: a block of its style is not closed')
+        blocks.append((' '.join(text[position:opening].split()), text[opening + 1:index]))
+        position = index + 1
+
+
+def _split_top(text: str) -> list[str]:
+    """A list split at its commas outside brackets and quotes ("a, :is(b, c)" → two)."""
+    parts, depth, quote, current = [], 0, '', ''
+    for char in text:
+        if quote:
+            quote = '' if char == quote else quote
+        elif char in '"\'':
+            quote = char
+        elif char in '([':
+            depth += 1
+        elif char in ')]':
+            depth -= 1
+        elif char == ',' and depth == 0:
+            parts.append(current.strip())
+            current = ''
+            continue
+        current += char
+    parts.append(current.strip())
+    return [part for part in parts if part]
+
+
+def _scoped_rule(prelude: str, body: str) -> str:
+    selectors = []
+    for selector in _split_top(prelude):
+        if selector == ':root':
+            selectors.append(SIGN_EDITOR_ROOT)
+        elif not re.match(r'(html|body)\b', selector):
+            selectors.append(SIGN_EDITOR_ROOT + ' ' + selector)
+    return ', '.join(selectors) + ' {' + body + '}\n' if selectors else ''
+
+
+# Where control.html takes the style of the sheet "Review with AI" (web/src/components/AiRouteSheet.vue), which the Signs
+# side of Speed review opens since Sign review's list of drives is gone: a comment until a server that knows it.
+AI_SHEET_MARK = '/* __NNSLR_AI_SHEET_CSS__ */'
+# The classes of that sheet styled by site.css (kept there, in one place).
+AI_SHEET_CLASSES = re.compile(r'\.(ai-(help|started|who|choices?|choice-[a-z]+|prov[a-z-]*|sheet)|ios-list|auth-error)\b')
+
+
+def ai_sheet_css() -> str:
+    """The rules of site.css of the sheet "Review with AI", for the control pages: the top-level rules, and those of
+    its media queries, whose every selector names one of AI_SHEET_CLASSES."""
+    return _ai_sheet_rules(asset('site.css'))
+
+
+@lru_cache(maxsize=4)
+def _ai_sheet_rules(sheet: str) -> str:
+    text = re.sub(r'/\*.*?\*/', '', sheet, flags=re.DOTALL)
+    def wanted(prelude: str) -> bool:
+        return all(AI_SHEET_CLASSES.search(part) for part in _split_top(prelude))
+    out = []
+    for prelude, body in _blocks(text):
+        if prelude.startswith('@media'):
+            rules = ''.join(inner + '{' + inner_body + '}' for inner, inner_body in _blocks(body) if wanted(inner))
+            if rules:
+                out.append(prelude + '{' + rules + '}')
+        elif not prelude.startswith('@') and wanted(prelude):
+            out.append(prelude + '{' + body + '}')
+    return '\n'.join(out) + '\n'
+# [sign-editor] - END
+
+
+def review_data(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
+                hints: dict | None = None, hint_stats: dict | None = None, suspicious: dict | None = None,
+                routes: list[dict] | None = None, proposer: str | None = None, busy: dict | None = None,
+                videos: dict | None = None, kept_seconds: dict | None = None) -> dict:
+    """What the review page of a drive starts from (render_review embeds it; GET /api/route/<route>/page sends it to
+    the editor of Sign review in Speed review). kept_seconds: {segment: its seconds kept} of the segments kept only at
+    a car park's speed (ReviewService.kept_seconds): a frame of their video in another second cannot be saved."""
+    return {'run_id': run_id, 'route_id': route_id, 'server': server, 'frames': rows, 'proposer': proposer,
+            'busy': busy, 'videos': videos, 'kept_seconds': kept_seconds if kept_seconds is not None else {},
             'hints': hints if hints is not None else {},
             'hint_stats': hint_stats if hint_stats is not None else empty_stats(),
             'suspicious': suspicious if suspicious is not None else {},
             'routes': routes if routes is not None else [],
             'countries': country_names()}
+
+
+def render_review(rows: list[dict], run_id: str, *, route_id: str = '', server: bool = False,
+                  nonce: str = '', hints: dict | None = None, hint_stats: dict | None = None,
+                  suspicious: dict | None = None, routes: list[dict] | None = None,
+                  proposer: str | None = None, busy: dict | None = None, videos: dict | None = None,
+                  kept_seconds: dict | None = None, guest: bool = False) -> str:
+    """The review page with its data embedded. Hints and suspicious flags travel apart from the
+    frame rows, so the JSONL export (which copies the rows) never contains them. proposer: who proposed the
+    signs of the report (vietnam, ours, qwen; None when not known), for the page's "More". busy: the drive is read
+    only, Propose again works on it (nnslr_tools.reproposing.public), else None. videos: the segments with their road
+    video on the server (ReviewService.videos), None offline. guest: for a reviewer from outside (guest_bar)."""
+    data = review_data(rows, run_id, route_id=route_id, server=server, hints=hints, hint_stats=hint_stats,
+                       suspicious=suspicious, routes=routes, proposer=proposer, busy=busy, videos=videos,
+                       kept_seconds=kept_seconds)
     payload = json.dumps(data, ensure_ascii=True, allow_nan=False)
     payload = payload.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
     # The same top bar as every page (the Review tab marked); the offline report has no site: only the brand.
@@ -448,8 +611,8 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
 
 def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = False, guest: bool = False,
                    uninvited: bool = False) -> str:
-    """An error page (404, 403, ...): a title and one sentence in words, no code, and the way back: Review for a
-    drive that is not there (drive), else Overview; My reviews for a guest. Someone signed in with an account that has no
+    """An error page (404, 403, ...): a title and one sentence in words, no code, and the way back: Speed review for
+    a drive that is not there (drive), else Overview; My reviews for a guest. Someone signed in with an account that has no
     access (uninvited) gets the public page and the sign-out of the proxy, to come back with another account."""
     title = ({404: 'Drive not found' if drive else 'Page not found', 403: 'Access denied'}.get(status)
              or 'Something went wrong')
@@ -463,7 +626,7 @@ def render_problem(status: int, message: str, nonce: str = '', *, drive: bool = 
         main.append('<a class="btn back" href="/">← Smartspeed</a> <a class="btn back" href="' + SIGN_OUT_ADDRESS + '">Sign out</a>')
     if status != 403:
         main.append('<a class="btn back" href="' + GUEST_HOME + '">← My reviews</a>' if guest
-                    else '<a class="btn back" href="/routes">← Sign review</a>' if drive
+                    else '<a class="btn back" href="/speed-review">← Speed review</a>' if drive
                     else '<a class="btn back" href="/">← Overview</a>')
     main.append('</div></main>')
-    return simple_page(title, 'review' if drive else '', nonce, '\n'.join(main), guest=guest)
+    return simple_page(title, 'speedreview' if drive else '', nonce, '\n'.join(main), guest=guest)

@@ -375,6 +375,19 @@ class ReviewService:
                 continue
         return found
 
+    def kept_seconds(self, route: str, videos: dict) -> dict[str, list[int]]:
+        """{segment: its seconds kept} of the segments of ``videos`` (self.videos) kept only at a car park's speed: the
+        page offers a frame of their video only in those seconds, the ones video_gop gives and materialize saves."""
+        found = {}
+        for segment in videos:
+            try:
+                seconds = video_frames.kept_seconds(self.root, route, int(segment))
+            except (OSError, ValueError):
+                continue
+            if seconds is not None:
+                found[str(segment)] = seconds
+        return found
+
     def forget_video_frame(self, route, frame_key: str) -> None:
         """Undo video_frame_row when the save it was for was refused."""
         segment, index = (int(part) for part in frame_key.split('/'))

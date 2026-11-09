@@ -1,6 +1,7 @@
 // The review at a glance, from the routes of the status: how many frames are confirmed, the routes in
 // progress and to start, and the route "Resume review" opens (the one in progress, else the next to start).
 import type {PanelStatus, RouteRow} from '../common/panel-types';
+import {signsHref} from '../common/sign-link';
 
 export interface ReviewSummary {
   /** Frames of the reports, and how many of them are confirmed. */
@@ -16,7 +17,8 @@ export interface ReviewSummary {
   resume: {route: string; href: string; left: number; started: boolean} | null;
 }
 
-export const reviewHref = (route: string): string => '/route/' + encodeURIComponent(route) + '/';
+/** The signs of a drive to review: the Signs side of its Speed review, which opens on its first frame still to review. */
+export const reviewHref = (route: string): string => signsHref(route);
 
 export function reviewSummary(status: PanelStatus | null): ReviewSummary {
   const routes = status?.routes ?? [];

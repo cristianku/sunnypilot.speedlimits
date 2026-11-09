@@ -1,13 +1,14 @@
 <script setup lang="ts">
-// "Review with AI" on the route list (pages.render_index): the button of a drive (button[data-ai-route], drawn by
-// the server) opens this sheet. It reads the AI reviewer of Settings (GET /api/ai/state) and starts the panel job
+// "Review with AI" on the Signs side of Speed review (control/SpeedReviewDrive.vue): the button of a drive
+// (button[data-ai-route], with data-ai-name and data-ai-left) opens this sheet. It reads the AI reviewer of Settings (GET /api/ai/state) and starts the panel job
 // ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames,
-// which the review page of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
+// which the Signs side of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
 // a question; what it saves waits for a person to confirm it before it goes into training. Only a reviewer that passed its Test in Settings can do either.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiState} from '../common/ai-types';
 import type {StartedJob} from '../common/panel-types';
+import {signsHref} from '../common/sign-link';
 import {askConfirm} from '../composables/confirm';
 import {useSheet} from '../composables/sheet';
 import Icon from './Icon.vue';
@@ -68,7 +69,7 @@ async function start(save: boolean): Promise<void> {
   if (save) {
     const ok = await askConfirm({title: 'Review and save with the AI?', action: 'Review and save', danger: true,
       text: 'What it saves is recorded as ' + recordedAs.value + ' and waits for you: each frame goes into training only '
-        + 'once you confirm it on the review page. Frames a person confirmed are never touched.'});
+        + 'once you confirm it on the Signs side of the drive. Frames a person confirmed are never touched.'});
     if (!ok || drive.value !== value) return;
   }
   busy.value = true;
@@ -112,7 +113,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <span>Started: follow it on the <a href="/">Overview</a>.</span></p>
         <p class="ai-help">{{ started.saving ? 'Each frame the AI reviews completely is saved as ' + recordedAs + '; the others stay for you.'
           : 'Nothing is saved. When it is done, open the drive: the frames the AI tried are under “AI trial”, ready to apply or dismiss.' }}</p>
-        <a v-if="!started.saving && drive" class="btn primary" id="ai-route-open" :href="'/route/' + encodeURIComponent(drive.route) + '/'">Open the drive</a>
+        <a v-if="!started.saving && drive" class="btn primary" id="ai-route-open" :href="signsHref(drive.route)">Open the drive</a>
       </template>
       <template v-else-if="blocker">
         <p class="ai-help" role="status">{{ blocker }}</p>
@@ -127,7 +128,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <button type="button" class="ai-choice" id="ai-route-try" :disabled="busy" @click="start(false)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Try without saving</strong>
-              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review. You see them on the review page; nothing is saved.</span></span>
+              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review. You see them on the drive's Signs side; nothing is saved.</span></span>
           </button>
           <button type="button" class="ai-choice save" id="ai-route-save" :disabled="busy" @click="start(true)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>

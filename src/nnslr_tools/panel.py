@@ -106,6 +106,13 @@ ROAD_LABELER_SCRIPT = 'helpers/road_labeler.sh'
 ROAD_LABELER_NNSLR = '.venv-gpu/bin/nnslr'
 ROAD_LABELER_ACTIONS = ('road_labeler_train', 'road_labeler_predict')
 ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
+# The signs on every frame of a drive's video for Speed review (nnslr_tools.sign_tracks): the cutter and the classifier
+# in use run on every decoded frame with the GPU of .venv-gpu (Models, the Signs on every frame card). Its options:
+# {'dry': 'on'} a dry run on the CPU (a few frames of one drive, apart); {'routes': 'R1,R2'} the drives, else every drive
+# with its video.
+SIGN_TRACKS_SCRIPT = 'helpers/sign_tracks.sh'
+SIGN_TRACKS_OPTIONS = ('routes',)
+SIGN_TRACKS_ROUTE = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
 # Where the photos of the Mapillary Traffic Sign Dataset were taken (Train › Classifier, its region): asked of
 # Mapillary with the token of .env, written into the data root (nnslr mapillary-locations).
 LOCATIONS_SCRIPT = 'helpers/mapillary_locations.sh'
@@ -157,6 +164,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool'),
                   'regression': ('openpilot', 'brains'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
+                  'sign_tracks': ('dry', 'routes'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer',),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
@@ -379,6 +387,9 @@ ACTIONS = {
     'road_labeler_train': {'label': 'Train the road labeler', 'group': 'train', 'command': [ROAD_LABELER_SCRIPT, 'train']},
     'road_labeler_predict': {'label': 'Prepare Speed review', 'group': 'train',
                              'command': [ROAD_LABELER_SCRIPT, 'predict']},
+    # The signs on every frame (SIGN_TRACKS_SCRIPT): the networks in use along every frame of the drives, for the boxes
+    # of Speed review. In the train group: the GPU.
+    'sign_tracks': {'label': 'Find the signs on every frame', 'group': 'train', 'command': [SIGN_TRACKS_SCRIPT]},
     # The cutter, classifier and decider in use exported as one package (start() names it); nothing is uploaded.
     'networks_prepare': {'label': 'Prepare the package', 'group': 'publish', 'command': [NETWORKS_SCRIPT]},
     # A package prepared here ({'package': name}) uploaded to Hugging Face, public: other people download it.
@@ -432,6 +443,8 @@ ACTIVITIES = (
     ('train', 'road labeler', ROAD_LABELER_SCRIPT),
     ('train', 'road labeler', 'nnslr road-labeler-train'),
     ('train', 'road labeler', 'nnslr road-labeler-predict'),
+    ('train', 'sign tracks', SIGN_TRACKS_SCRIPT),
+    ('train', 'sign tracks', 'nnslr sign-tracks'),
     ('update', 'code update', 'helpers/update.sh'),
     ('publish', 'package of the networks', 'publish_networks.sh'),
     ('publish', 'publish to the car', 'send_to_car.sh'),
@@ -457,6 +470,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_brain': 'a brain training', 'regression': 'a regression run',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
+                 'sign_tracks': 'a search of the signs on every frame',
                  'update': 'a code update', 'review_box': 'a copy with the review machine',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
                  'send_to_car': 'a publication to the car', 'try_on_comma': 'a trial on the comma',
@@ -470,7 +484,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training', 'regression': 'a regression run',
-                  'road labeler': 'a road labeler run',
+                  'road labeler': 'a road labeler run', 'sign tracks': 'a search of the signs on every frame',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
                   'networks on the comma': 'a copy onto the comma',
@@ -876,10 +890,10 @@ class Panel:
         trainings = [item for item in payload['activities'] if item['group'] == 'train']
         if from_panel or not trainings:
             return
-        # The road labeler started from a terminal has no log of its own to read: no progress, and not the
-        # whole pipeline's either.
+        # The road labeler and the signs on every frame started from a terminal have no log of their own to read: no
+        # progress, and not the whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'brain training': 'train_brain', 'road labeler': 'road_labeler'}
+                    'brain training': 'train_brain', 'road labeler': 'road_labeler', 'sign tracks': 'sign_tracks'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
                     ('train_brain', ('runs/*/brain.log',)))
@@ -1042,6 +1056,12 @@ class Panel:
                 # checked when it starts (start() and the helper), so a dry run on the CPU stays possible while another
                 # process has the GPU.
                 pass
+            elif name == 'sign_tracks' and (missing := self._sign_tracks_missing()):
+                reason = missing
+            elif name == 'sign_tracks':
+                # The networks in use on the drives' videos: no confirmed sign needed; the GPU is checked when it
+                # starts, as for the road labeler.
+                pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
             elif name == 'regression' and gpu is not None and gpu['processes']:
@@ -1139,6 +1159,39 @@ class Panel:
             arguments += ['--run-dir=' + str(self.root / 'runs' / name), '--all']
             if marks == 'off':
                 arguments.append('--no-marks')
+        if not dry:
+            gpu = self.system().get('gpu')
+            if gpu is not None and gpu.get('processes'):
+                raise PanelError(409, 'gpu_taken', 'The GPU is busy with another process: wait for it to finish, or '
+                                 'start a dry run on the CPU.')
+        return arguments
+
+    def _sign_tracks_missing(self) -> str:
+        """Why the signs on every frame cannot be found now, or '': its helper and .venv-gpu, a drive with its video."""
+        if not (self.repo / SIGN_TRACKS_SCRIPT).is_file():
+            return SIGN_TRACKS_SCRIPT + ' is missing in this installation'
+        if not (self.repo / ROAD_LABELER_NNSLR).is_file():
+            return 'no .venv-gpu: install it with scripts/setup_v100_training_env.sh'
+        from nnslr_tools import sign_tracks
+        if not sign_tracks.video_routes(self.root):
+            return 'no drive with its video yet (Drive view makes it)'
+        return ''
+
+    def _sign_tracks_arguments(self, options: dict) -> list[str]:
+        """The arguments of helpers/sign_tracks.sh from the options (strings, checked by start()): --dry-run, and
+        --route for each drive of {'routes': 'R1,R2'} (each with its video; none: every drive, the helper's --all). A
+        real run, not a dry one, is refused while another process has the GPU (the helper checks it again, with its
+        memory)."""
+        from nnslr_tools import drive_video
+        dry = options.get('dry')
+        if dry not in (None, 'on'):
+            raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
+        arguments = ['--dry-run'] if dry else []
+        routes = [route.strip() for route in (options.get('routes') or '').split(',') if route.strip()]
+        for route in dict.fromkeys(routes):
+            if not SIGN_TRACKS_ROUTE.match(route) or drive_video.index(self.root, route) is None:
+                raise PanelError(400, 'bad_option', 'Unknown drive, or a drive without its video: ' + route[:40] + '.')
+            arguments.append('--route=' + route)
         if not dry:
             gpu = self.system().get('gpu')
             if gpu is not None and gpu.get('processes'):
@@ -1784,6 +1837,16 @@ class Panel:
             if not (self.repo / ROAD_LABELER_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', ROAD_LABELER_SCRIPT + ' is missing in this installation.')
             start_args += self._road_labeler_arguments(action, options or {})
+        for key in SIGN_TRACKS_OPTIONS:
+            value = (options or {}).get(key)
+            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take ' + key + '.')
+            if value is not None and not isinstance(value, str):
+                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
+        if action == 'sign_tracks':
+            if not (self.repo / SIGN_TRACKS_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', SIGN_TRACKS_SCRIPT + ' is missing in this installation.')
+            start_args += self._sign_tracks_arguments(options or {})
         # [ai-reviewer] - START
         if action == 'fetch':
             # The address set in the comma panel of the top bar; without one the script's ssh host "comma".
