@@ -1706,6 +1706,9 @@ player's note about the video. */
 .sign-editor.sr-editor-side .panel{border-radius:14px;box-shadow:none}
 .sign-editor.sr-editor-side .panel section{padding:14px}
 .sign-editor.sr-editor-side .route-status{margin-top:0}
+/* Confirm always in reach: held at the bottom of the screen while the side scrolls (on the old page it was at hand). */
+.sign-editor.sr-editor-side .panel .confirm-section{position:sticky;bottom:0;z-index:6;background:var(--surface);
+border-top:1px solid var(--line);border-radius:0 0 14px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom))}
 @media (max-width:860px){
   .sr-view .dr-main{display:flex;flex-direction:column;align-items:stretch}
   .sr-view .dr-side,.sr-view .dr-time{display:contents}
