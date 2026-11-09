@@ -49,10 +49,9 @@ def brain_script(checkout):
 NS = 1_000_000_000
 
 
-def scanned(root, route='r1', frames=True, passive=True, marked=True):
+def scanned(root, route='r1', frames=True, passive=True):
     """A drive the brain can learn from (brain_targets.training_routes): its logs read to the end and, with frames, its
-    frames; with passive False, sunnypilot was on; with marked, a person marked it OK for training in Speed review (the
-    only mark it needs: no block, the driver's own speed is the answer)."""
+    frames; with passive False, sunnypilot was on. Nothing to mark: no block, the driver's own speed is the answer."""
     path = drive_review.db_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)
@@ -67,14 +66,6 @@ def scanned(root, route='r1', frames=True, passive=True, marked=True):
         listed = root / 'derived' / 'frames' / route / '0' / 'frames.jsonl'
         listed.parent.mkdir(parents=True, exist_ok=True)
         listed.write_text('{}\n')
-    if marked:
-        mark(root, route)
-
-
-def mark(root, route, ok=True):
-    """The switch "OK for brain training" of Speed review, through its store as the site sets it."""
-    from nnslr_tools.speed_review import SpeedReviewStore
-    SpeedReviewStore(root).set_training_ok(route, ok, 'cristian')
 
 
 # -- its progress -------------------------------------------------------------------------------------------------
@@ -119,22 +110,14 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(
     scanned(root, frames=False)
     assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == nothing
     # Read and prepared, but driven with sunnypilot on: it says so, not to prepare one.
-    scanned(root, 'r3', passive=False, marked=False)
+    scanned(root, 'r3', passive=False)
     assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == (
         'no drive to learn from: sunnypilot was on in every drive with its logs read (1); '
         'drive with sunnylink › Toggles › Enable sunnypilot off')
-    # A dashcam drive not marked OK for training in Speed review stays out whole, and says so first.
-    scanned(root, 'r2', marked=False)
-    scanned(root, 'r4', marked=False)
-    assert panel._action_states(ready_payload(), [])['train_brain']['reason'] == (
-        'no drive marked OK for training: 2 dashcam drives wait for it; '
-        'mark the drives whose signs are all right in Data › Speed review')
-    mark(root, 'r4')
-    mark(root, 'r4', ok=False)
-    assert 'no drive marked OK for training: 2 dashcam drives' in panel._action_states(ready_payload(), [])['train_brain']['reason']
-    mark(root, 'r2')
+    # A dashcam drive with its logs read and its frames: nothing to mark, it is learnt.
+    scanned(root, 'r2')
     assert panel._action_states(ready_payload(gpu_processes=1), [])['train_brain']['reason'] == 'the GPU is busy with another process'
-    # Its labels are the driver's own speed: only the switch of Speed review, no block and no reviewed drive of signs.
+    # Its labels are the driver's own speed: no switch, no block and no reviewed drive of signs.
     assert panel._action_states(ready_payload(), [])['train_brain']['allowed'] is True
 
     monkeypatch.setattr(panel, 'activities', lambda: [])
@@ -163,15 +146,15 @@ def test_a_step_of_the_pipeline_takes_every_choice_of_the_brain(root, checkout, 
     assert done['state'] == 'ok' and 'road types: 0' in full_log(panel, view['steps'][0]['job']).splitlines()
 
 
-def test_a_start_or_a_pipeline_is_refused_while_no_drive_is_marked_ok_for_training(root, checkout, monkeypatch):
+def test_a_start_or_a_pipeline_is_refused_while_there_is_no_dashcam_drive(root, checkout, monkeypatch):
     """Not only the button: a POST of its own and a pipeline's Brain step are refused the same way, before any job."""
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
-    scanned(root, marked=False)
+    scanned(root, passive=False)
     monkeypatch.setattr(panel, 'activities', lambda: [])
     monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 0}})
-    refused = ('No drive marked OK for training: 1 dashcam drive waits for it; '
-               'mark the drives whose signs are all right in Data › Speed review.')
+    refused = ('No drive to learn from: sunnypilot was on in every drive with its logs read (1); '
+               'drive with sunnylink › Toggles › Enable sunnypilot off.')
     with pytest.raises(PanelError) as error:
         panel.start('train_brain', None)
     assert (error.value.status, error.value.reason, error.value.message) == (409, 'not_available', refused)
@@ -179,7 +162,7 @@ def test_a_start_or_a_pipeline_is_refused_while_no_drive_is_marked_ok_for_traini
         panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {}}]}, 'admin')
     assert (error.value.status, error.value.message) == (409, refused)
     assert not list(panel.logs.glob('*.log')) and panel.pipeline_view() is None
-    mark(root, 'r1')
+    scanned(root, 'r2')
     assert finished(panel, panel.start('train_brain', None)['id'])['state'] == 'ok'
 
 
@@ -315,7 +298,7 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
     monkeypatch.setattr(brain_targets, 'summary', lambda drives: {'partitions': {}, 'drives': rows})
     labels = panel.brain_labels()
     assert labels['to_read'] == 1
-    assert labels['training'] == {'drives': 0, 'hours': 0.0, 'waiting': 0, 'sunnypilot_on': 0}
+    assert labels['training'] == {'drives': 0, 'hours': 0.0, 'sunnypilot_on': 0}
     # The names of the kinds of road, the first ones while Speed review has no file yet.
     assert labels['road_labels'] == {'narrow': 'Narrow road', 'country': 'Country road', 'gravel': 'Gravel road',
                                      'potholes': 'Potholes'}
@@ -347,7 +330,7 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         assert 'choices: 0 0 0 mean' in full_log(server.app.panel, job).splitlines()
         status, _, data = server.request('GET', '/api/panel/brain-labels')
         assert status == 200 and json_of(data)['to_read'] == 0
-        assert json_of(data)['training'] == {'drives': 1, 'hours': 0.01, 'waiting': 0, 'sunnypilot_on': 0}
+        assert json_of(data)['training'] == {'drives': 1, 'hours': 0.01, 'sunnypilot_on': 0}
     finally:
         server.close()
 

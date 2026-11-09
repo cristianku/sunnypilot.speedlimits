@@ -2,21 +2,20 @@
 
 What it is for. The brain learns the speed to hold from the driver: at every frame his speed as the dashboard showed it,
 unless a person blocked it in Speed review (annotations/speed_review.sqlite), and the next limit with the metres to it from
-the signs a person confirmed in Sign review (annotations/review.sqlite), passed where Sign distance says. None of this
+the signs our networks read, with what a person confirmed in Sign review (annotations/review.sqlite) over them
+(reviewed_signs), passed where Sign distance says. None of this
 changes anything by itself. It reaches the network only as an answer on a frame: the training compares the answer with what
 the network said, and that error moves the weights (brain_net.brain_loss). This module makes those answers. It reads the
 databases and writes nothing: no training, no GPU.
 
 The drives (training_routes): every dashcam drive with a finished scan (drive_review.sqlite, its span known) and its
-frames (derived/frames) that a person marked "OK for brain training" in Speed review (speed_review's switch of a drive,
-since 9 Nov 2026): he went through the whole drive and all its signs were marked right. The brain has a memory, so a
-drive is never taken in pieces: one without the mark stays out whole (NOT_MARKED in dataset's log), and no frame is
-confirmed one by one. A dashcam drive (speed_review.dashcam_drive) is one where openpilot was passive in every
-carParams (sunnylink › Toggles › "Enable sunnypilot" off, or dashcamOnly) and never engaged: he drove alone, so his speed
-is his. Any other drive is left out whole, with its reason in dataset's log, and so is one whose logs show openpilot,
-MADS or controlsd on anyway (speed_review.engaged_series). The sign classifier learns from every drive. A drive is
-labelled by being driven: one without a block or a mark is a drive like the others, once it has the mark OK
-for training.
+frames (derived/frames), always, each whole (his rule of 9 Nov 2026 evening: the switch "OK for brain training" of #9
+went again, since the signs the brain is given are the networks' anyway and get better as they learn). A dashcam drive
+(speed_review.dashcam_drive) is one where openpilot was passive in every carParams (sunnylink › Toggles › "Enable
+sunnypilot" off, or dashcamOnly) and never engaged: he drove alone, so his speed is his. Any other drive is left out
+whole, with its reason in dataset's log, and so is one whose logs show openpilot, MADS or controlsd on anyway
+(speed_review.engaged_series). The sign classifier learns from every drive. A drive is labelled by being driven: one
+without a block or a mark is a drive like the others.
 
 A drive here is its frames in drive order, each on the comma's clock by the encode index (drive_logs.frame_time): labels
 and frames meet on logMonoTime, never on a count of seconds. Two rates (dataset's rate):
@@ -298,7 +297,6 @@ def class_kph(index):
 
 # Why a scanned drive is not one the brain learns from (training_routes' left_out).
 SUNNYPILOT_ON = 'sunnypilot was on (no dashcam drive)'
-NOT_MARKED = 'not marked OK for training (Speed review)'
 
 
 def _connect_read_only(path: Path) -> sqlite3.Connection:
@@ -357,22 +355,6 @@ def road_kinds(root: Path) -> tuple[str, ...]:
     return tuple(road_labels(root))
 
 
-def marked_routes(root: Path) -> set[str]:
-    """The drives a person marked "OK for brain training" in Speed review (speed_review.SpeedReviewStore.set_training_ok:
-    the switch on, not one set and unset again), read only. A file without the switch yet (one of before 9 Nov 2026, or
-    one the site has not opened since) has none."""
-    path = db_path(root)
-    if not path.is_file():
-        return set()
-    connection = _connect_read_only(path)
-    try:
-        if not connection.execute("SELECT 1 FROM sqlite_master WHERE name = 'speed_training_ok'").fetchone():
-            return set()
-        return {row['route'] for row in connection.execute('SELECT route FROM speed_training_ok WHERE ok = 1')}
-    finally:
-        connection.close()
-
-
 def _dashcam_spans(root: Path, left_out: dict | None = None) -> dict[str, tuple[int, int]]:
     """{route: (t0_ns, end_ns)} of every dashcam drive (speed_review.dashcam_drive) with a finished scan (its start and its
     end on the comma's clock, in drive_review.sqlite, read only) and its frames (derived/frames). left_out, when given,
@@ -403,45 +385,26 @@ def _dashcam_spans(root: Path, left_out: dict | None = None) -> dict[str, tuple[
     return found
 
 
-def dashcam_routes(root: Path, left_out: dict | None = None) -> list[str]:
-    """The drives the brain can be run along, in order, marked OK for training or not: a dashcam drive with a finished
-    scan and its frames (_dashcam_spans). What the brain learns from is training_routes."""
-    return sorted(_dashcam_spans(root, left_out))
-
-
 def training_routes(root: Path, left_out: dict | None = None) -> list[str]:
-    """The drives the brain learns from, in order, each whole: a dashcam drive with a finished scan and its frames
-    (dashcam_routes) that a person marked "OK for brain training" in Speed review (marked_routes). The brain has a memory:
-    it never learns from a drive whose signs are only partly right, nor from pieces of one, so a drive without the mark
-    stays out whole. left_out, when given, gets why each scanned drive is not there, by route: SUNNYPILOT_ON, or NOT_MARKED
-    for a dashcam drive with its frames that waits for the mark."""
-    marked = marked_routes(root)
-    found = []
-    for route in dashcam_routes(root, left_out):
-        if route in marked:
-            found.append(route)
-        elif left_out is not None:
-            left_out[route] = NOT_MARKED
-    return found
+    """The drives the brain learns from, in order, each whole: every dashcam drive with a finished scan and its frames
+    (_dashcam_spans). left_out, when given, gets SUNNYPILOT_ON for each scanned drive that is no dashcam drive, by
+    route."""
+    return sorted(_dashcam_spans(root, left_out))
 
 
 def training_counts(root: Path) -> dict:
     """What the brain learns from today, from the scans alone (no dataset): {drives, hours: their length from the start
-    of their logs to the end, waiting: the dashcam drives with their frames not marked OK for training, sunnypilot_on:
-    the scanned drives with sunnypilot on}."""
+    of their logs to the end, sunnypilot_on: the scanned drives with sunnypilot on}."""
     left_out: dict[str, str] = {}
     spans = _dashcam_spans(root, left_out)
-    marked = marked_routes(root)
-    inside = [span for route, span in spans.items() if route in marked]
-    return {'drives': len(inside), 'hours': round(sum(end - start for start, end in inside) / NS / 3600, 2),
-            'waiting': sum(route not in marked for route in spans),
+    return {'drives': len(spans), 'hours': round(sum(end - start for start, end in spans.values()) / NS / 3600, 2),
             'sunnypilot_on': sum(reason == SUNNYPILOT_ON for reason in left_out.values())}
 
 
 def training_counts_text(counts: dict) -> str:
-    """training_counts for a log: the drives and hours in, the dashcam drives that wait for the mark."""
-    return (f"Drives marked OK for training (Speed review): {counts['drives']}, {counts['hours']:.1f} h; "
-            f"{counts['waiting']} dashcam drive{'' if counts['waiting'] == 1 else 's'} not marked yet, left out whole.")
+    """training_counts for a log: the dashcam drives and their hours, the drives with sunnypilot on left out."""
+    return (f"Dashcam drives: {counts['drives']}, {counts['hours']:.1f} h; {counts['sunnypilot_on']} "
+            f"drive{'' if counts['sunnypilot_on'] == 1 else 's'} with sunnypilot on, left out whole.")
 
 
 def speed_answers(ns: np.ndarray, driver_kph: list, blocks: list[dict],
@@ -1235,19 +1198,17 @@ def _say(text: str) -> None:
 
 
 def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *, rate: float = 1.0,
-            need_pictures: bool = True, inputs: bool = True, types: bool = False, marked: bool = True) -> list[dict]:
+            need_pictures: bool = True, inputs: bool = True, types: bool = False) -> list[dict]:
     """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs and types as
-    there), each with reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None before a scan. A
-    drive that is no dashcam drive, one not marked OK for training, one whose logs show openpilot driving
-    (engaged_series) and one of the frozen split whose frames changed are left out with a line in log. marked False:
-    every drive of dashcam_routes, the mark or not, for what only runs the brain along a drive and trains nothing
-    (brain_export's check of the car's step). Sites stay whole only across the drives asked for. Every drive has the
-    kinds of road of today (road_kinds), in the same columns."""
+    there), each with reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None
+    before a scan. A drive that is no dashcam drive, one whose logs show openpilot driving (engaged_series) and one of the frozen split
+    whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for. Every drive
+    has the kinds of road of today (road_kinds), in the same columns."""
     split = read_split(root)
     kinds = road_kinds(root)
     reader = fingerprint(package_path())
     left_out: dict[str, str] = {}
-    labels, trainable = read_labels(root), (training_routes if marked else dashcam_routes)(root, left_out)
+    labels, trainable = read_labels(root), training_routes(root, left_out)
     for route in sorted(set(labels) | set(routes or ()) | set(left_out)):
         if route not in trainable and (routes is None or route in routes):
             log(f"{route}: {left_out.get(route, 'no finished scan or no frames')}, left out")

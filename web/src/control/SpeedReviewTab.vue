@@ -8,9 +8,8 @@
 // does: a drive has a speed only once its logs are read. Under it, the drives with frames of their signs still for a
 // person to confirm (GET /api/routes, sunnypilot on or off; a frame the AI saved waits for a person too), a tap opening
 // the drive on its Signs side at the first of them, and folded under them the drives with every frame confirmed, to
-// open again: the list of Sign review, now that its page is retired (9 Nov 2026). Each drive says whether a person marked
-// it OK for brain training (only those enter the training, each whole: brain_targets.training_routes), a light-blue
-// OK FOR TRAINING label beside DASHCAM MODE.
+// open again: the list of Sign review, now that its page is retired (9 Nov 2026). Every dashcam drive enters the brain
+// training, each whole (brain_targets.training_routes): there is nothing to mark for it.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isGuest} from '../common/guest';
@@ -41,9 +40,6 @@ const startOf = (drive: SpeedRow): string => (drive.day ?? '') + (drive.when ?? 
 const listed = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
   .sort((a, b) => startOf(b).localeCompare(startOf(a))));
 
-// -- OK for brain training ---------------------------------------------------------------------------------------------
-const trainingOk = (drive: SpeedRow): boolean => drive.training_ok === true;
-const okCount = computed(() => listed.value.filter(trainingOk).length);
 /** Drives where sunnypilot was on: the brain does not learn from them, the list leaves them out. */
 const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
 /** What a drive has: its length, its blocks, its roadworks marks and its marks of a kind of road; before its logs are read,
@@ -117,23 +113,20 @@ onBeforeUnmount(() => window.clearTimeout(timer));
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>
-        <span v-if="drives" class="ds-when">{{ plural(listed.length, 'drive') }} · {{ okCount }} OK for training</span>
+        <span v-if="drives" class="ds-when">{{ plural(listed.length, 'drive') }}</span>
       </div>
       <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
         is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
         time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too. Nothing here changes the car.</p>
       <p v-if="engaged" class="import-why" id="sr-engaged">Only drives with sunnypilot off (sunnylink › Toggles › Enable
         sunnypilot): there the speed is all yours. {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} not listed.</p>
-      <p class="import-why" id="sr-training-why">The brain learns only from the drives marked <b>OK for training</b>, each
-        whole: open a drive, go through all of it, and once every sign is marked right, turn on its <b>Review done</b>.</p>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <ul v-else class="rt-list">
         <li v-for="drive in listed" :key="drive.route" class="rt-drive dr-drive">
           <a class="rt-open" :href="hrefOf(drive)">
             <div class="rt-name">
-              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b>
-                <b v-if="trainingOk(drive)" class="sr-ok-badge">OK FOR TRAINING</b></strong>
+              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
               <span><template v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</template>{{
                 drive.minutes !== null ? ' · ' + drive.minutes + ' min' : '' }}</span>
             </div>

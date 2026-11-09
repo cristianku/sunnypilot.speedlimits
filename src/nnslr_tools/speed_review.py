@@ -59,14 +59,10 @@ The old stretches. Until 8 Nov 2026 a person said the speed stretch by stretch, 
 the OpenStreetMap limit: speed_stretches and its rows of speed_history (saved, cleared) stay in the file, and nothing
 reads them any more.
 
-OK for brain training. The brain has a memory: it must never learn from a drive whose signs are only partly right, nor
-from pieces of a drive. So no frame is confirmed one by one: a person who went through a drive says of the whole of it
-"OK for me, all the signs were marked right, add it to the brain training", with a switch of the drive
-(speed_training_ok, its last state with who and when; speed_training_history, every one ever set, only grows). Only
-a dashcam drive is set (dashcam_drive), only by a person on the site as the other writes (never the access token alone,
-never a guest, never an agent), and unsetting takes the drive out again. A drive without it stays out of the brain
-training whole (brain_targets.training_routes). The switch says nothing of the speed: it is no write of the drive's
-revision.
+The old switch. On 9 Nov 2026 a person marked a drive "OK for brain training" (speed_training_ok,
+speed_training_history), and the same evening the switch went again: every dashcam drive enters the brain training,
+whole (brain_targets.training_routes), since the signs the brain is given are the networks' anyway. Its tables stay in
+the file, and nothing reads them any more.
 
 ``annotations/speed_review.sqlite`` is a file of its own, readable only by its owner like review.sqlite:
 drive_review.sqlite holds what a scan can make again, this holds what only a person can.
@@ -145,7 +141,7 @@ SCHEMA_STATEMENTS = (
         BEGIN SELECT RAISE(ABORT, 'speed_history only grows'); END''',
     '''CREATE TRIGGER IF NOT EXISTS speed_history_no_delete BEFORE DELETE ON speed_history
         BEGIN SELECT RAISE(ABORT, 'speed_history only grows'); END''',
-    # "OK for brain training", a drive's switch (9 Nov 2026): the last one a person set, and every one ever set.
+    # "OK for brain training", the drive's switch of 9 Nov 2026, gone the same evening: nothing reads these any more.
     '''CREATE TABLE IF NOT EXISTS speed_training_ok (
         route TEXT PRIMARY KEY, ok INTEGER NOT NULL, reviewer TEXT NOT NULL, at TEXT NOT NULL)''',
     '''CREATE TABLE IF NOT EXISTS speed_training_history (
@@ -354,40 +350,6 @@ class SpeedReviewStore:
 
     def history(self, route: str) -> list[dict]:
         return [dict(row) for row in self._rows('SELECT * FROM speed_history WHERE route = ? ORDER BY revision', (route,))]
-
-    def training_ok(self, route: str) -> dict | None:
-        """The drive's "OK for brain training" as a person last set it: {ok, reviewer, at}; None if nobody ever did."""
-        rows = self._rows('SELECT ok, reviewer, at FROM speed_training_ok WHERE route = ?', (route,))
-        return {'ok': bool(rows[0]['ok']), 'reviewer': rows[0]['reviewer'], 'at': rows[0]['at']} if rows else None
-
-    def training_flags(self) -> dict[str, bool]:
-        """{route: ok} of every drive whose switch a person ever set."""
-        return {row['route']: bool(row['ok']) for row in self._rows('SELECT route, ok FROM speed_training_ok')}
-
-    def training_history(self, route: str) -> list[dict]:
-        return [dict(row) for row in self._rows('SELECT * FROM speed_training_history WHERE route = ? ORDER BY id',
-                                                (route,))]
-
-    def set_training_ok(self, route: str, ok: bool, reviewer: str) -> None:
-        """Sets or unsets the switch, with who and when, and logs it in speed_training_history (which only grows), in one
-        transaction. It is no correction of the speed: the drive's revision stays as it is, and it checks none."""
-        with self._write:
-            connection = self._connect()
-            try:
-                connection.execute('BEGIN IMMEDIATE')
-                at = utc_now()
-                connection.execute('INSERT INTO speed_training_ok (route, ok, reviewer, at) VALUES (?, ?, ?, ?) '
-                                   'ON CONFLICT (route) DO UPDATE SET ok = excluded.ok, reviewer = excluded.reviewer, '
-                                   'at = excluded.at', (route, int(ok), reviewer, at))
-                connection.execute('INSERT INTO speed_training_history (route, ok, reviewer, at) VALUES (?, ?, ?, ?)',
-                                   (route, int(ok), reviewer, at))
-                connection.execute('COMMIT')
-            except BaseException:
-                if connection.in_transaction:
-                    connection.execute('ROLLBACK')
-                raise
-            finally:
-                connection.close()
 
     @contextlib.contextmanager
     def _writing(self, route: str, base_revision: int) -> Iterator[tuple[sqlite3.Connection, int]]:
@@ -780,10 +742,9 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
     (held: held_spans), its blocks, its roadworks, the kinds of road (road_kinds), their marks (road) and how far each was
     gone through (road_checked_ns, by kind), the road types of the map with a person's corrections (road_types:
     road_type_stretches; road_type_names, in their order), its first and last ns (span_ns, where a block may go), its
-    length and whether it is a drive the brain can learn from (dashcam: dashcam_drive), its switch "OK for brain
-    training" (training_ok: {ok, reviewer, at} as a person last set it, None if nobody did; only a dashcam drive with ok
-    true enters the training, whole: brain_targets.training_routes), and the reading of its logs (scan: state, progress,
-    error of DriveReviewStore.scan_state). A drive whose logs are not scanned has no speed, no span, no road types and
+    length and whether it is a drive the brain learns from (dashcam: dashcam_drive; each one does, whole:
+    brain_targets.training_routes), and the reading of its logs (scan: state, progress, error of
+    DriveReviewStore.scan_state). A drive whose logs are not scanned has no speed, no span, no road types and
     dashcam None."""
     span = _span_of(drives, route)
     scan = drives.scan_state(route)
@@ -793,7 +754,6 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
             'road_type_names': list(road_types.ROAD_TYPES), 'speed': [], 'held': [],
             'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
             'dashcam': None if span is None else dashcam_drive(drives.summary(route)),
-            'training_ok': store.training_ok(route),
             'scan': {key: scan[key] for key in ('state', 'progress', 'error')}}
     if span is not None:
         merged = drives.merged(route)
@@ -805,22 +765,20 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
 
 def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]:
     """The drives for the page, which puts them in order: each with its length, how many blocks, roadworks marks and
-    marks of a kind of road it has, whether the brain can learn from it (dashcam: dashcam_drive, None before its logs are
-    read) and whether a person marked it "OK for brain training" (training_ok: only those enter the training). The page
-    lists only the ones not False; Read the logs and Regression take them all."""
-    counts, flags = store.counts(), store.training_flags()
+    marks of a kind of road it has, and whether the brain learns from it (dashcam: dashcam_drive, None before its logs are
+    read). The page lists only the ones not False; Read the logs and Regression take them all."""
+    counts = store.counts()
     with drives.reading():
-        return _drives_list(drives, counts, flags)
+        return _drives_list(drives, counts)
 
 
-def _drives_list(drives: DriveReviewStore, counts: dict, flags: dict) -> list[dict]:
+def _drives_list(drives: DriveReviewStore, counts: dict) -> list[dict]:
     rows = []
     for drive in drives_view(drives):
         span = _span_of(drives, drive['route'])
         rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0, 'road': 0}),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0,
-                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route'])),
-                     'training_ok': flags.get(drive['route'], False)})
+                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route']))})
     return rows
 
 
@@ -912,23 +870,6 @@ def save_road_type(store: SpeedReviewStore, drives: DriveReviewStore, route: str
         (start, line_first), (last_ns, line_last) = frames[at[0]], frames[at[1]]
         first, last, end = line_first['frame_key'], line_last['frame_key'], min(last_ns + NS, span[1])
     store.set_road_type(route, first, last, start, max(end, start + 1), road_type, base, reviewer)
-    return drive_view(store, drives, route)
-
-
-def save_training(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
-    """A person's switch "OK for brain training" ({ok: true or false}): only a dashcam drive with its logs read is set
-    (a drive with sunnypilot on never enters the training, so there is nothing to say of it); unsetting is never refused,
-    not even on a drive whose logs are no longer read, so that a mark can always be taken back. Answers with the drive as
-    it is now. It checks no revision: it says nothing of the speed, and the last tap holds."""
-    ok = body.get('ok')
-    if not isinstance(ok, bool):
-        raise SpeedReviewError(400, 'bad_value', 'ok is true or false.')
-    if ok and _span_of(drives, route) is None:
-        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
-    if ok and not dashcam_drive(drives.summary(route)):
-        raise SpeedReviewError(409, 'not_dashcam', 'sunnypilot was on in this drive: the brain never learns from it, '
-                                                   'so it cannot be marked OK for training.')
-    store.set_training_ok(route, ok, reviewer)
     return drive_view(store, drives, route)
 
 

@@ -101,7 +101,7 @@ CLIP = 5.0
 CHECKPOINT = 'brain-last.pt'
 RESULT = 'result.json'
 # The drives a training took (dataset's, before the dry run's cut), written first: scripts/run_brain.sh keeps the dry
-# run's for the whole run, so that every step and every seed has the same drives whatever is marked meanwhile.
+# run's for the whole run, so that every step and every seed has the same drives whatever drive arrives meanwhile.
 ROUTES = 'routes.json'
 END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
@@ -581,7 +581,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     comparison. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
     types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
-    the ones still marked OK for training; None, every drive of training_routes."""
+    the ones still in training_routes; None, every drive of training_routes."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -589,26 +589,25 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     torch.manual_seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
     groups = LEARNED_INPUTS if driver else ROAD_INPUTS
-    # Only the drives a person marked OK for training in Speed review, each whole (brain_targets.training_routes): how
-    # many and how long, and how many wait for the mark, before the dry run keeps only a piece of the first.
+    # Every dashcam drive, each whole (brain_targets.training_routes): how many and how long, before the dry run keeps
+    # only a piece of the first.
     counts = training_counts(root)
     log(training_counts_text(counts))
     if routes is not None:
         log(f'Only the {len(routes)} drive{"" if len(routes) == 1 else "s"} of the start of this run (--route): '
-            'one marked since waits for the next run.')
+            'one added since waits for the next run.')
     drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types)
     if not drives and not counts['drives']:
-        raise ValueError('no drive marked OK for training: mark the drives whose signs are all right in '
-                         'Data › Speed review')
+        raise ValueError('no dashcam drive to learn from: drive with sunnylink › Toggles › Enable sunnypilot off, '
+                         'then Read the logs on Data › Speed review')
     if not drives:
-        raise ValueError(f'none of the {counts["drives"]} drives marked OK for training gave the brain a drive to '
-                         'learn: see the lines above for why each was left out'
+        raise ValueError(f'none of the {counts["drives"]} dashcam drives gave the brain a drive to learn: see the '
+                         'lines above for why each was left out'
                          + ('' if routes is None else ' (only those of the start of this run: a new NAME takes the '
-                                                      'drives marked today)'))
+                                                      'drives of today)'))
     # On every drive, before the dry run keeps a piece of one: the split may have put some of them all in val and test.
     if not any(loss_weights(drive, 'train')[0].any() for drive in drives):
-        raise ValueError('no speed labels in train: the drives marked OK for training in Data › Speed review fall in '
-                         'val and test of the split; mark more drives')
+        raise ValueError('no speed labels in train: the dashcam drives fall in val and test of the split; drive more')
     (run_dir / ROUTES).write_text(json.dumps([drive['route'] for drive in drives]), encoding='utf-8')
     if dry_run:
         # The first drive with an answer in train (one all in val or test would leave the dry run nothing to learn).

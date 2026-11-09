@@ -1439,7 +1439,6 @@ scrollbar-width:none;cursor:default;background:linear-gradient(to bottom,transpa
 .dr-strip-window{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
 .dr-strip-head{fill:var(--fg)}
 .dr-view-top{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 16px;align-self:stretch}
-.dr-zoom-row{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-left:auto}
 /* The zoom over the strip of the whole drive: plain words, the one shown in the text colour. */
 .dr-time-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
 .dr-zoom-mini{display:inline-flex;align-items:baseline;gap:2px;margin-left:auto}
@@ -1605,29 +1604,6 @@ body:has(.sr-end.dragging){cursor:ew-resize;user-select:none;-webkit-user-select
 .sr-wide{width:100%}
 .sr-new{display:flex;flex-direction:column;gap:8px;padding:10px;border-radius:12px;box-shadow:inset 0 0 0 1.5px var(--accent)}
 .sr-new-title{margin:0;font-size:14px;font-weight:600}
-/* A drive's switch "OK for brain training" (SpeedTrainingSwitch.vue): an iOS switch, green when on; who set it under it. */
-.sr-training{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:12px;background:var(--surface-2)}
-.sr-training .dr-hint{margin:0}
-/* On the drive's header, beside the zoom: one line, no card. */
-.sr-training.sr-training-compact{flex-direction:row;padding:0;background:none}
-.sr-training-compact .sr-switch{gap:8px}
-.sr-training-compact .sr-switch-label{font-size:14px;white-space:nowrap}
-.sr-switch{position:relative;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;min-height:32px}
-.sr-switch.sr-switch-off{cursor:default}
-.sr-switch-label{font-size:15px;font-weight:600}
-.sr-switch input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
-.sr-switch-track{position:relative;flex:none;width:51px;height:31px;border-radius:999px;background:var(--seg-bg);transition:background .2s}
-.sr-switch-track::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;
-  box-shadow:0 3px 8px rgba(0,0,0,.15),0 1px 1px rgba(0,0,0,.16);transition:transform .2s}
-.sr-switch input:checked+.sr-switch-track{background:var(--ok)}
-.sr-switch input:checked+.sr-switch-track::after{transform:translateX(20px)}
-.sr-switch input:disabled+.sr-switch-track{opacity:.45}
-.sr-switch input:focus-visible+.sr-switch-track{outline:2px solid var(--accent);outline-offset:2px}
-/* Its mark beside DASHCAM MODE, on the list of the drives and on the drive's title: the same shape, light blue, dark letters,
-   one colour in both themes. A <b>, as the DASHCAM MODE badge. */
-.sr-ok-badge{display:inline-flex;align-items:center;flex:none;margin-left:6px;padding:2px 8px;border-radius:6px;background:#7dd3fc;color:#062c43;
-  font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;
-  box-shadow:0 0 0 1px rgba(0,0,0,.35)}
 .dr-more{display:flex;flex-direction:column;gap:8px}
 .dr-more summary{cursor:pointer;font-size:13px;color:var(--muted);width:max-content}
 .dr-more summary:hover{color:var(--fg)}

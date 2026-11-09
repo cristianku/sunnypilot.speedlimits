@@ -2,18 +2,17 @@
 set -euo pipefail
 
 # The brain (docs/NEURAL_NETWORK.md): the network that says the speed to hold, four times a second, from the picture and the
-# car's own signals, learnt from every dashcam drive with its logs read that a person marked OK for training in Speed
-# review, each whole (a drive without the mark stays out whole): the driver's own speed, corrected by the blocks of
-# Speed review, the roadworks and the kinds of road marked there and the next limit of the signs our networks read,
+# car's own signals, learnt from every dashcam drive with its logs read, each whole: the driver's own speed, corrected
+# by the blocks of Speed review, the roadworks and the kinds of road marked there and the next limit of the signs our networks read,
 # those of Sign review where the frames were confirmed there. On one
 # GPU, one step after the other:
 #
 #   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run; its log says the
-#      drives and hours marked OK for training and the dashcam drives waiting, and it stops while none is marked); the
-#      drives it takes are the run's, kept in runs/NAME/routes.json and passed with --route to every step after it and
-#      to every seed: a drive marked meanwhile waits for the next run, one unmarked meanwhile is left out;
+#      dashcam drives and hours, and it stops while there is none); the drives it takes are the run's, kept in
+#      runs/NAME/routes.json and passed with --route to every step after it and to every seed: a drive read meanwhile
+#      waits for the next run;
 #   2. a CUDA smoke test;
-#   3. reads the signs of every drive it learns from (those marked OK for training) as the car does today
+#   3. reads the signs of every drive it learns from (every dashcam drive) as the car does today
 #      (nnslr road-type-signs --labelled; a drive already read by the car's reader of today is not read again: a new
 #      vision.py or a new network reads them all again, and the training refuses anything else), the signs it is given;
 #      then reads them with our networks in use, cutter, classifier and applicability, on the pictures at 1 a second
@@ -170,7 +169,7 @@ echo
 
 echo "== 1/6 Check the labels, the split and the training (CPU-only) =="
 # The drives of the run: those its first dry run took (brain_train.ROUTES), kept for every step and every seed whatever
-# is marked OK for training in Speed review meanwhile; a NAME run again keeps them too.
+# drive is read meanwhile; a NAME run again keeps them too.
 ROUTES_FILE="$RUN_ROOT/routes.json"
 ROUTE_ARGS=()
 read_routes() {

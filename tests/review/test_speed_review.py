@@ -444,7 +444,7 @@ def test_the_drives_say_whether_the_brain_learns_from_them(store, monkeypatch):
 
 
 
-# ---------- OK for brain training ----------
+# ---------- a dashcam drive ----------
 
 class DashcamDrives(FakeDrives):
     """A made-up dashcam drive: sunnypilot passive, never engaged."""
@@ -453,77 +453,15 @@ class DashcamDrives(FakeDrives):
         return {'t0_ns': T0, 'span_ns': [T0, END], 'coverage': {'engaged': 0}, 'meta': {'car': {'passive': True}}}
 
 
-def test_ok_for_training_is_a_switch_with_who_and_when_and_no_revision(store):
-    store.set_block(ROUTE, at(0), at(10), 80, '', 0, 'a')
-    assert store.training_ok(ROUTE) is None and store.training_flags() == {}
-    view = speed_review.save_training(store, DashcamDrives(), ROUTE, {'ok': True}, 'cristian')
-    assert view['training_ok']['ok'] is True and view['training_ok']['reviewer'] == 'cristian' and view['training_ok']['at']
-    # It says nothing of the speed: the drive's revision and history stay as they were.
-    assert view['revision'] == 1 and store.revision(ROUTE) == 1 and len(store.history(ROUTE)) == 1
-    view = speed_review.save_training(store, DashcamDrives(), ROUTE, {'ok': False}, 'local')
-    assert (view['training_ok']['ok'], view['training_ok']['reviewer']) == (False, 'local')
-    assert store.training_flags() == {ROUTE: False}
-    # Every one ever set is kept, and that log only grows.
-    assert [(row['ok'], row['reviewer']) for row in store.training_history(ROUTE)] == [(1, 'cristian'), (0, 'local')]
-    connection = sqlite3.connect(store.path)
-    try:
-        for sql in ('UPDATE speed_training_history SET ok = 1', 'DELETE FROM speed_training_history'):
-            with pytest.raises(sqlite3.DatabaseError, match='only grows'):
-                connection.execute(sql)
-    finally:
-        connection.close()
-
-
-@pytest.mark.parametrize('body', [{}, {'ok': 1}, {'ok': 'true'}, {'ok': None}])
-def test_ok_for_training_is_true_or_false(store, body):
-    with pytest.raises(SpeedReviewError) as refused:
-        speed_review.save_training(store, DashcamDrives(), ROUTE, body, 'a')
-    assert (refused.value.status, refused.value.reason) == (400, 'bad_value') and store.training_ok(ROUTE) is None
-
-
-def test_only_a_dashcam_drive_with_its_logs_read_is_marked_ok_for_training(store):
-    class NoLogs(FakeDrives):
-        def summary(self, route):
-            return None
-    with pytest.raises(SpeedReviewError) as refused:
-        speed_review.save_training(store, NoLogs(), ROUTE, {'ok': True}, 'a')
-    assert (refused.value.status, refused.value.reason) == (404, 'not_scanned')
-    assert speed_review.drive_view(store, NoLogs(), ROUTE)['training_ok'] is None
-    # sunnypilot on (FakeDrives has no carParams): never learnt, so never marked; unsetting is never refused.
-    with pytest.raises(SpeedReviewError) as refused:
-        speed_review.save_training(store, FakeDrives(), ROUTE, {'ok': True}, 'a')
-    assert (refused.value.status, refused.value.reason) == (409, 'not_dashcam') and store.training_ok(ROUTE) is None
-    assert speed_review.save_training(store, FakeDrives(), ROUTE, {'ok': False}, 'a')['training_ok']['ok'] is False
-    # A drive marked once whose logs are no longer read (the page still shows the switch on): it can be taken back.
-    store.set_training_ok(ROUTE, True, 'a')
-    view = speed_review.save_training(store, NoLogs(), ROUTE, {'ok': False}, 'b')
-    assert (view['span_ns'], view['training_ok']['ok'], view['training_ok']['reviewer']) == (None, False, 'b')
-
-
-def test_the_drives_say_whether_they_are_marked_ok_for_training(store, monkeypatch):
-    routes = ['00000001--aaaaaaaaaa', '00000002--bbbbbbbbbb', '00000003--cccccccccc']
-    monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': route} for route in routes])
-    store.set_training_ok(routes[0], True, 'a')
-    store.set_training_ok(routes[1], True, 'a')
-    store.set_training_ok(routes[1], False, 'a')
-    assert [row['training_ok'] for row in speed_review.drives_list(store, DashcamDrives())] == [True, False, False]
-
-
-def test_an_old_file_takes_the_switch_and_keeps_its_version(tmp_path):
-    from nnslr_tools.speed_review import SCHEMA_STATEMENTS, db_path
-    path = db_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    connection = sqlite3.connect(path)
-    for statement in SCHEMA_STATEMENTS:
-        if 'speed_training' not in statement:
-            connection.execute(statement)
-    connection.execute('INSERT INTO schema_version (version) VALUES (2)')
-    connection.commit()
-    connection.close()
-    store = SpeedReviewStore(tmp_path)
-    store.set_training_ok(ROUTE, True, 'a')
-    assert store.training_ok(ROUTE)['ok'] is True
-    assert sqlite3.connect(path).execute('SELECT MAX(version) FROM schema_version').fetchone()[0] == 2
+def test_a_drive_has_no_switch_ok_for_training_any_more(store, monkeypatch):
+    """The switch "OK for brain training" went on the evening of 9 Nov 2026: every dashcam drive enters the brain
+    training, whole. The drive and the list say nothing of it, and its tables stay in the file, read by nothing."""
+    assert 'training_ok' not in speed_review.drive_view(store, DashcamDrives(), ROUTE)
+    monkeypatch.setattr(speed_review, 'drives_view', lambda _drives: [{'route': ROUTE}])
+    assert 'training_ok' not in speed_review.drives_list(store, DashcamDrives())[0]
+    assert not hasattr(speed_review, 'save_training') and not hasattr(store, 'set_training_ok')
+    tables = {row[0] for row in sqlite3.connect(store.path).execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {'speed_training_ok', 'speed_training_history'} <= tables
 
 
 # ---------- the kinds of road ----------
@@ -902,52 +840,28 @@ def test_only_a_person_signed_in_corrects_a_road_type(tmp_path, monkeypatch):
         speed_review._stores.clear()
 
 
-def test_only_the_administrator_signed_in_marks_a_drive_ok_for_training(tmp_path, monkeypatch):
+def test_the_switch_ok_for_training_is_gone_from_the_site(tmp_path, monkeypatch):
     from nnslr_tools import drive_review
     monkeypatch.setattr(drive_review, 'store_for', lambda _root: DashcamDrives())
     make_report(tmp_path)
     path = f'/api/speed-review/drives/{ROUTE}/training'
     server = RunningServer(tmp_path, token=TOKEN, require_token=True)
-    token = {'X-Review-Token': TOKEN}
-
-    def post(headers, sent=None):
-        status, _response, data = server.request('POST', path, body={'ok': True} if sent is None else sent,
-                                                 headers=headers)
-        return status, json_of(data)
-
     try:
-        # Never the token alone (an agent): only a person, and the AI never sets it.
-        status, answer = post(token)
-        assert (status, answer['error']) == (403, 'session_required')
-        assert answer['message'] == 'Only the administrator signed in on the site marks a drive OK for training.'
-        session = sign_in(server)
-        assert post({**session, 'Origin': 'http://elsewhere.example'})[1]['error'] == 'cross_origin'
-        assert post({**session, 'Content-Type': 'text/plain'})[0] == 415
-        server.app.panel.actions_enabled = False
-        assert post(session)[1]['error'] == 'actions_disabled'
-        server.app.panel.actions_enabled = True
-        assert speed_review.store_for(tmp_path).training_ok(ROUTE) is None
-        status, answer = post(session)
-        assert status == 200 and answer['training_ok']['ok'] is True and answer['training_ok']['reviewer'] == 'admin'
-        assert answer['revision'] == 0
-        status, answer = post(session, {'ok': 'yes'})
-        assert (status, answer['error']) == (400, 'bad_value')
-        status, answer = post(session, {'ok': False})
-        assert status == 200 and answer['training_ok']['ok'] is False
-        # Read by anyone who reads the drive, written by nobody else.
-        status, _response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers=token)
-        assert status == 200 and json_of(data)['training_ok']['reviewer'] == 'admin'
-        assert server.request('GET', path, headers=token)[0] == 405
+        status, _response, data = server.request('POST', path, body={'ok': True}, headers=sign_in(server))
+        assert (status, json_of(data)['error']) == (404, 'not_found')
+        assert server.request('GET', path, headers={'X-Review-Token': TOKEN})[0] == 404
+        status, _response, data = server.request('GET', f'/api/speed-review/drives/{ROUTE}', headers={'X-Review-Token': TOKEN})
+        assert status == 200 and 'training_ok' not in json_of(data)
     finally:
         server.close()
         speed_review._stores.clear()
 
 
-@pytest.mark.parametrize('kind', ['training', 'blocks'])
+@pytest.mark.parametrize('kind', ['blocks', 'works'])
 @pytest.mark.parametrize('raw', [b'[]', b'null', b'"ok"', b'true'])
 def test_a_speed_review_write_that_is_no_json_object_is_a_400(tmp_path, monkeypatch, kind, raw):
-    """Valid JSON that is no object ([], null, a string, true) is refused with a 400 on every Speed review write (the
-    switch and the blocks share the path), never a server error; nothing is written."""
+    """Valid JSON that is no object ([], null, a string, true) is refused with a 400 on every Speed review write, never
+    a server error; nothing is written."""
     from nnslr_tools import drive_review
     monkeypatch.setattr(drive_review, 'store_for', lambda _root: DashcamDrives())
     make_report(tmp_path)
@@ -957,19 +871,7 @@ def test_a_speed_review_write_that_is_no_json_object_is_a_400(tmp_path, monkeypa
                                                  headers=sign_in(server))
         assert (status, json_of(data)['error']) == (400, 'invalid_json')
         store = speed_review.store_for(tmp_path)
-        assert store.training_ok(ROUTE) is None and store.revision(ROUTE) == 0
-    finally:
-        server.close()
-        speed_review._stores.clear()
-
-
-def test_ok_for_training_is_refused_on_a_drive_with_sunnypilot_on_through_the_site(tmp_path, drives):
-    make_report(tmp_path)
-    server = RunningServer(tmp_path, token=TOKEN, require_token=True)
-    try:
-        status, _response, data = server.request('POST', f'/api/speed-review/drives/{ROUTE}/training', body={'ok': True},
-                                                 headers=sign_in(server))
-        assert (status, json_of(data)['error']) == (409, 'not_dashcam')
+        assert store.revision(ROUTE) == 0
     finally:
         server.close()
         speed_review._stores.clear()

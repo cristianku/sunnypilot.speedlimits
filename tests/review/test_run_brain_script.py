@@ -96,8 +96,8 @@ def test_bad_settings_and_another_kind_of_run_are_refused(tmp_path):
 
 
 def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
-    """The drives the dry run took (marked OK for training at the start) are kept in routes.json and passed to every
-    step after it and every seed: a drive marked meanwhile waits for the next run, and the seeds stay alike."""
+    """The drives the dry run took (the dashcam drives at the start) are kept in routes.json and passed to every step
+    after it and every seed: a drive read meanwhile waits for the next run, and the seeds stay alike."""
     first = '["00000001--aaaaaaaaaa", "00000002--bbbbbbbbbb"]'
     assert run_script(tmp_path, env={'NNSLR_FAKE_ROUTES': first}).returncode == 0
     pinned = '--route 00000001--aaaaaaaaaa --route 00000002--bbbbbbbbbb'
