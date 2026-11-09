@@ -24,6 +24,8 @@ A frame's label and loss weight (frame_label), the same for the training, the va
 
 A frame also keeps the road type read so far, a person's over the map's (map_label, map_lead): it says only where the
 sign input of source 'map' stands (road_type_signs.map_sign_times), an input like the speed. It is never a label.
+The road labeler's layer (road_types.load_road_types, labeler=False) is left out of both: what that network wrote is
+neither a label nor an input here, the map's line under it is read.
 
 Enough to train: a training stops, with what is missing, while the partitions hold fewer confirmed frames than
 ENOUGH_LABELS asks (missing_labels). It never goes back to the proposals.
@@ -150,7 +152,7 @@ def route_frames(root: Path, route: str) -> list[dict]:
     # A passage whose exit was not seen (the GPS stops in it): no "passed" is labelled, so none is wrong there.
     unseen = [(p['t_in'], p['t_out']) for p in record['passages'] if not p['passed_key']] if record else []
     frames = []
-    for line in load_road_types(root, route):
+    for line in load_road_types(root, route, labeler=False):
         label, weight = frame_label(line)
         map_label = CLASS_INDEX.get(line.get('road_type'), -1)
         gps = positions.get(line['frame_key'], {})

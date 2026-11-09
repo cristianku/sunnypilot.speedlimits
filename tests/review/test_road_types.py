@@ -614,24 +614,68 @@ def test_the_overview_counts_the_prepared_drives_without_road_types(tmp_path):
     assert drives_without(tmp_path) == 1
 
 
-def test_the_labeler_s_road_types_are_proposals_left_out_of_every_answer(tmp_path):
-    from nnslr_tools.road_types import by_person, person_removals, proposal
+def test_three_layers_the_map_the_labeler_over_it_a_person_over_both(tmp_path):
+    from nnslr_tools.road_types import (by_labeler, by_person, load_labeler_types, source_of, summary,
+                                        write_labeler_types)
     _drive_of(tmp_path)
-    correct(tmp_path, ROUTE, '0/0', '0/1', 'town', 'admin')
-    correct(tmp_path, ROUTE, '0/1', '0/2', 'rural', 'net/run')
-    # The trainings read the map and the person's word under a proposal; Speed review shows the proposal.
-    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'town', 'motorway']
-    assert load_road_types(tmp_path, ROUTE)[2].get('reviewed', False) is False
-    shown = load_road_types(tmp_path, ROUTE, proposals=True)
-    assert [line['road_type'] for line in shown][:3] == ['town', 'rural', 'rural'] and shown[2]['reviewer'] == 'net/run'
-    # A person who sets the type there again makes it an answer: the last correction wins.
-    correct(tmp_path, ROUTE, '0/2', '0/2', 'rural', 'admin')
-    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:3] == ['town', 'town', 'rural']
-    assert proposal('net/run') and not proposal('admin') and not proposal(None)
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)] == ['motorway'] * 4 + [None] * 2
+    assert {source_of(line) for line in load_road_types(tmp_path, ROUTE)} == {'map'}
+    before = summary(tmp_path)['routes'][0]['types']['rural']
+    write_labeler_types(tmp_path, ROUTE, 'run-a', {'0/1': ('rural', 0.95), '0/2': ('rural', 0.97),
+                                                   '0/4': ('parking', 0.99)}, ['rural', 'parking'])
+    assert load_labeler_types(tmp_path, ROUTE)[0] == 'run-a'
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [line['road_type'] for line in lines] == ['motorway', 'rural', 'rural', 'motorway', 'parking', None]
+    assert [source_of(line) for line in lines] == ['map', 'net/run-a', 'net/run-a', 'map', 'net/run-a', 'map']
+    # The labeler's type is no person's: never reviewed, no reviewer, so nothing counts it as a person's word.
+    assert (lines[1]['reviewed'], lines[1]['reviewer'], lines[1]['basis']) == (False, None, 'road labeler')
+    assert not confirmed(lines[1])
+    # The summary sees the new layer at once (its cache key takes the layer's file).
+    assert summary(tmp_path)['routes'][0]['types']['rural'] == before + 2
+    # The trainings of the labeler itself and of the road-type network leave the layer out.
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE, labeler=False)] == \
+        ['motorway'] * 4 + [None] * 2
+    # A person over both: the last correction wins, the person's reviewer is its source.
+    correct(tmp_path, ROUTE, '0/2', '0/3', 'town', 'admin')
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [line['road_type'] for line in lines][:4] == ['motorway', 'rural', 'town', 'town']
+    assert [source_of(line) for line in lines][:4] == ['map', 'net/run-a', 'admin', 'admin']
+    assert lines[2]['reviewed'] is True and confirmed(lines[2])
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE, labeler=False)][:4] == \
+        ['motorway', 'motorway', 'town', 'town']
+    # A newer run replaces the layer whole: an empty one lets the map show through again, the person's stays.
+    write_labeler_types(tmp_path, ROUTE, 'run-b', {}, [])
+    assert [line['road_type'] for line in load_road_types(tmp_path, ROUTE)][:5] == \
+        ['motorway', 'motorway', 'town', 'town', None]
+    # A labeler's line in the corrections file (the code of 8 Nov 2026) is never read.
+    correct(tmp_path, ROUTE, '0/0', '0/0', 'rural', 'net/run')
+    assert load_road_types(tmp_path, ROUTE)[0]['road_type'] == 'motorway'
+    assert by_labeler('net/run') and not by_labeler('admin') and not by_labeler(None)
     assert by_person('admin') and not by_person('net/run') and not by_person('osm') and not by_person(None)
+
+
+def test_a_broken_layer_line_is_skipped(tmp_path):
+    from nnslr_tools.road_types import labeler_types_path, load_labeler_types
+    _drive_of(tmp_path)
+    path = labeler_types_path(tmp_path, ROUTE)
+    path.parent.mkdir(parents=True)
+    path.write_text('\n'.join([json.dumps({'run': 'r', 'made': 'x', 'types': ['rural']}),
+                               json.dumps({'frame_key': '0/1', 'road_type': 'highway', 'p': 1}), '{"frame_key":',
+                               json.dumps({'frame_key': '0/2', 'road_type': 'rural', 'p': 0.95})]) + '\n')
+    assert list(load_labeler_types(tmp_path, ROUTE)[1]) == ['0/2']
+    path.write_text(json.dumps({'frame_key': '0/2', 'road_type': 'rural', 'p': 0.95}) + '\n')  # no run: no layer
+    assert load_labeler_types(tmp_path, ROUTE) == (None, {})
+
+
+def test_person_removals_are_a_person_s_only():
+    from nnslr_tools.road_types import person_removals
     history = [{'action': 'road_start', 'state': 't', 'start_ns': 1, 'end_ns': 9, 'reviewer': 'p'},
                {'action': 'road_end', 'state': 't', 'start_ns': 1, 'end_ns': 5, 'reviewer': 'p'},
                {'action': 'road_removed', 'state': 't', 'start_ns': 1, 'end_ns': 5, 'reviewer': 'p'},
                {'action': 'works_start', 'state': None, 'start_ns': 7, 'end_ns': 9, 'reviewer': 'p'},
                {'action': 'works_removed', 'state': None, 'start_ns': 7, 'end_ns': 9, 'reviewer': 'p'}]
     assert person_removals(history) == [{'kind': 't', 'start_ns': 1, 'end_ns': 5}]
+    # The labeler's and nnslr tunnels' removals are their own undo, never a person's "no".
+    for reviewer in ('net/run', 'osm'):
+        undo = [{**row, 'reviewer': reviewer} for row in history[:3]]
+        assert person_removals(undo) == []

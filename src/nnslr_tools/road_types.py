@@ -1,4 +1,4 @@
-"""The type of road of every frame, from the map: proposals for the road-type head, prepared without a person.
+"""The type of road of every frame: the map's, the road labeler's over it, a person's over both.
 
 ``nnslr road-types --all`` reads the GPS position, speed and heading of every frame
 (``derived/gps/<route>/positions.jsonl``, nnslr gps) and the OpenStreetMap roads and car parks near the drives
@@ -55,17 +55,27 @@ frames of the acceleration lane that were the ramp's (the measures fold them bac
 Measured on 27 Oct 2026, 240 frames of 11 drives looked at without the map: where the eye was sure, the map agreed on
 91% of town frames, 75% of rural ones and 95% of motorway ones; most rural misses were roads at 60 in a town.
 
-The map labels are a proposal: OpenStreetMap can be wrong or old, and a person corrected them in the road-type review
-(Data › Roads, a drive opened, until 7 Nov 2026: the page went, the corrections made stay labels). A correction is kept apart, in ``annotations/road_types/<route>.jsonl``: one line per
-correction, appended, ``{"from", "to" (frame keys, the stretch), "road_type" (null: the person cannot tell), "reviewer",
-"at"}``; the last line covering a frame wins. ``nnslr road-types`` never touches it, so a correction survives a new map
-run; load_road_types gives the map labels with the corrections over them. A person confirms a proposal the same way,
-with a correction to the type the map proposed. Only a frame a person confirmed or corrected is a label of a training
-(confirmed), whatever the map says of it: a proposal, sure or not, is never one; "cannot tell" is reviewed, with no type.
-The road labeler (nnslr_tools.road_labeler) writes its sure types in the same file with the reviewer NET_PREFIX + its run:
-a proposal too, never a person's word, so load_road_types leaves those lines out (every training reads the map's line
-under them) and only Speed review, which shows them for a person to fix, asks for them (proposals=True). A person
-confirms one by setting the type again: that correction comes later, and the last one wins.
+Three layers, each over the one before (load_road_types), his rule of 9 Nov 2026: the map < the road labeler < a person.
+
+- The map: the lines above, the base where nothing else says a type. OpenStreetMap can be wrong or old (it misses car
+  parks), so it is only the fallback.
+- The road labeler (nnslr_tools.road_labeler, an offline network on the server, never on the car): Prepare Speed review
+  writes its road type of every frame where it is sure and the head of that type passed its gate, as a layer of its own
+  per drive, ``derived/road_labeler_types/<route>.jsonl`` (write_labeler_types: a first line {run, made, types}, then
+  {frame_key, road_type, p}). It is definitive, nobody confirms it: Speed review shows it and the brain learns it as it
+  learns the map. A newer run replaces the file whole. Its lines say their source, ``net/<run>`` (NET_PREFIX + the
+  run), and are never a person's: reviewed stays false, so no training counts them as a person's word.
+- A person: the corrections made in Speed review (and in the road-type review, Data › Roads, until 7 Nov 2026), kept
+  apart in ``annotations/road_types/<route>.jsonl``: one line per correction, appended, ``{"from", "to" (frame keys, the
+  stretch), "road_type" (null: the person cannot tell), "reviewer", "at"}``; the last line covering a frame wins.
+  ``nnslr road-types`` and the labeler never touch it, so a correction survives a new map and a new run. A person
+  corrects only where the type shown is wrong. Only a frame a person set is a label of road_type_data (confirmed);
+  "cannot tell" is reviewed, with no type. A line of that file with a reviewer NET_PREFIX (the labeler wrote its types
+  there with the code of 8 Nov 2026) is never read: its layer is the file above.
+
+Every line of load_road_types says its source: 'map', 'net/<run>', or the person's reviewer. The trainings of the
+labeler itself (road_labeler_data) and of the road-type network (road_type_data) leave the labeler out (labeler=False):
+what the labeler wrote is never an answer of a network that would learn to say it again.
 OpenStreetMap data © OpenStreetMap contributors (ODbL).
 """
 from __future__ import annotations
@@ -83,12 +93,16 @@ from nnslr_tools.map_context import CELL_DEGREES, OUR_ROAD_M, RoadMap, our_road
 from nnslr_tools.sign_reads import is_read_frame
 
 ROAD_TYPES_RELATIVE = Path('derived') / 'road_types'
-# Who wrote a label without a person: the road labeler (reviewer NET_PREFIX + its run), whose writes are proposals and
-# never an answer until a person keeps them, and nnslr tunnels (MAP_REVIEWER, nnslr_tools.tunnels), the one write
-# without a person that is an answer (asked by Cristian on 8 Nov 2026).
+# Who wrote a label without a person, both definitive, his rule of 9 Nov 2026: the road labeler (reviewer NET_PREFIX +
+# its run: its road types, its marks of the kinds of road and of the roadworks) and nnslr tunnels (MAP_REVIEWER,
+# nnslr_tools.tunnels). Neither is a person: a person's word wins over both, and what the labeler wrote is never an
+# answer of its own training.
 NET_PREFIX = 'net/'
 MAP_REVIEWER = 'osm'
+MAP_SOURCE = 'map'
 CORRECTIONS_RELATIVE = Path('annotations') / 'road_types'
+# The road labeler's road type of every frame it is sure of, a file a drive (write_labeler_types).
+LABELER_TYPES_RELATIVE = Path('derived') / 'road_labeler_types'
 PARKING_RELATIVE = Path('derived') / 'osm' / 'parking.jsonl'
 # The Geofabrik extracts of the server, and what scripts/osm_maps.py found the drives need (Read the map, Data › Speed review).
 MAPS_RELATIVE = Path('raw') / 'osm'
@@ -464,10 +478,16 @@ def load_corrections(root: Path, route: str) -> list[dict]:
     return found
 
 
+def _lead(line: dict, road_type) -> bool:
+    """"lead" of a frame given the type road_type over line: an acceleration lane on a frame that was the ramp's."""
+    return road_type == 'merge' and (bool(line.get('lead')) or line.get('road_type') == 'ramp')
+
+
 def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
-    """The map lines with a person's corrections over them (the last covering a frame wins): road_type from the person,
-    basis "reviewed", sure, reviewed true and the reviewer; "lead" on the frames corrected to the acceleration lane that
-    were the ramp's (the map's ramp or lead). A correction whose frames left the drive is skipped."""
+    """The lines with a person's corrections over them (the last covering a frame wins): road_type from the person,
+    basis "reviewed", sure, reviewed true, the reviewer and the source (the reviewer); "lead" on the frames corrected to
+    the acceleration lane that were the ramp's (the map's ramp or lead). A correction whose frames left the drive is
+    skipped. Only a person's corrections come here: the labeler has its own layer (with_labeler)."""
     where = {line['frame_key']: index for index, line in enumerate(lines)}
     chosen: list[dict | None] = [None] * len(lines)
     for correction in corrections:
@@ -478,19 +498,83 @@ def corrected(lines: list[dict], corrections: list[dict]) -> list[dict]:
             chosen[index] = correction
     return [line if correction is None else
             {**line, 'road_type': correction.get('road_type'), 'basis': 'reviewed', 'sure': True, 'reviewed': True,
-             'reviewer': correction.get('reviewer'), 'lead': correction.get('road_type') == 'merge'
-             and (bool(line.get('lead')) or line.get('road_type') == 'ramp')}
+             'reviewer': correction.get('reviewer'), 'source': correction.get('reviewer'),
+             'lead': _lead(line, correction.get('road_type'))}
             for line, correction in zip(lines, chosen)]
 
 
-def proposal(reviewer) -> bool:
-    """A write of the road labeler (reviewer NET_PREFIX + its run): a proposal, never a person's answer."""
+def by_labeler(reviewer) -> bool:
+    """A write of the road labeler (reviewer NET_PREFIX + its run): definitive, never a person's, never an answer of the
+    labeler's own training."""
     return isinstance(reviewer, str) and reviewer.startswith(NET_PREFIX)
 
 
 def by_person(reviewer) -> bool:
     """A write of a person: neither the road labeler's nor nnslr tunnels'."""
-    return isinstance(reviewer, str) and not proposal(reviewer) and reviewer != MAP_REVIEWER
+    return isinstance(reviewer, str) and not by_labeler(reviewer) and reviewer != MAP_REVIEWER
+
+
+def labeler_types_path(root: Path, route: str) -> Path:
+    parse_route_id(route)
+    return Path(root) / LABELER_TYPES_RELATIVE / f'{route}.jsonl'
+
+
+def load_labeler_types(root: Path, route: str) -> tuple[str | None, dict[str, dict]]:
+    """(the run, {frame key: {road_type, p}}) of the road labeler's layer of a drive, (None, {}) without one. A line that
+    cannot be read, or whose type is not one of ROAD_TYPES, is skipped."""
+    path = labeler_types_path(root, route)
+    if not path.is_file():
+        return None, {}
+    run = None
+    found: dict[str, dict] = {}
+    for text in path.read_text(encoding='utf-8', errors='replace').splitlines():
+        try:
+            line = strict_json_loads(text)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(line, dict):
+            continue
+        if 'run' in line and 'frame_key' not in line:
+            run = line['run'] if isinstance(line['run'], str) else None
+        elif isinstance(line.get('frame_key'), str) and line.get('road_type') in ROAD_TYPES:
+            found[line['frame_key']] = line
+    return (run, found) if run else (None, {})
+
+
+def write_labeler_types(root: Path, route: str, run: str, types: dict[str, tuple[str, float]],
+                        earned: list[str]) -> Path:
+    """The road labeler's layer of a drive, written whole in one atomic write (a newer run replaces the older one, also
+    with no frame at all: then the map shows through again): {run, made, types (the road types whose head passed the
+    gate)}, then {frame_key, road_type, p} a frame of types ({frame key: (road type, chance)})."""
+    path = labeler_types_path(root, route)
+    head = {'run': run, 'made': datetime.now().astimezone().isoformat(timespec='seconds'), 'types': list(earned)}
+    lines = [head] + [{'frame_key': key, 'road_type': kind, 'p': round(float(p), 3)}
+                      for key, (kind, p) in types.items() if kind in ROAD_TYPES]
+    atomic_write(path, jsonl_bytes(lines))
+    return path
+
+
+def with_labeler(lines: list[dict], run: str | None, types: dict[str, dict]) -> list[dict]:
+    """The lines with the road labeler's layer over them (load_labeler_types): road_type from the labeler, basis "road
+    labeler", sure, source NET_PREFIX + run, reviewed false and no reviewer (no person set it), "lead" as corrected's."""
+    if not run or not types:
+        return lines
+    source = NET_PREFIX + run
+    found = []
+    for line in lines:
+        said = types.get(line['frame_key'])
+        if said is None:
+            found.append(line)
+            continue
+        found.append({**line, 'road_type': said['road_type'], 'basis': 'road labeler', 'sure': True,
+                      'reviewed': False, 'reviewer': None, 'source': source, 'p': said.get('p'),
+                      'lead': _lead(line, said['road_type'])})
+    return found
+
+
+def source_of(line: dict) -> str:
+    """Who gave a line its type: 'map', 'net/<run>' or a person's reviewer."""
+    return line.get('source') or MAP_SOURCE
 
 
 def person_removals(history: list[dict]) -> list[dict]:
@@ -518,27 +602,31 @@ def person_removals(history: list[dict]) -> list[dict]:
 
 
 def confirmed(line: dict) -> bool:
-    """Whether a person gave the frame its type (a correction, or the proposed type confirmed): the one condition for a
-    label of a training (road_type_data.frame_label). "Cannot tell" is reviewed but has no type."""
+    """Whether a person gave the frame its type (a correction, or the type shown set again): the one condition for a
+    label of road_type_data (frame_label). The map's and the labeler's types are never one. "Cannot tell" is reviewed
+    but has no type."""
     return line.get('reviewed') is True and line.get('road_type') in ROAD_TYPES
 
 
 def review_counts(lines: list[dict]) -> dict[str, int]:
     """What a person did of a drive's frames: {'usable': confirmed, so usable in a training; 'cant_tell': reviewed
-    without a type; 'to_review': no person looked yet, the proposals the map is sure of too}."""
+    without a type; 'to_review': no person set it, the map's or the labeler's type}."""
     usable = sum(1 for line in lines if confirmed(line))
     reviewed = sum(1 for line in lines if line.get('reviewed') is True)
     return {'usable': usable, 'cant_tell': reviewed - usable, 'to_review': len(lines) - reviewed}
 
 
-def load_road_types(root: Path, route: str, proposals: bool = False) -> list[dict]:
-    """The lines of a route in the order of the drive with a person's corrections over the map (corrected), [] when
-    nnslr road-types has not run for it. Every reader takes these: a training. The road labeler's lines (proposal) are
-    left out, the map's line stays under them, unless proposals: Speed review, which shows them for a person to fix."""
+def load_road_types(root: Path, route: str, labeler: bool = True) -> list[dict]:
+    """The lines of a route in the order of the drive, [] when nnslr road-types has not run for it: the map, the road
+    labeler's layer over it (with_labeler), a person's corrections over both (corrected), each line with its source
+    (source_of). What Speed review shows and the brain learns. labeler=False leaves the labeler's layer out, the map's
+    line under it: the trainings of the labeler itself and of the road-type network."""
     lines = map_road_types(root, route)
-    corrections = load_corrections(root, route) if lines else []
-    if not proposals:
-        corrections = [line for line in corrections if not proposal(line.get('reviewer'))]
+    if not lines:
+        return []
+    if labeler:
+        lines = with_labeler(lines, *load_labeler_types(root, route))
+    corrections = [line for line in load_corrections(root, route) if not by_labeler(line.get('reviewer'))]
     return corrected(lines, corrections) if corrections else lines
 
 
@@ -581,8 +669,8 @@ def type_counts(lines: list[dict]) -> dict[str, int]:
 
 
 def _drive(root: Path, route: str) -> dict:
-    """One drive of summary(): its name, the frames of each type, those a person set (review_counts), and its
-    stretches."""
+    """One drive of summary(): its name, the frames of each type (the labeler's over the map, a person's over both, as
+    the brain takes them), those a person set (review_counts), and its stretches."""
     from nnslr_tools.drives import drive_of
     lines = load_road_types(root, route)
     drive = drive_of(root, route) or {}
@@ -593,8 +681,8 @@ def _drive(root: Path, route: str) -> dict:
 
 
 def _stamp(path: Path) -> tuple | None:
-    """When a corrections file changed, None without one: each correction rewrites it (a new inode, a line more or
-    less), maybe within one tick of the clock."""
+    """When a corrections file (or a labeler's layer) changed, None without one: each write rewrites it (a new inode, a
+    line more or less), maybe within one tick of the clock."""
     try:
         stat = path.stat()
     except OSError:
@@ -662,7 +750,8 @@ def summary(root: Path) -> dict:
     for path in sorted((root / ROAD_TYPES_RELATIVE).glob('*.jsonl')):
         try:
             parse_route_id(path.stem)
-            files.append((path.stem, path.stat().st_mtime_ns, _stamp(root / CORRECTIONS_RELATIVE / path.name)))
+            files.append((path.stem, path.stat().st_mtime_ns, (_stamp(root / CORRECTIONS_RELATIVE / path.name),
+                                                               _stamp(root / LABELER_TYPES_RELATIVE / path.name))))
         except (ValueError, OSError):
             continue
     key = tuple(files)

@@ -2,16 +2,18 @@
 
 ## What it is for
 
-The road labeler prepares the labels of Speed review so that a person has less to fix. For every moment of a drive it
-says three things:
+The road labeler labels the drives of Speed review so that a person has less to do. For every moment of a drive it says
+three things:
 
 - the road type: one of `road_types.ROAD_TYPES`, which are town, rural, expressway, motorway, ramp, parking, zone30,
   garage and merge;
 - the kinds of road: tunnel and the other kinds of `speed_road_kinds` (narrow, country, gravel, potholes...);
 - whether the car is inside roadworks, and so where they start and end.
 
-It is an offline network. It never runs on the car and is never an input of the car. It writes proposals, Speed review
-shows them, a person fixes what is wrong, and the brain learns from Speed review. Because it is offline, the
+It is an offline network. It never runs on the car and is never an input of the car. What it writes is the base layer of
+Speed review, definitive (9 Nov 2026): there is no confirmation step. Speed review shows it, the brain learns it as it
+learns a person's word, and a person corrects it only where it is wrong; a person's marks, removals and checks always
+win. Those corrections are what it learns from next time. Because it is offline, the
 OpenStreetMap map is one of its inputs. The rule "vision never reads the map" (AGENTS.md) is about the car, and the car
 never sees this network.
 
@@ -95,11 +97,12 @@ too where the map is wrong or missing.
   `map_context.our_road`. It applies only where nothing else answers, and never within 5 s (`TUNNEL_MARGIN_S`) of a
   tunnel mark of any reviewer or of a second whose road of the map is a tunnel. The map makes this label offline. It
   never reaches the car.
-- **The labeler's own writes.** Everything with reviewer `net/<run>` is a proposal and never an answer, neither here
-  nor for the brain. The only exception is a mark that ends before that kind's "checked to here", because a person
-  went through it and kept it (`brain_targets.kept_proposal`; `brain_targets.works_answers` masks the others for the
-  brain too). Its road types are left out by `road_types.load_road_types`, so the brain, the road-type network and this
-  network use the map's line under them, until a person sets the type there.
+- **The labeler's own writes.** Everything with reviewer `net/<run>` is an answer of the brain, with no confirmation,
+  but never an answer of this network nor of the road-type network: a network never learns to say again what it said.
+  Here its marks are left out and their steps, with 2 s (`EDGE_SECONDS`) around them, masked (`own_steps`), so that
+  neither their inside nor a "checked to here" past them teaches it its own word. Its layer of road types is read with
+  `road_types.load_road_types(..., labeler=False)` here and in `road_type_data`, so both use the map's line under it,
+  with a person's corrections over it.
 - **One side alone.** When a kind, or the roadworks, has only one side in train (all inside or all outside), it leaves
   the loss of train and the log says so (`keep_both_sides`). A constant answer would teach nothing.
 
@@ -132,51 +135,63 @@ The measure is made for each partition:
     minute of steps each). It must also be sure (0.9) on at least 20 steps (`GATE_MIN_SAID`) and right on at least
     90% of those (`GATE_PRECISION`).
   - A road type is measured on the steps a person set. It counts as sure where the network says that type at 0.9
-    while the map says another, because that is where a write would go.
+    while the map says another, because that is where its layer changes what the brain learns.
 
   The gate is saved in the checkpoint (`earned`). A checkpoint made before the gate existed writes nothing.
 
-## Proposals and writes
+## Chances and Prepare Speed review
 
-`road-labeler-predict` writes `derived/road_labeler/<route>.jsonl`:
+`road-labeler-predict` writes the chances to `derived/road_labeler/<route>.jsonl`:
 
 - a first line `{run, step_hz, road_types, kinds, made}`;
 - then one line a step: `{ns, segment, decoded, frame_key, partition, road_type, road_type_p, map_type, kinds: {kind:
   chance}, works}`.
 
-Where the network is sure, it also writes into Speed review, as `nnslr tunnels` does. The reviewer is `net/<run>`. It
-never writes over a person's mark, nor where a person removed a mark, nor before that kind's "checked to here". A
-removal counts as a person's word as for the answers (`road_types.person_removals`): a mark with an end, removed by a
-person, never the undo of the labeler or of `nnslr tunnels`.
-
-Only the heads that earned it write (`writable`, `held_back`):
+Then it prepares Speed review on each drive (`road_labeler.prepare_drive`), unless `--no-marks`. Only the heads that
+earned it write (`writable`, `held_back`):
 
 - they were trained with both sides (`trained` in the checkpoint). A head that did not learn says chances from its
   first weights;
 - they passed the gate of validation (`earned` in the checkpoint, the `gate` of `result.json`).
 
-A head held back still has its chances in the proposals, but never a write. The log and each drive's summary name it
-with why (`held_back`).
+A head held back writes nothing; its chances are still in the chances file. The log and each drive's summary name it
+with why (`held_back`). What it writes, with reviewer `net/<run>`:
 
-A start and its end are one write, here and in `nnslr tunnels`. When the store refuses the end (a revision changed
-meanwhile), the start is taken back and the stretch counts as kept. Nothing raises. If the store refuses that too, the
-summary counts it in `left_open`.
+- **Kinds of road and roadworks.** A mark is a stretch where the chance stays at 0.9 or more (`SURE`), at least 2 s
+  long, with stretches less than 3 s apart joined. A hole in time (a minute without its encode index or its frames)
+  ends a stretch, so a mark never spans what the network did not see. A mark never goes over a person's mark or a mark
+  of `nnslr tunnels`, nor where a person removed a mark, nor before that kind's "checked to here". A removal counts as
+  a person's word as for the answers (`road_types.person_removals`): a mark with an end, removed by a person, never the
+  undo of the labeler or of `nnslr tunnels`.
+- **Road types.** A layer of its own, `derived/road_labeler_types/<route>.jsonl`: a first line `{run, made, types}` (the
+  road types whose head passed the gate), then `{frame_key, road_type, p}` a frame. A frame is in it when the network's
+  most likely type is one of those, at 0.9 or more (`TYPE_SURE`), in a run of at least 5 frames in a row
+  (`TYPE_MIN_FRAMES`, `layer_types`), also where it agrees with the map (the line then says whose it is). Elsewhere the
+  map shows through. `road_types.load_road_types` reads the map, the layer over it, a person's corrections over both,
+  and gives each line its `source` (`map`, `net/<run>` or the person); `typed_by_person` in the brain is true only for
+  a person. A correction with reviewer `net/<run>` in `annotations/road_types` (written before 9 Nov 2026) is ignored.
 
-- **Kinds of road.** These are written by default. A mark is a stretch where the chance stays at 0.9 or more (`SURE`),
-  at least 2 s long, with stretches less than 3 s apart joined. A hole in time (a minute without its encode index or
-  its frames) ends a stretch, so a mark never spans what the network did not see. `--no-marks` turns this off.
-- **Roadworks.** These are written only with `--write`, by the same rule.
-- **Road types.** These are written only with `--write`, and only on map lines no person set. The network has to say
-  another type than the map's at 0.9 or more for at least 5 frames in a row. The type is kept with
-  `speed_review.set_road_type`, as a correction in `annotations/road_types`.
+**A newer run replaces the older one.** Every mark of the labeler that no person kept comes out, of any run and any
+kind, also of a head the new run holds back (so a head that lost its gate leaves nothing behind). A mark is kept by a
+person when it starts before its kind's "checked to here": a person went past it and left it. A kept mark, a person's
+mark and a mark of `nnslr tunnels` are never touched. The new run's layer of road types replaces the older one whole,
+also with no frame at all.
 
-**What `--write` does not do.** A road type the labeler writes never counts as a person's. `road_types.load_road_types`
-leaves the `net/<run>` lines out for every training: the brain's `type_head`, the road-type network and this network's
-own answers. Only Speed review asks for them (`proposals=True`), so that a person sees them and fixes them. A person
-confirms one by setting the type there again, and the last correction wins.
+**One write.** A drive's removals, its new marks (a start and its end, or nothing of it) and a row `types_labeled` for
+its layer (state: the run, note: how many frames of which types) go into `speed_history` as one write
+(`SpeedReviewStore.batch`), at consecutive revisions, all or nothing. The layer's file is written last inside it, so a
+layer that cannot be written takes the marks back with it. A drive changed meanwhile is tried again, up to 3 times.
+Preparing again with the same run, and the same answers, changes nothing.
 
-A dry run never writes into Speed review: `--dry-run`, or any checkpoint made by a dry run. Its proposals go to
-`<run>/proposals/`.
+**What a Prepare wrote.** `<run>/prepared.json`: `{run, at, drives, failed, writes (the heads that wrote), heads: {head:
+{written, removed, kept, left}, road_types}}` (`removed`: the older marks taken out; `kept`: the labeler's marks a person
+kept; `left`: a sure stretch left out for a person's word or refused by the store; `road_types`: frames of its layer).
+The run prepared last is the one Speed review shows. It is written again after each drive prepared, so a Prepare stopped
+part-way (also by the portal's Stop) says what it wrote, and only once a drive is prepared: a Prepare that prepared no
+drive (each one failed or had no scan) leaves the run Speed review shows as it was.
+
+A dry run never writes into Speed review: `--dry-run`, or any checkpoint made by a dry run. Its chances go to
+`<run>/chances/`, and it writes no `prepared.json`.
 
 ## Portal
 
@@ -188,8 +203,8 @@ The Road labeler card is at the bottom of Models (`/models`, `web/src/control/Ro
 - **Prepare Speed review** on a run with its checkpoint, and its own **Dry run**: `helpers/road_labeler.sh predict
   --run-dir data/runs/<run> --all`. The panel action is `road_labeler_predict`, with the options `labeler` (the run's
   folder name, which must hold `road-labeler.pt` and the run's `result.json`), `dry` and `marks` (`"off"` adds
-  `--no-marks`: the box **Proposals only**). The portal never passes `--write`: the roadworks and the road types are
-  written only from a terminal.
+  `--no-marks`: the box **Chances only**, nothing written into Speed review). It writes every head that passed its
+  gate: the kinds of road, the roadworks and the layer of road types. There is no terminal-only write.
 - Any other option, or one that is not a string (a dry run sent as `true`), is refused with 400 and nothing starts.
 - **The GPU.** A real run is refused while another process has the GPU: the server answers 409 (`gpu_taken`), and the
   helper checks again before it starts (`nvidia-smi`: another compute process, or more than `NNSLR_GPU_BUSY_PERCENT`, 10,
@@ -199,27 +214,34 @@ The Road labeler card is at the bottom of Models (`/models`, `web/src/control/Ro
   - for train, Check the GPU, Read the drives and their pictures (drive k of N, from `drives: N` and one
     `<route>: features of ...` or `left out` line a drive), then Train and measure (the `road_labeler epoch` lines, with
     a curve of `train_loss`, `val_types` and `val_on_person`);
-  - for predict, Check the GPU, then Propose along the drives (one `{"route_id": ...}` line a drive).
+  - for predict, Check the GPU, then Prepare Speed review drive by drive (one `{"route_id": ...}` line a drive).
   - A busy GPU shows as the reason the job failed.
 - **The runs** (`GET /api/panel/road-labeler`, `nnslr_tools.labeler_runs`, files only). The newest 8 runs with a
   `result.json` of the road labeler, each with:
   - its drives, steps and epochs;
   - the road type on validation: right overall, and on the steps a person set beside the map's share there;
+  - the road types it writes (`types.writing`), or that none passed its gate and the map stays;
   - each kind of road and the roadworks: precision and recall on validation, and whether it writes or why it is held
     back. It is the same rule as `road-labeler-predict` (`held_back` of the run's train sides and gate). A dry run never
-    writes, and the roadworks write with `--write` only.
+    writes;
+  - `prepared`: what its last Prepare Speed review wrote, head by head (`prepared.json`), and `current` on the run
+    prepared last, the one Speed review shows ("in Speed review" on the card).
+- **Speed review.** The Road type lane shows the type as the brain takes it: light where it is the map's, a mid tone
+  where it is the labeler's, solid where a person set it; the lane's name and the tag say whose the stretch shown is
+  (map, net, yours), with the run on the labeler's. There is nothing to confirm: a person sets a type only where it is
+  wrong.
 
 ## Commands
 
 ```
 helpers/road_labeler.sh train --dry-run --route R      # CPU, a tiny encoder, the first 48 steps of 1 or 2 drives
 helpers/road_labeler.sh train                          # GPU: every scanned drive with frames, 30 epochs
-helpers/road_labeler.sh predict --run-dir data/runs/<run> --all --no-marks   # the proposals only
-helpers/road_labeler.sh predict --run-dir data/runs/<run> --route R          # with the sure marks
+helpers/road_labeler.sh predict --run-dir data/runs/<run> --all --no-marks   # the chances only
+helpers/road_labeler.sh predict --run-dir data/runs/<run> --all              # Prepare Speed review: every head earned
 ```
 
 ## What is left
 
-- The portal's buttons and the runs' endpoint go live after a restart of `speedlimits-web`.
-- Showing the proposals in Speed review.
+- The portal's buttons, the runs' endpoint and the source of each road type in Speed review go live after a restart of
+  `speedlimits-web`.
 - A first real training on the V100.

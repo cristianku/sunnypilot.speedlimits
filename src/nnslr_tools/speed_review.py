@@ -13,16 +13,20 @@ of the drive, at least MIN_BLOCK_SECONDS long. kph is a whole number from 1 to M
 A new block over others clips them: what they say outside it stays, unless it is shorter than MIN_BLOCK_SECONDS.
 
 The writes. Only a person on the site writes them: signed in, or the person at the server itself on a site served only
-on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI), with two exceptions,
-neither of which writes over a person's mark: the tunnels of the map where it is sure (nnslr_tools.tunnels, reviewer
-'osm', asked by Cristian on 8 Nov 2026), answers like a person's; and the road labeler's proposals (nnslr_tools
-.road_labeler, reviewer net/<run>: marks of the kinds of road and of the roadworks, road types), which are never an answer
-of any training until a person keeps them (a mark that ends before its kind's "checked to here", brain_targets
-.kept_proposal; a road type set again by a person, road_types.load_road_types). One write sets a block or removes one, in one transaction with the check of the revision the page read (a stale one is refused with 409,
-so two tabs cannot overwrite each other). The drive's revision is the number of the last write of that drive in
-speed_history, a table that only grows (triggers refuse the rest): a drive's speed_blocks can always be rebuilt by
-playing its history again (block_saved, block_moved, block_removed). A block whose ends a person drags on the page is
-moved in one write: block_moved, with the start it had in its column known_ns.
+on 127.0.0.1 without sign-in (reviewer 'local'); never an agent (no MCP tool, no REST write, no CLI), with two
+exceptions, neither of which writes over a person's mark, removal or "checked to here", and both definitive, nobody
+confirms them (the tunnels asked on 8 Nov 2026, the labeler on 9 Nov): the tunnels of the map where it is sure
+(nnslr_tools.tunnels, reviewer 'osm'), and the road labeler's Prepare Speed review (nnslr_tools.road_labeler, reviewer
+net/<run>: marks of the kinds of road and of the roadworks, only of the heads that passed its gate). Both are answers of
+the brain like a person's marks; a person corrects them only where they are wrong, with the same taps. A newer run of
+the labeler takes out the marks of the older one that no person kept (a mark that starts before its kind's "checked to
+here") and writes its own, in one write of many revisions (batch: each tap a row of speed_history, all or nothing), with
+a row types_labeled for its layer of road types (road_types.write_labeler_types). One write sets a block or removes one,
+in one transaction with the check of the revision the page read (a stale one is refused with 409, so two tabs cannot
+overwrite each other). The drive's revision is the number of the last write of that drive in speed_history, a table that
+only grows (triggers refuse the rest): a drive's speed_blocks can always be rebuilt by playing its history again
+(block_saved, block_moved, block_removed). A block whose ends a person drags on the page is moved in one write:
+block_moved, with the start it had in its column known_ns.
 
 Roadworks. Two taps of a person on the frame shown: here they start, here they end. A start with no end yet runs to the
 end of the drive. A mark says nothing of the speed: it lies next to the answers, so that the training can tell the brain
@@ -43,12 +47,13 @@ The taps go in speed_history as road_start, road_end, road_removed and road_chec
 and speed_road is rebuilt by playing them again, as speed_works.
 
 The road types. Town, rural, expressway, motorway… (road_types.ROAD_TYPES) come from the map, one a second (Read the map
-in Data › Prepare, nnslr road-types), and a person corrects them here where the map is wrong: a type, or "can't tell",
-on the whole stretch of the frame shown or from one frame to another. The correction is the map's own
-(road_types.correct, annotations/road_types/<route>.jsonl), the file every training reads (road_types.load_road_types):
-never an input of the car, the brain learns the type aside (brain_net's type_head). It is a write of the drive like the
-others, same revision and same rules: type_corrected in speed_history, the type in its column state ('cant_tell' for
-none) and its frames in note.
+in Data › Prepare, nnslr road-types), with the road labeler's layer over it where it is sure (Prepare Speed review), and
+a person corrects them here where the type shown is wrong: a type, or "can't tell", on the whole stretch of the frame
+shown or from one frame to another. The page shows the type as the brain takes it (road_types.load_road_types) and
+says, stretch by stretch, whose it is: the map's, the labeler's (net) or a person's. The correction is kept with
+road_types.correct (annotations/road_types/<route>.jsonl), over both layers: never an input of the car, the brain
+learns the type aside (brain_net's type_head). It is a write of the drive like the others, same revision and same
+rules: type_corrected in speed_history, the type in its column state ('cant_tell' for none) and its frames in note.
 
 The old stretches. Until 8 Nov 2026 a person said the speed stretch by stretch, on a grid of 5 km/h, from a proposal of
 the OpenStreetMap limit: speed_stretches and its rows of speed_history (saved, cleared) stay in the file, and nothing
@@ -353,6 +358,14 @@ class SpeedReviewStore:
             finally:
                 connection.close()
 
+    @contextlib.contextmanager
+    def batch(self, route: str, base_revision: int) -> Iterator['Batch']:
+        """Several writes of a drive as one, all or nothing, if the drive is still at base_revision (409 otherwise):
+        each a row of speed_history at the revisions after it, in order. Nothing is kept when the block raises. The
+        road labeler's Prepare Speed review: the older run's marks out and the new run's in, at once."""
+        with self._writing(route, base_revision) as (connection, revision):
+            yield Batch(self, connection, route, revision)
+
     @staticmethod
     def _log(connection: sqlite3.Connection, route: str, revision: int, action: str, start_ns: int, end_ns: int, item: dict,
              reviewer: str) -> None:
@@ -463,6 +476,15 @@ class SpeedReviewStore:
              reviewer: str, label: str = '') -> int:
         """tap_works (kind None) and tap_road: the same rules, on speed_works or on the marks of one kind in speed_road
         (label: the kind's, for the messages)."""
+        with self._writing(route, base_revision) as (connection, revision):
+            self._tap_on(connection, route, revision, kind, tap, at_ns, drive_end, reviewer, label)
+        return revision
+
+    def _tap_on(self, connection: sqlite3.Connection, route: str, revision: int, kind: str | None, tap: str, at_ns: int,
+                drive_end: int, reviewer: str, label: str = '', exact: bool = False) -> None:
+        """One tap of _tap at the revision given, inside a write already open: it checks before it changes anything, so
+        a tap refused (SpeedReviewError) leaves the write as it was. exact (remove only): the mark that starts at at_ns,
+        never another one whose span covers it (an open mark started earlier covers every later time)."""
         if kind is None:
             marks_table, checked_table, action, what = 'speed_works', 'speed_works_checked', 'works', 'roadworks'
             keys, item, bad = {'route': route}, NO_LABEL, 'bad_works'
@@ -473,41 +495,41 @@ class SpeedReviewStore:
         names = ', '.join(keys)
         holes = ', '.join('?' for _ in keys)
         values = tuple(keys.values())
-        with self._writing(route, base_revision) as (connection, revision):
-            marks = connection.execute(f'SELECT * FROM {marks_table} WHERE {of} ORDER BY start_ns', values).fetchall()
-            here = next((row for row in marks if row['start_ns'] <= at_ns and (row['end_ns'] is None or at_ns < row['end_ns'])), None)
-            unended = next((row for row in marks if row['end_ns'] is None), None)
-            if tap == 'start':
-                if unended is not None or here is not None:
-                    raise SpeedReviewError(400, bad, f'End the {what} already open first.' if unended is not None
-                                           else f'This frame is already inside a {what}.' if kind else
-                                           'This frame is already inside roadworks.')
-                connection.execute(f'INSERT INTO {marks_table} ({names}, start_ns, end_ns, reviewer, revision) '
-                                   f'VALUES ({holes}, ?, NULL, ?, ?)', (*values, at_ns, reviewer, revision))
-                self._log(connection, route, revision, f'{action}_start', at_ns, drive_end, item, reviewer)
-            elif tap == 'end':
-                if unended is None:
-                    raise SpeedReviewError(400, bad, f'No {what} is waiting for its end.' if kind else
-                                           'No roadworks are waiting for their end.')
-                later = [row['start_ns'] for row in marks if row['start_ns'] > unended['start_ns']]
-                if at_ns <= unended['start_ns'] or (later and at_ns > later[0]):
-                    raise SpeedReviewError(400, bad, f'The end must come after the start, before the next {what}.')
-                connection.execute(f'UPDATE {marks_table} SET end_ns = ?, reviewer = ?, revision = ? WHERE {of} AND start_ns = ?',
-                                   (at_ns, reviewer, revision, *values, unended['start_ns']))
-                self._log(connection, route, revision, f'{action}_end', unended['start_ns'], at_ns, item, reviewer)
-            elif tap == 'checked':
-                if unended is not None and unended['start_ns'] <= at_ns:
-                    raise SpeedReviewError(400, bad, f'End the {what} already open first.')
-                connection.execute(f'INSERT OR REPLACE INTO {checked_table} ({names}, end_ns, reviewer, revision) '
-                                   f'VALUES ({holes}, ?, ?, ?)', (*values, at_ns, reviewer, revision))
-                self._log(connection, route, revision, f'{action}_checked', at_ns, at_ns, item, reviewer)
-            else:
-                if here is None:
-                    raise SpeedReviewError(400, bad, f'No {what} on this frame.')
-                connection.execute(f'DELETE FROM {marks_table} WHERE {of} AND start_ns = ?', (*values, here['start_ns']))
-                self._log(connection, route, revision, f'{action}_removed', here['start_ns'], here['end_ns'] or drive_end, item,
-                          reviewer)
-        return revision
+        marks = connection.execute(f'SELECT * FROM {marks_table} WHERE {of} ORDER BY start_ns', values).fetchall()
+        here = next((row for row in marks if row['start_ns'] <= at_ns and (row['end_ns'] is None or at_ns < row['end_ns'])), None)
+        if exact:
+            here = next((row for row in marks if row['start_ns'] == at_ns), None)
+        unended = next((row for row in marks if row['end_ns'] is None), None)
+        if tap == 'start':
+            if unended is not None or here is not None:
+                raise SpeedReviewError(400, bad, f'End the {what} already open first.' if unended is not None
+                                       else f'This frame is already inside a {what}.' if kind else
+                                       'This frame is already inside roadworks.')
+            connection.execute(f'INSERT INTO {marks_table} ({names}, start_ns, end_ns, reviewer, revision) '
+                               f'VALUES ({holes}, ?, NULL, ?, ?)', (*values, at_ns, reviewer, revision))
+            self._log(connection, route, revision, f'{action}_start', at_ns, drive_end, item, reviewer)
+        elif tap == 'end':
+            if unended is None:
+                raise SpeedReviewError(400, bad, f'No {what} is waiting for its end.' if kind else
+                                       'No roadworks are waiting for their end.')
+            later = [row['start_ns'] for row in marks if row['start_ns'] > unended['start_ns']]
+            if at_ns <= unended['start_ns'] or (later and at_ns > later[0]):
+                raise SpeedReviewError(400, bad, f'The end must come after the start, before the next {what}.')
+            connection.execute(f'UPDATE {marks_table} SET end_ns = ?, reviewer = ?, revision = ? WHERE {of} AND start_ns = ?',
+                               (at_ns, reviewer, revision, *values, unended['start_ns']))
+            self._log(connection, route, revision, f'{action}_end', unended['start_ns'], at_ns, item, reviewer)
+        elif tap == 'checked':
+            if unended is not None and unended['start_ns'] <= at_ns:
+                raise SpeedReviewError(400, bad, f'End the {what} already open first.')
+            connection.execute(f'INSERT OR REPLACE INTO {checked_table} ({names}, end_ns, reviewer, revision) '
+                               f'VALUES ({holes}, ?, ?, ?)', (*values, at_ns, reviewer, revision))
+            self._log(connection, route, revision, f'{action}_checked', at_ns, at_ns, item, reviewer)
+        else:
+            if here is None:
+                raise SpeedReviewError(400, bad, f'No {what} on this frame.')
+            connection.execute(f'DELETE FROM {marks_table} WHERE {of} AND start_ns = ?', (*values, here['start_ns']))
+            self._log(connection, route, revision, f'{action}_removed', here['start_ns'], here['end_ns'] or drive_end, item,
+                      reviewer)
 
     def set_road_type(self, route: str, first: str, last: str, start_ns: int, end_ns: int, road_type: str | None,
                       base_revision: int, reviewer: str) -> int:
@@ -523,6 +545,91 @@ class SpeedReviewStore:
                 raise SpeedReviewError(400, 'bad_road_type', str(exc)) from exc
         return revision
 
+
+
+class Batch:
+    """The writes of SpeedReviewStore.batch, on its open transaction: what a drive has, read inside it, and the taps,
+    each at the next revision. revision: the last one written (the base one before any)."""
+
+    def __init__(self, store: SpeedReviewStore, connection: sqlite3.Connection, route: str, revision: int) -> None:
+        self.store, self.connection, self.route = store, connection, route
+        self.next = revision
+
+    @property
+    def revision(self) -> int:
+        return self.next - 1
+
+    def kinds(self) -> dict[str, str]:
+        """{kind: label} of the kinds of road."""
+        return {row['kind']: row['label'] for row in self.connection.execute('SELECT kind, label FROM speed_road_kinds')}
+
+    def marks(self, kind: str | None) -> list[dict]:
+        """The marks of a kind of road (None: the roadworks), in time order."""
+        if kind is None:
+            rows = self.connection.execute('SELECT start_ns, end_ns, reviewer, revision FROM speed_works WHERE route = ? '
+                                           'ORDER BY start_ns', (self.route,))
+        else:
+            rows = self.connection.execute('SELECT start_ns, end_ns, reviewer, revision FROM speed_road WHERE route = ? '
+                                           'AND kind = ? ORDER BY start_ns', (self.route, kind))
+        return [dict(row) for row in rows]
+
+    def checked(self, kind: str | None) -> int | None:
+        """Up to when a person went through the drive for a kind (None: the roadworks), None when nobody did."""
+        if kind is None:
+            row = self.connection.execute('SELECT end_ns FROM speed_works_checked WHERE route = ?', (self.route,)).fetchone()
+        else:
+            row = self.connection.execute('SELECT end_ns FROM speed_road_checked WHERE route = ? AND kind = ?',
+                                          (self.route, kind)).fetchone()
+        return None if row is None else row['end_ns']
+
+    def history(self) -> list[dict]:
+        return [dict(row) for row in self.connection.execute('SELECT * FROM speed_history WHERE route = ? ORDER BY revision',
+                                                             (self.route,))]
+
+    def tap(self, kind: str | None, tap: str, at_ns: int, drive_end: int, reviewer: str) -> None:
+        """One tap as tap_works (kind None) or tap_road, at the next revision; refused (SpeedReviewError), it changes
+        nothing."""
+        label = ''
+        if kind is not None:
+            label = self.kinds().get(kind)
+            if label is None:
+                raise SpeedReviewError(400, 'bad_kind', 'No such kind of road.')
+        self.store._tap_on(self.connection, self.route, self.next, kind, tap, at_ns, drive_end, reviewer, label)
+        self.next += 1
+
+    def remove(self, kind: str | None, start_ns: int, drive_end: int, reviewer: str) -> None:
+        """The mark of a kind (None: the roadworks) that starts at start_ns out, at the next revision, as a remove tap
+        would, but that very mark: never a mark of someone else whose span covers start_ns. Refused (SpeedReviewError)
+        when there is none."""
+        label = ''
+        if kind is not None:
+            label = self.kinds().get(kind)
+            if label is None:
+                raise SpeedReviewError(400, 'bad_kind', 'No such kind of road.')
+        self.store._tap_on(self.connection, self.route, self.next, kind, 'remove', start_ns, drive_end, reviewer, label,
+                           exact=True)
+        self.next += 1
+
+    def mark(self, kind: str | None, start_ns: int, end_ns: int, drive_end: int, reviewer: str) -> bool:
+        """A whole mark, its start and its end, or nothing of it: False when the store refuses either."""
+        first = self.next
+        self.connection.execute('SAVEPOINT mark')
+        try:
+            self.tap(kind, 'start', start_ns, drive_end, reviewer)
+            self.tap(kind, 'end', end_ns, drive_end, reviewer)
+        except SpeedReviewError:
+            self.connection.execute('ROLLBACK TO mark')
+            self.connection.execute('RELEASE mark')
+            self.next = first
+            return False
+        self.connection.execute('RELEASE mark')
+        return True
+
+    def log(self, action: str, start_ns: int, end_ns: int, reviewer: str, state: str | None = None, note: str = '') -> None:
+        """A row of speed_history at the next revision, for a write outside the store (the labeler's road types)."""
+        self.store._log(self.connection, self.route, self.next, action, start_ns, end_ns,
+                        {**NO_LABEL, 'state': state, 'note': note[:MAX_NOTE]}, reviewer)
+        self.next += 1
 
 _stores: dict[str, SpeedReviewStore] = {}
 _stores_lock = threading.Lock()
@@ -546,12 +653,12 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
 
 
 def road_type_frames(root: Path, route: str, merged: dict | None) -> list[tuple[int, dict]]:
-    """The road type of each frame of the map, one a second (road_types.load_road_types: the map's, a person's
-    corrections over it, and the road labeler's proposals, reviewer net/<run>, for a person to see and fix), with the time the road camera exposed that frame on the comma's clock (its decoded frame in
-    the drive's encode index, drive_logs.frame_time), in time order: [(ns, line)]. A frame the encode index lacks is left
-    out; [] before Read the map."""
+    """The road type of each frame of the map, one a second, as the brain takes it (road_types.load_road_types: the
+    map's, the road labeler's layer over it, a person's corrections over both), with the time the road camera exposed
+    that frame on the comma's clock (its decoded frame in the drive's encode index, drive_logs.frame_time), in time
+    order: [(ns, line)]. A frame the encode index lacks is left out; [] before Read the map."""
     from nnslr_tools.road_type_data import FRAMES_RELATIVE
-    lines = road_types.load_road_types(root, route, proposals=True)
+    lines = road_types.load_road_types(root, route)
     if not lines or not merged:
         return []
     decoded = {}
@@ -575,24 +682,38 @@ def road_type_frames(root: Path, route: str, merged: dict | None) -> list[tuple[
     return found
 
 
+def _type_source(line: dict) -> tuple[str, str | None, str | None]:
+    """(source: 'person', 'net' or 'map'; the person's reviewer or None; the labeler's run or None) of a line of
+    road_type_frames."""
+    source = road_types.source_of(line)
+    if line.get('reviewed') is True:
+        return 'person', line.get('reviewer'), None
+    if road_types.by_labeler(source):
+        return 'net', None, source[len(road_types.NET_PREFIX):]
+    return 'map', None, None
+
+
 def road_type_stretches(frames: list[tuple[int, dict]], drive_end: int) -> list[dict]:
     """The drive as stretches of one road type for the page, from road_type_frames: [{road_type (None: the map has none,
-    or a person cannot tell), reviewer (None: the map's), from, to (frame keys of its first and last frame), from_ns,
-    to_ns}]. The map's frames and a person's are never one stretch. A stretch runs to the next one's first frame, the
-    last one a second past its last frame (never past drive_end), and frames missing (ROAD_TYPE_GAP_NS) end one."""
+    or a person cannot tell), source ('map', 'net': the road labeler's, 'person'), reviewer (the person's, None
+    otherwise), run (the labeler's, None otherwise), from, to (frame keys of its first and last frame), from_ns, to_ns}].
+    Frames of two sources (or two persons, or two runs) are never one stretch. A stretch runs to the next one's first
+    frame, the last one a second past its last frame (never past drive_end), and frames missing (ROAD_TYPE_GAP_NS) end
+    one."""
     found: list[dict] = []
     last_ns = None
     for ns, line in frames:
-        reviewer = line.get('reviewer') if line.get('reviewed') is True else None
+        source, reviewer, run = _type_source(line)
         current = found[-1] if found else None
         gap = last_ns is not None and ns - last_ns >= ROAD_TYPE_GAP_NS
-        if current and not gap and current['road_type'] == line.get('road_type') and current['reviewer'] == reviewer:
+        if (current and not gap and current['road_type'] == line.get('road_type') and current['source'] == source
+                and current['reviewer'] == reviewer and current['run'] == run):
             current['to'] = line['frame_key']
         else:
             if current:
                 current['to_ns'] = last_ns + NS if gap else ns
-            found.append({'road_type': line.get('road_type'), 'reviewer': reviewer, 'from': line['frame_key'],
-                          'to': line['frame_key'], 'from_ns': ns, 'to_ns': None})
+            found.append({'road_type': line.get('road_type'), 'source': source, 'reviewer': reviewer, 'run': run,
+                          'from': line['frame_key'], 'to': line['frame_key'], 'from_ns': ns, 'to_ns': None})
         last_ns = ns
     if found:
         found[-1]['to_ns'] = last_ns + NS

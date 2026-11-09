@@ -1,10 +1,12 @@
 """From a drive to what the road labeler sees and what it learns: its steps, its inputs and its answers. No torch here.
 
-What it is for. The road labeler (nnslr_tools.road_labeler) is an offline network that prepares the labels of Speed review
-so that a person has less to fix: the road type of every moment, the kinds of road (a tunnel, a narrow road... the kinds
-of speed_road_kinds) and where roadworks start and end. It never runs on the car and is never an input of the car: it
-only writes proposals that Speed review shows, and the brain learns from Speed review. Because it is offline, the
-OpenStreetMap map IS one of its inputs here (AGENTS.md's rule "vision never reads the map" is about the car).
+What it is for. The road labeler (nnslr_tools.road_labeler) is an offline network that labels the drives of Speed review
+so that a person has less to do: the road type of every moment, the kinds of road (a tunnel, a narrow road... the kinds
+of speed_road_kinds) and where roadworks start and end. It never runs on the car and is never an input of the car. What
+it writes is definitive (his rule of 9 Nov 2026): its road types replace the map's as the base of Speed review, its marks
+are answers of the brain, and a person only corrects it where it is wrong; those corrections are what it learns from.
+Because it is offline, the OpenStreetMap map IS one of its inputs here (AGENTS.md's rule "vision never reads the map" is
+about the car).
 
 The steps (drive_steps): STEP_HZ a second, the 1 Hz frames of the drive (brain_targets.drive_frames, the same frames the
 frozen split knows) and the frame of the road video HALF_STEP decoded frames after each, each on the comma's clock by the
@@ -42,10 +44,10 @@ The answers (drive_answers), each with a weight a step, 0 where nothing is known
   else answers, at least TUNNEL_MARGIN_S from any tunnel mark (any reviewer, one with no end too) and from any second
   whose road of the map is a tunnel. The map makes this label offline; it never reaches anything of the car.
 
-The labeler's own marks and road types (reviewer NET_PREFIX + its run) are proposals, no answer of any training: a mark
-of its own is one only before the kind's "checked to here" (a person went through it and kept it, brain_targets
-.kept_proposal); elsewhere its steps are masked (brain_targets.works_answers does both, for the brain too). A road type
-of its own is never an answer: the map's line under it is (road_types.load_road_types).
+What the labeler wrote itself (reviewer NET_PREFIX + its run) is never an answer of its own training, though it is the
+brain's: its marks are left out, and their steps (with EDGE_SECONDS around them) masked (own_steps), so that neither
+their inside nor a "checked to here" past them teaches it its own word; its road types are a layer the map's lines and a
+person's corrections never include here (map_road_types, load_corrections without its lines).
 
 Everything here reads: Speed review through brain_targets.read_labels (read only), speed_history of the removals through
 a read-only connection (removed_marks), the map and the drive's logs. No write, no training, no GPU.
@@ -62,12 +64,12 @@ import numpy as np
 from nnslr_tools import drive_logs
 from nnslr_tools.annotations import load_jsonl
 from nnslr_tools.brain_targets import (EDGE_SECONDS, FramesChanged, NO_LABELS, _cell_partition, drive_frames,
-                                       frame_partitions, kept_proposal, read_labels, read_split, road_answers,
-                                       road_kinds, road_labels, works_answers)
+                                       frame_partitions, read_labels, read_split, road_answers, road_kinds,
+                                       road_labels, works_answers)
 from nnslr_tools.map_context import ROADS_RELATIVE
 from nnslr_tools.road_type_data import frame_cells
-from nnslr_tools.road_types import (NET_PREFIX, ROAD_TYPES, corrected, load_corrections, map_road_types, maxspeed_limit,
-                                    person_removals, proposal)
+from nnslr_tools.road_types import (NET_PREFIX, ROAD_TYPES, by_labeler, corrected, load_corrections, map_road_types,
+                                    maxspeed_limit, person_removals)
 from nnslr_tools.speed_review import NS, db_path as speed_review_path
 
 STEP_HZ = 2
@@ -267,8 +269,8 @@ def step_inputs(steps: list[dict], map_lines: dict[str, dict], tunnels: set, mer
 
 
 def own(reviewer) -> bool:
-    """A write of the labeler itself (reviewer net/<run>, road_types.proposal)."""
-    return proposal(reviewer)
+    """A write of the labeler itself (reviewer net/<run>, road_types.by_labeler)."""
+    return by_labeler(reviewer)
 
 
 def type_answers(map_lines: list[dict], corrections: list[dict], steps: list[dict]) -> dict[str, np.ndarray]:
@@ -294,16 +296,21 @@ def type_answers(map_lines: list[dict], corrections: list[dict], steps: list[dic
     return found
 
 
-def _confirmed(mark: dict, checked: int | None) -> bool:
-    """A mark of the labeler a person went past with "checked to here": kept, so an answer (brain_targets
-    .kept_proposal)."""
-    return kept_proposal(mark, checked)
-
-
 def _near(ns: np.ndarray, start: int, end: int | None, margin_ns: int) -> np.ndarray:
     """The steps within margin_ns of [start, end) (to the drive's end without one)."""
     last = np.iinfo(np.int64).max if end is None else end + margin_ns
     return (ns >= start - margin_ns) & (ns < last)
+
+
+def own_steps(ns: np.ndarray, marks: list[dict]) -> np.ndarray:
+    """The steps inside a mark of the labeler's own, or within EDGE_SECONDS of it (to the drive's end without an end):
+    out of its own loss, whatever else answers there."""
+    ns = np.asarray(ns, dtype=np.int64)
+    where = np.zeros(len(ns), dtype=bool)
+    for mark in marks:
+        if own(mark.get('reviewer')):
+            where |= _near(ns, mark['start_ns'], mark['end_ns'], EDGE_SECONDS * NS)
+    return where
 
 
 def removal_answers(ns: np.ndarray, removed: list[dict], marks: list[dict]) -> np.ndarray:
@@ -325,9 +332,13 @@ def drive_answers(ns: np.ndarray, labels: dict, kinds: tuple[str, ...],
     ns = np.asarray(ns, dtype=np.int64)
     checked = labels.get('road_checked') or {}
     road = labels.get('road') or []
-    target, weight = road_answers(ns, road, checked, kinds)
+    target, weight = road_answers(ns, [mark for mark in road if not own(mark.get('reviewer'))], checked, kinds)
     works = labels.get('works') or []
-    works_target, works_weight = works_answers(ns, works, labels.get('checked_ns'))
+    works_target, works_weight = works_answers(ns, [mark for mark in works if not own(mark.get('reviewer'))],
+                                               labels.get('checked_ns'))
+    for column, kind in enumerate(kinds):
+        weight[own_steps(ns, [mark for mark in road if mark['kind'] == kind]), column] = 0
+    works_weight[own_steps(ns, works)] = 0
     for column, kind in enumerate(kinds):
         fill = removal_answers(ns, [row for row in removed if row['kind'] == kind],
                                [mark for mark in road if mark['kind'] == kind]) & (weight[:, column] == 0)
@@ -372,8 +383,7 @@ def drive_data(root: Path, route: str, merged: dict, *, labels: dict | None = No
     """Everything of a drive the training and the prediction need, but the pictures: route, steps, frames, ns (-1 without
     a time), partitions, inputs (steps, INPUTS), the answers of type_answers and drive_answers (with removed, the
     person's removals of removed_marks, and the tunnel's weak "no" of tunnel_free in the column of the kind tunnel),
-    kind_names, map_lines (the map's, in order) and lines (the map with every correction over it, the labeler's too:
-    what a write must not go over)."""
+    kind_names and map_lines (the map's, in order: what the labeler's road types are written over)."""
     steps, frames = drive_steps(root, route, merged)
     ns = np.array([-1 if step['ns'] is None else step['ns'] for step in steps], dtype=np.int64)
     map_lines = map_road_types(root, route)
@@ -384,8 +394,7 @@ def drive_data(root: Path, route: str, merged: dict, *, labels: dict | None = No
     data = {'route': route, 'steps': steps, 'frames': frames, 'ns': ns,
             'partitions': step_partitions(root, route, frames, steps, log),
             'inputs': step_inputs(steps, by_key, tunnels, merged),
-            'kind_names': list(kinds), 'map_lines': map_lines,
-            'lines': corrected(map_lines, corrections) if corrections else map_lines}
+            'kind_names': list(kinds), 'map_lines': map_lines}
     data.update(type_answers(map_lines, corrections, steps))
     data.update(drive_answers(ns, labels, kinds, removed))
     if tunnel in kinds:

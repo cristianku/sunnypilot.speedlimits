@@ -117,7 +117,7 @@ UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 # epochs ("road_labeler epoch 3/30 ..."); predict goes drive by drive ({"route_id": ...} a drive).
 ROAD_LABELER_TRAIN_STEPS = (('checks', 'Check the GPU', 2), ('features', 'Read the drives and their pictures', 58),
                             ('road_labeler', 'Train and measure', 40))
-ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Propose along the drives', 97))
+ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Prepare Speed review drive by drive', 97))
 # [ai-reviewer] - START
 # One step each: nnslr ai-review and nnslr measure-ai-reviewer report their frames (nnslr_tools.progress).
 AI_REVIEW_STEPS = (('review', 'Review the frames with the AI', 100),)

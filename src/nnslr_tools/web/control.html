@@ -581,6 +581,7 @@ background:var(--ok-soft);color:var(--ok)}
 .rl-run-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-width:0}
 .rl-run-head b{font-family:var(--font-data);font-size:13.5px;overflow-wrap:anywhere}
 .rl-run-head small,.rl-types{font-size:13px;color:var(--muted)}
+.rl-run-head small.rl-current{color:var(--ok);font-weight:600}
 .rl-types{margin:0}
 .rl-heads{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
 .rl-head{display:grid;grid-template-columns:minmax(90px,1fr) minmax(0,2fr) minmax(0,2fr);gap:4px 10px;font-size:13px;
@@ -1625,9 +1626,10 @@ background:var(--surface-2);color:var(--fg);font:inherit;font-size:13px;font-wei
 .sr-kind-new input{flex:1 1 160px;min-width:0;font:inherit;font-size:16px;padding:6px 10px;border:1px solid var(--line);border-radius:10px;
 background:var(--surface-2);color:var(--fg)}
 .sr-kind-new input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
-/* The road types: a lane of the map's, light, solid where he corrected it, the frame's stretch outlined; chips with their colour. */
+/* The road types: a lane of the map's, light, a mid tone where the road labeler's, solid where he corrected it, the frame's stretch outlined; chips with their colour. */
 .dr-lanes rect.sr-type{fill-opacity:.42;stroke:none}
 .dr-lanes rect.sr-type.sr-type-yours{fill-opacity:1}
+.dr-lanes rect.sr-type.sr-type-net{fill-opacity:.72}
 .dr-lanes rect.sr-type.sr-type-none{fill-opacity:.15}
 .dr-lanes rect.sr-type.sr-type-current{stroke:var(--fg);stroke-width:1.5}
 .dr-lanes rect.sr-type-new{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 3}

@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# The road labeler, an offline network that prepares the labels of Speed review so that a person has less to fix: the
-# road type of every moment, the kinds of road (tunnel and the others) and the roadworks, from the road camera at high
-# definition, the OpenStreetMap scene, the GPS and the dashboard speed. It never runs on the car and is never an input of
-# the car (docs/ROAD_LABELER.md). The portal runs it from the Road labeler card at the bottom of Models.
+# The road labeler, an offline network that labels Speed review, the base layer a person corrects only where it is wrong:
+# the road type of every moment, the kinds of road (tunnel and the others) and the roadworks, from the road camera at
+# high definition, the OpenStreetMap scene, the GPS and the dashboard speed. It never runs on the car and is never an
+# input of the car (docs/ROAD_LABELER.md). The portal runs it from the Road labeler card at the bottom of Models.
 #
 #   train   nnslr road-labeler-train into a new run folder data/runs/<YYYY-MM-DD_HHMM>-road-labeler (the GPU of
 #           .venv-gpu; --dry-run: a couple of steps on the CPU with a tiny encoder, nothing learned, the folder ends in
 #           -road-labeler-dry and nothing is written outside it)
-#   predict nnslr road-labeler-predict with the run given: derived/road_labeler/<route>.jsonl, and where it is sure the
-#           marks of the kinds of road in Speed review (reviewer net/<run>; never over a person's mark, removal or
-#           check). --write also writes the roadworks and the road types; --no-marks writes no mark at all
+#   predict nnslr road-labeler-predict with the run given, Prepare Speed review: derived/road_labeler/<route>.jsonl (the
+#           chances), and where it is sure, only for the heads that passed the gate, the marks of the kinds of road and
+#           of the roadworks (reviewer net/<run>) and its layer of road types (derived/road_labeler_types/), all
+#           definitive. It replaces an older run's marks that no person kept and its layer; a person's marks, removals
+#           and checks and the tunnels of the map are never touched. --no-marks writes nothing into Speed review
 #
 # usage: helpers/road_labeler.sh train [--dry-run] [--route R ...] [--epochs N]
-#        helpers/road_labeler.sh predict --run-dir D (--all | --route R ...) [--no-marks] [--write] [--dry-run]
+#        helpers/road_labeler.sh predict --run-dir D (--all | --route R ...) [--no-marks] [--dry-run]
 # Effects: train uses the GPU (the first run of a drive decodes its videos on 4 cores, about 13 s of CPU a minute of
 # drive, and keeps its features in derived/road_labeler_features/); predict writes into Speed review. Only on request.
 #
@@ -32,7 +34,7 @@ GPU_INDEX="${NNSLR_GPU_INDEX:-0}"
 BUSY_PERCENT="${NNSLR_GPU_BUSY_PERCENT:-10}"
 usage() {
     echo "usage: helpers/road_labeler.sh train [--dry-run] [--route R ...] [--epochs N]" >&2
-    echo "       helpers/road_labeler.sh predict --run-dir D (--all | --route R ...) [--no-marks] [--write] [--dry-run]" >&2
+    echo "       helpers/road_labeler.sh predict --run-dir D (--all | --route R ...) [--no-marks] [--dry-run]" >&2
     exit 2
 }
 refuse() {

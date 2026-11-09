@@ -449,9 +449,9 @@ def label_db(root, blocks=(), works=(), checked=(), road=(), road_checked=()):
     from nnslr_tools.speed_review import SpeedReviewStore, db_path
     SpeedReviewStore(root)
     connection = sqlite3.connect(db_path(root))
-    for route, kind, start, end in road:
+    for route, kind, start, end, *who in road:
         connection.execute('INSERT INTO speed_road (route, kind, start_ns, end_ns, reviewer, revision) VALUES (?, ?, ?, ?, ?, ?)',
-                           (route, kind, start, end, 'a', 1))
+                           (route, kind, start, end, who[0] if who else 'a', 1))
     for route, kind, end in road_checked:
         connection.execute('INSERT INTO speed_road_checked (route, kind, end_ns, reviewer, revision) VALUES (?, ?, ?, ?, ?)',
                            (route, kind, end, 'a', 1))
@@ -1494,19 +1494,37 @@ def test_the_server_gives_a_number_with_hours_the_speed_of_the_car():
         assert comma_trial.speed_of(name) == _targets().VISION.class_speed(name), name
 
 
-def proposed(start, end, run='net/run'):
+def by_labeler(start, end, run='net/run'):
     return {**mark(start, end), 'reviewer': run}
 
 
-def test_a_mark_of_the_labeler_is_no_answer_until_a_person_checked_past_it():
+def test_a_mark_of_the_labeler_is_an_answer_like_a_person_s():
     targets = _targets()
     ns = seconds(5, 20, 30, 60, 80, 90, 120)
-    marks = [proposed(10, 40), proposed(70, 110), {**mark(50, 65), 'reviewer': 'osm'}]
+    marks = [by_labeler(10, 40), by_labeler(70, 110), {**mark(50, 65), 'reviewer': 'osm'}]
     target, weight = targets.works_answers(ns, marks, 100 * NS)
-    # Kept (ends before the check): an answer. Across the check: its steps say nothing, nor are they a "no".
-    assert list(target) == [0, 1, 1, 1, 0, 0, 0]
-    assert list(weight) == [1, 1, 1, 1, 0, 0, 0]
-    _target, weight = targets.works_answers(ns, marks, None)
-    assert list(weight) == [0, 0, 0, 1, 0, 0, 0]
-    assert targets.kept_proposal(proposed(10, 40), 40 * NS) and not targets.kept_proposal(proposed(10, None), 100 * NS)
-    assert [row['start_ns'] // NS for row in targets.answer_marks(marks, 100 * NS)] == [10, 50]
+    # Nobody confirms them: inside every mark a yes, before the check a no, past it nothing.
+    assert list(target) == [0, 1, 1, 1, 1, 1, 0]
+    assert list(weight) == [1, 1, 1, 1, 1, 1, 0]
+    target, weight = targets.works_answers(ns, marks, None)
+    assert list(target) == [0, 1, 1, 1, 1, 1, 0] and list(weight) == [0, 1, 1, 1, 1, 1, 0]
+
+
+def test_the_brain_takes_the_labeler_s_road_types_over_the_map_and_a_person_s_over_both(tmp_path):
+    from nnslr_tools.road_types import ROAD_TYPES, write_labeler_types
+    targets = _targets()
+    write_drive(tmp_path, ROUTE, [(0, i) for i in range(20)])
+    label_db(tmp_path, road=[(ROUTE, 'narrow', 2 * NS, 8 * NS, 'net/run')])
+    road_type_lines(tmp_path, ROUTE, ['town'] * 20, corrections=[(15, 17, 'rural')])
+    write_labeler_types(tmp_path, ROUTE, 'run', {f'0/{i}': ('motorway', 0.95) for i in range(10, 17)}, ['motorway'])
+    merged = {'frames': encoded(20), 'series': {'v_ego': [[3 * NS, 77.0]]}, 'meta': {}, 'span': [0, 20 * NS]}
+    split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
+    labels = targets.read_labels(tmp_path)[ROUTE]
+    drive = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True, kinds=('narrow',))
+    assert drive['road_type'][5] == ROAD_TYPES.index('town') and not drive['typed_by_person'][5]
+    assert drive['road_type'][12] == ROAD_TYPES.index('motorway') and not drive['typed_by_person'][12]
+    assert drive['type_weight'][12] == 1
+    assert drive['road_type'][16] == ROAD_TYPES.index('rural') and drive['typed_by_person'][16]
+    # The labeler's mark of a kind of road is an answer with no "checked to here" of a person.
+    column = drive['road_kinds'].index('narrow')
+    assert drive['road'][5, column] == 1 and drive['road_weight'][5, column] == 1

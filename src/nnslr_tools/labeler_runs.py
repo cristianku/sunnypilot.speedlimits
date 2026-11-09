@@ -4,8 +4,10 @@ with what it measured on validation and which of its heads write into Speed revi
 GPU): the heads that write are road_labeler.held_back of the result's own train sides and gate, the same rule as nnslr
 road-labeler-predict.
 
-What a run writes from the portal's "Prepare Speed review": the marks of the kinds of road whose head writes (never over a
-person's mark, removal or check). The roadworks and the road types write only with --write, from a terminal.
+What a run writes from the portal's "Prepare Speed review", definitive, nobody confirms it: the marks of the kinds of road
+and of the roadworks whose head writes, and its layer of the road types that write (never over a person's mark, removal
+or check; road_labeler.prepare_drive). A newer Prepare replaces what an older run wrote. What the last Prepare of a run
+wrote, head by head, is its prepared.json (road_labeler.PREPARED); the run prepared last is the one Speed review shows.
 """
 from __future__ import annotations
 
@@ -61,15 +63,13 @@ def _heads(result: dict) -> list[dict]:
         why = 'a dry run never writes' if result.get('dry_run') else held.get(head)
         heads.append({'head': head, 'inside': item.get('inside'), 'outside': item.get('outside'),
                       'precision': item.get('precision'), 'recall': item.get('recall'),
-                      'writes': why is None, 'why': why,
-                      # The roadworks write only with --write (never from the portal); the kinds by default.
-                      'with_write_only': head == 'works'})
+                      'writes': why is None, 'why': why})
     return heads
 
 
 def _types(result: dict) -> dict:
     """The road type on validation: the share right on every step with one and on the steps a person set, beside the
-    map's own share there, and the road types that would write with --write."""
+    map's own share there, and the road types that write (their head passed the gate)."""
     validation = result.get('validation') if isinstance(result.get('validation'), dict) else {}
     types = validation.get('types') if isinstance(validation.get('types'), dict) else {}
     gate = result.get('gate') if isinstance(result.get('gate'), dict) else {}
@@ -77,12 +77,33 @@ def _types(result: dict) -> dict:
         name for name in result.get('road_types') or () if isinstance(gate.get(f'type:{name}'), dict)
         and gate[f'type:{name}'].get('why') is None]
     return {key: types.get(key) for key in ('steps', 'right', 'person_steps', 'right_on_person', 'map_on_person')} \
-        | {'writing_with_write': writing}
+        | {'writing': writing}
+
+
+def _prepared(run_dir: Path) -> dict | None:
+    """What the last Prepare Speed review of a run wrote (road_labeler.PREPARED): {at, drives, failed, writes (the heads
+    that wrote), heads: {head: {written, removed, kept, left}}, road_types (frames of its layer)}, None before one."""
+    try:
+        prepared = json.loads((run_dir / road_labeler.PREPARED).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(prepared, dict) or not isinstance(prepared.get('at'), str):
+        return None
+    try:
+        datetime.fromisoformat(prepared['at']).timestamp()
+    except ValueError:
+        return None
+    heads = prepared.get('heads') if isinstance(prepared.get('heads'), dict) else {}
+    return {'at': prepared['at'], 'drives': prepared.get('drives'), 'failed': prepared.get('failed'),
+            'writes': [head for head in prepared.get('writes') or () if isinstance(head, str)],
+            'heads': {head: item for head, item in heads.items() if isinstance(item, dict)},
+            'road_types': heads.get('road_types') if isinstance(heads.get('road_types'), int) else 0}
 
 
 def summary(root: Path) -> dict:
     """{runs: the newest SHOWN road labeler runs, total: how many there are, drives: how many drives it can read}.
-    A run: {run, dry_run, finished (ISO time of its result), drives, steps, epochs, checkpoint, types, heads}."""
+    A run: {run, dry_run, finished (ISO time of its result), drives, steps, epochs, checkpoint, types, heads, prepared
+    (_prepared), current (the run prepared last: the one Speed review shows)}."""
     found = []
     for path in (Path(root) / 'runs').glob('*/' + road_labeler.RESULT):
         run_dir = path.parent
@@ -102,8 +123,11 @@ def summary(root: Path) -> dict:
             'drives': len(drives), 'steps': sum(value for value in drives.values() if isinstance(value, int)),
             'epochs': len(result.get('history') or ()),
             'checkpoint': (run_dir / road_labeler.CHECKPOINT).is_file(),
-            'types': _types(result), 'heads': _heads(result)}))
+            'types': _types(result), 'heads': _heads(result), 'prepared': _prepared(run_dir), 'current': False}))
     found.sort(key=lambda item: item[0], reverse=True)
+    prepared = [run for _, run in found if run['prepared']]
+    if prepared:
+        max(prepared, key=lambda run: datetime.fromisoformat(run['prepared']['at']).timestamp())['current'] = True
     from nnslr_tools.road_labeler_data import labeler_routes
     try:
         drives_ready = len(labeler_routes(Path(root)))

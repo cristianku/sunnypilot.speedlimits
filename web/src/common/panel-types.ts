@@ -85,7 +85,7 @@ export interface ActionOptions {
   openpilot?: string;
   brains?: string;
   /** The road labeler (road_labeler_train, road_labeler_predict): a dry run on the CPU, the run Prepare Speed review uses,
-   * and its marks off for the proposals alone. */
+   * and its marks off to write nothing into Speed review (the chances alone). */
   dry?: 'on';
   labeler?: string;
   marks?: 'on' | 'off';
@@ -100,8 +100,24 @@ export interface LabelerHead {
   recall: number | null;
   writes: boolean;
   why: string | null;
-  /** The roadworks write only with --write, from a terminal. */
-  with_write_only: boolean;
+}
+/** What the last Prepare Speed review of a run wrote (road_labeler.PREPARED): per head {written, removed (an older
+ * run's marks taken out), kept (the labeler's marks a person kept), left (left out for a person's word)}. */
+export interface LabelerHeadPrepared {
+  written: number;
+  removed: number;
+  kept: number;
+  left: number;
+}
+export interface LabelerPrepared {
+  at: string;
+  drives: number | null;
+  failed: number | null;
+  /** The heads that wrote: kinds, 'works', 'type:<road type>'. */
+  writes: string[];
+  heads: Record<string, LabelerHeadPrepared>;
+  /** The frames of its layer of road types. */
+  road_types: number;
 }
 export interface LabelerRun {
   run: string;
@@ -113,8 +129,12 @@ export interface LabelerRun {
   /** Whether its road-labeler.pt is there: only then Prepare Speed review can use it. */
   checkpoint: boolean;
   types: {steps: number | null; right: number | null; person_steps: number | null; right_on_person: number | null;
-    map_on_person: number | null; writing_with_write: string[]};
+    map_on_person: number | null; writing?: string[]};
   heads: LabelerHead[];
+  /** Missing on a server from before 9 Nov 2026; null before its first Prepare. */
+  prepared?: LabelerPrepared | null;
+  /** The run prepared last: the one Speed review shows. */
+  current?: boolean;
 }
 export interface LabelerPayload {
   runs: LabelerRun[];

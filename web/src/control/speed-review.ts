@@ -42,12 +42,20 @@ export interface RoadMark extends Works {
 /** What the marks on the page are of: the roadworks, or a kind of road by its kind. */
 export const ROADWORKS = 'works';
 
-/** A stretch of one road type (speed_review.road_type_stretches): the map's, one a second (Read the map in Data ›
- * Prepare), or a person's correction over it. road_type null: the map has none, or (with a reviewer) they cannot tell. */
+/** Whose a stretch of road type is: the map's, the road labeler's (its layer over the map, Prepare Speed review), or a
+ * person's correction over both. */
+export type RoadTypeSource = 'map' | 'net' | 'person';
+/** A stretch of one road type (speed_review.road_type_stretches), as the brain takes it: the map's, one a second (Read
+ * the map in Data › Prepare), the road labeler's over it where it is sure, or a person's correction over both.
+ * road_type null: the map has none, or (a person's) they cannot tell. */
 export interface RoadTypeStretch {
   road_type: string | null;
-  /** Who corrected it; null where it is the map's. */
+  /** Missing from a server of before 9 Nov 2026: then a reviewer means a person, none the map (typeSource). */
+  source?: RoadTypeSource;
+  /** Who corrected it; null where it is not a person's. */
   reviewer: string | null;
+  /** The road labeler's run, on its stretches. */
+  run?: string | null;
   /** The frame keys of its first and last frame. */
   from: string;
   to: string;
@@ -184,6 +192,9 @@ export function worksAt(works: readonly Works[], ns: number): Works | null {
 }
 
 /** The stretch of road type at a time, null where the map has no frame. */
+/** Whose a stretch is, also from a server that does not say it yet. */
+export const typeSource = (item: RoadTypeStretch): RoadTypeSource => item.source ?? (item.reviewer !== null ? 'person' : 'map');
+
 export function roadTypeAt(stretches: readonly RoadTypeStretch[], ns: number): RoadTypeStretch | null {
   return stretches.find((item) => item.from_ns <= ns && ns < item.to_ns) ?? null;
 }

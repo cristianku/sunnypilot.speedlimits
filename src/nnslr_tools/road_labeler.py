@@ -1,9 +1,10 @@
-"""The road labeler: an offline network that prepares the labels of Speed review, so that a person has less to fix. It
-says, at every moment of a drive, the road type, the kinds of road (a tunnel and the other kinds of speed_road_kinds)
-and whether we are inside roadworks, from the road camera at high definition, the map scene of that moment, the GPS and
-the dashboard speed (nnslr_tools.road_labeler_data, nnslr_tools.road_labeler_net). It never runs on the car and is never
-an input of the car: it writes proposals, Speed review shows them, and the brain learns from Speed review. Started only on
-request: nnslr road-labeler-train, nnslr road-labeler-predict, helpers/road_labeler.sh.
+"""The road labeler: an offline network that labels Speed review, the base layer a person corrects only where it is
+wrong. It says, at every moment of a drive, the road type, the kinds of road (a tunnel and the other kinds of
+speed_road_kinds) and whether we are inside roadworks, from the road camera at high definition, the map scene of that
+moment, the GPS and the dashboard speed (nnslr_tools.road_labeler_data, nnslr_tools.road_labeler_net). It never runs on
+the car and is never an input of the car: it writes into Speed review, and the brain learns from Speed review. Started
+only on request: nnslr road-labeler-train, nnslr road-labeler-predict, helpers/road_labeler.sh, the portal's Road
+labeler card (Models).
 
 The training (train_labeler). The features of every drive are made once (the frozen encoder on the GPU, kept in
 derived/road_labeler_features/<encoder_id>/), then the memory learns on windows of WINDOW steps, each inside one stretch
@@ -23,32 +24,40 @@ with an answer, None where the partition has no step to tell them by.
 
 The prediction (predict_labeler) goes through a whole drive in windows of WINDOW steps that overlap by MARGIN on each side,
 keeping the middle of each: every step is said with at least MARGIN steps around it both ways, as in training. It writes
-derived/road_labeler/<route>.jsonl: a first line {run, step_hz, road_types, kinds, made}, then one line a step {ns,
-segment, decoded, frame_key, partition, road_type, road_type_p, map_type, kinds: {kind: chance}, works}. Where the network
-is sure it also writes into Speed review, the way nnslr tunnels does (write_marks, as tunnels.write_tunnels, reviewer
-NET_PREFIX + the run's name): never over a person's mark, a mark of the kind already there, where a person removed one, or
-before that kind's "checked to here". A start and its end are one write: when the store refuses the end, the start is
-taken back, and nothing raises. Only the heads that earned it write (writable): trained with both sides (a kind or the
-roadworks left out of the loss of train still has its chances in the proposals, and never a mark), and passed the gate
-of validation (earned_heads: at least GATE_MIN_ANSWERS steps of full weight on each side, sure on at least GATE_MIN_SAID
-of them, and right on at least GATE_PRECISION of those it was sure of). A head held back says why in the log and in
-the summary of each drive (held_back).
+derived/road_labeler/<route>.jsonl, the chances: a first line {run, step_hz, road_types, kinds, made}, then one line a
+step {ns, segment, decoded, frame_key, partition, road_type, road_type_p, map_type, kinds: {kind: chance}, works}.
 
-- the kinds of road: a stretch of at least MIN_MARK_S where its chance stays at SURE or more (stretches closer than JOIN_S
-  are one), by default;
-- the roadworks (the same, start and end taps) and the road types (only with --write): a road type is written where the
-  map's line has no person's type and says another one, for at least TYPE_MIN_FRAMES seconds at TYPE_SURE or more
-  (speed_review's set_road_type, which keeps it as a correction of annotations/road_types).
+Prepare Speed review (the same command, the portal's button) then writes, where the network is sure, what the labeler
+says, and that is definitive, his rule of 9 Nov 2026: nobody confirms it, Speed review shows it, the brain learns it, and
+a person corrects it only where it is wrong (prepare_drive):
 
-Everything the labeler writes is a proposal, never a person's answer: only a person writes the answers, and the tunnels
-of nnslr tunnels. A road type it writes is a line of annotations/road_types with its reviewer, which Speed review shows
-and every training leaves out (road_types.load_road_types: the map's line under it stays the answer) until a person sets
-the type there. A mark it writes is no answer of the brain nor of its own training until a person goes past it with
-"checked to here" (brain_targets.works_answers, road_labeler_data).
+- the road types: a layer of their own per drive, derived/road_labeler_types/<route>.jsonl (road_types
+  .write_labeler_types), over the map and under a person's corrections (road_types.load_road_types). A frame is in the
+  layer where the network says a type whose head passed the gate at TYPE_SURE or more, in a run of at least
+  TYPE_MIN_FRAMES frames of that type (layer_types); elsewhere the map shows through;
+- the kinds of road and the roadworks: a mark (reviewer NET_PREFIX + the run's name) on a stretch of at least MIN_MARK_S
+  where its chance stays at SURE or more (stretches closer than JOIN_S are one), as nnslr tunnels marks: never over a
+  person's mark or a mark of nnslr tunnels, where a person removed one, or before that kind's "checked to here".
+
+Only the heads that earned it write (writable): trained with both sides (a kind or the roadworks left out of the loss of
+train still has its chances in the chances file, and never a mark), and passed the gate of validation (earned_heads: at
+least GATE_MIN_ANSWERS steps of full weight on each side, sure on at least GATE_MIN_SAID of them, and right on at least
+GATE_PRECISION of those it was sure of). A head held back writes nothing and says why in the log and in the summary of
+each drive (held_back).
+
+A newer run replaces the older one, drive by drive, in one write of Speed review (all or nothing, every tap a row of
+speed_history): its layer replaces the older layer whole, and every mark of the labeler that no person kept (a mark
+that starts before its kind's "checked to here", kept_by_person) comes out, of any run and any head, also of a head the
+new run holds back: what an older run said is never left behind as if this run had said it. Then the new run's marks go
+in. A person's marks, removals and checks, and the marks of nnslr tunnels, are never touched. What it wrote, head by
+head, goes to <run>/prepared.json for the card.
+
+What the labeler wrote is never an answer of its own training (road_labeler_data masks it) nor of the road-type network
+(road_type_data): a network never learns to say again what it said.
 
 A dry run (train --dry-run) is a few steps on the CPU with ENCODER_TINY on the first DRY_STEPS steps of one or two drives:
 the chain works, nothing is learned, nothing written outside --run-dir. Its checkpoint never writes into Speed review, and
-its proposals go to <run>/proposals.
+its chances go to <run>/chances.
 """
 from __future__ import annotations
 
@@ -64,12 +73,14 @@ import numpy as np
 
 from nnslr_tools import road_labeler_data as data
 from nnslr_tools.road_labeler_data import NET_PREFIX, NS, PARTITIONS, STEP_HZ
-from nnslr_tools.road_types import ROAD_TYPES, person_removals
+from nnslr_tools.road_types import ROAD_TYPES, by_labeler, person_removals
 
 FEATURES_RELATIVE = Path('derived') / 'road_labeler_features'
-PROPOSALS_RELATIVE = Path('derived') / 'road_labeler'
+CHANCES_RELATIVE = Path('derived') / 'road_labeler'
 CHECKPOINT = 'road-labeler.pt'
 RESULT = 'result.json'
+# What the last Prepare Speed review of a run wrote (predict_labeler), for the portal.
+PREPARED = 'prepared.json'
 WINDOW = 8 * 60 * STEP_HZ  # 8 minutes of memory, both ways
 MARGIN = 2 * 60 * STEP_HZ  # at prediction, at least 2 minutes around every step said
 BATCH = 8
@@ -171,90 +182,107 @@ def _free(start: int, end: int, marks: list[dict], removed: list[tuple[int, int]
     return not clash and not any(a < end and start < b for a, b in removed) and (checked is None or start >= checked)
 
 
-def write_marks(store, route: str, kind: str | None, found: list[tuple[int, int]], span: tuple[int, int],
-                reviewer: str) -> dict:
-    """The stretches found as marks in Speed review (speed_review.SpeedReviewStore): of a kind of road (tap_road), or the
-    roadworks (kind None: tap_works), with the rules of tunnels.write_tunnels. Returns {written, kept} (kept: left out for
-    a person's mark, removal or check, or refused by the store; a start whose end is refused is taken back, and the
-    removals of the labeler and of nnslr tunnels do not count as a person's), and left_open when a start could not be
-    taken back either (the store refused both: a mark of the labeler waits for its end in Speed review). Never raises
-    for a write the store refuses."""
-    from nnslr_tools.speed_review import SpeedReviewError
-    removed = [(row['start_ns'], row['end_ns']) for row in person_removals(store.history(route)) if row['kind'] == kind]
-    checked = store.works_checked(route) if kind is None else store.road_checked(route).get(kind)
-    written = kept = left_open = 0
-    for start, end in found:
-        start, end = max(start, span[0]), min(end, span[1])
-        if end - start < MIN_MARK_S * NS:
-            continue
-        marks = store.works(route) if kind is None else [row for row in store.road(route) if row['kind'] == kind]
-        if not _free(start, end, marks, removed, checked):
-            kept += 1
-            continue
-        def tap(name: str, at: int) -> None:
-            if kind is None:
-                store.tap_works(route, name, at, span[1], store.revision(route), reviewer)
-            else:
-                store.tap_road(route, kind, name, at, span[1], store.revision(route), reviewer)
-
-        try:
-            tap('start', start)
-        except (SpeedReviewError, sqlite3.Error):
-            kept += 1
-            continue
-        try:
-            tap('end', end)
-            written += 1
-        except (SpeedReviewError, sqlite3.Error):
-            kept += 1
-            try:
-                tap('remove', start)  # no mark left open: the store refused its end
-            except (SpeedReviewError, sqlite3.Error):
-                left_open += 1
-    return {'written': written, 'kept': kept, **({'left_open': left_open} if left_open else {})}
+def kept_by_person(mark: dict, checked: int | None) -> bool:
+    """A mark of the labeler a person kept: it starts before its kind's "checked to here" (a person went past it and left
+    it). A newer run never takes it out."""
+    return checked is not None and mark['start_ns'] < checked
 
 
-def type_stretches(lines: list[dict], chance_of: dict[str, np.ndarray], threshold: float = TYPE_SURE,
-                   min_frames: int = TYPE_MIN_FRAMES) -> list[tuple[str, str, str]]:
-    """[(first frame key, last frame key, road type)]: runs of the map's lines (road_types.load_road_types' order, every
-    correction over them) with no person's type, where the network says one type at threshold or more and the line says
-    another, at least min_frames long. chance_of: {frame key: chances over ROAD_TYPES}."""
-    found: list[list] = []
-    previous = None
-    for at, line in enumerate(lines):
+def layer_types(lines: list[dict], chance_of: dict[str, np.ndarray], earned: list[str], threshold: float = TYPE_SURE,
+                min_frames: int = TYPE_MIN_FRAMES) -> dict[str, tuple[str, float]]:
+    """{frame key: (road type, chance)} of the labeler's layer of road types (road_types.write_labeler_types): runs of the
+    map's lines, in order, where the network says one type of earned at threshold or more, at least min_frames frames
+    long. Elsewhere it says nothing and the map shows through. chance_of: {frame key: chances over ROAD_TYPES}."""
+    found: dict[str, tuple[str, float]] = {}
+    run: list[tuple[str, float]] = []
+    said_before = None
+
+    def close() -> None:
+        if len(run) >= min_frames:
+            found.update({key: (said_before, p) for key, p in run})
+
+    for line in lines:
         chance = chance_of.get(line['frame_key'])
-        said = None
-        if chance is not None and line.get('reviewed') is not True:
+        said = p = None
+        if chance is not None:
             best = int(np.argmax(chance))
-            if chance[best] >= threshold and line.get('road_type') != ROAD_TYPES[best]:
-                said = ROAD_TYPES[best]
-        if said is not None and found and found[-1][2] == said and previous == at - 1:
-            found[-1][1] = line['frame_key']
-            found[-1][3] += 1
-        elif said is not None:
-            found.append([line['frame_key'], line['frame_key'], said, 1])
-        previous = at if said is not None else previous
-    return [(a, b, kind) for a, b, kind, count in found if count >= min_frames]
+            if chance[best] >= threshold and ROAD_TYPES[best] in earned:
+                said, p = ROAD_TYPES[best], float(chance[best])
+        if said != said_before:
+            close()
+            run = []
+        if said is not None:
+            run.append((line['frame_key'], p))
+        said_before = said
+    close()
+    return found
 
 
-def write_types(store, route: str, found: list[tuple[str, str, str]], ns_of: dict[str, int], span: tuple[int, int],
-                reviewer: str) -> dict:
-    """The road types of type_stretches into Speed review (set_road_type, as a person's correction of a stretch).
-    Returns {written, kept}."""
+def prepare_drive(store, root: Path, route: str, run: str, span: tuple[int, int], stretches: dict, earned: set,
+                  types: dict[str, tuple[str, float]], types_earned: list[str]) -> dict:
+    """Prepare Speed review on one drive with the run given, in one write of the store (SpeedReviewStore.batch, all or
+    nothing): the marks of the labeler that no person kept (kept_by_person) come out, of any run and any kind, also of a
+    head this run holds back, then this run's sure stretches go in (stretches: {kind, None for the roadworks: [(start_ns,
+    end_ns)]}) for the heads of earned only, never over a person's mark, a mark of nnslr tunnels, a mark kept, a
+    person's removal, or before that kind's "checked to here" (_free). A mark of this run already where it would go
+    stays as it is. Then the layer of road types (types, of the heads types_earned) replaces the older one, after the
+    write, with a row types_labeled in it; the same layer again writes nothing. Returns {head: {written, removed, kept,
+    left}} (kept: the labeler's marks a person kept; left: a stretch left out for a person's word or refused by the
+    store) and road_types: the frames of the layer."""
+    from nnslr_tools import road_types
     from nnslr_tools.speed_review import SpeedReviewError
-    written = kept = 0
-    for first, last, kind in found:
-        start, end = ns_of.get(first), ns_of.get(last)
-        if start is None or end is None:
-            kept += 1
-            continue
-        end = min(end + NS, span[1])
+    reviewer = NET_PREFIX + run
+    before_run, before_types = road_types.load_labeler_types(root, route)
+    layer = {key: {'road_type': kind, 'p': round(float(p), 3)} for key, (kind, p) in types.items()}
+    same_layer = before_run == run and {key: {'road_type': line['road_type'], 'p': line.get('p')}
+                                        for key, line in before_types.items()} == layer
+    for attempt in range(3):
+        report: dict = {}
         try:
-            store.set_road_type(route, first, last, start, max(end, start + 1), kind, store.revision(route), reviewer)
-            written += 1
-        except SpeedReviewError:
-            kept += 1
-    return {'written': written, 'kept': kept}
+            with store.batch(route, store.revision(route)) as batch:
+                known = batch.kinds()
+                removals = person_removals(batch.history())
+                for kind in (*known, None):
+                    head = 'works' if kind is None else kind
+                    checked = batch.checked(kind)
+                    marks = batch.marks(kind)
+                    old = [mark for mark in marks if by_labeler(mark['reviewer']) and not kept_by_person(mark, checked)]
+                    others = [mark for mark in marks if mark not in old]
+                    removed = [(row['start_ns'], row['end_ns']) for row in removals if row['kind'] == kind]
+                    wanted = []
+                    for start, end in stretches.get(kind, []) if kind in earned else []:
+                        start, end = max(start, span[0]), min(end, span[1])
+                        if end - start >= MIN_MARK_S * NS and _free(start, end, others, removed, checked):
+                            wanted.append((start, end))
+                    left = len(stretches.get(kind, [])) - len(wanted) if kind in earned else 0
+                    stay = {(mark['start_ns'], mark['end_ns']) for mark in old if mark['reviewer'] == reviewer} & set(wanted)
+                    out = [mark for mark in old if (mark['start_ns'], mark['end_ns']) not in stay or mark['reviewer'] != reviewer]
+                    for mark in out:
+                        batch.remove(kind, mark['start_ns'], span[1], reviewer)
+                    written = 0
+                    for start, end in wanted:
+                        if (start, end) in stay:
+                            continue
+                        if batch.mark(kind, start, end, span[1], reviewer):
+                            written += 1
+                        else:
+                            left += 1
+                    item = {'written': written, 'removed': len(out),
+                            'kept': sum(1 for mark in marks if by_labeler(mark['reviewer']) and mark not in old),
+                            'left': left}
+                    if any(item.values()) or kind in earned:
+                        report[head] = item
+                if not same_layer:
+                    batch.log('types_labeled', span[0], span[1], reviewer, state=run,
+                              note=f'{len(layer)} frames of {", ".join(types_earned) or "no road type"}')
+                    # The last thing of the write: a layer that cannot be written takes the marks back with it.
+                    road_types.write_labeler_types(root, route, run, types, types_earned)
+            report['road_types'] = len(layer)
+            return report
+        except SpeedReviewError as exc:
+            if exc.reason != 'stale_revision' or attempt == 2:
+                raise
+    raise AssertionError('unreachable')
 
 
 def _cut(drive: dict, length: int) -> dict:
@@ -523,7 +551,7 @@ def held_back(checkpoint: dict) -> dict[str, str]:
     """{head: why it writes nothing into Speed review} of a run's heads (the kinds, 'works', 'type:<road type>'): not
     trained with both sides (a head masked in training says chances from its first weights, and a mark of it would teach
     the brain noise), or not through the gate of validation (earned_heads; a checkpoint without one, made before it,
-    writes nothing). Their chances still go into the proposals."""
+    writes nothing). Their chances still go into the chances file."""
     trained = set(checkpoint.get('trained') or ())
     earned = checkpoint.get('earned') if isinstance(checkpoint.get('earned'), dict) else {}
     found = {}
@@ -556,7 +584,7 @@ def load_labeler(run_dir: Path, device):
     return model.eval(), encoder, checkpoint
 
 
-def proposal_lines(drive: dict, said: dict, checkpoint: dict) -> list[dict]:
+def chance_lines(drive: dict, said: dict, checkpoint: dict) -> list[dict]:
     """The lines of derived/road_labeler/<route>.jsonl: see the module's text."""
     lines = [{'run': checkpoint['run'], 'step_hz': STEP_HZ, 'road_types': list(ROAD_TYPES), 'kinds': drive['kind_names'],
               'made': datetime.now().astimezone().isoformat(timespec='seconds')}]
@@ -584,67 +612,93 @@ def frame_chances(drive: dict, said: dict) -> tuple[dict[str, np.ndarray], dict[
 
 
 def predict_labeler(data_root: Path, run_dir: Path, merged_of, span_of, routes: list[str], *, out_dir: Path | None = None,
-                    marks: bool = True, write: bool = False, dry_run: bool = False, device: str | None = None,
-                    log=_say) -> list[dict]:
-    """The proposals of each drive of routes into out_dir (derived/road_labeler by default) and, where sure, the writes
-    of the module's text. span_of(route): the drive's (first, last) ns, None before a scan. marks: the kinds of road;
-    write: also the roadworks and the road types. dry_run, or a checkpoint of a dry run: the first DRY_STEPS steps only
-    for dry_run, the proposals in <run>/proposals, nothing written into Speed review. Returns a summary a drive."""
+                    marks: bool = True, dry_run: bool = False, device: str | None = None, log=_say) -> list[dict]:
+    """The chances of each drive of routes into out_dir (derived/road_labeler by default) and, with marks, Prepare Speed
+    review on each (prepare_drive: the marks of the heads that earned it, the layer of road types). span_of(route): the
+    drive's (first, last) ns, None before a scan. marks False: the chances only, nothing written into Speed review.
+    dry_run, or a checkpoint of a dry run: the first DRY_STEPS steps only for dry_run, the chances in <run>/chances,
+    nothing written into Speed review. What a run wrote, head by head, goes to <run>/prepared.json (PREPARED) for the
+    portal's card, again after each drive prepared (a job stopped part-way, by a drive or by the panel's SIGTERM, which
+    skips any finally, still says what it wrote), and only once a drive is prepared: a Prepare that prepared none leaves
+    the run that Speed review shows as it was. Returns a summary a drive."""
     import torch
     root, run_dir = Path(data_root), Path(run_dir)
     made_dry = torch.load(run_dir / CHECKPOINT, map_location='cpu', weights_only=False)['dry_run']
     trial = dry_run or made_dry
     device = torch.device(device or ('cuda' if torch.cuda.is_available() and not trial else 'cpu'))
     model, encoder, checkpoint = load_labeler(run_dir, device)
-    target = run_dir / 'proposals' if trial else Path(out_dir) if out_dir else root / PROPOSALS_RELATIVE
+    target = run_dir / 'chances' if trial else Path(out_dir) if out_dir else root / CHANCES_RELATIVE
     cache = run_dir / 'features' if trial else root / FEATURES_RELATIVE / checkpoint['encoder_id']
-    reviewer = NET_PREFIX + checkpoint['run']
+    run = checkpoint['run']
     kinds = tuple(checkpoint['kinds'])
     marked, works_earned, types_earned = writable(checkpoint)
+    earned = set(marked) | ({None} if works_earned else set())
     held = held_back(checkpoint)
     if held:
-        log('Never written (their chances are in the proposals): ' +
+        log('Never written (their chances are in the chances file): ' +
             '; '.join(f'{head}: {why}' for head, why in held.items()))
     store = None
-    if not trial and (marks or write):
+    from nnslr_tools.speed_review import SpeedReviewError
+    if not trial and marks:
         from nnslr_tools.speed_review import store_for
         store = store_for(root)
-    if trial and (marks or write):
+    if trial and marks:
         log('A dry run: nothing is written into Speed review.')
     tunnels = data.tunnel_ways(root)
     found = []
-    for route in routes:
-        merged = merged_of(route)
-        span = span_of(route)
-        if not merged or span is None:
-            log(f'{route}: no scan, left out')
-            continue
-        drive = data.drive_data(root, route, merged, kinds=kinds, tunnels=tunnels, log=log)
-        if dry_run:
-            drive = _cut(drive, DRY_STEPS)
-        _features(root, [drive], checkpoint['encoder'], encoder, device, cache, log)
-        said = predict_drive(model, drive, device, checkpoint['window'], checkpoint['window'] // 4)
-        from nnslr_tools.annotations import atomic_write, jsonl_bytes
-        path = target / f'{route}.jsonl'
-        atomic_write(path, jsonl_bytes(proposal_lines(drive, said, checkpoint)))
-        summary = {'route_id': route, 'steps': len(drive['steps']), 'proposals': str(path)}
-        stretches = {kind: sure_stretches(drive['ns'], said['kinds'][:, column]) for column, kind in enumerate(kinds)}
-        works = sure_stretches(drive['ns'], said['works'])
-        chance_of, ns_of = frame_chances(drive, said)
-        types = type_stretches(drive['lines'], chance_of)
-        summary['sure'] = {**{kind: len(items) for kind, items in stretches.items()}, 'works': len(works),
-                           'road_types': len(types)}
-        summary['held_back'] = held
-        if store is not None:
-            known = {row['kind'] for row in store.road_kinds()}
-            if marks:
-                summary['marks'] = {kind: write_marks(store, route, kind, items, span, reviewer)
-                                    for kind, items in stretches.items() if kind in known and kind in marked}
-            if write:
-                if works_earned:
-                    summary['works'] = write_marks(store, route, None, works, span, reviewer)
-                summary['road_types'] = write_types(store, route, [item for item in types if item[2] in types_earned],
-                                                    ns_of, span, reviewer)
-        log(json.dumps(summary))
-        found.append(summary)
+    totals: dict = {}
+
+    def save_prepared() -> None:
+        drives = sum(1 for item in found if 'prepared' in item)
+        if store is None or not drives:
+            return
+        prepared = {'run': run, 'at': datetime.now().astimezone().isoformat(timespec='seconds'), 'drives': drives,
+                    'failed': sum(1 for item in found if 'error' in item),
+                    'writes': sorted(head if head is not None else 'works' for head in earned)
+                    + [f'type:{name}' for name in types_earned], 'heads': totals}
+        from nnslr_tools.annotations import atomic_write
+        atomic_write(run_dir / PREPARED, json.dumps(prepared, indent=2).encode('utf-8'))
+
+    try:
+        for route in routes:
+            merged = merged_of(route)
+            span = span_of(route)
+            if not merged or span is None:
+                log(f'{route}: no scan, left out')
+                continue
+            drive = data.drive_data(root, route, merged, kinds=kinds, tunnels=tunnels, log=log)
+            if dry_run:
+                drive = _cut(drive, DRY_STEPS)
+            _features(root, [drive], checkpoint['encoder'], encoder, device, cache, log)
+            said = predict_drive(model, drive, device, checkpoint['window'], checkpoint['window'] // 4)
+            from nnslr_tools.annotations import atomic_write, jsonl_bytes
+            path = target / f'{route}.jsonl'
+            atomic_write(path, jsonl_bytes(chance_lines(drive, said, checkpoint)))
+            summary = {'route_id': route, 'steps': len(drive['steps']), 'chances': str(path)}
+            stretches = {kind: sure_stretches(drive['ns'], said['kinds'][:, column]) for column, kind in enumerate(kinds)}
+            stretches[None] = sure_stretches(drive['ns'], said['works'])
+            chance_of, _ns_of = frame_chances(drive, said)
+            types = layer_types(drive['map_lines'], chance_of, types_earned)
+            summary['sure'] = {**{kind: len(items) for kind, items in stretches.items() if kind is not None},
+                               'works': len(stretches[None]), 'road_types': len(types)}
+            summary['held_back'] = held
+            if store is not None:
+                try:
+                    summary['prepared'] = prepare_drive(store, root, route, run, span, stretches, earned, types, types_earned)
+                except (SpeedReviewError, sqlite3.Error, OSError) as exc:
+                    summary['error'] = f'Speed review not prepared: {exc}'
+                for head, item in (summary.get('prepared') or {}).items():
+                    if isinstance(item, dict):
+                        total = totals.setdefault(head, {'written': 0, 'removed': 0, 'kept': 0, 'left': 0})
+                        for key in total:
+                            total[key] += item.get(key, 0)
+                    else:
+                        totals[head] = totals.get(head, 0) + item
+            log(json.dumps(summary))
+            found.append(summary)
+            if 'prepared' in summary:
+                save_prepared()
+    finally:
+        # Also when a drive stops the job part-way (an exception): the failures after the last drive prepared.
+        save_prepared()
     return found

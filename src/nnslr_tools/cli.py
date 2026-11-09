@@ -1755,25 +1755,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_labeler.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_labeler.set_defaults(func=_cmd_road_labeler_train)
     p_labeler_predict = sub.add_parser("road-labeler-predict", help="the road labeler of a run along drives: "
-                                                                    "derived/road_labeler/<route>.jsonl, and where it "
-                                                                    "is sure the marks of the kinds of road in Speed "
-                                                                    "review (reviewer net/<run>: proposals, written "
-                                                                    "only by the heads that passed the gate of "
-                                                                    "validation; a person's marks, removals and checks "
-                                                                    "win)")
+                                                                    "derived/road_labeler/<route>.jsonl (its chances), "
+                                                                    "then Prepare Speed review where it is sure: the "
+                                                                    "marks of the kinds of road and of the roadworks "
+                                                                    "(reviewer net/<run>) and its layer of road types, "
+                                                                    "definitive, only of the heads that passed the "
+                                                                    "gate of validation; it replaces an older run's, "
+                                                                    "and a person's marks, removals and checks win")
     p_labeler_predict.add_argument("--run-dir", required=True, help="the folder of the run with road-labeler.pt")
     p_labeler_predict.add_argument("--route", action="append", help="route id; repeat for more")
     p_labeler_predict.add_argument("--all", action="store_true", help="every scanned drive with its frames")
-    p_labeler_predict.add_argument("--no-marks", action="store_true", help="the proposals only, no mark in Speed review")
-    p_labeler_predict.add_argument("--write", action="store_true", help="also the roadworks and the road types where it "
-                                                                        "is sure: proposals for Speed review, never a "
-                                                                        "person's answer (every training leaves a "
-                                                                        "net/<run> road type out until a person sets "
-                                                                        "the type there)")
+    p_labeler_predict.add_argument("--no-marks", action="store_true", help="the chances only: nothing written into "
+                                                                           "Speed review")
     p_labeler_predict.add_argument("--out-dir", help="default: <data root>/derived/road_labeler")
     p_labeler_predict.add_argument("--device", help="default: cuda when there is one")
     p_labeler_predict.add_argument("--dry-run", action="store_true", help="the start of the drives on the CPU, the "
-                                                                          "proposals into <run>/proposals, nothing "
+                                                                          "chances into <run>/chances, nothing "
                                                                           "written into Speed review")
     p_labeler_predict.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_labeler_predict.set_defaults(func=_cmd_road_labeler_predict)
@@ -2787,7 +2784,7 @@ def _cmd_road_labeler_predict(args: argparse.Namespace) -> int:
 
     found = road_labeler.predict_labeler(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), span_of,
                                          routes, out_dir=Path(args.out_dir) if args.out_dir else None,
-                                         marks=not args.no_marks, write=args.write, dry_run=args.dry_run,
+                                         marks=not args.no_marks, dry_run=args.dry_run,
                                          device=args.device)
     print(json.dumps({'drives': len(found)}))
     return 0

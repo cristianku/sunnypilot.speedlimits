@@ -284,16 +284,17 @@ def test_the_card_shows_each_run_with_its_heads_and_whether_they_write(root):
     run = next(run for run in view['runs'] if run['run'] == RUN)
     assert (run['drives'], run['steps'], run['epochs'], run['checkpoint'], run['dry_run']) == (2, 1200, 2, True, False)
     assert run['types'] == {'steps': 9000, 'right': 0.91, 'person_steps': 600, 'right_on_person': 0.82,
-                            'map_on_person': 0.7, 'writing_with_write': ['motorway']}
+                            'map_on_person': 0.7, 'writing': ['motorway']}
     heads = {head['head']: head for head in run['heads']}
     assert list(heads) == ['tunnel', 'parking', 'works']
     assert heads['tunnel'] == {'head': 'tunnel', 'inside': 400, 'outside': 9000, 'precision': 0.95, 'recall': 0.8,
-                               'writes': True, 'why': None, 'with_write_only': False}
+                               'writes': True, 'why': None}
     assert (heads['parking']['writes'], heads['parking']['why']) == (False, 'not trained with both sides')
-    assert (heads['works']['writes'], heads['works']['why'], heads['works']['with_write_only']) == (
-        False, '12 steps inside', True)
+    assert (heads['works']['writes'], heads['works']['why']) == (False, '12 steps inside')
     dry = next(run for run in view['runs'] if run['dry_run'])
-    assert not any(head['writes'] for head in dry['heads']) and dry['types']['writing_with_write'] == []
+    assert not any(head['writes'] for head in dry['heads']) and dry['types']['writing'] == []
+    # Never prepared yet: nothing it wrote, and no run in Speed review.
+    assert run['prepared'] is None and not any(item['current'] for item in view['runs'])
     assert labeler_runs.trained_runs(root) == ['2026-11-08_1100-road-labeler-dry', RUN]
     assert labeler_runs.trained(root, RUN) and not labeler_runs.trained(root, 'brain-run')
 
@@ -302,3 +303,22 @@ def test_a_head_held_back_by_its_gate_says_why(root):
     labeler_run(root, tunnel_gate='sure on 4 steps of validation, 20 needed to tell whether it is right')
     heads = {head['head']: head for head in labeler_runs.summary(root)['runs'][0]['heads']}
     assert heads['tunnel']['writes'] is False and heads['tunnel']['why'].startswith('sure on 4 steps')
+
+
+def test_the_card_says_what_each_prepare_wrote_and_which_run_speed_review_shows(root):
+    older, newer = labeler_run(root, '2026-11-07_1200-road-labeler'), labeler_run(root)
+    heads = {'tunnel': {'written': 3, 'removed': 1, 'kept': 1, 'left': 0},
+             'works': {'written': 0, 'removed': 2, 'kept': 0, 'left': 0}, 'road_types': 120}
+    # The older run prepared last: it is the one in Speed review, whatever the order of training.
+    (newer / 'prepared.json').write_text(json.dumps({'run': RUN, 'at': '2026-11-08T13:00:00+01:00', 'drives': 4,
+                                                     'failed': 0, 'writes': ['tunnel'], 'heads': heads}))
+    (older / 'prepared.json').write_text(json.dumps({'run': older.name, 'at': '2026-11-08T14:00:00+01:00', 'drives': 4,
+                                                     'failed': 1, 'writes': [], 'heads': {}}))
+    runs = {run['run']: run for run in labeler_runs.summary(root)['runs']}
+    assert runs[older.name]['current'] and not runs[RUN]['current']
+    assert runs[RUN]['prepared'] == {'at': '2026-11-08T13:00:00+01:00', 'drives': 4, 'failed': 0, 'writes': ['tunnel'],
+                                     'heads': {'tunnel': heads['tunnel'], 'works': heads['works']}, 'road_types': 120}
+    # A broken prepared.json is as none: the card shows the run without it.
+    (older / 'prepared.json').write_text('{"at": "not a time"')
+    runs = {run['run']: run for run in labeler_runs.summary(root)['runs']}
+    assert runs[older.name]['prepared'] is None and runs[RUN]['current']

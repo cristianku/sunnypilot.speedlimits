@@ -141,17 +141,19 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'road_labeler_predict' && options?.dry === 'on') {
     return {title: 'Try Prepare Speed review?', action: 'Dry run',
-      text: 'The start of every drive on the CPU with ' + (options.labeler ?? 'this run') + ': its proposals go into the '
+      text: 'The start of every drive on the CPU with ' + (options.labeler ?? 'this run') + ': its chances go into the '
         + 'run’s own folder, nothing is written into Speed review.'};
   }
   if (name === 'road_labeler_predict') {
     const marks = options?.marks === 'off'
-      ? ' Proposals only: no mark is written into Speed review.'
-      : ' Where it is sure, the heads that passed their gate also put the kinds of road into Speed review as marks of '
-        + 'net/' + (options?.labeler ?? 'the run') + ', never over a mark, a removal or a check of a person.';
+      ? ' Chances only: nothing is written into Speed review.'
+      : ' Where it is sure, every head that passed its gate writes into Speed review, and that is final: the kinds of '
+        + 'road and the roadworks as marks of net/' + (options?.labeler ?? 'the run') + ', the road types over the map. '
+        + 'It replaces what an older run wrote there, except the marks a person kept; a person’s marks, removals and '
+        + 'checks always win. You correct only where it is wrong.';
     return {title: 'Prepare Speed review with ' + (options?.labeler ?? 'the road labeler') + '?', action: 'Prepare',
-      text: 'Runs the road labeler along every scanned drive on the GPU and keeps its proposals in '
-        + 'derived/road_labeler.' + marks + ' The roadworks and the road types are never written from here.'};
+      text: 'Runs the road labeler along every scanned drive on the GPU and keeps its chances in '
+        + 'derived/road_labeler.' + marks};
   }
   // send_to_car, try_on_comma, comma_restore: the Publish and Models tabs ask themselves (models.ts publishQuestion,
   // tryQuestion, restoreQuestion), naming the SignNet and the classifier in use.
@@ -188,7 +190,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   comma_restore: 'Trying again puts the build\'s networks back; nothing else on the comma is touched.',
   road_labeler_train: 'The pictures of the drives already read stay: training again reads only the others, then starts '
     + 'over on a new run.',
-  road_labeler_predict: 'The drives done keep their proposals and marks; preparing again does every drive again.',
+  road_labeler_predict: 'The drives done keep what it wrote; preparing again does every drive again.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

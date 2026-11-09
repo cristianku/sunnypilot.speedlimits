@@ -97,10 +97,11 @@ REGRESSION_SCRIPT = 'scripts/run_regression.sh'
 # The map's limit of every frame (Read the map, on Data › Speed review): the GPS of the drives, the maps they need, the
 # map roads near them and the way each frame is on.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
-# The road labeler (docs/ROAD_LABELER.md), an offline network that prepares Speed review, never on the car: trained and
+# The road labeler (docs/ROAD_LABELER.md), an offline network that labels Speed review, never on the car: trained and
 # run along the drives with the GPU of .venv-gpu (Models › Versions, the Road labeler card). Its options: {'dry': 'on'}
-# a dry run on the CPU; Prepare Speed review takes the run it uses ({'labeler': run with road-labeler.pt}) and
-# {'marks': 'off'} for the proposals alone. --write (the roadworks and the road types) is never started from here.
+# a dry run on the CPU; Prepare Speed review takes the run it uses ({'labeler': run with road-labeler.pt}) and writes
+# everything its heads earned (the marks of the kinds of road and of the roadworks, the layer of road types), or with
+# {'marks': 'off'} only the chances, nothing into Speed review.
 ROAD_LABELER_SCRIPT = 'helpers/road_labeler.sh'
 ROAD_LABELER_NNSLR = '.venv-gpu/bin/nnslr'
 ROAD_LABELER_ACTIONS = ('road_labeler_train', 'road_labeler_predict')
@@ -374,7 +375,7 @@ ACTIONS = {
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
     'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
     # The road labeler (ROAD_LABELER_SCRIPT): trained on the GPU on the corrections of Speed review, and run along every
-    # drive to propose the kinds of road there ({'labeler': run}). In the train group: the GPU.
+    # drive to label Speed review ({'labeler': run}): its base layer. In the train group: the GPU.
     'road_labeler_train': {'label': 'Train the road labeler', 'group': 'train', 'command': [ROAD_LABELER_SCRIPT, 'train']},
     'road_labeler_predict': {'label': 'Prepare Speed review', 'group': 'train',
                              'command': [ROAD_LABELER_SCRIPT, 'predict']},
@@ -1120,8 +1121,9 @@ class Panel:
 
     def _road_labeler_arguments(self, action: str, options: dict) -> list[str]:
         """The arguments of helpers/road_labeler.sh from the options (strings, checked by start()): --dry-run, and
-        for Prepare Speed review the run (--run-dir), every drive (--all) and --no-marks. A real run, not a dry one, is
-        refused while another process has the GPU (the helper checks it again, with its memory)."""
+        for Prepare Speed review the run (--run-dir), every drive (--all) and --no-marks (nothing written into Speed
+        review). A real run, not a dry one, is refused while another process has the GPU (the helper checks it again,
+        with its memory)."""
         dry = options.get('dry')
         if dry not in (None, 'on'):
             raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')

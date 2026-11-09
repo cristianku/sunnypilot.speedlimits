@@ -11,10 +11,13 @@
 // with "+") are marked the same way, each with its own marks and its own "checked to here": a tap on a chip starts a mark of
 // it at the frame shown and a second tap ends it there; the chip is solid where the frame shown is inside one of its
 // marks, and the last one tapped is the one the lane draws and Remove / Checked to here work on. The road type
-// (town, rural, motorway…) is the map's, one a second, drawn on a lane of its own, light, and solid where he corrected it:
+// (town, rural, motorway…) is as the brain takes it, one a second: the map's, the road labeler's over it where it is sure
+// (Prepare Speed review, definitive, nothing to confirm), his correction over both. It is drawn on a lane of its own,
+// light where it is the map's, a mid tone where it is the labeler's (net), solid where he corrected it, and the
+// lane's name and the tag say whose the stretch shown is (map / net / yours). He corrects only where it is wrong:
 // a chip sets a type, or "can't tell", on the whole stretch of the frame shown, on its part before or after the frame
 // shown (✂ Before / After, the stretch cut there), or from a frame kept with "From here" to the frame shown
-// (speed_review.save_road_type), kept as a correction over the map's (road_types.correct). The picture
+// (speed_review.save_road_type), kept as a correction over both layers (road_types.correct). The picture
 // shows the answer (its square named ANSWER, as the lane) next to his dashboard speed (the car's square too: never the car's vEgo, which reads lower), so that the number read
 // is the right one. Where openpilot or the car's cruise held the speed (held) it is not his foot: the lane greys it and
 // ANSWER is a dash, as the training leaves it out, unless a block of his says a speed there. A tap on a limit of the map's lane makes a block with it, from its start to its end, to change or
@@ -38,7 +41,7 @@ import DriveReviewDrive from './DriveReviewDrive.vue';
 import Segmented from './Segmented.vue';
 import {frameHref, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
-  roadTypeAt, roadTypeLabel, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, type Works, worksAt, type WorksTap} from './speed-review';
+  roadTypeAt, roadTypeLabel, type RoadTypeSource, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, typeSource, type Works, worksAt, type WorksTap} from './speed-review';
 
 const props = defineProps<{route: string; readOnly: boolean}>();
 const RATES = [1, 2, 4] as const;
@@ -334,14 +337,18 @@ const typeChoices = computed((): (string | null)[] => [...drive.value?.road_type
 const typeHere = computed(() => roadTypeAt(roadTypes.value, now.value) ?? roadTypes.value.find((item) =>
   item.from_ns - 1e9 <= now.value && now.value < item.to_ns + 1e9) ?? null);
 /** A stretch's type in words: where the map has none and nobody set one, it says so, not "can't tell". */
-const typeName = (item: RoadTypeStretch): string => item.road_type === null && item.reviewer === null ? 'None on the map'
-  : roadTypeLabel(item.road_type);
+const typeName = (item: RoadTypeStretch): string => item.road_type === null && typeSource(item) !== 'person'
+  ? 'None on the map' : roadTypeLabel(item.road_type);
+/** Whose the stretch is, in a word: the lane's name and the tag. */
+const TYPE_SOURCE_NAMES: Record<RoadTypeSource, string> = {person: 'yours', net: 'net', map: 'map'};
+const TYPE_SOURCE_TAGS: Record<RoadTypeSource, string> = {person: 'Yours', net: 'Net', map: 'Map'};
+const typeSourceName = (item: RoadTypeStretch | null): string => item ? TYPE_SOURCE_NAMES[typeSource(item)] : 'map';
 const canType = computed(() => !props.readOnly && !isGuest() && roadTypes.value.length > 0);
 /** A start kept with "From here": the next chip sets its type from there to the frame shown, not on the stretch. */
 const typeFrom = ref<number | null>(null);
 /** Whether a chip is the type in force at the frame shown: "can't tell" only where he said it, not where the map has none. */
 const typeOn = (type: string | null): boolean => !!typeHere.value && typeHere.value.road_type === type
-  && (type !== null || typeHere.value.reviewer !== null);
+  && (type !== null || typeSource(typeHere.value) === 'person');
 /** Which part of the stretch shown a chip sets: all of it, its start up to the frame shown, or from it to its end, so a
  * stretch is cut where the picture shows the change. */
 type TypePart = 'all' | 'before' | 'after';
@@ -383,10 +390,11 @@ function typesIn(from: number, to: number, fits: (from: number, to: number, text
     const first = Math.max(secondOf(item.from_ns), from);
     const last = Math.min(secondOf(item.to_ns), to);
     if (first >= last) return [];
-    const names = item.road_type === null ? item.reviewer === null ? [] : ['can’t tell', '?']
+    const source = typeSource(item);
+    const names = item.road_type === null ? source !== 'person' ? [] : ['can’t tell', '?']
       : [ROAD_TYPE_LABELS[item.road_type]?.label.toLowerCase() ?? item.road_type, ROAD_TYPE_LABELS[item.road_type]?.short ?? ''];
-    return [{key: item.from_ns, from: first, to: last, cls: 'rt-' + (item.road_type ?? 'unknown'), yours: item.reviewer !== null,
-      none: item.road_type === null && item.reviewer === null, current: typeFrom.value === null && item === typeHere.value,
+    return [{key: item.from_ns, from: first, to: last, cls: 'rt-' + (item.road_type ?? 'unknown'), yours: source === 'person',
+      net: source === 'net', none: item.road_type === null && source !== 'person', current: typeFrom.value === null && item === typeHere.value,
       text: names.find((name) => name && fits(first, last, name)) ?? ''}];
   });
 }
@@ -742,12 +750,12 @@ function worksIn(from: number, to: number) {
                 class="sr-works-checked"/>
         </svg>
       </div>
-      <div v-if="roadTypes.length" class="dr-lane sr-type-lane" title="The road type of the map, a second at a time: light where it is the map's, solid where you corrected it, the frame's stretch outlined; the brain learns it aside, in training">
-        <span class="dr-lane-name">Road type<small>{{ typeHere?.reviewer ? 'yours' : 'map' }}</small></span>
+      <div v-if="roadTypes.length" class="dr-lane sr-type-lane" title="The road type as the brain learns it, a second at a time: light where it is the map's, mid where it is the road labeler's (net), solid where you corrected it, the frame's stretch outlined; you correct it only where it is wrong">
+        <span class="dr-lane-name">Road type<small>{{ typeSourceName(typeHere) }}</small></span>
         <svg :width="width" :height="TYPE_HEIGHT" :viewBox="`0 0 ${width} ${TYPE_HEIGHT}`" aria-hidden="true">
           <g v-for="run in typesIn(from, to, fits)" :key="run.key">
             <rect :x="x(run.from)" y="2" :width="w(run.from, run.to)" :height="TYPE_HEIGHT - 4" rx="2"
-                  :class="['sr-type', run.cls, {'sr-type-yours': run.yours, 'sr-type-none': run.none, 'sr-type-current': run.current}]"/>
+                  :class="['sr-type', run.cls, {'sr-type-yours': run.yours, 'sr-type-net': run.net, 'sr-type-none': run.none, 'sr-type-current': run.current}]"/>
             <text v-if="run.text" :x="x(run.from) + w(run.from, run.to) / 2" :y="TYPE_HEIGHT / 2 + 3.5"
                   :class="['dr-run-text', 'sr-type-text', {'sr-type-text-yours': run.yours}]">{{ run.text }}</text>
           </g>
@@ -884,7 +892,8 @@ function worksIn(from: number, to: number) {
             <p id="sr-road-title" class="sr-blocks-title">The road</p>
             <div v-if="roadTypes.length" class="sr-type-row">
               <p class="sr-type-now">Road type <b>{{ typeHere ? typeName(typeHere) : '–' }}</b><span v-if="typeHere"
-                class="sr-tag" :class="{'sr-tag-out': !typeHere.reviewer}">{{ typeHere.reviewer ? 'Yours' : 'Map' }}</span></p>
+                class="sr-tag" :class="{'sr-tag-out': typeSource(typeHere) !== 'person'}"
+                :title="typeSource(typeHere) === 'net' ? 'The road labeler’s' + (typeHere.run ? ', run ' + typeHere.run : '') : undefined">{{ TYPE_SOURCE_TAGS[typeSource(typeHere)] }}</span></p>
               <template v-if="typeCuttable">
                 <p class="sr-cut-head"><strong>✂ Cut here?</strong> The stretch goes on before and after this frame: a type sets
                   the whole of it, or only the part before or after the frame.</p>
@@ -900,7 +909,8 @@ function worksIn(from: number, to: number) {
               </div>
               <p class="dr-hint"><template v-if="typeFrom !== null">From {{ clockOf(secondOf(typeFrom)) }} to the frame shown: tap its type.</template><template
                 v-else-if="typeHere">{{ typeName(typeHere) }} {{ clockOf(secondOf(typeHere.from_ns)) }}–{{ clockOf(secondOf(typeHere.to_ns)) }}<template
-                v-if="typeHere.reviewer"> · {{ typeHere.reviewer }}</template><template v-if="canType"> · a type sets it {{ typeCut === 'before' ? 'from its start to ' + clockOf(seconds)
+                v-if="typeHere.reviewer"> · {{ typeHere.reviewer }}</template><template
+                v-else-if="typeSource(typeHere) === 'net'"> · road labeler{{ typeHere.run ? ' ' + typeHere.run : '' }}</template><template v-if="canType"> · a type sets it {{ typeCut === 'before' ? 'from its start to ' + clockOf(seconds)
                 : typeCut === 'after' ? 'from ' + clockOf(seconds) + ' to its end' : 'on this stretch' }}</template></template><template
                 v-else>The map has no type here.</template></p>
             </div>
