@@ -28,6 +28,7 @@ S = 64            # the crop's side in pixels, what the network sees
 CROP = 2.0        # the crop's side as a share of the rough box's longer side
 STEPS = 1         # passes, each around the previous answer
 GATE = 30         # Fit box uses the refiner only under this shorter side of the rough box, in pixels
+KEEP = 0.8        # ... and only when the network judges the rough box's IoU with the sign under this
 
 _session = None
 _lock = threading.Lock()
@@ -80,14 +81,25 @@ def to_crop(box, frame) -> list[float]:
     return [(box[0] - x0) / side, (box[1] - y0) / side, (box[2] - x0) / side, (box[3] - y0) / side]
 
 
+def judge(img, box) -> float | None:
+    """How right ``box`` already is by the network (its IoU with the sign under it, 0..1); None from a refiner
+    trained before it answered that."""
+    pred = _run(img, box)[0]
+    return float(pred[4]) if len(pred) > 4 else None
+
+
+def _run(img, box):
+    patch, frame = crop(img, box)
+    x = patch.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
+    return session().run(None, {'crop': x})[0][0], frame
+
+
 def refine(img, box, steps: int = STEPS) -> list[float] | None:
     """The refined box of ``box`` ([x1, y1, x2, y2] in pixels of the BGR image ``img``) after ``steps`` passes, kept
     inside the image; None when the network answers no box (a side collapsed)."""
     height, width = img.shape[:2]
     for _ in range(steps):
-        patch, frame = crop(img, box)
-        x = patch.transpose(2, 0, 1)[None].astype(np.float32) / 255.0
-        pred = session().run(None, {'crop': x})[0][0]
+        pred, frame = _run(img, box)
         x1, y1, x2, y2 = to_image(pred, frame)
         x1, x2 = max(0.0, x1), min(float(width), x2)
         y1, y2 = max(0.0, y1), min(float(height), y2)

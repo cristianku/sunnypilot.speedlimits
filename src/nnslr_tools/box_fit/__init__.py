@@ -83,14 +83,17 @@ def fit_image(img, box, *, colour_model=None, edges_model=None, use_refiner=True
     """The fitted box of ``box`` ([x1, y1, x2, y2] in pixels of the decoded BGR image ``img``), or None to keep it.
 
     None means no better box was found: the sign is not there, or the box is already right. The two rankers' answer;
-    on a box under ``refiner.GATE`` pixels with ``refiner.onnx`` there (and ``use_refiner``), the rankers' answer on
-    the box the refiner moved it to, or that box when they keep it."""
+    on a box under ``refiner.GATE`` pixels with ``refiner.onnx`` there (and ``use_refiner``) that the refiner does not
+    judge already right (``refiner.KEEP``), the rankers' answer on the box the refiner moved it to, or that box when
+    they keep it."""
     from nnslr_tools.box_fit import colour, edges, refiner
     if use_refiner and colour_model is None and edges_model is None and refiner.available():
         rough = clip_box(box, img.shape[1], img.shape[0])
         if rough is None:
             return None
-        if min(rough[2] - rough[0], rough[3] - rough[1]) < refiner.GATE:
+        right = refiner.judge(img, rough) if min(rough[2] - rough[0], rough[3] - rough[1]) < refiner.GATE else 1.0
+        # A small box the network judges already right is left to the rankers, as a big one.
+        if right is None or right < refiner.KEEP:
             moved = refiner.refine(img, rough)
             if moved is not None:
                 fitted = fit_image(img, moved, use_refiner=False) or moved

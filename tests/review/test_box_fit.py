@@ -115,6 +115,7 @@ def test_the_refiner_moves_only_small_boxes_and_the_rankers_finish_its_box(monke
 
     monkeypatch.setattr(refiner, 'available', lambda: True)
     monkeypatch.setattr(refiner, 'refine', refine)
+    monkeypatch.setattr(refiner, 'judge', lambda img, box: None)
     img = ring_image()
     big = [10, 10, 10 + refiner.GATE + 10, 10 + refiner.GATE + 10]
     assert box_fit.fit_image(img, big) == box_fit.fit_image(img, big, use_refiner=False) and not calls
@@ -322,3 +323,14 @@ def test_on_the_lan_fit_needs_a_session_not_the_token(lan):
     assert status == 403 and json_of(data)['error'] == 'session_required'
     status, response, data = server.request('POST', FIT, body=body, headers=sign_in(server))
     assert status == 200 and len(json_of(data)['boxes']) == 1
+
+
+def test_a_small_box_the_refiner_judges_right_is_left_to_the_rankers(monkeypatch):
+    from nnslr_tools.box_fit import refiner
+    calls = []
+    monkeypatch.setattr(refiner, 'available', lambda: True)
+    monkeypatch.setattr(refiner, 'refine', lambda img, box: calls.append(box))
+    monkeypatch.setattr(refiner, 'judge', lambda img, box: refiner.KEEP + 0.05)
+    img = ring_image()
+    small = [90, 65, 112, 87]
+    assert box_fit.fit_image(img, small) == box_fit.fit_image(img, small, use_refiner=False) and not calls

@@ -11,14 +11,16 @@ The routes are split by a hash of their name: about a quarter left out, the same
 has its neighbourhood cut once from its frame (``REGION`` times its longer side, at most ``MAX_REGION`` pixels); each
 epoch draws new rough boxes around it (loose, shifted, tight: as a reviewer draws them and as a pass of the refiner
 leaves them), crops them as :func:`.refiner.crop` does and augments the light, the colours, the blur, the noise and
-the JPEG. The loss: smooth L1 on the sides plus GIoU. The epoch with the best mean IoU after ``STEPS`` passes on the
-routes left out is kept.
+the JPEG. The network also answers how right the rough box already is (its IoU with the person's box, 0..1), which
+Fit box uses to leave a good box to the rankers (``refiner.KEEP``). The loss: smooth L1 on the sides plus GIoU, plus
+L1 on that IoU. The epoch with the best mean IoU after ``STEPS`` passes on the routes left out is kept.
 
 Then the measure the decision rests on, on the full frames of the routes left out with the rough boxes of the
 rankers' benchmark (:func:`.train.make_cases`): the rough box, the rankers (:func:`nnslr_tools.box_fit.fit_image`
 without the refiner) and Fit box as the site runs it with the new refiner (under ``refiner.GATE`` pixels the refiner,
 then the rankers). ``refiner.onnx`` is written (replaced in one step) only when that mean IoU is higher than the
-rankers', in all and on the small signs; otherwise nothing changes. The summary is printed
+rankers', in all and on the small signs, and than Fit box with the refiner in use (when there is one) in all;
+otherwise nothing changes. The summary is printed
 as JSON on the last line.
 
 usage: .venv-gpu/bin/python -m nnslr_tools.box_fit.refiner_train [--epochs 40] [--out DIR] [--dry-run]
@@ -181,10 +183,11 @@ def network():
             self.body = nn.Sequential(block(3, 24, 1), block(24, 32, 2), block(32, 32, 1), block(32, 64, 2),
                                       block(64, 64, 1), block(64, 96, 2), block(96, 96, 1), block(96, 128, 2))
             self.head = nn.Sequential(nn.Flatten(), nn.Linear(128 * 16, 256), nn.ReLU(inplace=True),
-                                      nn.Linear(256, 4))
+                                      nn.Linear(256, 5))
 
-        def forward(self, x):            # x: N x 3 x S x S, BGR / 255; out: the box in crop units
-            return self.head(self.body(x - 0.45)) + torch.tensor([0.25, 0.25, 0.75, 0.75])
+        def forward(self, x):            # x: N x 3 x S x S, BGR / 255; out: the box in crop units, the rough box's IoU
+            out = self.head(self.body(x - 0.45))
+            return torch.cat([out[:, :4] + torch.tensor([0.25, 0.25, 0.75, 0.75]), torch.sigmoid(out[:, 4:])], 1)
     return Refiner()
 
 
@@ -292,8 +295,10 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
         def __getitem__(self, i):
             rng = random.Random(f'{SEED}:{self.epoch}:{i}')
             region, frame, truth = regions[i % len(regions)]
-            crop, target = make_sample(region, frame, truth, sample_rough(truth, rng), rng)
-            return torch.from_numpy(crop.transpose(2, 0, 1).astype(np.float32) / 255.0), torch.tensor(target)
+            rough = sample_rough(truth, rng)
+            crop, target = make_sample(region, frame, truth, rough, rng)
+            return (torch.from_numpy(crop.transpose(2, 0, 1).astype(np.float32) / 255.0),
+                    torch.tensor([*target, iou(rough, truth)], dtype=torch.float32))
 
     model = network()
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
@@ -307,7 +312,8 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
         t, total, n = time.time(), 0.0, 0
         for x, y in loader:
             p = model(x)
-            loss = F.smooth_l1_loss(p, y, beta=0.02) * 10 + giou_loss(p, y)
+            box, right = p[:, :4], y[:, :4]
+            loss = F.smooth_l1_loss(box, right, beta=0.02) * 10 + giou_loss(box, right) + F.l1_loss(p[:, 4], y[:, 4]) * 2
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -323,6 +329,19 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     summary['epoch_scores'] = scores
     summary['best_epoch'] = scores.index(max(scores)) + 1
 
+    left_out = [c for c in cases if region_of[c['annotation_id']] is not None]
+    # Fit box with the refiner in use, when there is one: the new one must beat it too.
+    current = None
+    if (out_dir / refiner.MODEL.name).is_file():
+        refiner.MODEL, saved_model = out_dir / refiner.MODEL.name, refiner.MODEL
+        refiner._session = None
+        try:
+            log('measuring Fit box with the refiner in use on the full frames left out')
+            current = compare(left_out, workers)
+        finally:
+            refiner.MODEL = saved_model
+            refiner._session = None
+        summary['current'] = current
     # The refiner as the site would run it, from a file next to the target, then the measure on the full frames.
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = out_dir / f'.{refiner.MODEL.name}.tmp'
@@ -331,13 +350,14 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     refiner._session = None
     try:
         log('comparing the refiner with the rankers on the full frames left out')
-        measure = compare([c for c in cases if region_of[c['annotation_id']] is not None], workers)
+        measure = compare(left_out, workers)
     finally:
         refiner.MODEL = saved_model
         refiner._session = None
     summary['left_out'] = measure
     small = measure.get('size:small', measure['all'])
-    wins = measure['all']['refiner'] > measure['all']['rankers'] and small['refiner'] > small['rankers']
+    wins = (measure['all']['refiner'] > measure['all']['rankers'] and small['refiner'] > small['rankers']
+            and (current is None or measure['all']['refiner'] > current['all']['refiner']))
     summary['refiner_wins'] = wins
     if wins:
         os.replace(tmp, out_dir / refiner.MODEL.name)
@@ -350,7 +370,7 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
 
 
 def export(model, path: Path) -> None:
-    """The network as one ONNX file (weights inside), input "crop" N x 3 x S x S, output "box" N x 4."""
+    """The network as one ONNX file (weights inside), input "crop" N x 3 x S x S, output "box" N x 5 (the box in crop units, the rough box's IoU)."""
     import onnx
     import torch
     torch.onnx.export(model, torch.zeros(1, 3, refiner.S, refiner.S), str(path), opset_version=17,
