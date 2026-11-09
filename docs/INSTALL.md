@@ -143,6 +143,21 @@ uvx --from "huggingface_hub>=1,<3" hf auth login
 
 Both stay out of Git. Videos are stored once in the comma-videos folder and linked into the data root, so another project on the same machine (for example openpilot.distill) can use the same files.
 
+### data/derived on TrueNAS
+
+On the LXC, `data/derived` (the frames, videos and sign reads that Prepare rebuilds, about 160 GB) lives on the TrueNAS share at `/data/sunnypilot/SPEEDLIMITS/derived`. It is bind-mounted on `<clone>/data/derived` by `scripts/install_derived_mount.sh` (a systemd mount unit after the share's own mount, and a drop-in that makes `speedlimits-web` wait for it). It is a bind mount and not a symlink because the site checks that every path resolves inside the data root. The databases in `data/annotations` (`review.sqlite`, `drive_review.sqlite`) stay on the local disk, because SQLite does not belong on NFS. The LXC's backup on PBS keeps them.
+
+The move, done once on 9 Nov 2026 with the site stopped:
+
+```sh
+rsync -a --delete data/derived/ /data/sunnypilot/SPEEDLIMITS/derived/   # with the site stopped
+mv data/derived data/derived.local && mkdir data/derived
+scripts/install_derived_mount.sh --dry-run && scripts/install_derived_mount.sh
+# start the site, check a drive's frames and video, then: rm -rf data/derived.local
+```
+
+`scripts/install_derived_mount.sh --uninstall` brings `data/derived` back to the local disk. It unmounts the share and leaves an empty folder that Prepare fills again, or that you copy back from the share.
+
 ### The comma, from zero
 
 The site downloads the drives over ssh (`helpers/fetch_comma_segments.sh`, the **comma** pill at the top right of every
