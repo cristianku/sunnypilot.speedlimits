@@ -982,7 +982,7 @@ def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictu
     asked = []
     found = [{'route': 'r1', 'partitions': ['test'], 'inputs': None, 'pictures': True}]
 
-    def dataset(_root, _merged_of, routes, *, rate):
+    def dataset(_root, _merged_of, routes, *, rate, networks=None):
         asked.append(routes)
         return [dict(drive) for drive in found]
 

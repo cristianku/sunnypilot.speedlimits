@@ -92,14 +92,13 @@ TRAININGS = {
     ), 'fixed': ()},
     'train_brain': {'label': 'Brain', 'script': 'scripts/run_brain.sh', 'settings': (
         {'key': 'epochs', 'env': 'NNSLR_BRAIN_EPOCHS', 'label': 'Epochs',
-         'help': 'Passes over the drives, for each of the three seeds; the last epoch is kept.', 'default': 40, 'min': 1,
+         'help': 'Passes over the drives, for each seed; the last epoch is kept.', 'default': 40, 'min': 1,
          'max': 200, 'step': 1, 'unit': 'epochs'},
         {'key': 'sign_workers', 'env': 'NNSLR_SIGN_WORKERS', 'label': 'Processes reading the signs',
          'help': 'The processes reading the signs of the drives not read by today’s reader of the car, each with its '
                  'ffmpeg. Only the speed changes. Default: half the cores.',
          'default': max(1, (os.cpu_count() or 8) // 2), 'min': 1, 'max': 64, 'step': 1, 'unit': 'workers'},
     ), 'fixed': (
-        {'label': 'Seeds', 'value': '0, 1, 2', 'help': 'Three networks that differ only by chance: compare them in Models.'},
         {'label': 'Picture', 'value': '256 × 144', 'help': 'One frame a second, as the car gives it.'},
         {'label': 'Memory', 'value': 'GRU, 128', 'help': 'What it keeps of the seconds before.'},
     )},

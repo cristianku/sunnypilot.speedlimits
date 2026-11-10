@@ -82,6 +82,8 @@ BRAIN_STEPS = (
     ('brain_s1', 'Seed 1', 24),
     ('brain_s2', 'Seed 2', 24),
 )
+# Its seeds, from its header ("seeds:        0"): seed 0 alone (Train › Brain's Seeds) has no steps for the others.
+BRAIN_SEEDS = re.compile(r'^seeds:\s+([0-2](?: [0-2])*)\s*$', re.M)
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/run_regression.sh: each step goes drive by drive ("regression item openpilot 2/7 <route>"), the driving models
 # also segment by segment ("SEGMENT 3/33 <folder>", evaluation/route_speed.py of openpilot.distill).
@@ -359,6 +361,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     signnet = is_signnet(action, text)
     two_stages = (action == 'train_classifier' or signnet) and PRETRAINING.search(text) is not None
     steps = box_fit_steps(text) if action == 'box_fit_train' else steps_of(action, two_stages, signnet)
+    if action == 'train_brain' and (seeds := BRAIN_SEEDS.search(text)):
+        trained = {'brain_s' + seed for seed in seeds.group(1).split()}
+        steps = tuple(step for step in steps if not step[0].startswith('brain_s') or step[0] in trained)
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
     done: set[str] = set()

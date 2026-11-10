@@ -86,7 +86,8 @@ CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
-# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'road', 'types', 'pool': 'grid'|'mean'}, the variables
+# script -s0, -s1, -s2), or seed 0 alone. What it learns: {'works': 'on'|'off', 'road', 'types', 'pool': 'grid'|'mean',
+# 'seeds': 'all'|'one'}, the variables
 # of the script, the first of each the usual one. The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT):
 # 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
@@ -94,6 +95,8 @@ BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
 BRAIN_POOLS = ('grid', 'mean')
+# Train › Brain's Seeds: the three (NAME-s0, -s1, -s2, to compare in Models) or seed 0 alone, a third of the time.
+BRAIN_SEEDS = {'all': '0 1 2', 'one': '0'}
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
 REGRESSION_SCRIPT = 'scripts/run_regression.sh'
 # Models › Drive (nnslr_tools.simulation): a recorded drive replayed through the car's own vision loop with a set of
@@ -139,6 +142,10 @@ WINDOWS_SCRIPT = 'helpers/mapillary_windows.sh'
 NETWORKS_SCRIPT = 'scripts/publish_networks.sh'
 NETWORKS_REPO = os.environ.get('HF_REPO', 'cristianku/sunnypilot-speedlimits-models')
 NETWORK_PACKAGES_SHOWN = 5
+# The drives' table of the status (helpers/route_status.route_rows) stats every video and counts the lines of every
+# frames.jsonl on the share: about 9 s on 1 800 segments. On the site it is read in a thread (Panel.background_rows) and
+# read again once it is older than this, or once a job began or ended since.
+ROUTE_ROWS_FRESH_S = 20.0
 RUN_ARGUMENT_LINE = re.compile(r'^run:\s+(\S+)\s*$', re.M)
 RUN_LINES = {
     'train_classifier': (re.compile(r'^== scripts/run_classifier\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
@@ -182,8 +189,8 @@ BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'start', 'sign_cutter', 'sign_classifier',
-                                  'sign_decider'),
+                  'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
+                                  'sign_classifier', 'sign_decider'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
@@ -604,7 +611,8 @@ class PanelError(Exception):
 
 
 class Panel:
-    def __init__(self, root: Path, *, repo: Path = REPO, actions_enabled: bool | None = None):
+    def __init__(self, root: Path, *, repo: Path = REPO, actions_enabled: bool | None = None,
+                 background_rows: bool = False):
         self.root = root
         self.repo = repo
         self.logs = root / 'logs' / 'panel'
@@ -633,6 +641,12 @@ class Panel:
         # next one (status()).
         self._status_lock = threading.Lock()
         self._status_last: tuple[float, dict] = (-float('inf'), {})
+        # The drives' table read in a thread (_route_rows), the site's: (when its reading began, rows, the jobs running
+        # then). Elsewhere (the tests, a terminal) every status reads it.
+        self.background_rows = background_rows
+        self._rows_lock = threading.Lock()
+        self._rows_last: tuple[float, list[dict], frozenset] | None = None
+        self._rows_reading = False
         # The training runs of <root>/runs, for the Evaluate tab (nnslr_tools.runs).
         self.runs_index = RunsIndex(root)
         # The same runs by role (cutter, classifier, decider) and the model in use, for the Models tab.
@@ -1111,7 +1125,7 @@ class Panel:
         payload['ai_live'] = self.ai_live(payload['jobs'])
         if payload['available']:
             module = self._route_status()
-            rows = module.route_rows(self.root, module.videos_dir())
+            rows = self._route_rows(module, frozenset(job['id'] for job in payload['jobs'] if job['state'] == 'running'))
             payload['routes'] = rows
             payload['preparation'] = self.preparation(rows, activities)
             payload['next_step'] = module.next_step(rows)
@@ -1166,6 +1180,37 @@ class Panel:
             job['progress'] = self.job_progress(job, payload['preparation'])
         self._terminal_training(payload)
         return payload
+
+    def _route_rows(self, module, running: frozenset) -> list[dict]:
+        """The drives' table (route_rows). With background_rows only the first after a start is read here: a status
+        then shows the last one read, and begins a new reading in a thread when it is older than ROUTE_ROWS_FRESH_S or
+        the running jobs changed (a preparation adds frames, an import confirms them). The GPU, the jobs and the
+        buttons of a status never wait for it."""
+        if not self.background_rows:
+            return module.route_rows(self.root, module.videos_dir())
+        with self._rows_lock:
+            last = self._rows_last
+            again = last is not None and not self._rows_reading and (
+                time.monotonic() - last[0] > ROUTE_ROWS_FRESH_S or last[2] != running)
+            if again:
+                self._rows_reading = True
+        if last is None:
+            return self._read_route_rows(module, running)
+        if again:
+            threading.Thread(target=self._read_route_rows, args=(module, running), name='route-rows',
+                             daemon=True).start()
+        return last[1]
+
+    def _read_route_rows(self, module, running: frozenset) -> list[dict]:
+        began = time.monotonic()
+        try:
+            rows = module.route_rows(self.root, module.videos_dir())
+            with self._rows_lock:
+                self._rows_last = (began, rows, running)
+            return rows
+        finally:
+            with self._rows_lock:
+                self._rows_reading = False
 
     def _terminal_training(self, payload: dict) -> None:
         """A training started from a terminal (helpers/3_train.sh) is no job of the panel: its progress comes
@@ -2255,21 +2300,23 @@ class Panel:
         return {'ok': True, 'summary': simulation.summary(self.root, route, self._simulation_sets())}
 
     def _brain_choices(self, options: dict) -> dict:
-        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool'}),
-        the usual ones when not given: the roadworks, the kinds of road and the road types on, the picture as a grid.
+        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool',
+        'seeds'}), the usual ones when not given: the roadworks, the kinds of road and the road types on, the picture as a
+        grid, the three seeds.
         'driver' is only 'off' (a page loaded before 10 Nov 2026 sends it): the brain never takes his pedals nor the
         car's speed."""
         if options.get('driver', 'off') != 'off':
             raise PanelError(400, 'bad_option', 'The brain no longer takes the driver’s inputs: with the car’s speed in, '
                                                 'it followed your speed. Reload the page.')
         works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
-        pool = options.get('pool', BRAIN_POOLS[0])
-        if not all(isinstance(value, str) for value in (works, road, types, pool)) or works not in BRAIN_WORKS \
-                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or pool not in BRAIN_POOLS:
+        pool, seeds = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all')
+        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds)) or works not in BRAIN_WORKS \
+                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS:
             raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road and the road types are on or off, the '
-                                                'picture mean or grid.')
+                                                'picture mean or grid, the seeds all or one.')
         return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
-                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool, **self._brain_sign_networks(options)}
+                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
+                'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], **self._brain_sign_networks(options)}
 
     def _brain_sign_networks(self, options: dict) -> dict:
         """The variables of the networks that read the brain's signs (BRAIN_SIGN_NETWORKS): a finished version of
@@ -2468,7 +2515,7 @@ class Panel:
             start_env.update(self._classifier_start((options or {}).get('start')))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
-        for key in ('works', 'road', 'driver', 'pool', *BRAIN_SIGN_NETWORKS):
+        for key in ('works', 'road', 'types', 'driver', 'pool', 'seeds', *BRAIN_SIGN_NETWORKS):
             if (options or {}).get(key) is not None and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':

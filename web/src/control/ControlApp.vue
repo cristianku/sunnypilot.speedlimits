@@ -47,9 +47,10 @@ function onVisibility(): void {
 }
 onMounted(() => document.addEventListener('visibilitychange', onVisibility));
 onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibility));
-/** On the light tabs, the server pill and the busy dots every 4 s from /api/panel/system (0.15 s, 1 kB). */
+/** On the light tabs, and until the first status comes, the server pill and the busy dots every 4 s from
+ * /api/panel/system (0.15 s, 1 kB): the pill shows at once after a reload, not after the whole status. */
 usePoll(async () => {
-  if (!light.value || hidden.value) return;
+  if (hidden.value || (!light.value && status.value !== null)) return;
   try {
     const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]}}>(
       '/api/panel/system');

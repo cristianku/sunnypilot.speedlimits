@@ -129,6 +129,7 @@ def test_start_sets_the_variables_of_the_changed_settings(root, checkout, monkey
                           'epochs=${NNSLR_CLASSIFIER_EPOCHS:-none}"'))
     panel = Panel(root, repo=checkout)
     monkeypatch.setattr(panel, 'activities', lambda: [])
+    monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 0}})  # the server's own cards may be busy
     job = panel.start('train_cutter')
     finished(panel, job['id'])
     assert re.search(r'epochs=12 rate=0\.001 batch=none classifier=none$', full_log(panel, job['id']), re.M)

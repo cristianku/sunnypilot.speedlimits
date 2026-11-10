@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // The choices of the brain's training (brain-choices.ts) in one short row, in Train › Brain above its flow (which follows
 // them) and in its step of Train › Pipeline: the three heads only the training has as switches that light up when on, the
-// picture's features as Mean or Grid.
-import {POOL_OPTIONS, type BrainChoice} from './brain-choices';
+// picture's features as Mean or Grid, its seeds as Three or One.
+import {POOL_OPTIONS, SEEDS_OPTIONS, type BrainChoice} from './brain-choices';
 import Segmented from './Segmented.vue';
 
 const props = defineProps<{choices: BrainChoice; id: string}>();
@@ -23,5 +23,7 @@ function flip(key: Switch): void {
             :title="item.title" @click="flip(item.key)">{{ item.label }}</button>
     <span class="bc-pick" :title="choices.note"><span>Picture</span>
       <Segmented v-model="choices.pool" :options="POOL_OPTIONS" label="The picture’s features: Grid keeps where things are, Mean only what is in it"/></span>
+    <span class="bc-pick" :title="choices.seedsNote"><span>Seeds</span>
+      <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: three to compare in Models, or seed 0 alone"/></span>
   </div>
 </template>

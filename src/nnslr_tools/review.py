@@ -293,7 +293,8 @@ class ReviewApp(ReviewService):
         self._mcp_failed = False
         self._mcp_lock = threading.Lock()
         # [control-panel] - START
-        self.panel = Panel(root)
+        # The drives' table of its status read in a thread: the pills and the buttons never wait for it (_route_rows).
+        self.panel = Panel(root, background_rows=True)
         # [control-panel] - END
         # [ai-reviewer] - START
         self.ai_slots = threading.BoundedSemaphore(MAX_AI_SUGGESTIONS)
@@ -2057,14 +2058,15 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}, {"rebuild": "on"}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool"}; "driver"
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool", "seeds"}; "driver"
                     # only "off", from a page of before) and the networks that read its signs ({"sign_cutter",
                     # "sign_classifier", "sign_decider"}), the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
                     # "certified"}), all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
-                                                          'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool', 'rebuild',
+                                                          'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
+                                                          'seeds', 'rebuild',
                                                           'openpilot',
                                                           'brains', 'sign_cutter', 'sign_classifier', 'sign_decider')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}

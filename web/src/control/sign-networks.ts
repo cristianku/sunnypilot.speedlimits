@@ -46,8 +46,10 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
     decider: computed({get: () => keyOf('decider'), set: (value: string) => { picked.value = {...picked.value, decider: value}; }}),
   });
   const versionOf = (part: SignPart): ModelVersion | null => versions(part).find((version) => version.id === keys[part]) ?? null;
-  /** The parts with none to choose: the training is refused without them (no applicability, no brain). */
-  const missing = computed(() => SIGN_PARTS.filter(({part}) => versionOf(part) === null).map(({label}) => label.toLowerCase()));
+  /** The parts with none to choose, once Models answered (none while it loads): the training is refused without them
+   * (no applicability, no brain). */
+  const missing = computed(() => SIGN_PARTS.some(({part}) => versionsOf(part) === undefined) ? []
+    : SIGN_PARTS.filter(({part}) => versionOf(part) === null).map(({label}) => label.toLowerCase()));
   /** The options of its training, all three named (a network put in use meanwhile changes nothing). */
   const option = computed((): ActionOptions => Object.fromEntries(SIGN_PARTS.flatMap(({part, option: key}) => {
     const version = versionOf(part);

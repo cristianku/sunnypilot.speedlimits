@@ -26,7 +26,8 @@ set -euo pipefail
 #      holds at that moment, which the panel then counts as the brain's until the step ends (#36: the NVDEC of one
 #      V100 held the first back, one drive at a time the second), several drives at once;
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
-#      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart.
+#      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart. With
+#      NNSLR_BRAIN_SEEDS=0 seed 0 alone (step 4), a third of the time.
 #
 # usage: scripts/run_brain.sh NAME
 #
@@ -46,7 +47,8 @@ set -euo pipefail
 # brain's brain-last.pt every seed goes on from, instead of ImageNet and random weights: Train › Brain's "Start from";
 # the dry run of step 1 refuses one stepped otherwise or learnt on another split), NNSLR_BRAIN_CUTTER,
 # NNSLR_BRAIN_CLASSIFIER, NNSLR_BRAIN_DECIDER (the networks its signs are read with, ids of the Models tab: a SignNet,
-# a classifier, an applicability network; empty: the one in use), NNSLR_SUNNYPILOT_CLONE
+# a classifier, an applicability network; empty: the one in use), NNSLR_BRAIN_SEEDS (the seeds it trains: "0 1 2", or
+# "0" alone; Train › Brain's Seeds), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -68,7 +70,7 @@ INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
 SIGN_CUTTER="${NNSLR_BRAIN_CUTTER:-}"
 SIGN_CLASSIFIER="${NNSLR_BRAIN_CLASSIFIER:-}"
 SIGN_DECIDER="${NNSLR_BRAIN_DECIDER:-}"
-SEEDS=(0 1 2)
+read -r -a SEEDS <<< "${NNSLR_BRAIN_SEEDS:-0 1 2}"
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
   echo "usage: $0 NAME" >&2
@@ -105,6 +107,11 @@ fi
 
 if [[ "$TYPES" != "0" && "$TYPES" != "1" ]]; then
   echo "error: NNSLR_BRAIN_TYPES must be 0 or 1: $TYPES" >&2
+  exit 2
+fi
+
+if [[ "${SEEDS[*]}" != "0 1 2" && "${SEEDS[*]}" != "0" ]]; then
+  echo "error: NNSLR_BRAIN_SEEDS must be \"0 1 2\" or \"0\": ${NNSLR_BRAIN_SEEDS:-}" >&2
   exit 2
 fi
 
@@ -199,7 +206,8 @@ fi
 
 echo "== Brain =="
 echo "run:          $RUN_ID"
-echo "output:       $RUN_ROOT-s{${SEEDS[0]},${SEEDS[1]},${SEEDS[2]}}"
+echo "seeds:        ${SEEDS[*]}"
+echo "output:       $(printf "$RUN_ROOT-s%s " "${SEEDS[@]}")"
 echo "data root:    $DATA_ROOT"
 echo "physical GPU: $GPU_INDEX"
 echo "settings:     ${SETTINGS[*]}"
@@ -279,10 +287,9 @@ else
   "$NN" brain-targets --data-root "$DATA_ROOT" "${SIGN_ARGS[@]}" "${ROUTE_ARGS[@]}"
 fi
 
-step=4
+# Each seed its own step, 4 to 6 (job_progress: seed 0 alone is step 4 alone).
 for seed in "${SEEDS[@]}"; do
-  echo "== $step/6 Train seed $seed =="
-  step=$(( step + 1 ))
+  echo "== $(( 4 + seed ))/6 Train seed $seed =="
   if [[ -f "$RUN_ROOT-s$seed/result.json" ]]; then
     echo "skip seed $seed: already trained"
     continue

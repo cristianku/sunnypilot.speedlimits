@@ -79,7 +79,7 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
       const theirs = version.value.pool;
       if (theirs && pool && pool() !== theirs) return {text: 'That brain sees the picture as ' + POOL_WORDS[theirs] + ': choose '
         + (theirs === 'grid' ? 'Grid' : 'Mean') + ' in Picture, or the training stops at its first check.', warn: true};
-      return {text: 'Its three seeds go on from that brain’s weights, learnt on the brain’s frozen split: the test stays fair. '
+      return {text: 'Its seeds go on from that brain’s weights, learnt on the brain’s frozen split: the test stays fair. '
         + 'An input it did not have starts at zero' + (takesTheDriver(version.value)
           ? '; your pedals and the car’s speed, which it took, are left out.' : '.'), warn: false};
     }

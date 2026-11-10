@@ -462,3 +462,51 @@ def test_a_training_started_from_a_terminal_has_the_progress_of_its_own_log(root
     progress = payload['activities'][0]['progress']
     assert progress['detail'] == 'detector · epoch 2 of 20'
     assert progress['curves']['detector']['points'] == [{'epoch': 2, 'train_loss': 0.9, 'val_loss': 1.0, 'seconds': 30}]
+
+
+def test_the_site_reads_the_drives_table_in_a_thread(root, checkout, monkeypatch):
+    """The site's status shows the last drives' table read and reads it again in a thread (it takes seconds on the
+    share): once older than ROUTE_ROWS_FRESH_S, or once a job began or ended; never two readings at once."""
+    import threading
+    from nnslr_tools import panel as panel_module
+    panel = Panel(root, repo=checkout, background_rows=True)
+    calls: list[int] = []
+    gate = threading.Event()
+
+    class Module:
+        @staticmethod
+        def videos_dir():
+            return root
+
+        @staticmethod
+        def route_rows(found_root, videos):
+            calls.append(len(calls) + 1)
+            if len(calls) > 1:
+                assert gate.wait(5)
+            return [{'reading': len(calls)}]
+
+    def settled(count):
+        for _ in range(500):
+            if len(calls) >= count and not panel._rows_reading:
+                return
+            time.sleep(0.01)
+        raise AssertionError('the reading did not end')
+
+    assert panel._route_rows(Module, frozenset()) == [{'reading': 1}]
+    assert panel._route_rows(Module, frozenset()) == [{'reading': 1}] and calls == [1]
+    assert panel._route_rows(Module, frozenset({'job'})) == [{'reading': 1}]
+    for _ in range(500):
+        if len(calls) == 2:
+            break
+        time.sleep(0.01)
+    assert panel._route_rows(Module, frozenset()) == [{'reading': 1}] and calls == [1, 2]
+    gate.set()
+    settled(2)
+    assert panel._route_rows(Module, frozenset({'job'})) == [{'reading': 2}] and calls == [1, 2]
+    monkeypatch.setattr(panel_module, 'ROUTE_ROWS_FRESH_S', -1.0)
+    assert panel._route_rows(Module, frozenset({'job'})) == [{'reading': 2}]
+    settled(3)
+    assert panel._route_rows(Module, frozenset({'job'}))[0]['reading'] >= 3
+    calls.clear()
+    assert Panel(root, repo=checkout)._route_rows(Module, frozenset()) == [{'reading': 1}]
+    assert Panel(root, repo=checkout)._route_rows(Module, frozenset()) == [{'reading': 2}]

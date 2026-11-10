@@ -189,13 +189,16 @@ watch(() => starts.brain.version?.id, () => {
 }, {immediate: true});
 /** The networks that read its signs (sign-networks.ts), the same in its section and in the pipeline. */
 const signNetworks = useSignNetworks(versionsOf);
-/** The brain's training, in its card: three seeds, to choose one in Models. */
-const BRAIN_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_brain', 'Three seeds of the brain' + brainChoices.words + starts.brain.words + signNetworks.words
-    + ', one after the other, about 3 minutes each on the GPU, after reading the signs of the drives as the car does '
+/** The brain's training, in its card: three seeds, to choose one in Models, or seed 0 alone. */
+const BRAIN_ACTIONS = computed((): [ActionName, string][] => {
+  const one = brainChoices.seeds === 'one';
+  return [['train_brain', (one ? 'Seed 0 of the brain' : 'Three seeds of the brain') + brainChoices.words
+    + starts.brain.words + signNetworks.words
+    + (one ? ', about 3 minutes on the GPU' : ', one after the other, about 3 minutes each on the GPU')
+    + ', after reading the signs of the drives as the car does '
     + '(the applicability network leaves out those of another road), and with the same networks those they have not read '
-    + 'yet (the next limit). Then you choose one in Models and Publish it.'],
-]);
+    + 'yet (the next limit). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
+});
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [

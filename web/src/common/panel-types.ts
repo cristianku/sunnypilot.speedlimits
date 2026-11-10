@@ -74,12 +74,14 @@ export interface ActionOptions {
    * finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, its head of the kinds of road of Speed
-   * review, its head of the road type (and only the seconds with one), the picture's features as a mean or as a grid. The
-   * driver's inputs are gone since 10 Nov 2026: the server still takes driver "off" from a page loaded before. */
+   * review, its head of the road type (and only the seconds with one), the picture's features as a mean or as a grid, its
+   * three seeds or seed 0 alone. The driver's inputs are gone since 10 Nov 2026: the server still takes driver "off" from a
+   * page loaded before. */
   works?: 'on' | 'off';
   road?: 'on' | 'off';
   types?: 'on' | 'off';
   pool?: 'mean' | 'grid';
+  seeds?: 'all' | 'one';
   /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
    * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
   sign_cutter?: string;
