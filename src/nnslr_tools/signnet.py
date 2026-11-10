@@ -20,6 +20,11 @@ In training, a quarter of the speed signs of a frame are drawn as an end of limi
 Switzerland has too few real ones to learn them), besides the flip and the light of the band.
 Needs the GPU environment (.venv-gpu).
 
+A training cuts every frame's band once, before its first epoch, into data/derived/band-cache (band_cache): an epoch
+reads the bands ready instead of decoding every frame and resizing it, and the light of each band is set on the GPU,
+batch by batch. The bands are the very pixels of _band_of; only a train frame with a speed sign that may be drawn as
+an end of limit is decoded again every time it comes, since the drawing is made on the whole frame.
+
 SignNet is the one cutter: the car runs it (sunnypilot's speed_limits/vision.py, mirrored by the CAR_* constants), and
 the server's chain (nnslr_tools.chain: Prepare's Our networks, mine-negatives, evaluate-chain) reads it the same way:
 the band made by _band_of, the heat map decoded by frame_boxes_of, at most CAR_MAX_BOXES a frame. The car keeps those
@@ -30,10 +35,15 @@ helpers below the imports need none.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import multiprocessing
+import os
 import random
+import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +57,11 @@ DEFAULT_STRIDE = 8
 SIGMA_SHARE = 1 / 6
 MAX_DETECTIONS = 50
 SCORE_THRESHOLDS = (0.05, 0.1, 0.2, 0.3, 0.5)
+# The bands cut once (band_cache): one .npy a frame (uint8, 3 x band height x band width: 774 KB at the car's band) in
+# BAND_CACHE/<width>x<height>/, named by a hash of BAND_CACHE_VERSION, the frame's path, size, time of change and width.
+# Safe to delete: the next training cuts them again.
+BAND_CACHE = Path('derived') / 'band-cache'
+BAND_CACHE_VERSION = 1
 # Boxes per frame the classifier after it can afford on the Adreno (about 5 ms a box).
 BOX_BUDGETS = (3, 5, 10)
 # The SignNet the car runs (sunnypilot/speed_limits/vision.py: SIGNNET_WIDTH x SIGNNET_HEIGHT, SIGNNET_STRIDE,
@@ -236,6 +251,70 @@ def _band_image(path: Path, band_width: int = BAND_WIDTH, paint=None):
         return _band_of(image, band_width), image.size[0]
 
 
+def _band_cache_file(data_root: Path, frame: dict[str, Any], band_width: int) -> Path | None:
+    """Where band_cache keeps a frame's band, None for a frame it does not keep (no width in the plan, or no file)."""
+    width = frame.get('width')
+    try:
+        stat = (Path(data_root) / frame['image_path']).stat()
+    except (OSError, KeyError, TypeError):
+        return None
+    if not isinstance(width, int):
+        return None
+    band_w, band_h = band_size(band_width)
+    key = hashlib.sha256(f"{BAND_CACHE_VERSION}|{frame['image_path']}|{stat.st_size}|{stat.st_mtime_ns}|{width}|"
+                         f"{band_w}x{band_h}".encode()).hexdigest()
+    return Path(data_root) / BAND_CACHE / f'{band_w}x{band_h}' / key[:2] / (key + '.npy')
+
+
+def _cut_band(job: tuple[str, str, int, int]) -> bool:
+    """One band of band_cache: the frame's band (_band_image) written to its file, only when the frame is as wide as
+    its plan says (the boxes are scaled by that width). Written aside, then renamed: a reader never sees half a file."""
+    import numpy as np
+    source, target, band_width, width = job
+    band, frame_width = _band_image(Path(source), band_width)
+    if frame_width != width:
+        return False
+    target = Path(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    aside = target.with_name(f'{target.stem}.{os.getpid()}.part')
+    with aside.open('wb') as handle:
+        np.save(handle, np.ascontiguousarray(band.numpy()))
+    os.replace(aside, target)
+    return True
+
+
+def band_cache(frames: list[dict[str, Any]], data_root: Path, band_width: int, *, workers: int = 8) -> dict[str, Any]:
+    """Every frame's band cut once into BAND_CACHE (the ones already there kept), on ``workers`` processes: the files
+    by image path, and what was done (frames, cut, kept, seconds, megabytes, folder). A frame that cannot be cut keeps
+    no file: its loader reads it from the frame as before."""
+    started = time.monotonic()
+    files: dict[str, Path] = {}
+    jobs = []
+    for frame in frames:
+        target = _band_cache_file(data_root, frame, band_width)
+        if target is None or frame['image_path'] in files:
+            continue
+        if target.is_file():
+            files[frame['image_path']] = target
+        else:
+            jobs.append((frame['image_path'], target, frame['width']))
+    kept = len(files)
+    if jobs:
+        work = [(str(Path(data_root) / path), str(target), band_width, width) for path, target, width in jobs]
+        if workers > 1:
+            # Forked before any network is on the GPU: the processes only decode and resize.
+            with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context('fork')) as pool:
+                done = list(pool.map(_cut_band, work, chunksize=8))
+        else:
+            done = [_cut_band(job) for job in work]
+        files.update((path, target) for (path, target, _), ok in zip(jobs, done) if ok)
+    band_w, band_h = band_size(band_width)
+    return {'files': files, 'frames': len(frames), 'cut': len(files) - kept, 'kept': kept,
+            'seconds': round(time.monotonic() - started, 1),
+            'megabytes': round(len(files) * 3 * band_w * band_h / 1e6),
+            'folder': str(Path(data_root) / BAND_CACHE / f'{band_w}x{band_h}')}
+
+
 def frame_boxes_of(heat, shape, stride: int, band_width: int, frame_width: float, *, limit: int = CAR_MAX_BOXES,
                    min_score: float = CAR_MIN_SCORE) -> list[dict]:
     """The boxes of one frame (heat (1, 1, H, W), shape (1, 4, H, W) on the CPU) in frame pixels, best first: the
@@ -277,9 +356,19 @@ def learnt_mapillary(plan: dict[str, Any], start: dict[str, Any] | None) -> bool
                 or start.get('mapillary') or start.get('mapillary_only'))
 
 
-def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, seed: int, band_width: int = BAND_WIDTH):
-    _torch()
+def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, seed: int, band_width: int = BAND_WIDTH,
+             cached: dict[str, Path] | None = None):
+    """The bands of ``frames`` (uint8, flipped in training), their targets, the light to give each one (gain, bias: 1, 0
+    without training; the GPU applies it, ``on_device``) and its index. ``cached``: band_cache's files by image path,
+    read instead of the frame."""
+    torch, _ = _torch()
+    import numpy as np
     from torch.utils.data import Dataset
+    cached = cached or {}
+    # The frames whose speed signs may be drawn as an end of limit: decoded every time, the drawing is on the frame.
+    drawn = {index for index, frame in enumerate(frames) if paints(frame, train) and any(
+        synthetic_signs.paintable(box, family)
+        for box, family in zip(frame['boxes'], synthetic_signs.frame_families(frame)))}
 
     class Bands(Dataset):
         def __len__(self):
@@ -287,17 +376,21 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
 
         def __getitem__(self, index):
             frame = frames[index]
-            paint = None
-            if paints(frame, train):
-                # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones are
-                # not enough to learn them. Python's random is seeded apart in every DataLoader worker.
-                def paint(image):
-                    return synthetic_signs.paint_frame(image, frame['boxes'], synthetic_signs.frame_families(frame),
-                                                       random)[0]
-            image, width = _band_image(data_root / frame['image_path'], band_width, paint)
+            ready = None if index in drawn else cached.get(frame['image_path'])
+            if ready is not None:
+                image, width = torch.from_numpy(np.load(ready)), frame['width']
+            else:
+                paint = None
+                if index in drawn:
+                    # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones
+                    # are not enough to learn them. Python's random is seeded apart in every DataLoader worker.
+                    def paint(image):
+                        return synthetic_signs.paint_frame(image, frame['boxes'],
+                                                           synthetic_signs.frame_families(frame), random)[0]
+                image, width = _band_image(data_root / frame['image_path'], band_width, paint)
             boxes = band_boxes(frame['boxes'], width, band_width)
             ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width, ignore=True)
-            image = image.float() / 255.0
+            light = (1.0, 0.0)
             if train:
                 # Python's random is seeded apart in every DataLoader worker (base seed + worker id).
                 rng = random
@@ -305,11 +398,19 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
                     image = image.flip(-1)
                     boxes = [[band_width - x2, y1, band_width - x1, y2] for x1, y1, x2, y2 in boxes]
                     ignore = [[band_width - x2, y1, band_width - x1, y2] for x1, y1, x2, y2 in ignore]
-                image = (image * rng.uniform(0.7, 1.3) + rng.uniform(-0.08, 0.08)).clamp(0, 1)
+                light = (rng.uniform(0.7, 1.3), rng.uniform(-0.08, 0.08))
             heat, shape, mask, weight = encode(boxes, stride, band_width, ignore)
-            return image, heat, shape, mask, weight, index
+            return image.contiguous(), heat, shape, mask, weight, torch.tensor(light, dtype=torch.float32), index
 
     return Bands()
+
+
+def on_device(image, light, device):
+    """A batch of bands (uint8) on the device as the network takes them: / 255, then each band's light, gain and bias
+    (training), kept in 0..1."""
+    image = image.to(device, non_blocking=True).float() / 255.0
+    light = light.to(device, non_blocking=True)
+    return (image * light[:, :1, None, None] + light[:, 1:, None, None]).clamp(0, 1)
 
 
 def _in_ignore(box: list[float], ignore: list[list[float]]) -> bool:
@@ -320,26 +421,26 @@ def _in_ignore(box: list[float], ignore: list[list[float]]) -> bool:
 
 
 def measure(model, frames: list[dict], data_root: Path, stride: int, device, *, batch: int = 16,
-            workers: int = 8, band_width: int = BAND_WIDTH) -> dict[str, Any]:
+            workers: int = 8, band_width: int = BAND_WIDTH, cached: dict[str, Path] | None = None) -> dict[str, Any]:
     """The cutter's measures on ``frames``: per score threshold (detector_size_metrics, reviewed boxes of the whole
     frame, those below the band count as missed), per box budget (the best N boxes of each frame, at any score) and
     ``car``: what the car reads, the best CAR_MAX_BOXES boxes of score CAR_MIN_SCORE or more. All of them match a found
     box to a reviewed one at IoU 0.5; ``car_centre`` is ``car`` with the lenient match (evaluation.centre_match: IoU 0.5,
     or the found box's centre on the reviewed box and its size 0.5 to 2 times it), fairer to the far, small signs. A
     box found on an ignore box of the frame (a switched-off display) is dropped before any of them: neither found nor
-    false."""
+    false. ``cached``: band_cache's files, the bands read from there."""
     torch, _ = _torch()
     from torch.utils.data import DataLoader
 
     from nnslr_tools.evaluation import detector_size_metrics, score_frame
-    loader = DataLoader(_dataset(frames, data_root, stride, train=False, seed=0, band_width=band_width),
-                        batch_size=batch, shuffle=False, num_workers=workers)
+    loader = DataLoader(_dataset(frames, data_root, stride, train=False, seed=0, band_width=band_width, cached=cached),
+                        batch_size=batch, shuffle=False, num_workers=workers, pin_memory=torch.device(device).type == 'cuda')
     predictions: dict[int, list[dict]] = {}
     ignored = 0
     model.eval()
     with torch.no_grad():
-        for image, _, _, _, _, indexes in loader:
-            heat, shape = model(image.to(device))
+        for image, _, _, _, _, light, indexes in loader:
+            heat, shape = model(on_device(image, light, device))
             heat, shape = heat.float().cpu(), shape.float().cpu()
             for b, index in enumerate(indexes.tolist()):
                 ignore = frames[index].get('ignore_boxes') or []
@@ -505,6 +606,11 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
     if pretrain:
         log(f"{name} keeps the epoch with the best validation recall of the speed signs at 5 boxes a frame: the "
             "Mapillary windows have speed signs only, so the recall over every family is low by design")
+    # Every band cut once, before the network goes on the GPU (the processes that cut them are forked).
+    cache = band_cache(plan['frames'], data_root, band_width, workers=workers)
+    print(f"band cache: {cache['cut']} bands cut, {cache['kept']} already there, of {cache['frames']} frames, "
+          f"{cache['megabytes']} MB, {cache['seconds']}s: {cache['folder']}", file=sys.stderr, flush=True)
+    cached = cache['files']
     model = build_signnet(widths, stride, fuse_kernel)
     start = None
     if init_from is not None:
@@ -516,16 +622,17 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
             + ('' if start['split_sha256'] == plan.get('split_sha256') else ', learnt on another split'))
     model = model.to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    loader = DataLoader(_dataset(train_frames, data_root, stride, train=True, seed=seed, band_width=band_width),
+    loader = DataLoader(_dataset(train_frames, data_root, stride, train=True, seed=seed, band_width=band_width,
+                                 cached=cached),
                         batch_size=batch, shuffle=True, num_workers=workers, drop_last=True,
-                        persistent_workers=workers > 0)
+                        persistent_workers=workers > 0, pin_memory=device.type == 'cuda')
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=learning_rate, total_steps=epochs * len(loader))
     best, best_epoch, history = -1.0, -1, []
     for epoch in range(1, epochs + 1):
         model.train()
         started, total, parts = time.monotonic(), 0.0, {'focal': 0.0, 'shape': 0.0}
-        for image, heat, shape, mask, weight, _ in loader:
-            pred_heat, pred_shape = model(image.to(device))
+        for image, heat, shape, mask, weight, light, _ in loader:
+            pred_heat, pred_shape = model(on_device(image, light, device))
             value, detail = loss(pred_heat, pred_shape, heat.to(device), shape.to(device), mask.to(device),
                                  weight.to(device))
             optimizer.zero_grad(set_to_none=True)
@@ -537,7 +644,7 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
                 parts[key] += detail[key]
         steps = max(len(loader), 1)
         checked = measure(model, validation, data_root, stride, device, workers=workers,
-                          band_width=band_width)['by_box_budget']['5']
+                          band_width=band_width, cached=cached)['by_box_budget']['5']
         speed = ((checked.get('recall_by_family') or {}).get('speed') or {}).get('recall')
         history.append({'epoch': epoch, 'loss': total / steps, 'focal': parts['focal'] / steps,
                         'shape': parts['shape'] / steps, 'validation_recall_at_5': checked['recall_iou'],
@@ -571,8 +678,9 @@ def train_signnet(plan: dict[str, Any], data_root: Path, run_dir: Path, *, width
         'synthetic_end_of_limit': {**synthetic_signs.summary(), 'paintable_train_boxes': paintable_train_boxes(
             train_frames)},
         'history': history,
-        'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width),
-        'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width),
+        'validation': measure(model, validation, data_root, stride, device, workers=workers, band_width=band_width,
+                              cached=cached),
+        'test': measure(model, test, data_root, stride, device, workers=workers, band_width=band_width, cached=cached),
     }
     (run_dir / 'result.json').write_text(json.dumps(result, indent=2, sort_keys=True) + '\n', encoding='utf-8')
     log(f"Mapillary stage complete: {run_dir}" if pretrain else f"SignNet complete: {run_dir}")

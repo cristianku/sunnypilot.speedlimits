@@ -302,7 +302,7 @@ def test_the_default_log_flushes_every_line(tmp_path, monkeypatch):
                        'boxes': [[40.0, 6.0, 56.0, 22.0]], 'box_families': ['speed_limit']})
     plan = {'frames': frames, 'trainable': True, 'families': 'all'}
     train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96)
-    assert printed == [True, True, True]  # the epoch, the measure and the complete lines
+    assert printed == [True, True, True, True]  # the band cache, the epoch, the measure and the complete lines
 
 
 def test_the_car_measure_keeps_the_best_5_boxes_of_0_3(tmp_path, monkeypatch):
