@@ -296,6 +296,9 @@ export interface EpochPoint {
   val_selection_score?: number;
   /** The brain: how far its speed is from the labels, in km/h (val_accuracy: the frames it says right). */
   val_error_kph?: number;
+  /** The brain: the frames whose road type its type_head names right on validation, on all and on each type. */
+  val_types?: number;
+  val_type?: Record<string, number>;
   seconds?: number;
 }
 

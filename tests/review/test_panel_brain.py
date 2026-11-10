@@ -116,6 +116,15 @@ def test_the_seeds_have_a_curve_each_and_a_seed_without_a_measure_still_counts()
     assert 'val_error_kph' not in result['curves']['brain_s1']['points'][0]
 
 
+def test_an_epoch_says_the_road_type_named_right_in_all_and_on_each_type():
+    log = LOG + ('brain_s0 epoch 3/40 train_loss 2.0000 val_error_kph 9.10 val_accuracy 0.5200 val_types 0.8123 '
+                 'val_type_town 0.9100 val_type_motorway 0.9500 on 357 frames (always 120: 31.2, the sign: 12.4), '
+                 'says 3 speeds, 50-120 km/h 4s\n')
+    points = progress('train_brain', 'running', log)['curves']['brain_s0']['points']
+    assert points[2]['val_types'] == 0.8123 and points[2]['val_type'] == {'town': 0.91, 'motorway': 0.95}
+    assert points[2]['val_error_kph'] == 9.1 and 'val_type' not in points[0]
+
+
 def test_the_reading_of_the_signs_moves_with_the_segments_then_the_drives():
     head = LOG[:LOG.index('== 4/6')]
     result = progress('train_brain', 'running', head)

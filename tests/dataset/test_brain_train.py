@@ -664,6 +664,15 @@ def test_the_epoch_line_keeps_what_the_site_reads_and_says_the_speeds_in_short(t
     assert re.search(r' says (nothing|\d+ speeds?, \d+-\d+ km/h) \d+s$', epoch), epoch
 
 
+def test_the_epoch_line_says_the_road_type_on_all_and_on_each_type_with_frames():
+    from nnslr_tools.brain_train import _types_words
+    types = {'frames': 30, 'right': 0.8, 'per_type': {'town': {'frames': 20, 'right': 0.9},
+                                                       'ramp': {'frames': 0, 'right': None},
+                                                       'motorway': {'frames': 10, 'right': 0.6}}}
+    assert _types_words(types) == ' val_types 0.8000 val_type_town 0.9000 val_type_motorway 0.6000'
+    assert _types_words({'frames': 0, 'right': None, 'per_type': {}}) == '' and _types_words(None) == ''
+
+
 def at_two_in_the_afternoon(drive):
     from nnslr_tools.brain_targets import BRAIN_INPUTS
     drive['inputs']['hour'][:] = BRAIN_INPUTS.hour_row(14.0)

@@ -251,6 +251,8 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after ep
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
                     r'val_rejection|val_balanced_accuracy|val_false_per_frame|'
                     r'val_ownership_macro_f1|val_other_road_recall|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+# The brain's road type named right on validation on each type ("val_type_motorway 0.9500", brain_train._types_words).
+TYPE_METRIC = re.compile(r'\bval_type_([a-z0-9_]+) (-?[0-9.]+)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
 FETCHED = re.compile(r'^== (\S+)--(\d+) -> ')
 # helpers/fetch_comma_segments.sh, a route and its segments (in Italian in the older logs).
@@ -429,6 +431,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
                      else (match.group(1), int(match.group(2)), int(match.group(3))))
             point: dict = {'epoch': epoch[1]}
             point.update((name, float(value)) for name, value in METRIC.findall(line))
+            if kinds := TYPE_METRIC.findall(line):
+                point['val_type'] = {kind: float(value) for kind, value in kinds}
             if 'val_sign_accuracy' in point and 'val_rejection' in point and 'val_balanced_accuracy' not in point:
                 # The measure that chooses the classifier's best epoch: the mean of the two.
                 point['val_balanced_accuracy'] = (point['val_sign_accuracy'] + point['val_rejection']) / 2

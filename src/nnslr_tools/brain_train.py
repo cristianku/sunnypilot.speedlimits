@@ -428,6 +428,15 @@ def _types_measure(said: list[np.ndarray], truth: list[np.ndarray]) -> dict | No
     return {'frames': int(len(truth)), 'right': float((said == truth).mean()) if len(truth) else None, 'per_type': per_type}
 
 
+def _types_words(types: dict | None) -> str:
+    """Of an epoch line: " val_types 0.8123 val_type_town 0.9100 ...", the road type named right on validation, on all
+    and on each type with frames there; nothing for a network without type_head or a validation without a road type."""
+    if not types or types['right'] is None:
+        return ''
+    return f' val_types {types["right"]:.4f}' + ''.join(f' val_type_{kind} {one["right"]:.4f}'
+                                                     for kind, one in types['per_type'].items() if one['right'] is not None)
+
+
 def _count(chance: np.ndarray, answer: np.ndarray, known: np.ndarray, hits: dict, told: dict) -> None:
     """A head of yes or no (works_head, a kind of road_head) against the answers on the frames known."""
     yes, real = chance[known] >= .5, answer[known] > 0
@@ -756,11 +765,13 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')
         score = validation['speed']['mean_error_kph']
-        history.append({'epoch': epoch, 'error': error, 'validation': validation['speed']})
-        # Read by nnslr_tools.job_progress: the seed's curve in Train › Brain.
+        history.append({'epoch': epoch, 'error': error, 'validation': validation['speed'], 'types': validation['types']})
+        # Read by nnslr_tools.job_progress: the seed's curve in Train › Brain, with the road type type_head names right on
+        # validation, on all and on each type (only measured: the last epoch is kept whatever it says).
         right, spoken = validation['speed']['right'], validation['speeds_said']
         log(f'{name} epoch {epoch + 1}/{epochs} train_loss {error:.4f} val_error_kph {"-" if score is None else f"{score:.2f}"} '
-            f'val_accuracy {"-" if right is None else f"{right:.4f}"} on {validation["speed"]["frames"]} frames '
+            f'val_accuracy {"-" if right is None else f"{right:.4f}"}{_types_words(validation["types"])} '
+            f'on {validation["speed"]["frames"]} frames '
             f'(always {validation["one_speed"]["kph"]}: {validation["one_speed"]["mean_error_kph"]}, '
             f'the sign: {validation["follow_the_sign"]["sign"]["mean_error_kph"]}), says {_spoken(spoken)} '
             f'{time.monotonic() - started:.0f}s')

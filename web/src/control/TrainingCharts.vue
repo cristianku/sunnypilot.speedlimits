@@ -15,6 +15,7 @@ import {computed} from 'vue';
 import type {BrainNet, CurveNet, DeciderNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
 import LineChart, {type ChartSeries} from './charts/LineChart.vue';
 import {elapsedText, roughText} from './jobs';
+import {ROAD_TYPE_LABELS} from './speed-review';
 
 // title: the heading of the card (the Evaluate tab shows the curves of a past run); nets: the networks to show, else
 // those of the job's steps, else those with curves, else the detector and the reader.
@@ -221,6 +222,13 @@ const deciderSeries = (pick: (point: EpochPoint) => number | undefined, scale = 
 const brainLines = computed(() => linesOf(brainCards.value));
 const brainSpan = computed(() => spanOf(brainLines.value));
 const brainSeries = (pick: (point: EpochPoint) => number | undefined, scale = 1): ChartSeries[] => seriesOf(brainLines.value, pick, scale);
+/** The road types the brain's epochs measure on validation (brain trainings from 10 Nov 2026 on), in ROAD_TYPES' order. */
+const brainTypes = computed(() => brainCards.value.some((card) => card.curve?.points.some((point) => point.val_types !== undefined)));
+const brainTypeKinds = computed((): string[] => {
+  const kinds = new Set<string>();
+  for (const card of brainCards.value) for (const point of card.curve?.points ?? []) Object.keys(point.val_type ?? {}).forEach((kind) => kinds.add(kind));
+  return [...kinds];
+});
 /** The best variant's best epoch, marked on its line. */
 function deciderMark(pick: (card: NetCard) => Best, highest: boolean, label: string): {series: string; epoch: number; label: string} | null {
   let found: {net: Net; point: EpochPoint & {value: number}} | null = null;
@@ -307,7 +315,8 @@ const tables = computed(() => nets.value.flatMap((net) => {
             <span class="tile-label">{{ NET_NAME[card.net] }} on validation</span>
             <span class="tile-value">{{ kph(card.best.value) }}</span>
             <span class="tile-note">off the labels at epoch {{ card.best.epoch }}<template v-if="card.best.val_accuracy !== undefined">:
-              right {{ percent(card.best.val_accuracy * 100) }}</template></span>
+              right {{ percent(card.best.val_accuracy * 100) }}</template><template v-if="card.best.val_types !== undefined">,
+              road type right {{ percent(card.best.val_types * 100) }}</template></span>
           </div>
         </template>
         <div v-if="perEpoch !== null" class="tile">
@@ -444,12 +453,14 @@ const tables = computed(() => nets.value.flatMap((net) => {
 
       <div v-if="brainCards.length" class="net" id="brain-curves">
         <h3>The brain<span>the speed to hold, once a second · a line per seed, on validation: km/h off the labels, lower is better,
-          the frames it says right, higher is better, and train loss</span></h3>
+          the frames it says right and the road type it names right, higher is better, and train loss</span></h3>
         <div v-if="brainCards.some((card) => card.curve)" class="net-charts">
           <LineChart title="Km/h off on validation" :format="kphAxis" :epochs="brainSpan"
                      :series="brainSeries((point) => point.val_error_kph)" :running="brainRunning"/>
           <LineChart title="Right on validation" :top="100" :format="percentAxis" :epochs="brainSpan"
                      :series="brainSeries((point) => point.val_accuracy, 100)" :running="brainRunning"/>
+          <LineChart v-if="brainTypes" title="Road type right on validation" :top="100" :format="percentAxis" :epochs="brainSpan"
+                     :series="brainSeries((point) => point.val_types, 100)" :running="brainRunning"/>
           <LineChart title="Train loss" :format="lossAxis" :epochs="brainSpan" :series="brainSeries((point) => point.train_loss)"
                      :running="brainRunning"/>
         </div>
@@ -466,7 +477,10 @@ const tables = computed(() => nets.value.flatMap((net) => {
             <caption>{{ NET_NAME[table.net] }}</caption>
             <thead><tr><th class="num">Epoch</th><th class="num">Train loss</th><th v-if="!isSignnet(table.net) && !isBrain(table.net)" class="num">Val loss</th>
               <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isBrain(table.net)"><th class="num">Train acc.</th><th class="num">Val acc.</th></template>
-              <template v-if="isBrain(table.net)"><th class="num">Km/h off</th><th class="num">Right</th></template>
+              <template v-if="isBrain(table.net)"><th class="num">Km/h off</th><th class="num">Right</th>
+                <template v-if="brainTypes"><th class="num" title="The road type named right, on all types">Road type</th>
+                  <th v-for="kind in brainTypeKinds" :key="kind" class="num" :title="'Road type right on ' + (ROAD_TYPE_LABELS[kind]?.label ?? kind)">{{
+                    ROAD_TYPE_LABELS[kind]?.short ?? kind }}</th></template></template>
               <template v-if="isDecider(table.net)"><th class="num">Whose sign</th><th class="num" title="The signs of another road found">Other road</th>
                 <th class="num">Chosen</th></template>
               <th v-if="table.net === 'detector' && detectorRecall" class="num">Val recall</th>
@@ -483,6 +497,8 @@ const tables = computed(() => nets.value.flatMap((net) => {
                 <template v-if="isBrain(table.net)">
                   <td class="num">{{ cell(point.val_error_kph, (value) => value.toFixed(1)) }}</td>
                   <td class="num">{{ cell(point.val_accuracy, (value) => percent(value * 100)) }}</td>
+                  <template v-if="brainTypes"><td class="num">{{ cell(point.val_types, (value) => percent(value * 100)) }}</td>
+                    <td v-for="kind in brainTypeKinds" :key="kind" class="num">{{ cell(point.val_type?.[kind], (value) => percent(value * 100)) }}</td></template>
                 </template>
                 <template v-if="table.net !== 'detector' && !isSignnet(table.net) && !isBrain(table.net)">
                   <td class="num">{{ cell(point.train_accuracy, (value) => percent(value * 100)) }}</td>
