@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // The server at the right of the top bar, on every page with the tabs (#tabs-machine of pages.py): a small pill
-// with the GPU and CPU load ("GPU 85% CPU 12%"; each card with two, "GPU 3% · 87% CPU 12%", on a phone without the
-// CPU), and under it, on a click, a panel with the GPU, its memory and temperature (with two cards, one row each:
+// with the GPU and CPU load ("GPU 85% CPU 12%"; each card with two, "GPU 3% · 87% CPU 12%", on a phone their mean,
+// "GPU 45% CPU 12%"), and under it, on a click, a panel with the GPU, its memory and temperature (with two cards, one row each:
 // "GPU 0 · 81:00.0", its use, memory and temperature and what holds it), the CPU, the RAM and the free disk, each its
 // value and a thin bar, what runs now (the jobs of the panel, asked while the panel is open, with the card each holds)
 // and Update the site at the bottom.
@@ -85,16 +85,18 @@ const narrow = window.matchMedia('(max-width: 560px)');
 const phone = ref(narrow.matches);
 narrow.addEventListener('change', () => { phone.value = narrow.matches; });
 /** The pill: GPU and CPU load (the memory is in the panel), each card's use in nvidia-smi's order, each with its own %
- * so that two never read as one number with a decimal ("GPU 3% · 87%"); on a phone with two cards without the CPU (in
- * the panel, and in the dot), so that the pill never grows into the logo at 390 px. The dot blue when one works, red
- * when a GPU is hot. */
+ * so that two never read as one number with a decimal ("GPU 3% · 87%"); on a phone the mean of the cards (each one is
+ * in the panel), which leaves the room for the CPU without the pill growing into the logo at 390 px. The dot blue when
+ * one works, red when a GPU is hot. */
 const summary = computed(() => {
   const gpus = cells.value.filter((cell) => cell.kind === 'gpu');
   const cpu = cells.value.find((cell) => cell.kind === 'cpu');
   const hot = cells.value.some((cell) => cell.hot === true);
   const busy = gpus.some((cell) => cell.level >= 15) || (cpu?.level ?? 0) >= 40;
-  return {dot: hot ? 'hot' : busy ? 'busy' : '', gpu: gpus.length ? gpus.map((cell) => Math.round(cell.level) + '%').join(' · ') : null,
-    cpu: gpus.length > 1 && phone.value ? null : cpu?.value ?? null,
+  const levels = gpus.length > 1 && phone.value ? [gpus.reduce((sum, cell) => sum + cell.level, 0) / gpus.length]
+    : gpus.map((cell) => cell.level);
+  return {dot: hot ? 'hot' : busy ? 'busy' : '', gpu: gpus.length ? levels.map((level) => Math.round(level) + '%').join(' · ') : null,
+    cpu: cpu?.value ?? null,
     title: gpus.length > 1 ? gpus.map((cell) => cell.label + ' ' + cell.value).join(', ') + (cpu ? ', CPU ' + cpu.value : '')
       : undefined};
 });
