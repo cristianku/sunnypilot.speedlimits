@@ -489,11 +489,26 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 .stack .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 #editor { gap: 10px; }
 .zoom-wrap { display: flex; background: var(--stage); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-#zoom { display: block; flex: 1 1 0; min-width: 0; height: 180px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+#zoom { display: block; flex: 1 1 0; min-width: 0; height: 192px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
 /* Beside the zoom, as high as it is: each pixel of the square is one the classifier gets. */
 .net-view { flex: none; width: 160px; margin: 0; border-left: 1px solid var(--line); }
 .net-view canvas { display: block; width: 160px; height: 160px; image-rendering: pixelated; }
-.net-view figcaption { height: 20px; padding: 0 6px; font-size: 11.5px; line-height: 20px; text-align: center; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The crop as drawn top left (marked), the jittered ones beside it, two by two at half size: smoothed, so a screen at 1x still shows each whole. */
+.net-view.varied { position: relative; }
+.net-view.varied canvas { image-rendering: auto; }
+.net-view.varied::before { content: ""; position: absolute; left: 0; top: 0; width: 80px; height: 80px; box-shadow: inset 0 0 0 1.5px var(--accent); pointer-events: none; }
+/* Under the square, two lines: what it is and the box's pixels; the picture the server cut it from (or the browser's preview) with the grid button at its end. */
+.net-view figcaption { position: relative; padding: 2px 4px; font-size: 11px; line-height: 14px; text-align: center; color: var(--muted); white-space: nowrap; }
+.net-caption, .net-source { display: block; height: 14px; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.net-source { padding: 0 18px; opacity: 0.75; }
+.net-source.served { opacity: 1; }
+.net-toggle { position: absolute; right: 3px; bottom: 2px; display: grid; place-items: center; width: 18px; height: 14px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.net-toggle::after { content: ""; position: absolute; inset: -4px -3px -2px; }
+/* A finger's tap area: up over the caption and the square's corner, which take no tap (below, the frame clips it). */
+@media (pointer: coarse) { .net-toggle::after { inset: -22px -3px -2px -16px; } }
+.net-toggle svg { width: 11px; height: 11px; fill: currentColor; }
+.net-toggle:hover { background: var(--surface-3); color: var(--fg); }
+.net-toggle[aria-pressed="true"], .net-toggle[aria-pressed="true"]:hover { background: var(--accent-soft); color: var(--tab-on-fg); }
 #zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .evidence { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
 /* Under the zoom: where the box comes from, and Fit with AI right by it. */

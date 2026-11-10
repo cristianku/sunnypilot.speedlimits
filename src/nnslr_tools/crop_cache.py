@@ -17,6 +17,7 @@ A frame of a drive at full definition is cut from the frame beside its picture (
 stay in the picture's pixels, so a crop has twice the pixels and only the stored window is finer than its rectangle.
 
 The evaluation (evaluate-classifier, evaluate-chain) and the comma never use this cache: they cut from the frame.
+Sign review shows the crops of a box as these cuts make them (review_crops, with no cache: the square by the zoom).
 
 The cache is a folder of data/derived/crop-cache named by a hash of what it holds (the version of this format, the
 input size, the class scheme, every image path, its sha256 when the dataset gives it, whether it has a frame at full
@@ -86,35 +87,107 @@ def _window(box: list[float], width: int, height: int) -> tuple[int, int, int, i
     return left, top, right, bottom
 
 
+def stored_crop(image, factor: int, kind: int, box: list[float], size: int, scheme: str = "v2"):
+    """What the cache keeps of one record, cut from its crop source (training.crop_source: the image and how many of
+    its pixels make one of the picture): (the PIL pixels, their rectangle in the picture's pixels). EXACT: the box cut
+    as the training cuts it (crop_rectangle for v2, the integer box for v1) and resized to the input size. WINDOW: the
+    pixels around the box that every jitter of it falls in (_window), at the source's resolution while the box is at
+    most MAX_BOX_SIDE input sizes wide and high, else scaled down."""
+    from PIL import Image
+
+    width, height = image.width // factor, image.height // factor
+    if kind == EXACT:
+        region = rectangle_of(scheme)(box, width, height)
+        return image.crop(tuple(value * factor for value in region)).resize((size, size), Image.BILINEAR), region
+    region = _window(box, width, height)
+    cut = tuple(value * factor for value in region)
+    side_x = max(abs(float(box[2]) - float(box[0])), 1.0) * factor
+    side_y = max(abs(float(box[3]) - float(box[1])), 1.0) * factor
+    keep_x = min(1.0, MAX_BOX_SIDE * size / side_x)
+    keep_y = min(1.0, MAX_BOX_SIDE * size / side_y)
+    span_x, span_y = cut[2] - cut[0], cut[3] - cut[1]
+    if keep_x == 1.0 and keep_y == 1.0:
+        return image.crop(cut), region
+    return image.resize((max(1, round(span_x * keep_x)), max(1, round(span_y * keep_y))), Image.BILINEAR,
+                        box=cut), region
+
+
 def _cut(task: tuple[str, str, int, str, list[tuple[int, int, list[float]]]]) -> list[tuple]:
     """The stored pixels of the records of one image (a loader process: Pillow only)."""
     import numpy as np
-    from PIL import Image
 
     root, image_path, size, scheme, items = task
-    rectangle = rectangle_of(scheme)
     image, factor = crop_source(_safe_image_path(Path(root), image_path))
     width, height = image.width // factor, image.height // factor
     out = []
     for index, kind, box in items:
-        if kind == EXACT:
-            region = rectangle(box, width, height)
-            pixels = image.crop(tuple(value * factor for value in region)).resize((size, size), Image.BILINEAR)
-        else:
-            region = _window(box, width, height)
-            cut = tuple(value * factor for value in region)
-            side_x = max(abs(float(box[2]) - float(box[0])), 1.0) * factor
-            side_y = max(abs(float(box[3]) - float(box[1])), 1.0) * factor
-            keep_x = min(1.0, MAX_BOX_SIDE * size / side_x)
-            keep_y = min(1.0, MAX_BOX_SIDE * size / side_y)
-            span_x, span_y = cut[2] - cut[0], cut[3] - cut[1]
-            if keep_x == 1.0 and keep_y == 1.0:
-                pixels = image.crop(cut)
-            else:
-                pixels = image.resize((max(1, round(span_x * keep_x)), max(1, round(span_y * keep_y))),
-                                      Image.BILINEAR, box=cut)
+        pixels, region = stored_crop(image, factor, kind, box, size, scheme)
         array = np.ascontiguousarray(np.asarray(pixels, dtype=np.uint8))
         out.append((index, kind, array.tobytes(), array.shape[0], array.shape[1], region, width, height))
+    return out
+
+
+def window_crop(window, region: tuple[int, int, int, int], frame_size: tuple[int, int], box: list[float], size: int,
+                paint=None):
+    """The crop of ``box`` (a record's box, jittered) from the window stored around it (stored_crop, WINDOW: its PIL
+    pixels and their rectangle in a frame of frame_size), cut as crop_rectangle cuts it from the frame. paint: see
+    CropCache.crop."""
+    from PIL import Image
+
+    image = window
+    left, top, right, bottom = region
+    frame_width, frame_height = frame_size
+    if paint is not None:
+        to_x, to_y = image.width / (right - left), image.height / (bottom - top)
+        image = paint(image, lambda frame_box: [(frame_box[0] - left) * to_x, (frame_box[1] - top) * to_y,
+                                                (frame_box[2] - left) * to_x, (frame_box[3] - top) * to_y])
+    x1, y1, x2, y2 = crop_rectangle(box, frame_width, frame_height)
+    # Inside the window (always, by construction: the clamp only guards against rounding).
+    x1, x2 = max(left, min(x1, right - 1)), max(left + 1, min(x2, right))
+    y1, y2 = max(top, min(y1, bottom - 1)), max(top + 1, min(y2, bottom))
+    if image.width == right - left and image.height == bottom - top:
+        return image.crop((x1 - left, y1 - top, x2 - left, y2 - top))
+    scale_x, scale_y = image.width / (right - left), image.height / (bottom - top)
+    return image.resize((size, size), Image.BILINEAR,
+                        box=((x1 - left) * scale_x, (y1 - top) * scale_y,
+                             (x2 - left) * scale_x, (y2 - top) * scale_y))
+
+
+def review_crops(image, factor: int, box: list[float], *, size: int, samples: int = 0) -> list:
+    """The crops the v2 classifier trains on for a box of a picture, made by this module's own cuts from the picture's
+    crop source (training.crop_source), for Sign review's square beside the zoom: first the crop without jitter (EXACT,
+    the crop validation gives the classifier), then ``samples`` crops of the box jittered as the augmented
+    training jitters it: the first epochs whose draw moves it (jitter_box with the draws of the record of index 0 in a
+    run of seed 0; 1 epoch in 5 keeps the box as drawn, the crop above), each cut from the window as CropCache.crop
+    cuts it, then the dataset's Resize to the input size, which on a PIL image is Pillow's bilinear resize). Not the
+    rotation of up to 4 degrees nor the colours of the augmentation: those need torch. Each crop is a PIL image of
+    size x size."""
+    from PIL import Image
+
+    crops = [stored_crop(image, factor, EXACT, box, size)[0]]
+    if samples > 0:
+        window, region = stored_crop(image, factor, WINDOW, box, size)
+        frame_size = (image.width // factor, image.height // factor)
+        for moved in moved_boxes(box, samples):
+            crops.append(window_crop(window, region, frame_size, moved, size).resize((size, size), Image.BILINEAR))
+    return crops
+
+
+def moved_boxes(box: list[float], count: int) -> list[list[float]]:
+    """The box as the augmented training jitters it in the first ``count`` epochs whose draw moves it (jitter_box, the
+    draws of the record of index 0 in a run of seed 0): the same epochs for every box."""
+    import random
+
+    from nnslr_tools.training import _sample_seed, jitter_box
+
+    drawn = [float(value) for value in box]
+    out = []
+    for epoch in range(50 * count):
+        moved = jitter_box(box, random.Random(_sample_seed("box", 0, epoch, 0)))
+        if [float(value) for value in moved] != drawn:
+            out.append(moved)
+            if len(out) == count:
+                break
     return out
 
 
@@ -174,22 +247,8 @@ class CropCache:
         image = Image.fromarray(self.array(index))
         if int(row[9]) == EXACT:
             return image
-        left, top, right, bottom = (int(value) for value in row[3:7])
-        frame_width, frame_height = int(row[7]), int(row[8])
-        if paint is not None:
-            to_x, to_y = image.width / (right - left), image.height / (bottom - top)
-            image = paint(image, lambda frame_box: [(frame_box[0] - left) * to_x, (frame_box[1] - top) * to_y,
-                                                    (frame_box[2] - left) * to_x, (frame_box[3] - top) * to_y])
-        x1, y1, x2, y2 = crop_rectangle(box, frame_width, frame_height)
-        # Inside the window (always, by construction: the clamp only guards against rounding).
-        x1, x2 = max(left, min(x1, right - 1)), max(left + 1, min(x2, right))
-        y1, y2 = max(top, min(y1, bottom - 1)), max(top + 1, min(y2, bottom))
-        if image.width == right - left and image.height == bottom - top:
-            return image.crop((x1 - left, y1 - top, x2 - left, y2 - top))
-        scale_x, scale_y = image.width / (right - left), image.height / (bottom - top)
-        return image.resize((self.size, self.size), Image.BILINEAR,
-                            box=((x1 - left) * scale_x, (y1 - top) * scale_y,
-                                 (x2 - left) * scale_x, (y2 - top) * scale_y))
+        region = tuple(int(value) for value in row[3:7])
+        return window_crop(image, region, (int(row[7]), int(row[8])), box, self.size, paint)
 
 
 def build_crop_cache(data_root: Path, records: list[dict[str, Any]], kinds: list[int], *, size: int,

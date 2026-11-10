@@ -85,6 +85,8 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     ('GET', r'/route/' + DRIVE + r'/video/' + FRAME + r'\.jpg', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/(reviews|live|busy(/[0-9]{1,7})?)', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/video/' + FRAME, ('signs',)),
+    # The square beside the zoom: what the classifier's training cuts of the box being edited.
+    ('GET', r'/api/route/' + DRIVE + r'/frame/' + SAVED_FRAME + r'/classifier-crop', ('signs',)),
     ('POST', r'/api/route/' + DRIVE + r'/frame/' + SAVED_FRAME + r'(/apply-previous|/fit)?', ('signs',)),
     # Sign distance.
     ('GET', r'/api/sign-distance/drives/' + DRIVE, ('distance',)),

@@ -135,19 +135,31 @@ with sync_playwright() as p:
     assert phone.locator('#prevSecond').is_visible() and phone.locator('#nextSecond').is_visible()
     assert phone.evaluate('document.documentElement.scrollWidth - innerWidth') <= 0
 
-    # Beside the zoom, the box as the classifier gets it: rounded outwards as on the car, following a corner dragged.
-    # The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks nothing.
+    # Beside the zoom, the box as the classifier gets it: rounded outwards as on the car, the training's own crop made
+    # by the server once the box settles, which names the picture it was cut from; drawn by the browser while a corner
+    # is dragged. The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks
+    # nothing.
     square = open_page(browser, '/route/' + route + '/', 1500)
     square.locator('#boxList .box-main').first.click()
-    caption = square.locator('#netView figcaption')
-    assert caption.inner_text() == 'Classifier · 14 × 18 px', caption.inner_text()
+    caption, source = square.locator('#netCaption'), square.locator('#netSource')
+    until(square, "document.querySelector('#netSource').textContent.startsWith('from ')")
+    assert caption.inner_text() == 'Classifier · 14×18 px', caption.inner_text()
+    assert source.inner_text() == 'from 32×24', source.inner_text()
     assert square.evaluate("[netViewPicture.width, netViewPicture.height]") == [160, 160]
+    # The grid: the crop as drawn top left and three as the training varies it, then back to the one square.
+    square.locator('#netSamples').click()
+    until(square, "netViewPicture.width === 320 && document.querySelector('#netView').classList.contains('varied')")
+    assert caption.inner_text() == 'Classifier · 14×18 px', caption.inner_text()
+    square.locator('#netSamples').click()
+    until(square, "netViewPicture.width === 160")
     corner = square.locator('#zoom .handle-hit.se').bounding_box()
     square.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
     square.mouse.down()
     square.mouse.move(corner['x'] - 40, corner['y'] - 40, steps=4)
-    assert caption.inner_text() != 'Classifier · 14 × 18 px', 'the square did not follow the corner while dragging'
+    assert caption.inner_text() != 'Classifier · 14×18 px', 'the square did not follow the corner while dragging'
+    assert source.inner_text() == 'browser preview', source.inner_text()
     square.mouse.up()
+    until(square, "document.querySelector('#netSource').textContent.startsWith('from ')")
 
     # Car networks: a number with hours says so, and the plain disc of the frame under it does not use up that reading.
     car = open_page(browser, '/route/' + route + '/', 1500)

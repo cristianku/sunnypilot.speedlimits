@@ -262,7 +262,8 @@ def addresses_of_the_site() -> set[str]:
         found.update(f'/route/{route}/{tail}' for tail in ('summary', 'car', 'report.jsonl', 'reviews.jsonl', 'run.json',
                                                            'preannotations.jsonl', '../../etc/passwd'))
         found.update(f'/api/route/{route}/{tail}' for tail in ('ai-trial', 'ai-live', 'car/0/0', 'car-logs', 'frame/0/0/ai-suggest',
-                                                               'frame/0/0/ai-fit', 'car-settings'))
+                                                               'frame/0/0/ai-fit', 'car-settings',
+                                                               'frame/0/0/classifier-crop'))
         found.update(f'/api/drive-review/drives/{route}{tail}' for tail in drive)
         found.add(f'/api/panel/drive-video/{OTHER_ROUTE}')
     return found

@@ -22,6 +22,10 @@ token only reads. No answer or log line ever holds a provider's key.
 this server's CPU (:mod:`nnslr_tools.box_fit`), with no AI provider; like the AI it needs a
 signed-in browser or the site on 127.0.0.1, and nothing is saved.
 
+The square beside the zoom (``GET /frame/<key>/classifier-crop?box=x1,y1,x2,y2``) is what the classifier's training cuts
+of the box being edited (:func:`nnslr_tools.crop_cache.review_crops`, the training's own cuts), from the frame at full
+definition when the drive has one; a guest given the drive's signs opens it too.
+
 A reviewer from outside (:mod:`nnslr_tools.review_access`) comes through the proxy with no account here: _handle checks
 every one of their requests against a table of what a guest may open, and the work given to that person.
 """
@@ -93,6 +97,13 @@ FIT_WAIT_SECONDS = 5.0
 MAX_FIT_BOXES = 64
 FIT_SESSION_MESSAGE = 'Sign in on the site to fit boxes.'
 # [box-fit] - END
+# [classifier-crop] - START
+# Sign review's square beside the zoom (GET .../frame/<key>/classifier-crop): the crops the classifier's training cuts
+# of a box (crop_cache.review_crops), at most MAX_CROP_SAMPLES of them jittered; the last CROP_SOURCES_KEPT frames
+# decoded for it (about 12 MB each at full definition) are kept for the next request, the box being edited.
+MAX_CROP_SAMPLES = 8
+CROP_SOURCES_KEPT = 2
+# [classifier-crop] - END
 AI_SETTINGS_POSTS = ('/api/settings/ai/providers', '/api/settings/ai/reviewer', '/api/settings/ai/models',
                      '/api/settings/ai/test')
 AI_DELETE_RE = re.compile(r'/api/settings/ai/providers/([a-z][a-z0-9-]{0,31})/delete')
@@ -271,6 +282,11 @@ class ReviewApp(ReviewService):
         # [box-fit] - START
         self.fit_slots = threading.BoundedSemaphore(MAX_LOCAL_FITS)
         # [box-fit] - END
+        # [classifier-crop] - START
+        # crop_source of the last frames asked (crop_source below): {(picture, stamps): (image, factor)}, oldest first.
+        self._crop_sources = {}
+        self._crop_sources_lock = threading.Lock()
+        # [classifier-crop] - END
         # route_summaries' counts of each route, with what they were made from: {route: (stamp, rows, counts)}.
         self._summaries = {}
         self._summaries_lock = threading.Lock()
@@ -348,6 +364,28 @@ class ReviewApp(ReviewService):
             return self.report(route)[2]
         except (PreannotationError, ValueError, OSError):
             return {}
+
+    # [classifier-crop] - START
+    def crop_source(self, picture: Path):
+        """training.crop_source of a frame's picture (the frame at full definition beside it, or the picture; and how
+        many of its pixels make one of the picture), the last CROP_SOURCES_KEPT kept while their files stay the same:
+        a box being edited asks for its crops again and again."""
+        from nnslr_tools.media import full_picture
+        from nnslr_tools.training import crop_source
+        full = full_picture(picture)
+        stamp = (str(picture), picture.stat().st_mtime_ns, full.stat().st_mtime_ns if full.is_file() else None)
+        with self._crop_sources_lock:
+            found = self._crop_sources.pop(stamp, None)
+            if found is not None:
+                self._crop_sources[stamp] = found
+                return found
+        found = crop_source(picture)
+        with self._crop_sources_lock:
+            self._crop_sources[stamp] = found
+            while len(self._crop_sources) > CROP_SOURCES_KEPT:
+                del self._crop_sources[next(iter(self._crop_sources))]
+        return found
+    # [classifier-crop] - END
 
     # [sign-review-retired] - START
     def first_to_review(self, route: str) -> dict:
@@ -524,6 +562,67 @@ def _report_proposer(directory: Path) -> str:
         return proposer_of(json.loads((directory / 'run.json').read_text(encoding='utf-8')))
     except (OSError, ValueError):
         return 'vietnam'
+
+
+# [classifier-crop] - START
+def crop_query(query: dict) -> tuple[list[float], int]:
+    """The box (x1,y1,x2,y2 in the frame's pixels) and the number of jittered crops (0 to MAX_CROP_SAMPLES) asked of
+    .../classifier-crop, from its parsed query; 400 for anything else. Other parameters (run: the page's cache key) are
+    left alone."""
+    import math
+
+    from nnslr_tools.review_db import ReviewRejected
+    sent = query.get('box', [])
+    try:
+        box = [float(value) for value in sent[0].split(',')] if len(sent) == 1 else []
+    except ValueError:
+        box = []
+    if len(box) != 4 or not all(math.isfinite(value) for value in box):
+        raise ReviewRejected(400, 'invalid_box', 'box is x1,y1,x2,y2: four numbers, in pixels of the frame.')
+    asked = query.get('samples', ['0'])
+    if len(asked) != 1 or not re.fullmatch(r'[0-9]{1,2}', asked[0]) or int(asked[0]) > MAX_CROP_SAMPLES:
+        raise ReviewRejected(400, 'invalid_samples', f'samples is a whole number from 0 to {MAX_CROP_SAMPLES}.')
+    return box, int(asked[0])
+
+
+def inside_frame(row: dict, box: list[float]) -> None:
+    """400 unless the box lies in the frame of its report row, x1 < x2 and y1 < y2 (half a pixel of rounding let
+    through, as for Fit box); 409 for a row without its size."""
+    from nnslr_tools.review_db import ReviewRejected
+    width, height = row.get('width'), row.get('height')
+    if type(width) is not int or type(height) is not int or width < 1 or height < 1:
+        raise ReviewRejected(409, 'invalid_frame', 'The frame has no size in the report: rebuild the report.')
+    x1, y1, x2, y2 = box
+    if not (-0.5 <= x1 < x2 <= width + 0.5 and -0.5 <= y1 < y2 <= height + 0.5):
+        raise ReviewRejected(400, 'invalid_box', 'The box is outside the frame or not x1 < x2, y1 < y2.')
+
+
+def classifier_crop(image, factor: int, box: list[float], samples: int) -> tuple[bytes, dict[str, str]]:
+    """The PNG of .../classifier-crop and its headers: the crops the classifier's training cuts of a box
+    (crop_cache.review_crops) from a frame's crop source (training.crop_source: the image, the frame at full definition
+    when there is one, and how many of its pixels make one of the picture), side by side, each the input size square:
+    the crop without jitter, then ``samples`` jittered ones. X-Crop-Source: that image's size; X-Crop-Pixels: the
+    box's pixels in it (crop_rectangle)."""
+    import io
+
+    from PIL import Image
+
+    from nnslr_tools.crop_cache import review_crops
+    from nnslr_tools.training import TrainConfig, crop_rectangle
+    size = TrainConfig().input_size
+    crops = review_crops(image, factor, box, size=size, samples=samples)
+    strip = Image.new('RGB', (size * len(crops), size))
+    for place, crop in enumerate(crops):
+        strip.paste(crop, (place * size, 0))
+    buffer = io.BytesIO()
+    strip.save(buffer, 'PNG', compress_level=1)
+    data = buffer.getvalue()
+    left, top, right, bottom = crop_rectangle(box, image.width // factor, image.height // factor)
+    return data, {'Content-Type': 'image/png', 'Content-Length': str(len(data)),
+                  'X-Crop-Source': f'{image.width}x{image.height}',
+                  'X-Crop-Pixels': f'{(right - left) * factor}x{(bottom - top) * factor}',
+                  'X-Crop-Size': str(size), 'X-Crop-Samples': str(len(crops) - 1)}
+# [classifier-crop] - END
 
 
 def make_handler(app: ReviewApp):
@@ -982,6 +1081,14 @@ def make_handler(app: ReviewApp):
                     answer.update(run_id=item['pending'].name, rows=located(fresh, by_key))
                 self._json(200, answer)
                 return
+            # [classifier-crop] - START
+            # What the classifier's training cuts of a box of a frame, for the square beside Sign review's zoom.
+            match = re.fullmatch(r'/api/route/([^/]+)/frame/([0-9]{1,9})/([0-9]{1,9})/classifier-crop', path)
+            if match:
+                self._send_classifier_crop(match.group(1), match.group(2) + '/' + match.group(3),
+                                           parse_qs(urlsplit(self.path).query, keep_blank_values=True))
+                return
+            # [classifier-crop] - END
             if re.fullmatch(r'/api/route/[^/]+/frame/[^/]+/[^/]+', path):
                 self._problem(405, 'method_not_allowed', 'Use POST to save a frame.', True)
                 return
@@ -1315,6 +1422,29 @@ def make_handler(app: ReviewApp):
             self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
             self.end_headers()
             self.wfile.write(data)
+
+        # [classifier-crop] - START
+        def _send_classifier_crop(self, route, frame_key, query):
+            """The square beside Sign review's zoom for a box of a saved frame (classifier_crop), the box as the page
+            holds it, saved or not. The same address always gives the same pixels: the frame's picture is checked
+            against the report."""
+            box, samples = crop_query(query)
+            # Unknown drive or frame (a frame of the video not saved yet among them): 404; a picture changed since the
+            # report: 409.
+            picture, _mime_type, row = app.image_file(route, frame_key, 'original')
+            inside_frame(row, box)
+            try:
+                image, factor = app.crop_source(picture)
+            except OSError:
+                raise ReviewRejected(409, 'invalid_image', 'The frame image cannot be read.') from None
+            data, headers = classifier_crop(image, factor, box, samples)
+            self.send_response(200)
+            for name, value in headers.items():
+                self.send_header(name, value)
+            self._security_headers(DEFAULT_CSP, 'private, max-age=3600')
+            self.end_headers()
+            self.wfile.write(data)
+        # [classifier-crop] - END
 
         def _send_video(self, route):
             """The video of a drive (nnslr_tools.drive_video), with byte ranges: the player seeks in it."""
