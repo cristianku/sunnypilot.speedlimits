@@ -9,6 +9,8 @@
 #   --set=car     the release in the sunnypilot clone (what the comma downloads)
 #   --set=in-use  the versions in use on Models: exported first as Publish would (PyTorch, in .venv-gpu), unless they
 #                 are exported already
+#   Either set: the road type head of its brain (type_head, for the training only) is read from the brain's weights
+#   (PyTorch, in .venv-gpu) into derived/simulation/type-heads/, and the replay names the road type the brain sees.
 #   --again       also a drive replayed already with these networks
 # Effects: writes derived/simulation/ and uses a V100: the video is decoded by the GPU and the networks run on it.
 # ALWAYS ON THE GPU: there is no CPU run. The replay takes about 1 GB of a card and shares it with what else runs
@@ -57,6 +59,8 @@ echo "== 1/2 Get the networks ready =="
 if [ "$set_key" = in-use ]; then
     [ -x "$NN_GPU" ] || bad "no GPU environment for the export of the versions in use: $NN_GPU (helpers/3_train.sh installs it)"
     "$NN_GPU" simulate-set --set in-use
+elif [ -x "$NN_GPU" ]; then
+    "$NN_GPU" simulate-set --set car
 else
     "$NN" simulate-set --set car
 fi

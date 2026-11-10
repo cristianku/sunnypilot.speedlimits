@@ -1133,17 +1133,23 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
 
 
 def _cmd_simulate_set(args: argparse.Namespace) -> int:
-    """The release of a set of networks made ready for a replay: the versions in use exported (simulation.export_set)."""
+    """The release of a set of networks made ready for a replay: the versions in use exported (simulation.export_set),
+    and the road type head of its brain written beside the replays (simulation.save_type_head)."""
     from nnslr_tools import simulation
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+
+    def log(text: str) -> None:
+        print(text, flush=True)
+
     if args.set == 'car':
         directory = simulation.set_directory(root, 'car')
         if simulation.release_networks(directory) is None:
             raise ValueError(f"no release of the networks in {directory}")
-        print(f"the networks on the car: {simulation.release_name(directory)}", flush=True)
-        return 0
-    simulation.export_set(root, log=lambda text: print(text, flush=True))
+        log(f"the networks on the car: {simulation.release_name(directory)}")
+    else:
+        simulation.export_set(root, log=log)
+    simulation.save_type_head(root, args.set, log=log)
     return 0
 
 

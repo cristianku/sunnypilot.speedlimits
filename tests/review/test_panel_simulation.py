@@ -359,11 +359,11 @@ def test_the_list_has_the_sets_and_every_drive_with_its_replays(site, root, no_c
     answer = json_of(data)
     assert answer['ok'] is True and list(answer['sets']) == ['car', 'in-use']
     assert answer['sets']['car'] == {'label': 'On the car', 'name': 'speed-limits 2026-11-08', 'networks': NETWORKS,
-                                     'settings': {}, 'ready': True, 'reason': ''}
+                                     'settings': {}, 'ready': True, 'reason': '', 'type_head': None}
     # The versions in use on Models, by the car's names of the networks: not exported yet.
     assert answer['sets']['in-use'] == {
         'label': 'In use', 'name': '', 'networks': [], 'settings': {}, 'ready': False, 'wanted': {'finder': CUTTER},
-        'reason': 'Not exported yet: Compute exports the versions in use first.'}
+        'reason': 'Not exported yet: Compute exports the versions in use first.', 'type_head': None}
     assert [row['route'] for row in answer['drives']] == [ROUTE]
     row = answer['drives'][0]
     # A row of Speed review's list, with what the drive has here.

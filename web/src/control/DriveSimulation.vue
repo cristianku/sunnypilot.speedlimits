@@ -27,6 +27,7 @@ import DriveReviewDrive from './DriveReviewDrive.vue';
 import JobProgress from './JobProgress.vue';
 import {jobOf, terminalActivities} from './jobs';
 import Segmented from './Segmented.vue';
+import {ROAD_TYPE_LABELS, roadTypeLabel} from './speed-review';
 import {boxesAt, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
   regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
   type Source, type Summary} from './simulation';
@@ -182,8 +183,14 @@ const now = computed(() => {
       + (at('vis_raw_road') === 'other_road' ? ' · other road' : taken === true ? ' · taken' : taken === false ? ' · not taken' : ''),
     sign: metres > 0 ? 'in ' + metres + ' m' + (shown.seen ? ', in view' : '') : shown.seen ? 'in view' : 'none',
     road: shown.road,
+    // A replay with a brain that learnt the road type: the type its type_head names (not on the car's screen).
+    brainType: all['brain_type'] === undefined ? null : brainTypeText(at('brain_type'), at('brain_type_p')),
   };
 });
+function brainTypeText(type: unknown, chance: unknown): string {
+  if (typeof type !== 'string' || !type) return 'none yet';
+  return roadTypeLabel(type) + (typeof chance === 'number' ? ' · ' + Math.round(chance * 100) + '%' : '');
+}
 
 // -- compute ----------------------------------------------------------------------------------------------------------------
 const readOnly = computed(() => props.status?.actions_enabled === false);
@@ -273,7 +280,7 @@ interface Tick {at: number; left: number; text: string; other: boolean; title: s
 interface Differ {from: number; to: number; start: number; title: string}
 interface Lanes {
   from: number; to: number; width: number; series: Record<string, Series> | null; reads: number[]; found: Differences | null;
-  hold: Run[]; ticks: Tick[]; limit: Differ[]; reading: Differ[];
+  hold: Run[]; types: Run[]; ticks: Tick[]; limit: Differ[]; reading: Differ[];
 }
 /** The lanes of a time window, kept while the window and what is shown stay the same: the player draws its lanes again
  * for other reasons, these only when they change. */
@@ -288,6 +295,10 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
   const hold = runsOf(all?.['vis_limit'], from, to, (value) => value === null ? -1 : typeof value === 'number' ? Math.max(0, Math.round(value)) : 0)
     .map((run): Run => ({from: run.from, to: run.to, cls: run.value < 0 ? 'dr-gap' : run.value ? 'dv-hold' : 'dr-none',
       text: run.value < 0 ? '' : run.value ? String(run.value) : '–'}));
+  // The road type the brain names, in Speed review's colours; hatched where no frame was read.
+  const types = runsOf(all?.['brain_type'], from, to, (value) => typeof value === 'string' ? value : '')
+    .map((run): Run => ({from: run.from, to: run.to, cls: run.value ? 'sr-type sr-type-net rt-' + run.value : 'dr-gap',
+      text: run.value ? ROAD_TYPE_LABELS[run.value]?.label.toLowerCase() ?? run.value : ''}));
   // What was read over its tick when there is room for it, kept whole at the ends of the lane.
   let lastX = -Infinity;
   const ticks = all === null ? [] : times.filter((at) => at >= from && at <= to).map((at): Tick => {
@@ -305,7 +316,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
   const inside = <T extends [number, number, unknown, unknown]>(runs: readonly T[], title: (run: T) => string): Differ[] => runs
     .filter((run) => run[1] + PERIOD >= from && run[0] <= to)
     .map((run) => ({from: Math.max(from, run[0]), to: Math.min(to, run[1] + PERIOD), start: run[0], title: title(run)}));
-  drawn = {from, to, width, series: all, reads: times, found: differs, hold, ticks,
+  drawn = {from, to, width, series: all, reads: times, found: differs, hold, types, ticks,
     limit: inside(differs?.limit ?? [], (run) => 'The speed to hold: certified ' + (run[2] || 'none') + ', now ' + (run[3] || 'none')),
     reading: inside(differs?.reading ?? [], (run) => 'The reading: certified ' + readingName(run[2]) + ', now ' + readingName(run[3]))};
   return drawn;
@@ -335,6 +346,17 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
           <g v-for="(run, index) in lanesIn(from, to, width, x).hold" :key="index">
             <rect :x="x(run.from)" y="4" :width="w(run.from, run.to)" height="17" rx="2" :class="run.cls"/>
             <text v-if="run.text && fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="16.5" class="dr-run-text">{{ run.text }}</text>
+          </g>
+        </svg>
+      </div>
+      <div v-if="shownSeries?.['brain_type']" class="dr-lane" id="dv-brain-type"
+           title="The road type the brain names at each of its steps (its training head, applied to the car brain’s memory: the car does not show it); hatched: no frame read there">
+        <span class="dr-lane-name">Road type<small>brain</small></span>
+        <svg :width="width" height="18" :viewBox="`0 0 ${width} 18`" aria-hidden="true">
+          <g v-for="(run, index) in lanesIn(from, to, width, x).types" :key="index">
+            <rect :x="x(run.from)" y="2" :width="w(run.from, run.to)" height="14" rx="2" :class="run.cls"/>
+            <text v-if="run.text && fits(run.from, run.to, run.text)" :x="x(run.from) + w(run.from, run.to) / 2" y="12.5"
+                  class="dr-run-text sr-type-text">{{ run.text }}</text>
           </g>
         </svg>
       </div>
@@ -378,6 +400,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
             <dt>Sign read</dt><dd>{{ now.read }}</dd>
             <dt>Sign ahead</dt><dd>{{ now.sign }}</dd>
             <template v-if="now.road"><dt>Road</dt><dd>{{ now.road }}</dd></template>
+            <template v-if="now.brainType !== null"><dt>Road type (brain)</dt><dd id="dv-brain-type-now">{{ now.brainType }}</dd></template>
           </dl>
           <p v-else-if="set" class="dr-hint" id="dv-none">This drive is not replayed with these networks yet.</p>
           <div v-if="view" class="sr-tools">

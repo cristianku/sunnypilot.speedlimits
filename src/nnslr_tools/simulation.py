@@ -38,7 +38,9 @@ A result, derived/simulation/<route>/<set>.json.gz, is the whole reading of the 
    out {speedLimit, speedLimitAhead, ..., rawSignSeen},   speedVisionSP as the car would send it, a column a field
    signs {"<row>": [[x1, y1, x2, y2, score, class, confidence, road], ...]},   SignNet's boxes of the rows with any
    in {v_ego, steering_deg, left, right, yaw_rate, gas, brake, enabled, yaw_device, lead_m, lead_kph, country, unix_s,
-       brain {"<row>": [the brain's input row at that step]}}}     what went in: the car's signals at that frame
+       brain {"<row>": [the brain's input row at that step]}},     what went in: the car's signals at that frame
+   brain_type {"<row>": [road type, its probability]},   the road type the brain's type_head names at each of its steps,
+   brain_type_head}                                      on the car's own memory; with the checkpoint_sha256 of its head
 
 Certifying a drive (certify) keeps its result as it is in simulation/certified/<route>.json.gz of the data root, with
 who and when in simulation/certified.json: a test case complete in itself, what went in and what came out. compare()
@@ -74,6 +76,9 @@ SETS = {'car': 'On the car', 'in-use': 'In use'}
 RESULTS_RELATIVE = Path('derived') / 'simulation'
 SETS_RELATIVE = RESULTS_RELATIVE / 'sets'
 CERTIFIED_RELATIVE = Path('simulation') / 'certified'
+# The road type head of a set's brain (W, b and the names of its types), by the brain's checkpoint_sha256: type_head is
+# for the training only, so no release has it, and the replay applies it on the car brain's memory (save_type_head).
+TYPE_HEADS_RELATIVE = RESULTS_RELATIVE / 'type-heads'
 CERTIFIED_INDEX = Path('simulation') / 'certified.json'
 SUNNYPILOT_ENV, SUNNYPILOT_DEFAULT = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'
 PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
@@ -104,7 +109,7 @@ META_SUFFIX = '.meta.json'  # beside a result: what the lists show without readi
 REGRESSION_SUFFIX = '.regression.json'  # beside a result: how it stands next to the certified one (compare's counts)
 # What a result's meta keeps of it (the rows aside); COMPARE_VERSION: of compare()'s counts kept beside a result, made
 # again when compare() looks at more.
-META_FIELDS = ('version', 'route', 'set', 'name', 'made_at', 'device', 'networks', 'code', 'settings')
+META_FIELDS = ('version', 'route', 'set', 'name', 'made_at', 'device', 'networks', 'code', 'settings', 'brain_type_head')
 COMPARE_VERSION = 3
 # The messages of the log a replay gives the car's loop, and those that say when each frame of the video came.
 GPS_SERVICES = ('gpsLocationExternal', 'gpsLocation')
@@ -270,6 +275,91 @@ def release_name(directory: Path) -> str:
         return ''
 
 
+def brain_contract(directory: Path) -> dict | None:
+    """The contract of a release's brain; None without one."""
+    try:
+        manifest = json.loads((directory / MANIFEST).read_text(encoding='utf-8'))
+        found = json.loads((directory / manifest['brain']['contract']).read_text(encoding='utf-8'))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return found if isinstance(found, dict) else None
+
+
+def type_head_path(root: Path, contract: dict | None) -> Path | None:
+    """Where the road type head of a brain is kept, by its checkpoint_sha256; None for a contract without one."""
+    sha = (contract or {}).get('checkpoint_sha256')
+    if not isinstance(sha, str) or len(sha) != 64 or any(digit not in '0123456789abcdef' for digit in sha):
+        return None
+    return Path(root) / TYPE_HEADS_RELATIVE / f'{sha}.npz'
+
+
+def load_type_head(root: Path, contract: dict | None) -> dict | None:
+    """The road type head of a set's brain, {weight (types x memory), bias, names, sha256}; None while save_type_head
+    has not written it or for a brain that learnt no road type."""
+    import numpy as np
+
+    path = type_head_path(root, contract)
+    if path is None or not path.is_file():
+        return None
+    try:
+        with np.load(path) as found:
+            weight, bias, names = found['weight'].astype(np.float64), found['bias'].astype(np.float64), found['names']
+    except (OSError, ValueError, KeyError):
+        return None
+    names = [str(name) for name in names.tolist()]
+    if not names or weight.ndim != 2 or weight.shape[0] != len(names) or bias.shape != (len(names),):
+        return None
+    return {'weight': weight, 'bias': bias, 'names': names, 'sha256': contract['checkpoint_sha256']}
+
+
+def save_type_head(root: Path, set_key: str, package: Path | None = None, log=print) -> Path | None:
+    """The road type head of a set's brain written beside the replays, from its run's weights (brain-last.pt, the one
+    the contract's checkpoint_sha256 names): type_head is for the training only (brain_net.TRAINING_ONLY), so no ONNX
+    has it, and the replay applies it on the memory of the car's brain at each of its steps. In the GPU environment,
+    whose PyTorch reads the weights; nothing for a set without a brain or a brain that learnt no road type."""
+    import numpy as np
+
+    from nnslr_tools.model_roles import BRAIN_WEIGHTS
+    from nnslr_tools.runs import RUN_NAME
+
+    contract = brain_contract(set_directory(root, set_key, package))
+    path = type_head_path(root, contract)
+    if contract is None or path is None:
+        log('no brain in this set: no road type of the brain')
+        return None
+    if path.is_file():
+        log('the road type of the brain: its head is ready')
+        return path
+    version = str(contract.get('checkpoint') or '')
+    run = version.split(':', 1)[-1].split('/', 1)[0]
+    checkpoint = Path(root) / 'runs' / run / BRAIN_WEIGHTS
+    if not RUN_NAME.fullmatch(run) or not checkpoint.is_file():
+        log(f'the brain {version} has no weights on this server: no road type of the brain')
+        return None
+    if _sha256(checkpoint) != contract['checkpoint_sha256']:
+        log(f'the weights of the brain {version} changed since its export: no road type of the brain')
+        return None
+    try:
+        import torch
+    except ImportError:
+        log('no PyTorch in this environment (.venv-gpu reads the weights): no road type of the brain')
+        return None
+    saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
+    weights, names = saved.get('weights') or {}, [str(name) for name in saved.get('road_types') or []]
+    if 'type_head.weight' not in weights or not names:
+        log(f'the brain {version} learnt no road type (Road type off): no road type of the brain')
+        return None
+
+    def write(temporary: Path) -> None:
+        with temporary.open('wb') as handle:
+            np.savez(handle, weight=weights['type_head.weight'].float().numpy(),
+                     bias=weights['type_head.bias'].float().numpy(), names=np.array(names))
+
+    _write_atomic(path, write)
+    log(f'the road type of the brain: its head written ({len(names)} types of {version})')
+    return path
+
+
 def set_states(root: Path, in_use: dict[str, str | None] | None = None, package: Path | None = None) -> dict[str, dict]:
     """Each set as the page shows it: {label, name, networks, settings, ready, reason}. in_use: the versions in use on
     Models by role (cutter, classifier, decider, brain), to say whether the export of 'in-use' is still theirs, and of
@@ -278,9 +368,12 @@ def set_states(root: Path, in_use: dict[str, str | None] | None = None, package:
     for key, label in SETS.items():
         directory = set_directory(root, key, package)
         networks = release_networks(directory)
+        head = type_head_path(root, brain_contract(directory))
         state = {'label': label, 'name': release_name(directory), 'networks': networks or [],
                  'settings': release_settings(directory), 'ready': networks is not None,
-                 'reason': '' if networks is not None else 'No release of the networks in the sunnypilot clone.'}
+                 'reason': '' if networks is not None else 'No release of the networks in the sunnypilot clone.',
+                 # the checkpoint_sha256 of its brain's road type head, once save_type_head wrote it
+                 'type_head': head.stem if head is not None and head.is_file() else None}
         if key == 'in-use':
             wanted = {role: version for role, version in (in_use or {}).items() if version}
             exported = exported_source(root)
@@ -306,12 +399,14 @@ def exported_source(root: Path) -> dict[str, str]:
         return {}
 
 
-def is_current(record: dict, networks: list[dict] | None, code: dict[str, str], settings: dict | None = None) -> bool:
+def is_current(record: dict, networks: list[dict] | None, code: dict[str, str], settings: dict | None = None,
+               type_head: str | None = None) -> bool:
     """Whether a result is the one a replay of today would give: the same networks, the same code of the car and, when
-    given, the same settings of the release (a set's 'settings')."""
+    given, the same settings of the release (a set's 'settings') and the road type of its brain (a set's 'type_head')."""
     mine = {(one['role'], one['sha256']) for one in record.get('networks') or []}
     return networks is not None and mine == {(one['role'], one['sha256']) for one in networks} and \
-        record.get('code') == code and (settings is None or (record.get('settings') or {}) == settings)
+        record.get('code') == code and (settings is None or (record.get('settings') or {}) == settings) and \
+        (type_head is None or record.get('brain_type_head') == type_head)
 
 
 # -- the page ------------------------------------------------------------------------------------------------------------
@@ -346,6 +441,17 @@ def view(record: dict, t0_ns: int) -> dict:
     events = [[times[row], 'sign', kph[row]] for row, read in enumerate(out['signRead']) if read]
     signs = [[times[int(row)], [[*box[:4], box[5], box[6], box[7]] for box in boxes]]
              for row, boxes in sorted(record.get('signs', {}).items(), key=lambda item: int(item[0]))]
+    if record.get('brain_type'):
+        # The road type the brain names (its type_head, for the training only: the car does not show it), held from
+        # one of its steps to the next, as its speed to hold.
+        kinds, chances, held = [], [], (None, None)
+        for row in range(len(times)):
+            found = record['brain_type'].get(str(row))
+            if found:
+                held = (found[0], round(found[1], 2))
+            kinds.append(held[0])
+            chances.append(held[1])
+        series['brain_type'], series['brain_type_p'] = _steps(times, kinds), _steps(times, chances)
     return {'route': record['route'], 'set': record['set'], 'label': SETS.get(record['set'], record['set']),
             'name': record.get('name', ''), 'made_at': record.get('made_at'), 'networks': record.get('networks', []),
             'frame': record.get('frame'), 'frames': len(times), 'series': series, 'events': events, 'signs': signs}
@@ -620,7 +726,7 @@ def summary(root: Path, route: str, states: dict[str, dict] | None = None, code:
             continue
         sets[key] = {'made_at': meta.get('made_at'), 'name': meta.get('name') or '', 'frames': meta.get('frames', 0),
                      'current': is_current(meta, states[key]['networks'] if states[key]['ready'] else None, code,
-                                           states[key].get('settings'))}
+                                           states[key].get('settings'), states[key].get('type_head'))}
         counts = regression_counts(root, route, key, entry, meta) if entry else None
         if counts is not None:
             regression[key] = counts
@@ -845,6 +951,9 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
     finder, classifier = OneNetwork(files.finder, device), OneNetwork(files.classifier, device)
     brain_network = StepNetwork(files.brain, device) if files.brain is not None else None
     reader = car.brain.BrainReader(brain_network, files.brain_contract, car.vision, width, height) if brain_network else None
+    head = load_type_head(root, files.brain_contract) if reader is not None else None
+    if head is not None and head['weight'].shape[1] != reader.hidden.size:
+        head = None
     road_types = None
     if files.road_type is not None and reader is None:
         road_types = car.vision.RoadTypeReader(StepNetwork(files.road_type, device), files.road_types, width, height)
@@ -865,6 +974,7 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
     signs: dict[str, list] = {}
     inputs: dict[str, list] = {name: [] for name in INPUTS}
     brain_rows: dict[str, list] = {}
+    brain_types: dict[str, list] = {}
     car_now = (None,) * 7
     enabled_now = yaw_now = None
     video_sha: list[list] = []
@@ -930,6 +1040,11 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
                 inputs[name].append(value if isinstance(value, (bool, str)) or value is None else _number(value))
             if brain_network is not None and brain_network.given is not None:
                 brain_rows[str(row)] = [_number(value) for value in brain_network.given['extra'].reshape(-1)]
+                if head is not None:  # type_head on the memory the car's brain just made, as its speed_head reads it
+                    logits = head['weight'] @ np.asarray(reader.hidden, dtype=np.float64).reshape(-1) + head['bias']
+                    chances = np.exp(logits - logits.max())
+                    best = int(chances.argmax())
+                    brain_types[str(row)] = [head['names'][best], round(float(chances[best] / chances.sum()), 3)]
         video_sha.append([segment, _sha256(videos[segment])])  # read once more right after the decoder: in the cache
         log(f'minute {position + 1}/{len(segments)}: {len(frames["t_ns"])} frames read')
         progress.report('simulate', position + 1, len(segments), route)
@@ -942,7 +1057,8 @@ def replay(root: Path, route: str, set_key: str, *, device: str = 'cuda', packag
             'brain_memory_gap': (files.brain_contract.get('step') or {}).get('memory_gap_seconds') if reader else None,
             'brain_groups': [[name, car.brain.brain_inputs.INPUT_SIZES[name]] for name in reader.groups] if reader else None,
             'sources': {'video': video_sha, 'logs': [row for row in logs['files'] if row[0] in segments]},
-            'frames': frames, 'out': out, 'signs': signs, 'in': {**inputs, 'brain': brain_rows}}
+            'frames': frames, 'out': out, 'signs': signs, 'in': {**inputs, 'brain': brain_rows},
+            **({'brain_type': brain_types, 'brain_type_head': head['sha256']} if head is not None else {})}
 
 
 def run(root: Path, routes: list[str], set_key: str, *, device: str = 'cuda', again: bool = False,
@@ -956,7 +1072,7 @@ def run(root: Path, routes: list[str], set_key: str, *, device: str = 'cuda', ag
     for position, route in enumerate(routes):
         meta = result_meta(root, route, set_key)
         if not again and meta is not None and is_current(meta, states[set_key]['networks'] or None, code,
-                                                          states[set_key]['settings']):
+                                                          states[set_key]['settings'], states[set_key]['type_head']):
             log(f'drive {position + 1}/{len(routes)} {route}: replayed already with these networks')
             continue
         try:

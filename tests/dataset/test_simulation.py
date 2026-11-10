@@ -297,6 +297,76 @@ def test_a_result_is_current_with_the_same_networks_code_and_settings():
     assert not simulation.is_current(made, made['networks'], made['code'], {'min_confidence': 0.5})
 
 
+def test_a_replay_without_the_road_type_of_its_brain_is_not_current_once_the_head_is_there():
+    made = record([50])
+    head = 'a' * 64
+    assert not simulation.is_current(made, made['networks'], made['code'], {}, head)
+    assert simulation.is_current({**made, 'brain_type_head': head}, made['networks'], made['code'], {}, head)
+    assert not simulation.is_current({**made, 'brain_type_head': 'b' * 64}, made['networks'], made['code'], {}, head)
+
+
+def test_the_page_holds_the_road_type_of_the_brain_from_one_of_its_steps_to_the_next():
+    made = record([50, 50, 50, 50])
+    assert 'brain_type' not in simulation.view(made, T0)['series']
+    made['brain_type'] = {'0': ['town', 0.912], '1': ['town', 0.904], '3': ['motorway', 0.6]}
+    series = simulation.view(made, T0)['series']
+    assert series['brain_type'] == [[1.0, 'town'], [1.6, 'motorway']]
+    assert series['brain_type_p'] == [[1.0, 0.91], [1.2, 0.9], [1.6, 0.6]]
+
+
+def brain_release(directory, sha):
+    release(directory)
+    manifest = json.loads((directory / 'speed_limits.json').read_text())
+    manifest['brain'] = {'file': 'brain.onnx', 'contract': 'brain.onnx.contract.json'}
+    (directory / 'speed_limits.json').write_text(json.dumps(manifest))
+    (directory / 'brain.onnx').write_bytes(b'brain')
+    (directory / 'brain.onnx.contract.json').write_text(json.dumps(
+        {'checkpoint': 'brain:2026-11-10_2051-brain-s2/brain', 'checkpoint_sha256': sha, 'onnx_sha256': 'b' * 64}))
+
+
+def write_head(root, sha, weight, names):
+    import numpy as np
+    path = simulation.type_head_path(root, {'checkpoint_sha256': sha})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('wb') as handle:
+        np.savez(handle, weight=np.array(weight, dtype=np.float32), bias=np.zeros(len(names), dtype=np.float32),
+                 names=np.array(names))
+
+
+def test_a_set_says_the_road_type_head_of_its_brain_once_it_is_written(tmp_path):
+    package = tmp_path / 'clone' / 'openpilot' / 'sunnypilot' / 'speed_limits'
+    sha = 'c' * 64
+    brain_release(package / 'models', sha)
+    root = tmp_path / 'data'
+    assert simulation.set_states(root, package=package)['car']['type_head'] is None
+    contract = simulation.brain_contract(package / 'models')
+    assert contract['checkpoint_sha256'] == sha and simulation.load_type_head(root, contract) is None
+    write_head(root, sha, [[1.0, 0.0], [0.0, 1.0]], ['town', 'motorway'])
+    assert simulation.set_states(root, package=package)['car']['type_head'] == sha
+    head = simulation.load_type_head(root, contract)
+    assert head['names'] == ['town', 'motorway'] and head['weight'].shape == (2, 2) and head['sha256'] == sha
+    # A set without a brain, a contract without its checkpoint's hash: no head.
+    release(tmp_path / 'other')
+    assert simulation.brain_contract(tmp_path / 'other') is None
+    assert simulation.type_head_path(root, {'checkpoint_sha256': '../x'}) is None
+
+
+def test_the_road_type_head_is_written_only_from_the_weights_the_contract_names(tmp_path):
+    package = tmp_path / 'clone' / 'openpilot' / 'sunnypilot' / 'speed_limits'
+    root = tmp_path / 'data'
+    said = []
+    release(package / 'models')
+    assert simulation.save_type_head(root, 'car', package, log=said.append) is None and 'no brain' in said[-1]
+    brain_release(package / 'models', 'c' * 64)
+    assert simulation.save_type_head(root, 'car', package, log=said.append) is None and 'no weights' in said[-1]
+    weights = root / 'runs' / '2026-11-10_2051-brain-s2' / 'brain-last.pt'
+    weights.parent.mkdir(parents=True)
+    weights.write_bytes(b'trained again since')
+    assert simulation.save_type_head(root, 'car', package, log=said.append) is None and 'changed since' in said[-1]
+    write_head(root, 'c' * 64, [[1.0, 0.0]], ['town'])
+    assert simulation.save_type_head(root, 'car', package, log=said.append) is not None and 'ready' in said[-1]
+
+
 def test_a_meta_without_the_settings_is_made_again_from_its_result(tmp_path):
     made = record([50, 50])
     made['settings'] = {'min_confidence': 0.7}
@@ -435,3 +505,57 @@ def test_a_replay_gives_the_loop_what_speedvisiond_gets_in_its_order(tmp_path, m
     import hashlib
     assert made['sources'] == {'video': [[0, hashlib.sha256(b'video').hexdigest()]], 'logs': [[0, 'rlog', 'b' * 64]]}
     assert made['brain_memory_gap'] is None
+
+
+def test_a_replay_names_the_road_type_on_the_memory_of_the_cars_brain_at_each_of_its_steps(tmp_path, monkeypatch):
+    import numpy as np
+
+    from nnslr_tools import road_type_signs
+    width, height = 16, 16
+    sha = 'c' * 64
+    network = SimpleNamespace(given=None)
+    reader = SimpleNamespace(hidden=np.zeros((1, 2), dtype=np.float32), groups=[])
+    # The car's brain steps at frames 0 and 8 only; its memory then says town, then motorway.
+    memories = {0: [2.0, 0.0], 8: [0.0, 3.0]}
+
+    class BrainLoop(Loop):
+        def frame(self, now, y, uv, full=None):
+            sent = super().frame(now, y, uv, full)
+            index = int(y[0, 0])
+            if index in memories:
+                network.given = {'extra': np.array([[float(index)]])}
+                reader.hidden = np.array([memories[index]], dtype=np.float32)
+            return sent
+
+    car = SimpleNamespace(
+        pipeline=SimpleNamespace(release=lambda directory: SimpleNamespace(
+            name='speed-limits fake', settings={}, finder='f', classifier='c', brain='b', road_type=None, decider=None,
+            brain_contract={'checkpoint_sha256': sha, 'step': {'memory_gap_seconds': 5.0}}),
+            SpeedVision=lambda *args, **kwargs: BrainLoop(), DEFAULT_COUNTRY='CH'),
+        vision=SimpleNamespace(apply_settings=lambda settings: {}, FOCAL_LENGTHS={},
+                               nv12_planes=lambda data, w, h, stride, offset: (data[:w * h].reshape(h, w), data[w * h:].reshape(h // 2, w))),
+        applicability=SimpleNamespace(), country=SimpleNamespace(GpsFix=None),
+        brain=SimpleNamespace(BrainReader=lambda *args: reader, brain_inputs=SimpleNamespace(INPUT_SIZES={})))
+    monkeypatch.setattr(simulation, 'car_modules', lambda package=None: car)
+    monkeypatch.setattr(simulation, 'release_networks', lambda directory: [{'role': 'brain', 'file': 'b', 'id': 'x', 'sha256': 'a'}])
+    monkeypatch.setattr(simulation, 'code_hashes', lambda package=None: {'brain.py': 'c'})
+    monkeypatch.setattr(simulation, 'OneNetwork', lambda path, device: None)
+    monkeypatch.setattr(simulation, 'StepNetwork', lambda path, device: network)
+    monkeypatch.setattr(road_type_signs, '_videos', lambda root, route: {0: tmp_path / 'fcamera.hevc'})
+    monkeypatch.setattr(road_type_signs, '_video_size', lambda video: (width, height))
+    monkeypatch.setattr(road_type_signs, '_video_stamp', lambda videos: [[0, 1, 2]])
+    (tmp_path / 'fcamera.hevc').write_bytes(b'video')
+    second = 1_000_000_000
+    monkeypatch.setattr(simulation, 'read_logs', lambda root, route, workers=None: {
+        'car': [], 'enabled': [], 'motion': [], 'radar': [], 'gps': [],
+        'frames': {0: [10 * second + 50_000_000 * index for index in range(10)]}, 'files': []})
+    monkeypatch.setattr(simulation, '_decode', lambda video, w, h, *, reduce, device: (
+        bytes([index]) * (w * h * 3 // 2) for index in range(10)))
+    without = simulation.replay(tmp_path, ROUTE, 'car', device='cpu', log=lambda text: None)
+    assert 'brain_type' not in without and 'brain_type_head' not in without
+    write_head(tmp_path, sha, [[1.0, 0.0], [0.0, 1.0]], ['town', 'motorway'])
+    made = simulation.replay(tmp_path, ROUTE, 'car', device='cpu', log=lambda text: None)
+    # Frames 0, 4 and 8 are read; the brain stepped at the first and the last.
+    assert made['in']['brain'] == {'0': [0.0], '2': [8.0]} and made['brain_type_head'] == sha
+    assert made['brain_type'] == {'0': ['town', round(float(np.exp(2) / (np.exp(2) + 1)), 3)],
+                                  '2': ['motorway', round(float(np.exp(3) / (np.exp(3) + 1)), 3)]}
