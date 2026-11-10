@@ -135,31 +135,33 @@ with sync_playwright() as p:
     assert phone.locator('#prevSecond').is_visible() and phone.locator('#nextSecond').is_visible()
     assert phone.evaluate('document.documentElement.scrollWidth - innerWidth') <= 0
 
-    # Beside the zoom, the box as the classifier gets it: rounded outwards as on the car, the training's own crop made
-    # by the server once the box settles, which names the picture it was cut from; drawn by the browser while a corner
-    # is dragged. The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks
+    # In the zoom's top right corner, the box as the classifier gets it: rounded outwards as on the car, the training's
+    # own crop made by the server once the box settles, which names the picture it was cut from; drawn by the browser
+    # while a corner is dragged. The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks
     # nothing.
     square = open_page(browser, '/route/' + route + '/', 1500)
     square.locator('#boxList .box-main').first.click()
     caption, source = square.locator('#netCaption'), square.locator('#netSource')
-    until(square, "document.querySelector('#netSource').textContent.startsWith('from ')")
-    assert caption.inner_text() == 'Classifier · 14×18 px', caption.inner_text()
-    assert source.inner_text() == 'from 32×24', source.inner_text()
+    until(square, "document.querySelector('#netSource').classList.contains('served')")
+    assert caption.inner_text() == '14×18 px', caption.inner_text()
+    assert source.inner_text() == '32×24', source.inner_text()
     assert square.evaluate("[netViewPicture.width, netViewPicture.height]") == [160, 160]
+    zoom, net = square.locator('#zoom').bounding_box(), square.locator('#netView').bounding_box()
+    assert abs(zoom['x'] + zoom['width'] - net['x'] - net['width']) <= 12 and abs(net['y'] - zoom['y']) <= 12, (zoom, net)
     # The grid: the crop as drawn top left and three as the training varies it, then back to the one square.
     square.locator('#netSamples').click()
     until(square, "netViewPicture.width === 320 && document.querySelector('#netView').classList.contains('varied')")
-    assert caption.inner_text() == 'Classifier · 14×18 px', caption.inner_text()
+    assert caption.inner_text() == '14×18 px', caption.inner_text()
     square.locator('#netSamples').click()
     until(square, "netViewPicture.width === 160")
     corner = square.locator('#zoom .handle-hit.se').bounding_box()
     square.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
     square.mouse.down()
     square.mouse.move(corner['x'] - 40, corner['y'] - 40, steps=4)
-    assert caption.inner_text() != 'Classifier · 14×18 px', 'the square did not follow the corner while dragging'
-    assert source.inner_text() == 'browser preview', source.inner_text()
+    assert caption.inner_text() != '14×18 px', 'the square did not follow the corner while dragging'
+    assert source.inner_text() == 'browser', source.inner_text()
     square.mouse.up()
-    until(square, "document.querySelector('#netSource').textContent.startsWith('from ')")
+    until(square, "document.querySelector('#netSource').classList.contains('served')")
     # C fits every box of the frame, the one just resized by hand too.
     hand_fits = []
     square.route('**/fit', lambda route: (hand_fits.append(route.request.post_data_json['boxes']), route.fulfill(json={
@@ -168,6 +170,20 @@ with sync_playwright() as p:
     until(square, "document.body.innerText.includes(' · 1 ms.')")
     assert len(hand_fits) == 1 and len(hand_fits[0]) == square.locator('#boxList .box-main').count(), hand_fits
     assert 'placed by hand' not in square.locator('body').inner_text()
+
+    # Recent: the label just given to a box of the drive, one tap away on the box of another frame.
+    recent = open_page(browser, '/route/' + route + '/', 1500)
+    recent.locator('#boxList .box-main').first.click()
+    recent.keyboard.press('8')
+    for _ in range(2):
+        recent.keyboard.press('ArrowRight')
+    recent.locator('#boxList .box-main').first.click()
+    chip = recent.locator('#recentLabels .chip.recent', has=recent.locator('.mini-sign', has_text='80'))
+    chip.wait_for()
+    assert chip.get_attribute('aria-pressed') == 'false'
+    chip.click()
+    assert chip.get_attribute('aria-pressed') == 'true'
+    assert 'Speed limit · 80' in recent.locator('#boxList .box-main').first.inner_text()
 
     # Car networks: a number with hours says so, and the plain disc of the frame under it does not use up that reading.
     car = open_page(browser, '/route/' + route + '/', 1500)

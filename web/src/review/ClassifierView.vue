@@ -1,13 +1,13 @@
 <script setup lang="ts">
-// What the classifier gets for the selected box, beside the zoom: the box cut from the frame and stretched to a square,
-// proportions lost, as the car and the training do. Each of its pixels is one the network gets, so it stays blocky on
-// a sharp screen.
+// What the classifier gets for the selected box, in the zoom's top right corner: the box cut from the frame and
+// stretched to a square, proportions lost, as the car and the training do. On a screen at 2x each of its pixels is one
+// the network gets (160 in 80 px; the grid, 320 in 160 px).
 //   - Once the box settles, the square is the training's own crop, made by the server (GET .../classifier-crop, the
 //     training's crop_rectangle, frame at full definition and resize): its caption says which picture it comes from.
 //   - While a corner is dragged, before that answer comes, and wherever there is none (the static report, a frame of
 //     the video not saved, a failure), it is drawn here from the photo on screen, as close as a browser can.
-//   - The grid button shows that crop small, top left, and beside it three of the box as the augmented training varies
-//     it across epochs (moved and resized).
+//   - The grid button shows that crop top left, and beside it three of the box as the augmented training varies it
+//     across epochs (moved and resized), in a square twice as large.
 import {computed, onBeforeUnmount, ref, shallowRef, useTemplateRef, watch, watchEffect} from 'vue';
 import {readLocal, releaseFocus, writeLocal} from './dom';
 import {cropRectangle} from './geometry';
@@ -136,15 +136,15 @@ const measure = computed(() => {
   return {source: [width, height], pixels: [Math.round((c[2] - c[0]) * width / props.row.width),
     Math.round((c[3] - c[1]) * height / props.row.height)]};
 });
-// Two lines: what the square is and the box's pixels; then the picture the server cut it from, or that the browser
-// drew it.
+// Two short lines on the square: the box's pixels; then the picture the server cut it from, or that the browser drew
+// it. The tooltip says the rest.
 const caption = computed(() => {
   const size = measure.value;
-  return size === null ? 'Classifier' : 'Classifier · ' + size.pixels[0] + '×' + size.pixels[1] + ' px';
+  return size === null ? 'Classifier' : size.pixels[0] + '×' + size.pixels[1] + ' px';
 });
 const source = computed(() => {
   const answer = shown.value;
-  return answer === null ? 'browser preview' : 'from ' + answer.source[0] + '×' + answer.source[1];
+  return answer === null ? 'browser' : answer.source[0] + '×' + answer.source[1];
 });
 const describe = computed(() => {
   const size = measure.value;
@@ -199,7 +199,8 @@ watchEffect(() => {
 </script>
 
 <template>
-  <figure class="net-view" id="netView" :class="{varied: grid}">
+  <!-- Twice as large while the grid is asked for, a drag included: the zoom's view, which leaves it room, stays. -->
+  <figure class="net-view" id="netView" :class="{varied: grid, large: varied && address !== null}">
     <canvas ref="view" id="netViewPicture" :width="grid ? 2 * SIZE : SIZE" :height="grid ? 2 * SIZE : SIZE" role="img"
             :aria-label="describe"></canvas>
     <figcaption :title="describe">

@@ -5,6 +5,7 @@ import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue, signStyleOf} f
 import {writeLocal} from './dom';
 import {countryOf, currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
+import {LABEL_FIELDS, type Label} from './recent';
 import {refuseChange} from './busy';
 import {revealEditor} from './scroll';
 import {hintsOf, state, store} from './store';
@@ -133,6 +134,22 @@ export function setValue(value: number | null): void {
     d.value_state = value === null ? 'unknown' : 'reviewed';
     const row = currentRow()!;
     if (signStyleOf(countryOf(row, workOf(row))) === 'us') d.sign_unit = 'mph';
+    state.valueError = false;
+  });
+}
+
+/** Recent (recent.ts): a label given to another box of the drive, whole on the selected box. Its box, visibility,
+ * occlusion and notes stay. */
+export function applyLabel(label: Label): void {
+  editSelected((d) => {
+    for (const field of LABEL_FIELDS) {
+      if (label[field] === undefined) delete d[field];
+      else Object.assign(d, {[field]: label[field]});
+    }
+    d.family = label.family;
+    d.value_kph = label.value_kph ?? null;
+    d.sign_value = d.value_kph;
+    d.value_state = d.value_kph === null ? 'unknown' : 'reviewed';
     state.valueError = false;
   });
 }
