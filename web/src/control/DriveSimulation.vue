@@ -8,7 +8,7 @@
 // player's own timeline, read here once more), a replay with the networks on the car or with those in use (GET
 // /api/simulation/drives/<route>?set=, nnslr_tools.simulation.view: the same series by the same names), or the
 // certified replay. Over the picture also SignNet's boxes of the frame read (the switch Boxes), in the frame's pixels
-// as Speed review's. Three lanes over the player's: the speed to hold as runs, every sign read as a tick with what was
+// as Speed review's, and on the video's frames between two frames read on their way to the next one's (boxesAt). Three lanes over the player's: the speed to hold as runs, every sign read as a tick with what was
 // read, and on a certified drive where the replay shown differs from it (red the speed to hold, orange the reading; a
 // tap goes there). At the side: the values at the time shown; Compute, which replays the drive with the set shown on
 // the GPU (the panel action "simulate", helpers/simulate_drive.sh) where it has no replay or one of other networks
@@ -319,7 +319,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
     <template #picture="{shown}">
       <div ref="overlay" class="dv-overlay" aria-hidden="true">
         <svg v-if="shown && boxes.length" class="dv-boxes" :viewBox="`0 0 ${frame[0]} ${frame[1]}`" preserveAspectRatio="xMidYMid meet">
-          <g v-for="(box, index) in boxes" :key="index" class="dv-box" :class="{other: box[6] === 'other_road'}">
+          <g v-for="({box, held}, index) in boxes" :key="index" class="dv-box" :class="{other: box[6] === 'other_road', held}">
             <rect :x="box[0]" :y="box[1]" :width="Math.max(1, box[2] - box[0])" :height="Math.max(1, box[3] - box[1])"/>
             <text :x="box[0]" :y="Math.max(frame[1] / 30, box[1] - frame[1] / 120)" :font-size="frame[1] / 28">{{ tagOf(box) }}</text>
           </g>
@@ -382,7 +382,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
           <p v-else-if="set" class="dr-hint" id="dv-none">This drive is not replayed with these networks yet.</p>
           <div v-if="view" class="sr-tools">
             <button type="button" class="bc-switch" id="dv-boxes" :aria-pressed="showBoxes"
-                    title="SignNet’s boxes of the frame read, on the picture: grey and dashed a sign of another road"
+                    title="SignNet’s boxes of the frame read, on the picture: grey and dashed a sign of another road. The car reads 5 frames a second: in between, a box follows its sign to the next frame read; faded, the next frame read lost it"
                     @click="showBoxes = !showBoxes">Boxes</button>
           </div>
         </template>

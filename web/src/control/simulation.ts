@@ -6,7 +6,7 @@
 // a time; where the comma's screen goes on the picture; and the regression test in words.
 import {ref, watch} from 'vue';
 import {plural, sentence} from '../common/format';
-import {type Series, type Value, valueAt} from './drive-review';
+import {FPS, type Series, type Value, valueAt} from './drive-review';
 
 /** A set of networks a drive is replayed with (simulation.SETS): the release the comma downloads, or the versions in
  * use on Models. */
@@ -272,11 +272,60 @@ export function readingWords(signClass: string, value: number): string {
 const FRAME_LEAD = 0.045;
 /** The boxes hold until the next frame read, 0.2 s later (pipeline.PERIOD); older than this they are of a frame gone. */
 const BOX_SECONDS = 0.35;
-/** SignNet's boxes on the picture of a time: those of the last frame read up to it, none once that frame is old. */
-export function boxesAt(signs: readonly [number, SignBox[]][], s: number): SignBox[] {
+/** Two boxes of two frames read one after the other are the same sign when their centres are closer than this many times
+ * the larger box's longer side: a sign close by moves about one and a half of its size in 0.25 s. */
+const SAME_SIGN = 2;
+/** A box on the picture of a time. The car reads 5 frames a second and the video has 20: on the frame read, SignNet's
+ * box as it is; on the frames after it, on its way to the same sign's box of the next frame read, so that it stays on
+ * the sign (the sign moves 25-30 px in 0.2 s close by); held: the next frame read has no box of that sign, so it stays
+ * where it was read, behind the sign. */
+export interface ShownBox {
+  box: SignBox;
+  held: boolean;
+}
+const centre = (box: SignBox): [number, number] => [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+const side = (box: SignBox): number => Math.max(box[2] - box[0], box[3] - box[1], 1);
+/** For each box of a frame read, the same sign's box in the next frame read, or null: the nearest one, the same class
+ * first, each box of the next frame taken once. */
+export function sameSigns(now: readonly SignBox[], next: readonly SignBox[]): (SignBox | null)[] {
+  const pairs: [number, number, number][] = [];
+  now.forEach((box, i) => next.forEach((other, j) => {
+    const [x, y] = centre(box);
+    const [u, v] = centre(other);
+    const apart = Math.hypot(u - x, v - y) / Math.max(side(box), side(other));
+    if (apart <= SAME_SIGN) pairs.push([i, j, apart + (box[4] === other[4] ? 0 : SAME_SIGN)]);
+  }));
+  pairs.sort((a, b) => a[2] - b[2]);
+  const found: (SignBox | null)[] = now.map(() => null);
+  const taken = new Set<number>();
+  for (const [i, j] of pairs) {
+    if (found[i] || taken.has(j)) continue;
+    found[i] = next[j]!;
+    taken.add(j);
+  }
+  return found;
+}
+/** SignNet's boxes on the picture of a time: those of the last frame read up to it, each moved by the video's frames
+ * since it towards the same sign's box of the next frame read (ShownBox); none once that frame is old. */
+export function boxesAt(signs: readonly [number, SignBox[]][], s: number): ShownBox[] {
   const at = s + FRAME_LEAD;
-  const row = signs[lastAt(signs.length, (index) => signs[index]![0], at)];
-  return row && at - row[0] < BOX_SECONDS ? row[1] : [];
+  const index = lastAt(signs.length, (row) => signs[row]![0], at);
+  const row = signs[index];
+  if (!row || at - row[0] >= BOX_SECONDS) return [];
+  // Whole frames of the video: 0 on the frame read, whatever the few ms between its exposure and FRAME_LEAD.
+  const step = Math.round((at - row[0]) * FPS);
+  const next = signs[index + 1];
+  const steps = next ? Math.round((next[0] - row[0]) * FPS) : 0;
+  const ahead = next && next[0] - row[0] < BOX_SECONDS && steps > step ? sameSigns(row[1], next[1]) : [];
+  return row[1].map((box, i) => {
+    const to = ahead[i];
+    if (step <= 0) return {box, held: false};
+    if (!to) return {box, held: true};
+    const part = step / steps;
+    const way = (from: number, end: number): number => from + (end - from) * part;
+    return {box: [way(box[0], to[0]), way(box[1], to[1]), way(box[2], to[2]), way(box[3], to[3]), box[4], box[5], box[6]],
+      held: false};
+  });
 }
 
 // -- the picture ----------------------------------------------------------------------------------------------------------
