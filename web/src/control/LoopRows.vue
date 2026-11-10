@@ -2,6 +2,7 @@
 // The loop of the work on the Overview (loop.ts): Drives, Review, Train, Car, numbered in their order, each a link to
 // its page with how much waits there and its one button. Work running for a row takes the place of its button (its Stop
 // is in the Running card above); a row whose work is done shows a tick. The first row with work waiting is marked.
+// Train also has a link to Training › Pipeline under its button, there while its import runs too.
 import {computed} from 'vue';
 import {sentence} from '../common/format';
 import type {ActionName, ActionState, PanelStatus} from '../common/panel-types';
@@ -32,7 +33,8 @@ const rows = computed(() => loopRows(props.status));
             <p v-if="!row.action.state.allowed && row.action.state.reason" class="loop-note">{{ sentence(row.action.state.reason) }}</p>
           </template>
           <a v-else-if="row.action" class="btn" :class="{primary: row.primary}" :href="row.action.href"><Icon :name="row.action.icon"/>{{ row.action.label }}</a>
-          <span v-else-if="row.ok" class="loop-ok" aria-label="Done">✓</span>
+          <span v-else-if="row.ok && !row.link" class="loop-ok" aria-label="Done">✓</span>
+          <a v-if="row.link" class="btn" :href="row.link.href" :id="'loop-' + row.key + '-link'"><Icon :name="row.link.icon"/>{{ row.link.label }}</a>
         </div>
       </section>
     </template>

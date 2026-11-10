@@ -1,10 +1,12 @@
 // The Overview as the loop of the work: new drives are prepared, their signs reviewed, the networks trained on the
 // reviews, and the ones in use published to the car. One row each, from the data of the status (never the sentence of
 // route_status): how much waits there, in one line, and the one thing to do about it; its work running in place of
-// its button. The rows with work waiting are marked; the first of them has the main button.
+// its button. The rows with work waiting are marked; the first of them has the main button. Train has a second button,
+// a link to Training › Pipeline that stays while its import runs (issue #43).
 import {plural, reviewPercent, sentence, thousands} from '../common/format';
 import type {ActionName, ActionState, Job, PanelStatus, RouteState} from '../common/panel-types';
 import type {IconName} from '../components/icons/shapes';
+import {JOB_STATE, jobOf, startedWhen} from './jobs';
 import {networkText, proposerText} from './proposer-words';
 import {reviewSummary} from './review-routes';
 
@@ -32,6 +34,8 @@ export interface LoopRow {
   running: string;
   /** The button: an action of the panel, or a link. */
   action: {name: ActionName; state: ActionState; label: string} | {href: string; label: string; icon: IconName} | null;
+  /** A second button, a link shown under the first even while its work runs; null for none. */
+  link: {href: string; label: string; icon: IconName} | null;
   /** The main one: the first row with work waiting, nothing of it running. */
   primary: boolean;
 }
@@ -82,7 +86,7 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
       big: plural(roads, 'drive') + ' not read on the map',
       note: 'Prepared: the map still has to give the road and the limit of each picture.', warn: '',
       more: null, waiting: true, ok: false, running: running(status, 'drives'),
-      action: {name: 'road_types', state: status.actions.road_types, label: 'Read the map'},
+      action: {name: 'road_types', state: status.actions.road_types, label: 'Read the map'}, link: null,
     };
   }
   // Nothing to prepare: the button downloads the new drives from the comma (also in the comma's panel, at the top).
@@ -96,6 +100,7 @@ function drives(status: PanelStatus): Omit<LoopRow, 'primary'> {
     waiting: count > 0 || status.next_action === 'fetch', ok: !count && status.routes.length > 0, running: running(status, 'drives'),
     // "Download from the comma" is too long for a column of four: the row says where they come from.
     action: status.actions[name] ? {name, state: status.actions[name], label: count ? status.actions[name].label : 'Download'} : null,
+    link: null,
   };
 }
 
@@ -112,27 +117,37 @@ function review(status: PanelStatus): Omit<LoopRow, 'primary'> {
     warn: '', more: null, waiting: left > 0, ok: summary.frames > 0 && !left, running: running(status, 'review'),
     action: summary.resume ? {href: summary.resume.href, label: summary.resume.started ? 'Resume review' : 'Start review',
       icon: 'resume'} : null,
+    link: null,
   };
 }
 
 function train(status: PanelStatus): Omit<LoopRow, 'primary'> {
+  // As Data › Training dataset says it: the Sign review frames not imported yet, on how many drives, the last import.
   const fresh = status.routes.reduce((total, row) => total + row.new_reviews, 0);
+  const freshDrives = status.routes.filter((row) => row.new_reviews > 0).length;
   const objects = status.dataset?.objects ?? status.routes.reduce((total, row) => total + row.objects, 0);
   const enough = status.reviewed_routes >= status.min_routes;
+  const last = jobOf(status, ['dataset']);
+  const lastText = last && last.state !== 'running' ? 'Last import ' + startedWhen(last) + ' · '
+    + (last.state === 'interrupted' ? 'stopped' : JOB_STATE[last.state][0]) + '. ' : '';
+  const importing = status.actions.dataset;
   return {
     key: 'train', label: 'Train', href: '/train', kind: 'train',
     big: !enough ? status.reviewed_routes + ' of ' + status.min_routes + ' drives reviewed'
-      : fresh ? plural(fresh, 'new review') : 'Dataset up to date',
+      : fresh ? plural(fresh, 'sign review') + ' to import' : 'Dataset up to date',
     note: !enough ? 'Training needs ' + status.min_routes + ' reviewed drives.'
-      : (fresh ? 'Not in the dataset yet: Train all imports them first. ' : '') + thousands(objects) + ' objects in the dataset.',
+      : (fresh ? 'New or changed on ' + plural(freshDrives, 'drive') + ', a few minutes; Speed review needs none. ' : '')
+        + lastText + thousands(objects) + ' objects in the dataset.',
     warn: '', more: null, waiting: enough && fresh > 0, ok: enough && !fresh, running: running(status, 'train'),
-    action: enough ? {href: '/train#pipeline', label: 'Train all', icon: 'train'} : null,
+    action: enough && fresh && importing ? {name: 'dataset', state: importing, label: 'Import sign reviews'} : null,
+    link: enough ? {href: '/train#pipeline', label: 'Training pipeline', icon: 'train'} : null,
   };
 }
 
 function car(status: PanelStatus): Omit<LoopRow, 'primary'> {
   const summary = status.car;
-  const base = {key: 'car' as const, label: 'Car', href: '/publish', kind: 'done' as const, more: null, running: running(status, 'car')};
+  const base = {key: 'car' as const, label: 'Car', href: '/publish', kind: 'done' as const, more: null, link: null,
+    running: running(status, 'car')};
   if (!summary) return {...base, big: '–', note: '', warn: '', waiting: false, ok: false, action: null};
   const differ = CAR_ROLES.filter((role) => (summary.in_use[role] ?? null) !== (summary.on_car?.[role] ?? null));
   const publish = {href: '/publish', label: summary.build_pending ? 'Finish publishing' : 'Publish', icon: 'upload' as const};
