@@ -488,7 +488,8 @@ def load_signs(root: Path, route: str, models: Path | None = None) -> dict | Non
 
 
 def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: list, classifier: Path | None,
-                package: Path, models: Path | None = None, networks: dict | None = None, speeds: bool = False) -> dict:
+                package: Path, models: Path | None = None, networks: dict | None = None,
+                speeds: list | None = None) -> dict:
     """The record of a drive read to the end, written to its cache. 'pictures' only when every segment saved them."""
     vision = load_vision(package, models)
     segments.sort(key=lambda item: item['segment'])
@@ -502,7 +503,7 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
               'boards': board_confirmations(vision, readings),
               'other_road': [[round(item['segment'] * SEGMENT_SECONDS + seconds, 3), signs]
                              for item in segments for seconds, signs in item.get('other_road') or []],
-              'networks': networks, 'speeds': speeds,
+              'networks': networks, 'speeds': speeds or [],
               'classifier': str(classifier) if classifier is not None else None}
     if all(item.get('pictures') == item['frames'] for item in segments if item['frames']):
         record['pictures'] = {str(item['segment']): item['pictures'] for item in segments if item['frames']}
@@ -537,13 +538,22 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         videos = _videos(root, route)
         stamps[route] = _video_stamp(videos)
         record = load_signs(root, route, models)
+        speeds = None
         if record and record.get('fingerprint') == stamp and record.get('videos') == stamps[route] and \
                 (not pictures or pictures_ready(root, record)):
-            records[route] = record
-            continue
+            # The segments ruled with the car's speed ('speeds'): one whose logs came since is read again with it.
+            had = set(record['speeds']) if isinstance(record.get('speeds'), list) else set()
+            if not ruled or speeds_of is None or set(videos) <= had:
+                records[route] = record
+                continue
+            speeds = frame_speeds(speeds_of(route))
+            if not (set(speeds) & set(videos)) - had:
+                records[route] = record
+                continue
         keep = pictures or bool(record and record.get('pictures'))
-        speeds = frame_speeds(speeds_of(route)) if ruled and speeds_of is not None and videos else {}
-        known[route] = bool(speeds)
+        if speeds is None:
+            speeds = frame_speeds(speeds_of(route)) if ruled and speeds_of is not None and videos else {}
+        known[route] = sorted(segment for segment in speeds if segment in videos)
         tasks += [(route, segment, str(path), str(picture_path(root, route, segment)) if keep else None,
                    speeds.get(segment)) for segment, path in videos.items()]
     if tasks:

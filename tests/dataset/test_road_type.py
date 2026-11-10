@@ -1359,3 +1359,46 @@ def test_the_speed_of_each_frame_read_is_the_last_carstate_before_it(monkeypatch
     # The frame before any carState: unknown; a frame not read (not on the step) is skipped; km/h -> m/s.
     assert signs.frame_speeds(merged) == {2: [None, 10.0, None, None]}
     assert signs.frame_speeds(None) == {}
+
+
+def test_a_drive_whose_logs_came_later_is_ruled_again_with_the_cars_speed(tmp_path, monkeypatch):
+    """A segment read without its logs was ruled with the speed unknown; once its logs are there the drive is read again
+    (a drive whose every segment had its speed is not)."""
+    from nnslr_tools import road_type_signs as signs
+    read = []
+
+    class Pool:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *error): return False
+        def map(self, function, tasks):
+            read.append([(segment, speeds) for _, segment, _, speeds in tasks])
+            return ({'segment': segment, 'frames': 1, 'signs': [], 'boxes': [], 'gpu': True, 'nvdec': True,
+                     'pictures': None} for _, segment, *_ in tasks)
+
+    videos = {0: tmp_path / 'a.hevc', 1: tmp_path / 'b.hevc'}
+    for video in videos.values():
+        video.write_bytes(b'x')
+    logs = {0: [1.0]}
+    monkeypatch.setattr(signs, 'ProcessPoolExecutor', Pool)
+    monkeypatch.setattr(signs, '_videos', lambda root, route: videos)
+    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx, models=None: 'stamp')
+    monkeypatch.setattr(signs, 'network_paths', lambda package, onnx=None, models=None: {'decider': tmp_path / 'decider'})
+    monkeypatch.setattr(signs, 'network_ids', lambda paths: {})
+    monkeypatch.setattr(signs, 'load_vision', lambda package, models=None: None)
+    monkeypatch.setattr(signs, 'confirmations', lambda vision, readings: [])
+    monkeypatch.setattr(signs, 'board_confirmations', lambda vision, readings: [])
+    monkeypatch.setattr(signs, 'frame_speeds', lambda merged: dict(merged))
+
+    def build():
+        signs.build_signs(tmp_path, ['drive'], package=tmp_path, workers=1, log=lambda line: None,
+                          speeds_of=lambda route: logs)
+    build()
+    assert read == [[(0, [1.0]), (1, None)]] and signs.load_signs(tmp_path, 'drive')['speeds'] == [0]
+    build()
+    assert len(read) == 1
+    logs[1] = [2.0]
+    build()
+    assert read[-1] == [(0, [1.0]), (1, [2.0])] and signs.load_signs(tmp_path, 'drive')['speeds'] == [0, 1]
+    build()
+    assert len(read) == 2
