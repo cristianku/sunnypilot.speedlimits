@@ -45,6 +45,7 @@ from typing import Any
 
 from nnslr_tools.car_release import (
     BRAIN_FILE,
+    DECIDER_FILE,
     FILES,
     GPU_VENV_ENV,
     MANIFEST,
@@ -442,12 +443,13 @@ def compiled_name(stem: str, digest: str) -> str:
 
 def copy_files(comma: Comma, folder: Path, version: str, settings: dict | None = None) -> list[str]:
     """Each file to <name>.tmp in the comma's models folder, its sha256 checked there, then all moved into place,
-    speed_limits.json last (with the car's settings); the build's brain, when it has one, stays in use. Returns
-    the files copied."""
+    speed_limits.json last (with the car's settings); the build's brain and applicability network, when it has them,
+    stay in use. Returns the files copied."""
     names = [name for network_file in FILES.values() for name in (network_file, network_file + '.contract.json')]
-    brain = 'yes' in comma.run('cd ' + _q(comma.models) + f' && test -f {BRAIN_FILE} && '
-                               f'test -f {BRAIN_FILE}.contract.json && echo yes || true')
-    (folder / MANIFEST).write_text(json.dumps(manifest_of(version, settings, brain), indent=2) + '\n',
+    brain, decider = ('yes' in comma.run('cd ' + _q(comma.models) + f' && test -f {file} && '
+                                         f'test -f {file}.contract.json && echo yes || true')
+                      for file in (BRAIN_FILE, DECIDER_FILE))
+    (folder / MANIFEST).write_text(json.dumps(manifest_of(version, settings, brain, decider), indent=2) + '\n',
                                    encoding='utf-8')
     names.append(MANIFEST)
     try:

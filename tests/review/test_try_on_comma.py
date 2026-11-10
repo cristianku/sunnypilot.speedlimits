@@ -274,6 +274,18 @@ def test_the_builds_brain_stays_in_use_during_a_trial(comma):
     assert models[car_release.BRAIN_FILE] == b'build brain'
 
 
+def test_the_builds_applicability_network_stays_in_use_during_a_trial(comma):
+    for name in (car_release.BRAIN_FILE, car_release.DECIDER_FILE):
+        (comma['models'] / name).write_bytes(b'build ' + name.encode())
+        (comma['models'] / (name + '.contract.json')).write_text('{}\n')
+    assert run_trial(comma, sleep=compile_all(comma))['outcome'] == 'ready'
+    models = models_state(comma)
+    manifest = json.loads(models['speed_limits.json'])
+    assert manifest == car_release.manifest_of('2026-10-28-try', brain=True, decider=True, settings=car_settings.DEFAULTS)
+    assert manifest['decider'] == {'file': 'decider.onnx', 'contract': 'decider.onnx.contract.json'}
+    assert models[car_release.DECIDER_FILE] == b'build decider.onnx'
+
+
 def test_a_dry_run_reads_the_comma_and_copies_nothing(comma):
     before = models_state(comma)
     said: list[str] = []

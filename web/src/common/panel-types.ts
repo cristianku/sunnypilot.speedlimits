@@ -599,8 +599,8 @@ export interface PanelStatus {
 /** The networks the car runs: in use here (models/active.json) and in the comma's software (models/on-car.json, null
  * before the first Publish), by role and id; why one of the files cannot be read; a build of the testing branch owed. */
 export interface CarSummary {
-  in_use: Record<'cutter' | 'classifier' | 'brain', string | null>;
-  on_car: Record<'cutter' | 'classifier' | 'brain', string | null> | null;
+  in_use: Record<'cutter' | 'classifier' | 'decider' | 'brain', string | null>;
+  on_car: Record<'cutter' | 'classifier' | 'decider' | 'brain', string | null> | null;
   problem: string | null;
   build_pending: boolean;
 }
@@ -1349,7 +1349,7 @@ interface ModelBase {
   part: string;
   /** "Detector 640 × 360", "Reader", "Crop + geometry". */
   label: string;
-  /** "training pipeline", "input-size comparison", "experiment B prototype". */
+  /** "training pipeline", "input-size comparison", "experiment B". */
   detail: string;
   /** The time of its weights (*-best.pt). */
   trained_at: string | null;

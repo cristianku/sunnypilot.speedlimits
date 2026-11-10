@@ -1,7 +1,7 @@
 # [model-roles] - START
 """The networks of the pipeline by role, for the Models tab of the site (docs/NEURAL_NETWORK.md): the cutter finds
 every box that could be a sign (SignNet, the network the comma runs), the classifier says what each box is, the
-decider says whom a sign applies to (today only the prototypes of experiment B).
+decider (Applicability) says whom a sign applies to, our road or another one (experiment B).
 
 Every trained artifact under <data root>/runs is listed by role, newest first, with the numbers that judge it, read
 from what the training and the evaluation wrote:
@@ -92,9 +92,10 @@ MAX_ID = 320
 ACTIVE_FILE = 'models/active.json'
 ON_CAR_FILE = 'models/on-car.json'
 # The networks of the published models repository (speed_limits.json, format 2) by the role they play here.
-CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'brain': 'brain'}
-# A release may have no brain: speedvisiond then reads the signs alone. With a brain it says the limit itself.
-OPTIONAL_CAR_NETWORKS = ('brain',)
+CAR_NETWORKS = {'finder': 'cutter', 'classifier': 'classifier', 'decider': 'decider', 'brain': 'brain'}
+# A release may have no brain: speedvisiond then reads the signs alone. With a brain it says the limit itself. Without
+# a decider it takes every sign; with one it leaves out the signs of another road.
+OPTIONAL_CAR_NETWORKS = ('decider', 'brain')
 SIGNNET_WEIGHTS = re.compile(rf'/runs/({_RUN})/{SIGNNET_PART}-best\.pt$')
 # The weights file of a version, inside its part (SignNet's is at the root of its run).
 WEIGHTS = {'cutter': 'detector-best.pt', 'classifier': 'reader-best.pt'}
@@ -511,6 +512,11 @@ def _write_atomic(path: Path, value: dict) -> None:
             os.close(directory)
 
 
+def decider_weights(part: str) -> str:
+    """The weights of a decider in its run, by the part of its id (experiment-b/<variant>)."""
+    return f'{part}/{part.rsplit("/", 1)[-1]}-best.pt'
+
+
 def _car_id_ok(role: str, model_id: Any) -> bool:
     """An id of a network on the car: a SignNet or a detector for the cutter, a reader or classifier."""
     return role_of(model_id) == role
@@ -580,7 +586,7 @@ def _git(folder: Path, *args: str) -> str:
 
 def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
     """``nnslr on-car``: <root>/models/on-car.json from a clone of the published models repository, the networks
-    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier and brain when
+    the comma downloads. Each network of its speed_limits.json (format 2: finder, classifier, and decider and brain when
     there is one) must match its contract (the ONNX sha256), name weights of a run on this server, and those weights must be
     the ones the contract was made from (checkpoint sha256); the clone must be clean and its commit on a remote
     branch. Reads only the clone (no network) and the runs; writes the one file, unless dry_run."""
@@ -611,7 +617,8 @@ def record_on_car(root: Path, models: Path, *, dry_run: bool = False) -> dict:
             raise ValueError(f'the {network} {model_id} is not on this server')
         run_name, part = model_id.split(':', 1)[1].split('/', 1)
         run = runs._run_dir(run_name)
-        relative = {SIGNNET_PART: SIGNNET_PART + '-best.pt', BRAIN_PART: BRAIN_WEIGHTS}.get(part) or f'{part}/{WEIGHTS[role]}'
+        relative = ({SIGNNET_PART: SIGNNET_PART + '-best.pt', BRAIN_PART: BRAIN_WEIGHTS}.get(part)
+                    or (decider_weights(part) if role == 'decider' else f'{part}/{WEIGHTS[role]}'))
         weights = None if run is None else runs._file(run, relative)
         wanted = contract.get('checkpoint_sha256')
         if weights is None or not isinstance(wanted, str) or not SHA256.fullmatch(wanted) or _sha256(weights) != wanted:
@@ -807,7 +814,7 @@ class ModelIndex:
             pass
         found = []
         for variant in names:
-            checkpoint = self.runs._file(run, f'{EXPERIMENT_DIR}/{variant}/{variant}-best.pt')
+            checkpoint = self.runs._file(run, decider_weights(f'{EXPERIMENT_DIR}/{variant}'))
             if checkpoint is None:
                 continue
             problems: list[str] = []
@@ -815,7 +822,7 @@ class ModelIndex:
             trained = result or {}
             entry = self._base('decider', name, f'{EXPERIMENT_DIR}/{variant}', checkpoint, result, problems)
             entry.update({
-                'label': VARIANT_LABELS.get(variant, _words(variant)), 'detail': 'experiment B prototype',
+                'label': VARIANT_LABELS.get(variant, _words(variant)), 'detail': 'experiment B',
                 'variant': variant, 'inputs': trained.get('inputs'),
                 'architecture': trained.get('architecture'), 'initialization': trained.get('initialization'),
                 'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),

@@ -487,3 +487,181 @@ def export_decider_onnx(checkpoint_path: Path, output_path: Path, *, verify: boo
     contract_path.write_text(json.dumps(contract, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
     return {"valid": True, "task": "decider", "onnx": str(output_path), "onnx_sha256": contract["onnx_sha256"],
             "contract": str(contract_path), "verification": verification}
+
+
+# The boxes the car's decider takes a frame: the car reads no more (vision.MAX_BOXES).
+CAR_DECIDER_BOXES = 5
+CAR_DECIDER_FILE = "applicability.py"
+
+
+def car_decider_contract(checkpoint: dict[str, Any], boxes: int, scene_map: tuple[int, int]) -> dict[str, Any]:
+    """What the car's decider takes and gives (the comma's applicability.py feeds it): a fixed number of boxes, and
+    for the full variant the weights of torchvision's RoIAlign over the cells of the scene's map in place of the boxes
+    (tinygrad has no RoiAlign); one output, the probabilities of whom each box applies to."""
+    from nnslr_tools.context_experiment import OWNERSHIP_CLASSES, SCENE_ROI_SIZE, SCENE_STRIDE
+    from nnslr_tools.sign_types import PLATE_CLASSES
+
+    server = decider_io_contract(checkpoint)
+    # The boxes' inputs take a fixed number of rows; the scene is one frame.
+    inputs = {name: {**spec, "shape": [boxes, *spec["shape"][1:]]} if spec["shape"][0] == "boxes" else spec
+              for name, spec in server["inputs"].items() if name != "rois"}
+    if "rois" in server["inputs"]:
+        inputs["roi_weights"] = {
+            "shape": [boxes, SCENE_ROI_SIZE * SCENE_ROI_SIZE, scene_map[0] * scene_map[1]], "dtype": "float32",
+            "map": list(scene_map), "stride": SCENE_STRIDE, "size": SCENE_ROI_SIZE, "sampling_ratio": 2,
+            "source": "torchvision roi_align (aligned, output size x size, sampling_ratio, spatial_scale 1/stride) of "
+                      "each box in scene pixels, as weights over the cells of the map: bin ph*size+pw, cell row*width+col"}
+    return {
+        "schema_version": 1, "task": "decider", "target": "car", "architecture": server["architecture"],
+        "variant": server["variant"], "boxes": boxes, "inputs": inputs,
+        "outputs": {"ownership": {"shape": [boxes, len(OWNERSHIP_CLASSES)], "dtype": "float32",
+                                  "classes": server["outputs"]["ownership_logits"]["classes"],
+                                  "decode": "probabilities; argmax, unresolved means it abstains; rows of the boxes "
+                                            "given only"}},
+        "ownership_families": server["ownership_families"],
+        # The classes with a plate are of the family of their number (sign_types.class_parts).
+        "plate_families": {kind: "maximum_speed" for kind in PLATE_CLASSES},
+        "dataset_sha256": server["dataset_sha256"], "split_sha256": server["split_sha256"],
+        "training_initialization": server["training_initialization"],
+    }
+
+
+def car_decider_module(path: Path | None = None):
+    """The comma's applicability.py (numpy only), loaded by path: the sunnypilot clone's unless given."""
+    import importlib.util
+    from nnslr_tools.road_type_signs import package_path
+
+    path = Path(path) if path is not None else package_path() / CAR_DECIDER_FILE
+    spec = importlib.util.spec_from_file_location("comma_speed_limits_applicability", path)
+    if spec is None or spec.loader is None or not path.is_file():
+        raise ValueError(f"the comma's {CAR_DECIDER_FILE} is missing: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _car_decider_cases(width: float, height: float):
+    """Boxes (frame pixels) the check of the car's decider tries: 1, 3 and 5 of them, small and large, on every edge of
+    the frame and beyond it, thinner than a pixel."""
+    return [
+        [[600.0, 200.0, 640.0, 240.0]],
+        [[0.0, 0.0, 30.0, 30.0], [width - 12.5, 100.25, width + 4.0, 131.0], [700.3, height - 9.0, 720.9, height + 3.0]],
+        [[-5.0, 50.0, 18.0, 90.0], [400.0, 300.0, 400.4, 300.3], [1000.0, 10.0, 1300.0, 400.0],
+         [250.7, 120.2, 290.1, 171.9], [width - 1.0, height - 1.0, width + 10.0, height + 10.0]],
+    ]
+
+
+def export_decider_car_onnx(checkpoint_path: Path, output_path: Path, *, boxes: int = CAR_DECIDER_BOXES,
+                            car_module: Path | None = None, verify: bool = True) -> dict[str, Any]:
+    """The decider as the comma runs it (applicability.py, under tinygrad): a fixed number of boxes, RoIAlign as a
+    product with weights given as an input, the ownership probabilities only. Checked against PyTorch (torchvision's
+    RoIAlign) with onnxruntime, the weights made by the comma's own applicability.py, on boxes at the edges of the
+    frame too."""
+    from nnslr_tools.checkpoints import model_weights
+    from nnslr_tools.context_experiment import _build_model, _require_experiment_stack
+    from nnslr_tools.media import FRAME_SIZE
+
+    torch, _, _, _, _, _, mobilenet_v3_small, roi_align, _ = _require_experiment_stack()
+    checkpoint = safe_torch_load(Path(checkpoint_path))
+    server = decider_io_contract(checkpoint)
+    model = _build_model(torch, mobilenet_v3_small, None, roi_align, server["variant"],
+                         len(server["outputs"]["reading_logits"]["classes"]))
+    model.load_state_dict(model_weights(checkpoint), strict=True)
+    model.eval()
+    scene_map = (0, 0)
+    if model.scene_backbone is not None:
+        _, _, scene_height, scene_width = server["inputs"]["scene"]["shape"]
+        with torch.no_grad():
+            shape = model.scene_neck(model.scene_backbone(torch.zeros(1, 3, scene_height, scene_width))).shape
+        scene_map = (int(shape[2]), int(shape[3]))
+    contract = car_decider_contract(checkpoint, boxes, scene_map)
+    names = list(contract["inputs"])
+
+    class CarDecider(torch.nn.Module):
+        # The decider's forward with roi_align written as a product over the map's cells.
+        def __init__(self, decider):
+            super().__init__()
+            self.decider = decider
+
+        def forward(self, *inputs):
+            given = dict(zip(names, inputs))
+            decider = self.decider
+            parts = [decider.crop_backbone(given["crops"]).mean((2, 3))]
+            if decider.geometry is not None:
+                parts.append(decider.geometry(given["geometry"]))
+            if decider.scene_backbone is not None:
+                cells = decider.scene_neck(decider.scene_backbone(given["scene"])).flatten(2)[0]  # (C, cells)
+                local = torch.matmul(given["roi_weights"], cells.t())  # (boxes, bins, C)
+                # roi_align(...).flatten(1) is channel first: (boxes, C * bins).
+                parts.append(local.transpose(1, 2).flatten(1))
+                parts.append(cells.mean(1).unsqueeze(0).expand(boxes, -1))
+            fused = decider.fusion(torch.cat(parts, 1))
+            return torch.softmax(decider.ownership_head(fused), 1)
+
+    wrapper = CarDecider(model).eval()
+    example = tuple(torch.zeros(spec["shape"]) for spec in contract["inputs"].values())
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(wrapper, example, str(output_path), input_names=names, output_names=["ownership"],
+                      dynamo=False, opset_version=17)
+    try:
+        import onnx
+    except ImportError as exc:
+        raise ValueError("onnx_dependencies_missing: install onnx") from exc
+    graph = onnx.load(str(output_path))
+    onnx.checker.check_model(graph)
+    unsupported = sorted({node.op_type for node in graph.graph.node} & {"RoiAlign", "NonZero", "Loop", "If"})
+    if unsupported:
+        raise ValueError(f"car_decider_unsupported_ops: {unsupported}")
+
+    verification = {"enabled": verify, "passed": None}
+    if verify:
+        import numpy as np
+        import onnxruntime as ort
+        comma = car_decider_module(car_module)
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = options.inter_op_num_threads = 1
+        session = ort.InferenceSession(str(output_path), options, providers=["CPUExecutionProvider"])
+        generator = torch.Generator().manual_seed(31)
+        worst, passed, tried = 0.0, True, []
+        width, height = FRAME_SIZE  # the size of every frame of the decider's training
+        for case in _car_decider_cases(width, height):
+            count = len(case)
+            values = {"crops": torch.randn(boxes, *contract["inputs"]["crops"]["shape"][1:], generator=generator)}
+            if "geometry" in names:
+                values["geometry"] = torch.rand(boxes, contract["inputs"]["geometry"]["shape"][1], generator=generator)
+            rois = None
+            if "scene" in names:
+                _, _, scene_height, scene_width = contract["inputs"]["scene"]["shape"]
+                values["scene"] = torch.randn(1, 3, scene_height, scene_width, generator=generator)
+                sx, sy = scene_width / width, scene_height / height
+                clipped = [comma.clip_box(box, width, height) for box in case]
+                scaled = [[x1 * sx, y1 * sy, x2 * sx, y2 * sy] for x1, y1, x2, y2 in clipped]
+                weights = np.zeros(contract["inputs"]["roi_weights"]["shape"], dtype=np.float32)
+                for i, box in enumerate(scaled):
+                    weights[i] = comma.roi_weights(box, *scene_map, contract["inputs"]["roi_weights"]["stride"])
+                values["roi_weights"] = torch.from_numpy(weights)
+                rois = torch.tensor([[0.0, *box] for box in scaled], dtype=torch.float32)
+            with torch.no_grad():
+                _, logits = model(values["crops"][:count], values.get("geometry", torch.zeros(boxes, 1))[:count],
+                                  values.get("scene"), rois)
+                expected = torch.softmax(logits.float(), 1).numpy()
+            actual = session.run(["ownership"], {name: values[name].numpy() for name in names})[0][:count]
+            worst = max(worst, float(np.max(np.abs(expected - actual))))
+            passed = passed and bool(np.allclose(expected, actual, rtol=1e-3, atol=1e-4)) and \
+                bool(np.array_equal(expected.argmax(1), actual.argmax(1)))
+            tried.append(count)
+        verification = {"enabled": True, "passed": passed, "max_abs_error": worst, "rtol": 1e-3, "atol": 1e-4,
+                        "boxes_tried": tried, "reference": "PyTorch with torchvision roi_align",
+                        "provider": "CPUExecutionProvider"}
+        if not passed:
+            raise ValueError(f"onnx_parity_failed: car decider max_abs_error={worst}")
+
+    contract["onnx_sha256"] = sha256_file(output_path)
+    contract["checkpoint"] = str(checkpoint_path)
+    contract["checkpoint_sha256"] = sha256_file(Path(checkpoint_path))
+    contract["verification"] = verification
+    contract_path = output_path.with_suffix(output_path.suffix + ".contract.json")
+    contract_path.write_text(json.dumps(contract, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    return {"valid": True, "task": "decider", "onnx": str(output_path), "onnx_sha256": contract["onnx_sha256"],
+            "contract": str(contract_path), "verification": verification}

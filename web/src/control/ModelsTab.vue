@@ -124,13 +124,11 @@ function signnetText(version: ModelVersion): string {
     version.train_share ? Math.round(version.train_share * 100) + ' % of the drives' : ''].filter(Boolean).join(' · ');
 }
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
- * of the one on the car tells them apart. The comma runs the cutter, the classifier and the road type (Publish puts
- * the ones in use there); a trial replaces the first two until
- * its next software update; the decider runs only on this server. */
+ * of the one on the car tells them apart. The comma runs the cutter, the classifier, the applicability network and the
+ * brain (Publish puts the ones in use there); a trial replaces the first two until its next software update. */
 interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
 function carLine(role: RoleModels): CarLine | null {
   if (payload.value?.on_car_problem) return null;
-  if (role.role === 'decider') return {tone: 'none', text: 'On the car: not used there, only on this server'};
   const used = inUseOf(role);
   const car = carOf(role);
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;

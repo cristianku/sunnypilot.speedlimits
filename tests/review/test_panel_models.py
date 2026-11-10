@@ -154,7 +154,7 @@ def test_every_artifact_by_role_with_its_numbers(root, models):
     assert set(deciders) == {'crop', 'crop_geom'} and deciders['crop']['id'] == 'decider:expB/experiment-b/crop'
     crop = deciders['crop']
     assert (crop['label'], crop['detail'], crop['inputs'], crop['best_epoch'], crop['smoke_limit']) == (
-        'Crop', 'experiment B prototype', ['crop', 'box position'], 7, None)
+        'Crop', 'experiment B', ['crop', 'box position'], 7, None)
     assert crop['validation'] == {'boxes': 40, 'reading_accuracy': 0.9, 'ownership_samples': 30, 'macro_f1': 0.6,
                                   'abstain_rate': 0.1, 'other_road_recall': 0.6, 'other_road_precision': 0.5,
                                   'other_road_support': None, 'other_road_found': None}
@@ -695,7 +695,7 @@ def test_the_overview_has_the_car_at_a_glance(root):
     # Nothing published, nothing in use yet.
     root.mkdir(parents=True)
     panel = Panel(root)
-    assert panel.car_summary() == {'in_use': {'cutter': None, 'classifier': None, 'brain': None},
+    assert panel.car_summary() == {'in_use': {'cutter': None, 'classifier': None, 'decider': None, 'brain': None},
                                    'on_car': None,
                                    'problem': None, 'build_pending': False}
     # A scene network of before 7 Nov 2026, in use and on the car, is no longer one of them.
@@ -704,8 +704,15 @@ def test_the_overview_has_the_car_at_a_glance(root):
     write(root / 'models/on-car.json', {'cutter': {'id': 'cutter:s1/signnet'}, 'classifier': {'id': 'classifier:k2/classifier'},
                                         'road_type': {'id': 'road_type:t1/road-type/gru'}})
     car = panel.status()['car']
-    assert car['in_use'] == {'cutter': 'cutter:s2/signnet', 'classifier': 'classifier:k2/classifier', 'brain': None}
-    assert car['on_car'] == {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:k2/classifier', 'brain': None}
+    assert car['in_use'] == {'cutter': 'cutter:s2/signnet', 'classifier': 'classifier:k2/classifier', 'decider': None,
+                             'brain': None}
+    assert car['on_car'] == {'cutter': 'cutter:s1/signnet', 'classifier': 'classifier:k2/classifier', 'decider': None,
+                             'brain': None}
+    # The applicability network goes on the car too.
+    write(root / 'models/active.json', {'decider': {'id': 'decider:expB/experiment-b/full'}})
+    write(root / 'models/on-car.json', {'decider': {'id': 'decider:expB/experiment-b/full'}})
+    car = panel.status()['car']
+    assert car['in_use']['decider'] == car['on_car']['decider'] == 'decider:expB/experiment-b/full'
     write(root / 'models/on-car.json', '{"cutter": ')
     assert panel.car_summary()['problem'] == 'models/on-car.json cannot be read'
 
@@ -757,6 +764,35 @@ def test_on_car_is_recorded_from_a_clone_of_the_published_models(root, models, t
     marked = {entry['id'] for role in models.index()['roles'] for entry in role['versions'] if entry['on_car']}
     assert marked == {'cutter:s1/signnet', 'classifier:r1/reader'}
     assert not (root / 'models/active.json').exists()
+
+
+def test_on_car_records_the_applicability_network_of_the_release(root, models, tmp_path):
+    import hashlib
+    pipeline(root)
+    make_signnet(root, 's1')
+    experiment(root, variants=('full',))
+    clone = published_models(tmp_path, root)
+    write(clone / 'decider.onnx', 'decider onnx')
+    write(clone / 'decider.onnx.contract.json', {
+        'task': 'decider', 'target': 'car', 'checkpoint': 'decider:expB/experiment-b/full',
+        'onnx_sha256': hashlib.sha256((clone / 'decider.onnx').read_bytes()).hexdigest(),
+        'checkpoint_sha256': hashlib.sha256((root / 'runs/expB/experiment-b/full/full-best.pt').read_bytes()).hexdigest()})
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    write(clone / 'speed_limits.json', {**manifest, 'decider': {'file': 'decider.onnx', 'contract': 'decider.onnx.contract.json'}})
+    _git(clone, 'add', '-A')
+    _git(clone, 'commit', '-q', '-m', 'decider')
+    _git(clone, 'remote', 'set-url', 'origin', str(tmp_path / 'origin.git'))
+    _git(clone, 'push', '-q', 'origin', 'main')
+    record = model_roles.record_on_car(root, clone)
+    assert record['decider'] == {'id': 'decider:expB/experiment-b/full', 'file': 'decider.onnx',
+                                 'onnx_sha256': hashlib.sha256(b'decider onnx').hexdigest(),
+                                 'checkpoint_sha256': hashlib.sha256(b'weights').hexdigest()}
+    marked = {entry['id'] for role in models.index()['roles'] for entry in role['versions'] if entry['on_car']}
+    assert marked == {'cutter:s1/signnet', 'classifier:r1/reader', 'decider:expB/experiment-b/full'}
+    # Other weights on this server than the published ones: not recorded.
+    write(root / 'runs/expB/experiment-b/full/full-best.pt', 'other weights')
+    with pytest.raises(ValueError, match='the weights of decider:expB/experiment-b/full on this server are not'):
+        model_roles.record_on_car(root, clone, dry_run=True)
 
 
 @pytest.mark.parametrize('change, message', [

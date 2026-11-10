@@ -267,6 +267,79 @@ def test_the_brain_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
     assert 'country_policy' not in manifest['settings']
 
 
+def use_decider(data: Path, variant: str = 'full') -> str:
+    """A finished decider of experiment B in use."""
+    run = data / 'runs' / 'd1' / 'experiment-b' / variant
+    write(run / 'result.json', {'metrics': {'validation': {}, 'test': {}}, 'best_epoch': 1, 'epochs': 1})
+    (run / f'{variant}-best.pt').write_bytes(b'decider ' + variant.encode())
+    runs = RunsIndex(data)
+    runs.running_runs = dict
+    model_id = f'decider:d1/experiment-b/{variant}'
+    ModelIndex(runs).set_active('decider', model_id, who=None, via='local')
+    return model_id
+
+
+def fake_export_with_decider(content: bytes, onnx: bytes):
+    """fake_export, and the applicability network as the real export writes it for the car."""
+    signs = fake_export(content)
+
+    def exporter(chosen: dict, folder: Path) -> dict:
+        (folder / car_release.DECIDER_FILE).write_bytes(onnx)
+        write(folder / (car_release.DECIDER_FILE + '.contract.json'), {
+            'task': 'decider', 'target': 'car', 'checkpoint': str(chosen['decider']['weights']), 'onnx_sha256': sha256(onnx),
+            'checkpoint_sha256': sha256(Path(chosen['decider']['weights']).read_bytes())})
+        return signs(chosen, folder)
+    return exporter
+
+
+def test_the_applicability_network_in_use_goes_on_the_car_and_goes_away_with_it(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    _, clone = models_clone(tmp_path)
+    assert car_release.choose(data, 's1')['decider'] is None
+    model_id = use_decider(data)
+    chosen = car_release.choose(data, 's1')
+    assert chosen['decider'] == {'id': model_id, 'run': 'd1',
+                                 'weights': (data / 'runs/d1/experiment-b/full/full-best.pt').resolve()}
+    lines = []
+    first = car_release.send_to_car(data, 's1', models=clone, today=TODAY, say=lines.append,
+                                    exporter=fake_export_with_decider(b'v1', b'decider v1'))
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    assert first['changed'] and manifest == car_release.manifest_of('2026-10-28', car_settings.DEFAULTS, decider=True)
+    assert manifest['decider'] == {'file': 'decider.onnx', 'contract': 'decider.onnx.contract.json'}
+    assert 'country_policy' not in manifest['settings']  # the brain's only
+    assert (clone / 'decider.onnx').read_bytes() == b'decider v1'
+    assert json.loads((clone / 'decider.onnx.contract.json').read_text())['checkpoint'] == model_id
+    assert git(clone, 'log', '-1', '--format=%s') == (
+        'speed limits 2026-10-28: SignNet s1, classifier r1, applicability d1/experiment-b/full')
+    assert lines[0] == ('== 1/3 Export the SignNet of s1 and the classifier classifier:r1/reader, the applicability '
+                        f'network {model_id}')
+    assert json.loads((data / 'models/on-car.json').read_text())['decider']['id'] == model_id
+    assert lines[-1].startswith(f'on the car: cutter:s1/signnet and classifier:r1/reader, {model_id}, commit ')
+    again = car_release.send_to_car(data, 's1', models=clone, today=TODAY,
+                                    exporter=fake_export_with_decider(b'v1', b'decider v1'))
+    assert not again['changed']
+
+    path = data / 'models/active.json'
+    value = json.loads(path.read_text())
+    value.pop('decider')
+    path.write_text(json.dumps(value))
+    third = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export(b'v1'))
+    manifest = json.loads((clone / 'speed_limits.json').read_text())
+    assert third['changed'] and 'decider' not in manifest and not (clone / 'decider.onnx').exists()
+    assert git(clone, 'ls-files', 'decider.onnx', 'decider.onnx.contract.json') == ''
+    assert 'decider' not in json.loads((data / 'models/on-car.json').read_text())
+
+
+def test_an_applicability_network_goes_only_finished_with_its_weights(tmp_path):
+    data = tmp_path / 'data'
+    servers_runs(data)
+    use_decider(data)
+    (data / 'runs/d1/experiment-b/full/full-best.pt').unlink()
+    with pytest.raises(ValueError, match='the decider in use is no longer on this server'):
+        car_release.choose(data, 's1')
+
+
 def test_a_brain_goes_only_finished_and_its_dry_run_is_not_a_version(tmp_path):
     data = tmp_path / 'data'
     servers_runs(data)

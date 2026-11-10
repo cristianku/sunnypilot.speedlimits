@@ -46,7 +46,7 @@ const ROW_ACTIONS: Record<LoopKey, ActionName[]> = {
 };
 /** The terminal work of each stop, by its group (nnslr_tools.panel.ACTIVITIES). */
 const ROW_GROUPS: Partial<Record<LoopKey, string[]>> = {drives: ['fetch', 'prepare'], train: ['train'], car: ['publish']};
-const CAR_ROLES = ['cutter', 'classifier', 'brain'] as const;
+const CAR_ROLES = ['cutter', 'classifier', 'decider', 'brain'] as const;
 
 const wholePercent = (percent: number | null): string =>
   percent === null ? '' : Math.floor(Math.max(0, Math.min(100, percent))) + '%';

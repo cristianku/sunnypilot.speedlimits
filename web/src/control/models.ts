@@ -105,19 +105,23 @@ export interface CarState {
   onTrial?: string | null;
 }
 
-/** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier and which brain
- * (the ones in use) the comma gets, what the job prepares, publishes and builds, and what is left to do on the comma. */
+/** The question before Publish (Publish tab, scripts/send_to_car.sh): which SignNet, which classifier, which
+ * applicability network and which brain (the ones in use) the comma gets, what the job prepares, publishes and builds,
+ * and what is left to do on the comma. */
 export function publishQuestion(signnet: ModelVersion, classifier: ModelVersion | null,
-                                brain: ModelVersion | null = null): ConfirmOptions {
+                                brain: ModelVersion | null = null, decider: ModelVersion | null = null): ConfirmOptions {
   const reader = classifier ? classifier.label + ' ' + (classifier.trained_at ? isoWhen(classifier.trained_at) : classifier.run)
     : 'the classifier in use';
+  const roads = decider
+    ? ', the applicability network ' + decider.label + ' of ' + decider.run + ' to leave out the signs of another road'
+    : ' (no applicability network is in use: it takes every sign, of another road too)';
   const decides = brain
     ? ' and the brain of ' + brain.run + ' to say the speed to hold, in place of the rules of the signs'
     : '; no brain is in use, so the rules of the signs give the limit';
   return {
     title: 'Publish the networks in use to the car?', action: 'Publish',
     text: 'The comma gets ' + signnet.label + ' of ' + signnet.run + ' to find the signs, ' + reader
-      + ' to read them' + decides + '. The package is prepared and checked, published in speed-limits-models, the '
+      + ' to read them' + roads + decides + '. The package is prepared and checked, published in speed-limits-models, the '
       + 'sunnypilot speed-limits branch moves to it and psa-torque-sunny-testing is built again: a few minutes. Then, on '
       + 'the comma: Settings, Software, Check for updates, and install.',
   };

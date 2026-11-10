@@ -1,15 +1,19 @@
 """``nnslr send-to-car``: the first three steps of Publish to the car (the Publish tab), the networks the
-comma downloads replaced by a SignNet of this server, the classifier in use and the brain in use.
+comma downloads replaced by a SignNet of this server, the classifier in use, the applicability network in use and
+the brain in use.
 
 1. Export: the SignNet of a run (or the cutter in use) and the classifier in use (models/active.json, or one given)
    to ONNX on the CPU, each
-   checked against PyTorch with onnxruntime; the brain in use, when one is chosen, is exported here too. Each
-   contract names its network by its id of the Models tab.
-2. Publish: the ONNX, their contracts and speed_limits.json (format 2: finder, classifier, and brain when there is
-   one in use) in the clone of the models repository the comma downloads (cristianku/speed-limits-models), one commit
-   pushed to its main. The export is the same byte for byte each time: when every ONNX is already the one there,
+   checked against PyTorch with onnxruntime; the brain in use, when one is chosen, is exported here too, and so is the
+   applicability network in use (the decider: whom each sign applies to; speedvisiond leaves out the signs it gives to
+   another road), as the car runs it (exporting.export_decider_car_onnx, checked with the comma's applicability.py).
+   Each contract names its network by its id of the Models tab.
+2. Publish: the ONNX, their contracts and speed_limits.json (format 2: finder, classifier, and decider and brain when
+   there is one in use) in the clone of the models repository the comma downloads (cristianku/speed-limits-models), one
+   commit pushed to its main. The export is the same byte for byte each time: when every ONNX is already the one there,
    nothing changes and nothing is pushed. Without a brain in use the published one is removed: speedvisiond then
-   runs its rules again. The scene network of older releases (road-type.onnx) is removed too: nothing here makes it.
+   runs its rules again; without an applicability network in use its file goes too, and the car takes every sign. The
+   scene network of older releases (road-type.onnx) is removed too: nothing here makes it.
 3. Record: models/on-car.json (record_on_car, what ``nnslr on-car`` writes), the "On the car" of the Models tab.
 
 scripts/send_to_car.sh runs it, then moves the models submodule of the sunnypilot speed-limits branch (step 4) and
@@ -37,6 +41,7 @@ from nnslr_tools.model_roles import (
     WEIGHTS,
     ModelIndex,
     _sha256,
+    decider_weights,
     record_on_car,
     role_of,
 )
@@ -53,9 +58,11 @@ GPU_VENV_ENV = 'NNSLR_GPU_VENV'
 BUILD_SCRIPT = 'OP-setup-psa-torque-testing/scripts/setup_psa_torque.sh'
 # Written by the script when sunnypilot's speed-limits moved and the build has not finished yet (step 5 runs then).
 PENDING_FILE = 'models/send-to-car.pending'
-# The files of the models repository, as speed_limits.json names them; the brain's only when one is in use.
+# The files of the models repository, as speed_limits.json names them; the brain's and the decider's only when one is
+# in use.
 FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
 BRAIN_FILE = 'brain.onnx'
+DECIDER_FILE = 'decider.onnx'
 # The scene network of the releases before the brain: removed from the models repository at the next publication.
 OLD_FILES = ('road-type.onnx',)
 # The brain's country (speed_limits/country.py): a first try, not validated on the road. Only a release with a brain has it.
@@ -91,8 +98,10 @@ def car_missing(repo: Path) -> str:
 
 
 def car_files(chosen: dict) -> dict[str, str]:
-    """The networks of a publication and their file: the SignNet and the classifier, the brain when chosen."""
-    return {**FILES, **({'brain': BRAIN_FILE} if chosen.get('brain') else {})}
+    """The networks of a publication and their file: the SignNet and the classifier, the decider and the brain when
+    chosen."""
+    return {**FILES, **({'decider': DECIDER_FILE} if chosen.get('decider') else {}),
+            **({'brain': BRAIN_FILE} if chosen.get('brain') else {})}
 
 
 def build_pending(root: Path) -> bool:
@@ -104,7 +113,8 @@ def build_pending(root: Path) -> bool:
 def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
     """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
     of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
-    brain in use, or None when none is chosen. Each with its id and its weights on this server."""
+    applicability network (decider) and the brain in use, each None when none is chosen. Each with its id and its
+    weights on this server."""
     if signnet is not None and (not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet)):
         raise ValueError(f'{signnet!r} is not a run name')
     runs = RunsIndex(Path(root))
@@ -149,6 +159,7 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
         if weights is None:
             raise ValueError(f'{entry["id"]} has no weights on this server')
         found[network] = {'id': entry['id'], 'run': entry['run'], 'weights': weights}
+    found['decider'] = _decider(runs, index)
     found['brain'] = _brain(Path(root), runs, index)
     _check_plates(runs, found, chosen)
     return found
@@ -202,6 +213,23 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
             'wet': entry['wet']}
 
 
+def _decider(runs: RunsIndex, index: ModelIndex) -> dict | None:
+    """The applicability network in use, or None when none is chosen (the car then takes every sign)."""
+    active, problem = index.read_active()
+    if problem is not None or active.get('decider') is None:
+        return None
+    entry, why = index.in_use('decider')
+    if entry is None:
+        raise ValueError(why)
+    if not entry['finished']:
+        raise ValueError(f'the applicability network {entry["id"]} has not finished its training')
+    run = runs._run_dir(entry['run'])
+    weights = None if run is None else runs._file(run, decider_weights(entry['part']))
+    if weights is None:
+        raise ValueError(f'{entry["id"]} has no weights on this server')
+    return {'id': entry['id'], 'run': entry['run'], 'weights': weights}
+
+
 def export_brain(chosen: dict, folder: Path) -> None:
     """The brain's step to ONNX in folder, checked against PyTorch and along a real drive (it raises when it differs)."""
     if chosen.get('brain'):
@@ -217,14 +245,16 @@ def export_brain(chosen: dict, folder: Path) -> None:
 # -- 2. the export ------------------------------------------------------------------------------------------
 def export(chosen: dict, folder: Path) -> dict:
     """Both sign networks to ONNX in folder (signnet.onnx, classifier.onnx and their contracts), each checked against
-    PyTorch with onnxruntime (they raise when it differs), and the brain's step when one is in use;
-    each contract names its checkpoint by its id."""
-    from nnslr_tools.exporting import export_reader_onnx
+    PyTorch with onnxruntime (they raise when it differs), the applicability network as the car runs it and the brain's
+    step when one is in use; each contract names its checkpoint by its id."""
+    from nnslr_tools.exporting import export_decider_car_onnx, export_reader_onnx
     from nnslr_tools.signnet import export_signnet_onnx
 
     exporters = {'finder': export_signnet_onnx, 'classifier': export_reader_onnx}
     for network, name in FILES.items():
         exporters[network](chosen[network]['weights'], folder / name, verify=True)
+    if chosen.get('decider'):
+        export_decider_car_onnx(chosen['decider']['weights'], folder / DECIDER_FILE, verify=True)
     export_brain(chosen, folder)
     return finish_contracts(chosen, folder)
 
@@ -255,10 +285,10 @@ def _git(folder: Path, *args: str) -> str:
     return done.stdout.strip()
 
 
-def manifest_of(version: str, settings: dict | None = None, brain: bool = False) -> dict:
+def manifest_of(version: str, settings: dict | None = None, brain: bool = False, decider: bool = False) -> dict:
     """speed_limits.json; settings: the car's (car_settings.values), each a constant of vision.py on the comma, and with a
     brain the policy of its country."""
-    files = {**FILES, **({'brain': BRAIN_FILE} if brain else {})}
+    files = {**FILES, **({'decider': DECIDER_FILE} if decider else {}), **({'brain': BRAIN_FILE} if brain else {})}
     settings = {**(settings or {}), **({'country_policy': COUNTRY_POLICY} if brain else {})}
     return {'format': 2, 'version': version,
             **{network: {'file': name, 'contract': name + '.contract.json'} for network, name in files.items()},
@@ -323,9 +353,9 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
     manifest = _read_manifest(models)
     current_version = (manifest or {}).get('version')
     files = car_files(chosen)
-    brain = 'brain' in files
+    brain, decider = 'brain' in files, 'decider' in files
     same_manifest = manifest is not None and {key: value for key, value in manifest.items() if key != 'version'} == {
-        key: value for key, value in manifest_of('', settings, brain).items() if key != 'version'}
+        key: value for key, value in manifest_of('', settings, brain, decider).items() if key != 'version'}
     same = same_manifest and all(
         (models / name).is_file() and not (models / name).is_symlink()
         and _sha256(models / name) == exported[network]['onnx_sha256'] for network, name in files.items())
@@ -335,8 +365,9 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
     if dry_run:
         return {'changed': True, 'commit': None, 'version': version}
     paths = []
-    # No brain in use: the published one goes, speedvisiond runs its rules again. An old scene network goes always.
-    unused = [*OLD_FILES, *(() if brain else (BRAIN_FILE,))]
+    # No brain in use: the published one goes, speedvisiond runs its rules again; no applicability network: the car takes
+    # every sign. An old scene network goes always.
+    unused = [*OLD_FILES, *(() if brain else (BRAIN_FILE,)), *(() if decider else (DECIDER_FILE,))]
     gone = [file for name in unused for file in (name, name + '.contract.json') if _git(models, 'ls-files', '--', file)]
     for name in files.values():
         for file in (name, name + '.contract.json'):
@@ -345,10 +376,11 @@ def publish(models: Path, chosen: dict, folder: Path, exported: dict, *, today: 
                 raise ValueError(f'{target} is a link: the clone must hold the files themselves')
             shutil.copyfile(folder / file, target)
             paths.append(file)
-    (models / MANIFEST).write_text(json.dumps(manifest_of(version, settings, brain), indent=2) + '\n',
+    (models / MANIFEST).write_text(json.dumps(manifest_of(version, settings, brain, decider), indent=2) + '\n',
                                    encoding='utf-8')
     paths.append(MANIFEST)
     message = (f'speed limits {version}: SignNet {chosen["finder"]["run"]}, classifier {chosen["classifier"]["run"]}'
+               + (f', applicability {chosen["decider"]["id"].split(":", 1)[1]}' if decider else '')
                + (f', brain {chosen["brain"]["run"]}' if brain else '') + '\n\n'
                + ''.join(f'{network} {exported[network]["id"]} (onnx sha256 {exported[network]["onnx_sha256"][:12]})\n'
                          for network in files)
@@ -389,9 +421,10 @@ def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, mode
     root = Path(root)
     models = Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE)
     chosen = choose(root, signnet, classifier)
+    decider = f', the applicability network {chosen["decider"]["id"]}' if chosen.get('decider') else ''
     brain = f', the brain {chosen["brain"]["id"]}' if chosen.get('brain') else ''
     say(f'== 1/{steps_of} Export the SignNet of {chosen["finder"]["run"]} and the classifier {chosen["classifier"]["id"]}'
-        + brain)
+        + decider + brain)
     work = root / 'tmp'
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='send-to-car-', dir=work) as name:
@@ -422,6 +455,6 @@ def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, mode
         else:
             record = record_on_car(root, models)
             say('recorded in ' + ON_CAR_FILE)
-        brain = f', {record["brain"]["id"]}' if record.get('brain') else ''
-        say(f'on the car: {record["cutter"]["id"]} and {record["classifier"]["id"]}{brain}, commit {record["commit"][:7]}')
+        extra = ''.join(f', {record[role]["id"]}' for role in ('decider', 'brain') if record.get(role))
+        say(f'on the car: {record["cutter"]["id"]} and {record["classifier"]["id"]}{extra}, commit {record["commit"][:7]}')
     return {**published, 'record': record}
