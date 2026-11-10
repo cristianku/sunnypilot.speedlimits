@@ -1,4 +1,4 @@
-"""The signs our networks in use read on the drives the brain learns from (nnslr_tools.brain_signs), with the worker
+"""The signs our networks on the car read on the drives the brain learns from (nnslr_tools.brain_signs), with the worker
 replaced: what is read again, what a failure leaves, and a training that goes on without the networks."""
 import pytest
 
@@ -24,15 +24,19 @@ FRAMES = [{'frame_key': f'0/{second}', 'segment_index': 0, 'decoded_frame_index'
            'frame_sha256': str(second)} for second in range(3)]
 
 
-def worker(calls, fail=False):
-    def run(setup, root, frames, work, run_id, route):
+def worker(calls, fail=False, cards=None, provider='CUDAExecutionProvider'):
+    def run(setup, root, frames, work, run_id, route, *, gpu=None, log_path=None):
         calls.append(route)
+        if cards is not None:
+            cards.append(gpu)
         (work / 'request.json').write_text('{}', encoding='utf-8')
-        if fail:
+        if log_path is not None:
+            log_path.write_text(''.join(f'line {number}\n' for number in range(30)), encoding='utf-8')
+        if fail is True or fail == route:
             from nnslr_tools.preannotate import PreannotationError
             raise PreannotationError(f'preannotation failed; diagnostic request: {work / "request.json"}')
-        return [{**frame, 'detections': [{'family': 'maximum_speed', 'value_kph': 60, 'applicability': 'own_road'}]}
-                for frame in frames]
+        return [{**frame, 'detections': [{'family': 'maximum_speed', 'value_kph': 60, 'applicability': 'own_road'}],
+                 'inference': {'provider': provider}} for frame in frames]
     return run
 
 
@@ -73,6 +77,91 @@ def test_a_failed_reading_keeps_the_last_one_and_its_work_folder(tmp_path, monke
     assert len(kept) == 1 and (kept[0] / 'request.json').is_file()
 
 
+ROUTES = [f'0000000{number}--abcdef0123' for number in range(1, 5)]
+
+
+def test_drives_are_read_several_at_a_time_on_the_cards_in_turn(tmp_path, monkeypatch):
+    import threading
+    signs = _signs()
+    from nnslr_tools import preannotate
+    calls, cards = [], []
+    # Each pair of drives waits for the other: two workers at once, or the barrier breaks.
+    together = threading.Barrier(2, timeout=10)
+    read = worker(calls, cards=cards)
+
+    def run(*args, **kwargs):
+        together.wait()
+        return read(*args, **kwargs)
+
+    monkeypatch.setattr(signs, 'pictures', lambda root, route: FRAMES)
+    monkeypatch.setattr(preannotate, 'run_proposer_worker', run)
+    lines = []
+    found = signs.read_drives(tmp_path, ROUTES + ROUTES[:1], setup=setup_of(tmp_path), log=lines.append, jobs=2,
+                              gpus=['0', '1'])
+    assert found == {route: 'read' for route in ROUTES} and sorted(calls) == ROUTES
+    assert sorted(cards) == ['0', '0', '1', '1']
+    assert 'brain signs: 4 drives to read, 2 at a time, on the cards 0, 1' in lines
+    assert all(len(signs.load(tmp_path, route)['rows']) == 3 for route in ROUTES)
+    assert sum(line.startswith('brain signs 4/4 ') for line in lines) == 1
+
+
+def test_the_default_is_one_drive_per_four_cores(monkeypatch):
+    signs = _signs()
+    monkeypatch.setattr(signs.os, 'cpu_count', lambda: 24)
+    assert (signs.default_jobs(10), signs.default_jobs(2), signs.default_jobs(0)) == (6, 2, 1)
+    monkeypatch.setattr(signs.os, 'cpu_count', lambda: None)
+    assert signs.default_jobs(10) == 1
+
+
+def test_a_failure_starts_no_drive_after_it_and_keeps_those_read(tmp_path, monkeypatch):
+    signs = _signs()
+    from nnslr_tools import preannotate
+    calls = []
+    monkeypatch.setattr(signs, 'pictures', lambda root, route: FRAMES)
+    monkeypatch.setattr(preannotate, 'run_proposer_worker', worker(calls, fail=ROUTES[1]))
+    with pytest.raises(preannotate.PreannotationError) as failed:
+        signs.read_drives(tmp_path, ROUTES, setup=setup_of(tmp_path), log=lambda line: None, jobs=1)
+    message = str(failed.value)
+    # The drive, the worker's error and the end of its log, not its beginning.
+    assert message.startswith(f'{ROUTES[1]}: preannotation failed') and 'the end of its log' in message
+    assert 'line 29' in message and 'line 10\n' in message and 'line 9\n' not in message
+    assert calls == ROUTES[:2]
+    assert signs.load(tmp_path, ROUTES[0]) is not None and not signs.cache_path(tmp_path, ROUTES[1]).exists()
+    kept = [path for path in signs.cache_path(tmp_path, ROUTES[1]).parent.iterdir() if path.is_dir()]
+    assert len(kept) == 1 and (kept[0] / 'worker.log').is_file() and (kept[0] / 'request.json').is_file()
+
+
+def test_a_reading_on_the_cpu_is_refused(tmp_path, monkeypatch):
+    signs = _signs()
+    from nnslr_tools import preannotate
+    monkeypatch.setattr(signs, 'pictures', lambda root, route: FRAMES)
+    monkeypatch.setattr(preannotate, 'run_proposer_worker', worker([], provider='CPUExecutionProvider'))
+    with pytest.raises(preannotate.PreannotationError, match='on the CPU'):
+        signs.read_drives(tmp_path, [ROUTE], setup=setup_of(tmp_path), log=lambda line: None)
+    assert not signs.cache_path(tmp_path, ROUTE).exists()
+
+
+def test_the_command_takes_the_drives_at_once_and_the_cards(tmp_path, monkeypatch, capsys):
+    signs = _signs()
+    from nnslr_tools import cli
+    seen = {}
+
+    def read_drives(root, routes, *, setup=None, log=print, jobs=None, gpus=None):
+        seen.update(jobs=jobs, gpus=gpus)
+        return {route: 'read' for route in routes}
+
+    monkeypatch.setattr(signs, 'reader_setup', lambda root: {'model': {}})
+    monkeypatch.setattr(signs, 'read_drives', read_drives)
+    base = ['brain-signs', '--route', ROUTE, '--data-root', str(tmp_path)]
+    assert cli.main(base + ['--jobs', '3', '--gpus', '1, 0,1']) == 0
+    assert seen == {'jobs': 3, 'gpus': ['1', '0']}
+    assert cli.main(base) == 0
+    assert seen == {'jobs': None, 'gpus': None}
+    with pytest.raises(SystemExit):
+        cli.main(base + ['--gpus', 'cuda:0'])
+    assert cli.main(base + ['--jobs', '-1']) == 2 and '--jobs' in capsys.readouterr().err
+
+
 def test_the_reader_runs_in_the_gpu_environment_of_the_training(tmp_path, monkeypatch):
     signs = _signs()
     from nnslr_tools import preannotate
@@ -84,7 +173,7 @@ def test_the_reader_runs_in_the_gpu_environment_of_the_training(tmp_path, monkey
 
     monkeypatch.setattr(preannotate, 'proposer_setup', proposer_setup)
     monkeypatch.setenv('NNSLR_GPU_VENV', '/opt/gpu')
-    assert signs.reader_setup(tmp_path)['request'] == {'model': {}, 'previews': False}
+    assert signs.reader_setup(tmp_path)['request'] == {'model': {}, 'previews': False, 'require_gpu': True}
     assert seen == {'proposer': 'ours', 'python': '/opt/gpu/bin/python'}
     monkeypatch.delenv('NNSLR_GPU_VENV')
     signs.reader_setup(tmp_path)

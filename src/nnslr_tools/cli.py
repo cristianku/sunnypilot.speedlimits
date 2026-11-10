@@ -1679,7 +1679,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                    "per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
                                                    "with an answer on roadworks and with the next limit (the signs our "
-                                                   "networks in use read, Sign review's over them where the frames "
+                                                   "networks on the car read, Sign review's over them where the frames "
                                                    "are confirmed), "
                                                    "and why the others are out. Reads only: it writes nothing and "
                                                    "trains nothing")
@@ -1691,7 +1691,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="as a training with --no-road-types: the seconds without a road type answer too")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
-    p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks in use "
+    p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks on the car "
                                                        "(cutter, classifier and applicability, Models tab) on its "
                                                        "pictures at 1 a second, on the GPU: derived/brain_signs/<route>"
                                                        ".jsonl, the next limit and its metres the brain is taught where "
@@ -1700,8 +1700,25 @@ def build_parser() -> argparse.ArgumentParser:
                                                        "changes")
     p_brain_signs.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the "
                                                                 "brain learns from (every dashcam drive)")
+    p_brain_signs.add_argument("--jobs", type=int, default=0,
+                               help="drives read at once, each by a worker of its own (default: one per 4 cores)")
+    p_brain_signs.add_argument("--gpus", type=_cards, default=None,
+                               help="the cards the workers run on, in turn, by nvidia-smi's numbers: 0,1 (default: "
+                                    "every worker on the first card this process sees)")
     p_brain_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_signs.set_defaults(func=_cmd_brain_signs)
+    p_borrow = sub.add_parser("borrow-cards", help="scripts/run_brain.sh, step 3 (#36): prints the cards its readings "
+                                                   "of the signs run on (0,1), --own first, then every other card no "
+                                                   "compute process is on and no running job of the panel holds. In "
+                                                   "a job of the panel (NNSLR_JOB_RECORD) they are written to its "
+                                                   "record, so the panel names them as the brain's and starts nothing "
+                                                   "else on them until --release")
+    p_borrow.add_argument("--own", type=int, help="the brain's own card, by nvidia-smi's number")
+    p_borrow.add_argument("--cards", type=_cards, default=None,
+                          help="these cards instead of the free ones (NNSLR_SIGN_GPUS), written as they are")
+    p_borrow.add_argument("--release", action="store_true", help="give the borrowed cards back")
+    p_borrow.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_borrow.set_defaults(func=_cmd_borrow_cards)
     p_regression_plan = sub.add_parser("regression-plan", help="what a run of Models › Regression still has to compute: a "
                                                                "line per certified drive, its route and the driving "
                                                                "models missing there. Reads only")
@@ -1720,7 +1737,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                      ".venv-gpu): the speed to hold, the driver's own corrected by the "
                                                      "blocks of Speed review, with the roadworks and the kinds of road "
                                                      "as tasks of the same network and the next limit of the signs our "
-                                                     "networks in use read (nnslr brain-signs), Sign review's over them, "
+                                                     "networks on the car read (nnslr brain-signs), Sign review's over them, "
                                                      "measured on "
                                                      "sites it never learned. Writes brain-last.pt and result.json "
                                                      "into --run-dir")
@@ -1910,6 +1927,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--device", choices=("auto", "cpu"), default="auto",
                               help="auto: the video decoded by NVDEC and the networks on the GPU when they work there, "
                                    "else the CPU; cpu: always the CPU")
+    p_road_signs.add_argument("--gpus", type=_cards, default=None,
+                              help="the cards the processes run on, in turn, by nvidia-smi's numbers: 0,1 (default: "
+                                   "every process on the first card this process sees). The NVDEC of one V100 is what "
+                                   "holds the reading back")
     p_road_signs.add_argument("--route", action="append",
                               help="route id; repeat for more: only these drives, instead of every one of the list "
                                    "chosen (with --labelled: scripts/run_brain.sh passes the drives of its start; "
@@ -2736,10 +2757,36 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cards(value: str) -> list[str]:
+    """--gpus: cards by nvidia-smi's numbers, "0,1"."""
+    cards = [part.strip() for part in value.split(',')]
+    if not all(part.isdigit() for part in cards):
+        raise argparse.ArgumentTypeError(f"cards by nvidia-smi's numbers, e.g. 0,1: {value!r}")
+    return list(dict.fromkeys(cards))
+
+
+def _cmd_borrow_cards(args: argparse.Namespace) -> int:
+    from nnslr_tools import panel
+    from nnslr_tools.preannotate import resolve_data_root
+    record = Path(os.environ['NNSLR_JOB_RECORD']) if os.environ.get('NNSLR_JOB_RECORD') else None
+    if args.release:
+        panel.release_cards(record)
+        return 0
+    if args.own is None:
+        raise ValueError("--own is needed: the brain's card, by nvidia-smi's number")
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    cards = panel.borrow_cards(root / 'logs' / 'panel', args.own, record,
+                               [int(card) for card in args.cards] if args.cards is not None else None)
+    print(','.join(str(card) for card in cards))
+    return 0
+
+
 def _cmd_brain_signs(args: argparse.Namespace) -> int:
     from nnslr_tools import brain_signs
     from nnslr_tools.brain_targets import training_routes
     from nnslr_tools.preannotate import PreannotationError, resolve_data_root
+    if args.jobs < 0:
+        raise ValueError("--jobs must be 0 (the default) or more")
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     routes = list(args.route or []) or training_routes(root)
     if not routes:
@@ -2753,7 +2800,8 @@ def _cmd_brain_signs(args: argparse.Namespace) -> int:
         print(f"WARNING: no drive read by our networks, the next limit is taught from Sign review alone: {exc}", flush=True)
         return 0
     try:
-        found = brain_signs.read_drives(root, routes, setup=setup, log=lambda line: print(line, flush=True))
+        found = brain_signs.read_drives(root, routes, setup=setup, log=lambda line: print(line, flush=True),
+                                        jobs=args.jobs or None, gpus=args.gpus)
     except PreannotationError as exc:
         print(f"nnslr brain-signs: {exc}", file=sys.stderr)
         return 1
@@ -3196,7 +3244,7 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 2
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
-                          workers=args.workers or None, device=args.device,
+                          workers=args.workers or None, device=args.device, gpus=args.gpus,
                           classifier=Path(args.classifier) if args.classifier else None,
                           pictures=bool(args.labelled or args.certified), log=lambda line: print(line, flush=True))
     for route, record in records.items():

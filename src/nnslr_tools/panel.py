@@ -740,13 +740,19 @@ class Panel:
         return jobs
 
     def _job_gpus(self, job_id: str, *, running: bool, pid: int | None = None) -> list[int] | None:
-        """The cards of a job, by nvidia-smi's index: those start() gave it (<job id>.json, 'gpus'); for a job started
-        before that, [] when it uses no GPU, else the cards its processes have open while it runs; None when they are
-        not known (it holds every card)."""
+        """The cards of a job, by nvidia-smi's index: those start() gave it (<job id>.json, 'gpus'), and while it runs
+        those a brain borrowed for its readings of the signs ('borrowed', borrow_cards); for a job started before that,
+        [] when it uses no GPU, else the cards its processes have open while it runs; None when they are not known (it
+        holds every card)."""
         record = _read_json(self.logs / (job_id + '.json')) or {}
         if 'gpus' in record:
             gpus = record['gpus']
-            return gpus if gpus is None or (isinstance(gpus, list) and all(isinstance(i, int) for i in gpus)) else None
+            if gpus is None or not (isinstance(gpus, list) and all(isinstance(i, int) for i in gpus)):
+                return None
+            borrowed = record.get('borrowed') if running else None
+            if isinstance(borrowed, list) and all(isinstance(i, int) for i in borrowed):
+                return list(dict.fromkeys([*gpus, *borrowed]))
+            return gpus
         if not self._uses_gpu(job_id):
             return []
         if not running or pid is None:
@@ -2580,6 +2586,8 @@ class Panel:
                 environment[FETCH_PYTHON_ENV] = fetch_python
             # Its own progress file (nnslr_tools.progress): two jobs at once never read each other's.
             environment['NNSLR_PROGRESS_FILE'] = str(self.root / 'logs' / f'progress-{job_id}.json')
+            # Its record, where the brain writes the cards it borrows for its readings of the signs (borrow_cards).
+            environment['NNSLR_JOB_RECORD'] = str(path.with_suffix('.json'))
             if gpus:
                 # Its card, by nvidia-smi's index: the helpers and scripts check that one (NNSLR_GPU_INDEX), CUDA
                 # counts the cards in the same order (by PCI bus) and sees only it.
@@ -2860,18 +2868,7 @@ class Panel:
             process = self._processes.get(job_id)
         if process is not None:
             return process.pid if process.poll() is None else None
-        try:
-            pid = int((self.logs / (job_id + '.pid')).read_text().strip())
-            command = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
-        except (OSError, ValueError):
-            return None
-        # The pid may have been reused by another program: it must be the wrapper of this action.
-        action = job_id.split('-', 2)[2]
-        wanted = [part.encode() for part in ACTIONS.get(action, {}).get('command', [])]
-        wrappers = [[b'bash', b'-c', wrapper.encode(), b'panel'] for wrapper in (WRAPPER, *OLD_WRAPPERS)]
-        if not wanted or command[:4] not in wrappers or command[4:4 + len(wanted)] != wanted:
-            return None
-        return pid
+        return _wrapper_pid(self.logs, job_id)
 
     def stop(self, job_id: str) -> dict:
         group = self._group(job_id)
@@ -3092,6 +3089,96 @@ def _read_json(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _wrapper_pid(logs: Path, job_id: str) -> int | None:
+    """The pid of a job's wrapper (<job id>.pid) while it still runs that job, None when it ended."""
+    try:
+        pid = int((logs / (job_id + '.pid')).read_text().strip())
+        command = (Path('/proc') / str(pid) / 'cmdline').read_bytes().split(b'\0')
+    except (OSError, ValueError):
+        return None
+    # The pid may have been reused by another program: it must be the wrapper of this action.
+    action = job_id.split('-', 2)[2]
+    wanted = [part.encode() for part in ACTIONS.get(action, {}).get('command', [])]
+    wrappers = [[b'bash', b'-c', wrapper.encode(), b'panel'] for wrapper in (WRAPPER, *OLD_WRAPPERS)]
+    if not wanted or command[:4] not in wrappers or command[4:4 + len(wanted)] != wanted:
+        return None
+    return pid
+
+
+# How long borrow_cards waits before it reads the records again: a start of the panel reads them and writes its own
+# within this, under its lock.
+BORROW_RECHECK_SECONDS = 1.0
+
+
+def _cards_held(logs: Path, skip: str | None) -> set[int] | None:
+    """The cards the running jobs of the panel hold, but the job skip: those of their records ('gpus', and 'borrowed'
+    of a brain); None when one holds every card (its cards not known)."""
+    held: set[int] = set()
+    for path in logs.glob('*.pid') if logs.is_dir() else ():
+        job_id = path.stem
+        if job_id == skip or not JOB_ID.fullmatch(job_id) or job_id.split('-', 2)[2] not in ACTIONS:
+            continue
+        record = _read_json(logs / (job_id + '.json'))
+        if record is None or _wrapper_pid(logs, job_id) is None:
+            continue
+        gpus = record.get('gpus', [])
+        if gpus is None:
+            return None
+        held.update(i for i in [*gpus, *record.get('borrowed', [])] if isinstance(i, int))
+    return held
+
+
+def _free_of_others(logs: Path, own: int, skip: str | None) -> list[int]:
+    """The cards but own that no compute process is on and no other running job of the panel holds."""
+    held = _cards_held(logs, skip)
+    if held is None:
+        return []
+    return [card['index'] for card in _gpu_cards() if card['index'] != own and not card['processes']
+            and card['index'] not in held]
+
+
+def _write_borrowed(record: Path, cards: list[int]) -> None:
+    kept = _read_json(record) or {}
+    if cards:
+        kept['borrowed'] = cards
+    else:
+        kept.pop('borrowed', None)
+    temporary = record.with_name(record.name + '.tmp')
+    temporary.write_text(json.dumps(kept) + '\n', encoding='utf-8')
+    temporary.replace(record)
+
+
+def borrow_cards(logs: Path, own: int, record: Path | None, cards: list[int] | None = None) -> list[int]:
+    """scripts/run_brain.sh, step 3 (#36): the cards its readings of the signs run on. Without cards, own first and
+    every other card no compute process is on and no other running job of the panel holds; with cards (NNSLR_SIGN_GPUS),
+    those as given. The ones but own are written to the brain's record of the panel (record, NNSLR_JOB_RECORD; None
+    from a terminal: nothing written) as 'borrowed', so the panel names them as the brain's and starts nothing else on
+    them until release_cards. Free cards are read again a moment after they are written, so a job the panel started
+    meanwhile on one of them keeps it."""
+    if cards is not None:
+        chosen = list(dict.fromkeys(cards))
+        if record is not None:
+            _write_borrowed(record, [card for card in chosen if card != own])
+        return chosen
+    skip = record.stem if record is not None else None
+    borrowed = _free_of_others(logs, own, skip)
+    if record is not None:
+        _write_borrowed(record, borrowed)
+        if borrowed:
+            time.sleep(BORROW_RECHECK_SECONDS)
+            still = set(_free_of_others(logs, own, skip))
+            if any(card not in still for card in borrowed):
+                borrowed = [card for card in borrowed if card in still]
+                _write_borrowed(record, borrowed)
+    return [own, *borrowed]
+
+
+def release_cards(record: Path | None) -> None:
+    """The cards of borrow_cards given back: the brain holds its own only."""
+    if record is not None and record.is_file():
+        _write_borrowed(record, [])
 
 
 def _now() -> str:

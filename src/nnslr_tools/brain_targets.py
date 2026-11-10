@@ -70,7 +70,7 @@ several kinds at once: one column a kind, each with its target and its weight, a
 
 The limit ahead (reviewed_signs, ahead_from_signs), what the brain says beside the speed so that sunnypilot can slow down
 for it as for the map's: the next limit (a class of the speed, or NONE_AHEAD) and the metres to it. The signs are the
-boxes our networks in use read on every picture of the drive (brain_signs: cutter, classifier and applicability, at 1 a
+boxes our networks on the car read on every picture of the drive (brain_signs: cutter, classifier and applicability, at 1 a
 second), with the person's over them, his rule of 8 Nov 2026: a frame confirmed in Sign review, on the drive's current
 run (review.latest_report), never a site AI review still waiting for a person (review_db.NOT_WAITING_SQL), is his and
 the networks' boxes there are not read; a sign he boxed is his, whatever road he gave it: the networks' sign of the

@@ -1188,6 +1188,75 @@ def test_a_drive_read_to_the_end_is_kept_when_a_later_one_fails(tmp_path, monkey
     assert signs.load_signs(tmp_path, 'second') is None
 
 
+def test_the_processes_take_the_cards_in_turn(tmp_path, monkeypatch):
+    import multiprocessing
+    import os
+    from nnslr_tools import road_type_signs as signs
+    monkeypatch.setattr(signs, 'network_paths', lambda package, classifier=None: {'finder': tmp_path / 'finder',
+                                                                                  'classifier': tmp_path / 'classifier'})
+    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, '_Network', lambda path, gpu: None)
+    monkeypatch.setattr(signs, 'classifier_classes', lambda path: [])
+    monkeypatch.setattr(signs, '_WORKER', {})
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '0')
+    monkeypatch.setenv('CUDA_DEVICE_ORDER', 'FASTEST_FIRST')
+    turn = multiprocessing.get_context().Value('i', 0)
+    seen = []
+    for _ in range(3):
+        signs._worker_start(str(tmp_path), True, None, ['0', '1'], turn)
+        seen.append(os.environ['CUDA_VISIBLE_DEVICES'])
+    assert seen == ['0', '1', '0'] and os.environ['CUDA_DEVICE_ORDER'] == 'PCI_BUS_ID'
+    # Without cards a process stays on those it was started with.
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '1')
+    signs._worker_start(str(tmp_path), True)
+    assert os.environ['CUDA_VISIBLE_DEVICES'] == '1'
+
+
+def test_the_cards_reach_the_processes_only_on_the_gpu(tmp_path, monkeypatch):
+    from nnslr_tools import road_type_signs as signs
+    started = []
+
+    on = {'gpu': True, 'nvdec': True}
+
+    class Pool:
+        def __init__(self, **kwargs): started.append(kwargs['initargs'])
+        def __enter__(self): return self
+        def __exit__(self, *error): return False
+        def map(self, function, tasks):
+            return ({'segment': segment, 'frames': 1, 'signs': [], 'boxes': [], **on, 'pictures': None}
+                    for _, segment, _ in tasks)
+
+    video = tmp_path / 'fcamera.hevc'
+    video.write_bytes(b'x')
+    monkeypatch.setattr(signs, 'ProcessPoolExecutor', Pool)
+    monkeypatch.setattr(signs, '_videos', lambda root, route: {0: video})
+    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx: 'stamp')
+    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, 'confirmations', lambda vision, readings: [])
+    monkeypatch.setattr(signs, 'board_confirmations', lambda vision, readings: [])
+    lines = []
+    signs.build_signs(tmp_path, ['first'], package=tmp_path, workers=2, gpus=['0', '1'], log=lines.append)
+    assert started[-1][3] == ['0', '1'] and started[-1][4].value == 0
+    assert 'road-type signs: the processes on the cards 0, 1 in turn' in lines
+    signs.build_signs(tmp_path, ['second'], package=tmp_path, workers=2, gpus=['0', '1'], device='cpu',
+                      log=lambda line: None)
+    assert started[-1][3:] == (None, None)
+    signs.build_signs(tmp_path, ['third'], package=tmp_path, workers=2, log=lambda line: None)
+    assert started[-1][3:] == (None, None)
+    # On the cards given a video NVDEC cannot decode is said, the networks on the CPU stop the reading.
+    on['nvdec'] = False
+    lines.clear()
+    signs.build_signs(tmp_path, ['fourth'], package=tmp_path, workers=2, gpus=['0', '1'], log=lines.append)
+    assert 'road-type signs: segment 0 of fourth: NVDEC could not decode it, decoded on the CPU' in lines
+    on['gpu'] = False
+    with pytest.raises(RuntimeError, match='on the CPU, not on a card of 0, 1'):
+        signs.build_signs(tmp_path, ['fifth'], package=tmp_path, workers=2, gpus=['0', '1'], log=lambda line: None)
+    assert signs.load_signs(tmp_path, 'fifth') is None
+    # Without cards given, the reading goes on as before.
+    signs.build_signs(tmp_path, ['sixth'], package=tmp_path, workers=2, log=lambda line: None)
+    assert signs.load_signs(tmp_path, 'sixth') is not None
+
+
 def test_a_segment_read_keeps_the_boxes_and_the_brain_pictures(tmp_path, monkeypatch):
     import subprocess
     import numpy as np

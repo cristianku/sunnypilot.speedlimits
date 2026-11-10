@@ -94,6 +94,29 @@ def test_the_seeds_have_a_curve_each_and_a_seed_without_a_measure_still_counts()
     assert 'val_error_kph' not in result['curves']['brain_s1']['points'][0]
 
 
+def test_the_reading_of_the_signs_moves_with_the_segments_then_the_drives():
+    head = LOG[:LOG.index('== 4/6')]
+    result = progress('train_brain', 'running', head)
+    # Nothing read yet: the 6 of the checks.
+    assert result['steps'][1]['state'] == 'current' and result['percent'] == pytest.approx(6.0)
+    log = head + 'road-type signs: 100/400 segments\n'
+    result = progress('train_brain', 'running', log)
+    assert result['step_progress']['text'] == 'as the car reads · 100 of 400 segments'
+    # A quarter of the first half of its 22.
+    assert result['percent'] == pytest.approx(6 + 22 * 0.125, abs=0.1)
+    log += ('road-type signs: 400/400 segments\nbrain signs: 3 drives to read, 2 at a time, on the cards 0, 1\n'
+            'brain signs 1/4 00000001--aaaaaaaaaa: read by these networks already\n'
+            'brain signs 2/4 00000002--bbbbbbbbbb: 900 pictures read, 12 boxes of our road, card 1\n')
+    result = progress('train_brain', 'running', log)
+    assert result['step_progress']['text'] == 'our networks · 2 of 4 drives'
+    assert result['percent'] == pytest.approx(6 + 22 * 0.75, abs=0.1)
+    # The seeds after it: the step is done whatever its last line said.
+    assert progress('train_brain', 'running', log + LOG[LOG.index('== 4/6'):])['percent'] == pytest.approx(29.2)
+    # The same NAME again from a terminal, its log written on: its step 3 starts from nothing.
+    again = progress('train_brain', 'running', log + '== 3/6 Read the signs of the drives as the car does today ==\n')
+    assert again['percent'] == pytest.approx(6.0) and again['step_progress'] is None
+
+
 def test_a_seed_already_trained_is_a_step_done():
     log = LOG + '== 5/6 Train seed 1 ==\nskip seed 1: already trained\n== 6/6 Train seed 2 ==\n'
     assert [step['state'] for step in progress('train_brain', 'running', log)['steps']] == ['done', 'done', 'done', 'done', 'current']

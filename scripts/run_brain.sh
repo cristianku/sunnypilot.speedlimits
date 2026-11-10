@@ -5,7 +5,7 @@ set -euo pipefail
 # car's own signals, learnt from every dashcam drive with its logs read, each whole: the driver's own speed, corrected
 # by the blocks of Speed review, the roadworks and the kinds of road marked there and the next limit of the signs our networks read,
 # those of Sign review where the frames were confirmed there. On one
-# GPU, one step after the other:
+# GPU (the readings of step 3 also on the free ones), one step after the other:
 #
 #   1. checks the labels, the split and the whole training on the CPU (nnslr train-brain --dry-run; its log says the
 #      dashcam drives and hours, and it stops while there is none); the drives it takes are the run's, kept in
@@ -15,9 +15,12 @@ set -euo pipefail
 #   3. reads the signs of every drive it learns from (every dashcam drive) as the car does today
 #      (nnslr road-type-signs --labelled; a drive already read by the car's reader of today is not read again: a new
 #      vision.py or a new network reads them all again, and the training refuses anything else), the signs it is given;
-#      then reads them with our networks in use, cutter, classifier and applicability, on the pictures at 1 a second
+#      then reads them with the networks on the car, cutter, classifier and applicability, on the pictures at 1 a second
 #      (nnslr brain-signs, the same: a new network reads them all again), the next limit and its metres it is taught
-#      where nobody confirmed the frames in Sign review; then says what the labels give (nnslr brain-targets);
+#      where nobody confirmed the frames in Sign review; then says what the labels give (nnslr brain-targets). Both
+#      readings run on the brain's card and on every other card nothing computes on and no other job of the panel
+#      holds at that moment, which the panel then counts as the brain's until the step ends (#36: the NVDEC of one
+#      V100 held the first back, one drive at a time the second), several drives at once;
 #   4-6. trains seeds 0, 1 and 2, each into a run of its own, runs/NAME-s0, -s1, -s2 (nnslr train-brain, the last epoch
 #      kept): three versions in Models › Brain, which differ only by chance. Train › Brain draws them on one chart.
 #
@@ -29,7 +32,9 @@ set -euo pipefail
 # NAME to finish: a finished seed is not repeated, the signs already read are not read again, the drives are the same.
 #
 # Environment: NNSLR_GPU_INDEX (default 0), NNSLR_GPU_VENV (.venv-gpu), NNSLR_BRAIN_EPOCHS (40), NNSLR_SIGN_WORKERS
-# (processes reading the signs: half the cores, each with its ffmpeg), NNSLR_BRAIN_WORKS (1: it also learns the
+# (processes reading the signs as the car does: half the cores, each with its ffmpeg), NNSLR_BRAIN_SIGN_JOBS (drives
+# our networks read at once: 0, one per 4 cores), NNSLR_SIGN_GPUS (the cards of step 3, nvidia-smi's numbers: 0,1;
+# default the brain's and every other card free then), NNSLR_BRAIN_WORKS (1: it also learns the
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
 # one; 0: not, every second),
@@ -45,6 +50,8 @@ EPOCHS="${NNSLR_BRAIN_EPOCHS:-40}"
 CORES="$(nproc 2>/dev/null || echo 8)"
 SIGN_WORKERS_DEFAULT=$(( CORES / 2 > 1 ? CORES / 2 : 1 ))
 SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
+BRAIN_SIGN_JOBS="${NNSLR_BRAIN_SIGN_JOBS:-0}"
+SIGN_GPUS="${NNSLR_SIGN_GPUS:-}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
@@ -62,12 +69,17 @@ if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   exit 2
 fi
 
-for setting in EPOCHS SIGN_WORKERS; do
+for setting in EPOCHS SIGN_WORKERS BRAIN_SIGN_JOBS; do
   if [[ ! "${!setting}" =~ ^[0-9]+$ ]]; then
     echo "error: $setting must be a whole number: ${!setting}" >&2
     exit 2
   fi
 done
+
+if [[ -n "$SIGN_GPUS" && ! "$SIGN_GPUS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+  echo "error: NNSLR_SIGN_GPUS must be cards by nvidia-smi's numbers, e.g. 0,1: $SIGN_GPUS" >&2
+  exit 2
+fi
 
 if [[ "$WORKS" != "0" && "$WORKS" != "1" ]]; then
   echo "error: NNSLR_BRAIN_WORKS must be 0 or 1: $WORKS" >&2
@@ -200,9 +212,31 @@ echo "== 3/6 Read the signs of the drives as the car does today =="
 # The signs on the GPU: .venv has onnxruntime-gpu, .venv-gpu only the CPU's (torch brings its own CUDA).
 SIGNS_NN="$ROOT_DIR/.venv/bin/nnslr"
 [ -x "$SIGNS_NN" ] || SIGNS_NN="$NN"
-"$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
-# The next limit and its metres it is taught: our networks in use read the pictures (their worker on .venv-gpu's torch).
-"$NN" brain-signs --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
+# The cards that read them (nnslr borrow-cards): the brain's, and every other card no compute process is on and no
+# other job of the panel holds; or those of NNSLR_SIGN_GPUS. In a job of the panel the others are written to its record
+# (NNSLR_JOB_RECORD): the panel names them as the brain's and starts nothing else on them until this step ends. Chosen
+# here, not at the start (the checks above take a minute), and again before the second reading. Without an answer, the
+# brain's card alone.
+sign_cards() {
+  local cards
+  if [[ -n "$SIGN_GPUS" ]]; then
+    cards="$("$SIGNS_NN" borrow-cards --own "$GPU_INDEX" --cards "$SIGN_GPUS" --data-root "$DATA_ROOT")" ||
+      cards="$SIGN_GPUS"
+  else
+    cards="$("$SIGNS_NN" borrow-cards --own "$GPU_INDEX" --data-root "$DATA_ROOT")" || cards="$GPU_INDEX"
+  fi
+  [[ "$cards" =~ ^[0-9]+(,[0-9]+)*$ ]] || cards="$GPU_INDEX"
+  echo "$cards"
+}
+CARDS="$(sign_cards)"
+echo "sign cards:   $CARDS"
+"$SIGNS_NN" road-type-signs --labelled --num-workers "$SIGN_WORKERS" --gpus "$CARDS" --data-root "$DATA_ROOT" \
+  "${ROUTE_ARGS[@]}"
+# The next limit and its metres it is taught: the car's networks read the pictures (their worker on .venv-gpu's torch).
+CARDS="$(sign_cards)"
+echo "sign cards:   $CARDS"
+"$NN" brain-signs --jobs "$BRAIN_SIGN_JOBS" --gpus "$CARDS" --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}"
+"$SIGNS_NN" borrow-cards --release --data-root "$DATA_ROOT" || true
 if [[ "$TYPES" == "0" ]]; then
   "$NN" brain-targets --data-root "$DATA_ROOT" "${ROUTE_ARGS[@]}" --no-road-types
 else

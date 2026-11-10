@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
 import os
 import subprocess
 import time
@@ -192,7 +193,15 @@ class _Network:
 _WORKER: dict = {}
 
 
-def _worker_start(package: str, gpu: bool = False, classifier: str | None = None) -> None:
+def _worker_start(package: str, gpu: bool = False, classifier: str | None = None, cards: list[str] | None = None,
+                  turn=None) -> None:
+    if cards:
+        # This process's card, the next in turn, before its networks and its ffmpeg open one (#36): the NVDEC of one
+        # V100 is what holds the reading back.
+        with turn.get_lock():
+            place = turn.value
+            turn.value += 1
+        os.environ.update(CUDA_DEVICE_ORDER='PCI_BUS_ID', CUDA_VISIBLE_DEVICES=cards[place % len(cards)])
     paths = network_paths(Path(package), Path(classifier) if classifier else None)
     _WORKER.update(vision=load_vision(Path(package)), finder=_Network(paths['finder'], gpu),
                    classifier=_Network(paths['classifier'], gpu), classes=classifier_classes(paths['classifier']),
@@ -388,13 +397,14 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
 
 
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
-                device: str = 'auto', classifier: Path | None = None, pictures: bool = False,
-                log=print) -> dict[str, dict]:
+                device: str = 'auto', gpus: list[str] | None = None, classifier: Path | None = None,
+                pictures: bool = False, log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
     The segments of all drives are read in parallel by workers processes (default half the cores), on the GPU when
-    there is one (device 'auto'; 'cpu' never). classifier: a v2 reader-best.pt to read with instead of the car's
-    (classifier_onnx). pictures: also the brain's pictures (picture_path), read again where they are missing; a drive
-    that has them gets them again whenever it is read."""
+    there is one (device 'auto'; 'cpu' never), each process on a card of gpus in turn (nvidia-smi's numbers; None: every
+    process on the first card this process sees). classifier: a v2 reader-best.pt to read with instead of the car's (classifier_onnx).
+    pictures: also the brain's pictures (picture_path), read again where they are missing; a drive that has them gets
+    them again whenever it is read."""
     package = package_path() if package is None else Path(package)
     onnx = classifier_onnx(root, classifier) if classifier is not None else None
     stamp = fingerprint(package, onnx)
@@ -419,10 +429,22 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
         results: dict[str, list] = {}
         left = Counter(task[0] for task in tasks)
         gpu = device != 'cpu'
-        with ProcessPoolExecutor(max_workers=workers, initializer=_worker_start,
-                                 initargs=(str(package), gpu, str(onnx) if onnx else None)) as pool:
+        cards = [str(card) for card in gpus] if gpu and gpus else None
+        context = multiprocessing.get_context()
+        if cards and len(cards) > 1:
+            log(f"road-type signs: the processes on the cards {', '.join(cards)} in turn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context, initializer=_worker_start,
+                                 initargs=(str(package), gpu, str(onnx) if onnx else None, cards,
+                                           context.Value('i', 0) if cards else None)) as pool:
             done = 0
             for (route, _, _, _), result in zip(tasks, pool.map(read_segment, [(v, s, p) for _, s, v, p in tasks])):
+                if cards and not result['gpu']:
+                    # A process whose card does not work stops the reading: on the cards given, never the CPU.
+                    raise RuntimeError(f"road-type signs: segment {result['segment']} of {route} was read by the "
+                                       f"networks on the CPU, not on a card of {', '.join(cards)}")
+                if cards and not result['nvdec']:
+                    log(f"road-type signs: segment {result['segment']} of {route}: NVDEC could not decode it, decoded "
+                        "on the CPU")
                 results.setdefault(route, []).append(result)
                 done += 1
                 left[route] -= 1

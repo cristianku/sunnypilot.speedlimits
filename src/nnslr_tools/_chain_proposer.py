@@ -9,6 +9,7 @@ torchvision) on the request.json written by preannotate.run_preannotation."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -65,6 +66,9 @@ def run(request: dict) -> None:
     root = Path(request['data_root'])
     # The progress of a training lives in logs/progress.json: this worker reports in its log lines only.
     chain.report_progress = lambda *args, **kwargs: None
+    if request.get('require_gpu') and not torch.cuda.is_available():
+        # The brain's signs (nnslr_tools.brain_signs) are read on a card, never on the CPU.
+        raise RuntimeError(f"no card for this worker (CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r})")
     device = _device(torch, 'cuda' if torch.cuda.is_available() else 'cpu')
     proposer = request['model']
     cutter, _, input_size = _load_cutter({'path': Path(proposer['cutter_path']), 'id': proposer['cutter']}, device)

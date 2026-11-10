@@ -74,7 +74,8 @@ MINORS = {1: '81:00.0', 0: 'c1:00.0'}
 # A job that says the card it was given and its progress file, then sleeps ($FAKE_SLEEP).
 GPU_SCRIPT = ('#!/usr/bin/env bash\necho "run:          ${1:-x}"\necho "arguments: $*"\n'
               'echo "gpu=${NNSLR_GPU_INDEX:-none} cuda=${CUDA_VISIBLE_DEVICES:-none} order=${CUDA_DEVICE_ORDER:-none}"\n'
-              'echo "progress=${NNSLR_PROGRESS_FILE:-none}"\nsleep "${FAKE_SLEEP:-0}"\n')
+              'echo "progress=${NNSLR_PROGRESS_FILE:-none}"\necho "record=${NNSLR_JOB_RECORD:-none}"\n'
+              'sleep "${FAKE_SLEEP:-0}"\n')
 
 
 def cards(used0=0, used1=0):
@@ -86,7 +87,7 @@ def cards(used0=0, used1=0):
 def opened(only_this_checkout, monkeypatch):  # noqa: F811
     """No card env from the machine running the tests, the driver's minors of CT 131, and the card files each process
     has open ({pid: {minor}}, none unless a test says so)."""
-    for name in ('NNSLR_GPU_INDEX', 'CUDA_VISIBLE_DEVICES', 'CUDA_DEVICE_ORDER', 'NNSLR_PROGRESS_FILE'):
+    for name in ('NNSLR_GPU_INDEX', 'CUDA_VISIBLE_DEVICES', 'CUDA_DEVICE_ORDER', 'NNSLR_PROGRESS_FILE', 'NNSLR_JOB_RECORD'):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(panel_module, '_CARD_INDEX', {})
     monkeypatch.setattr(panel_module, '_gpu_minor_buses', lambda: dict(MINORS))
@@ -204,6 +205,64 @@ def test_the_brain_takes_one_card_and_the_regression_never_runs_beside_it(panel,
     assert said(panel, cutter, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
     assert reasons(panel)['train_cutter']['reason'] == (
         'both GPUs are busy: a brain training on GPU 0, a cutter training on GPU 1')
+
+
+def test_the_cards_the_brain_borrows_for_its_signs_are_its_own_until_it_gives_them_back(panel, root, checkout,  # noqa: F811
+                                                                                         monkeypatch):
+    """#36: step 3 of the brain also reads on the other card when it is free (nnslr borrow-cards); the panel names that
+    card as the brain's and starts no training there until the step gives it back."""
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(FREE, ''))
+    monkeypatch.setattr(panel_module, 'BORROW_RECHECK_SECONDS', 0)
+    monkeypatch.setenv('FAKE_SLEEP', '30')
+    script = checkout / 'scripts' / 'run_brain.sh'
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text(GPU_SCRIPT)
+    script.chmod(0o755)
+    signnet_script(checkout, GPU_SCRIPT)
+    monkeypatch.setattr(panel, '_brain_drives_missing', lambda: '')
+    brain = panel.start('train_brain')
+    path = panel.logs / (brain['id'] + '.json')
+    assert said(panel, brain, 'record=') == f'record={path}'
+    # A cutter holds card 1: the brain reads on its own card alone.
+    cutter = panel.start('train_cutter')
+    said(panel, cutter, 'gpu=')
+    assert panel_module.borrow_cards(panel.logs, 0, path) == [0]
+    assert 'borrowed' not in record(panel, brain)
+    panel.stop(cutter['id'])
+    finished(panel, cutter['id'])
+    # Card 1 free: borrowed, written to the brain's record, and the brain's for the panel.
+    assert panel_module.borrow_cards(panel.logs, 0, path) == [0, 1]
+    assert record(panel, brain) == {'gpus': [0], 'own_progress': True, 'borrowed': [1]}
+    assert [card for card in holders(panel) if not card[1]][1][2][0]['job'] == brain['id']
+    assert reasons(panel)['train_cutter']['reason'] == 'both GPUs are busy with a brain training'
+    assert refused(panel, 'train_cutter')[:2] == (409, 'busy')
+    assert [job['gpus'] for job in panel.jobs() if job['id'] == brain['id']] == [[0, 1]]
+    # Asked again before the second reading: still its own, not taken from itself.
+    assert panel_module.borrow_cards(panel.logs, 0, path) == [0, 1]
+    # Given back: a cutter starts on card 1.
+    panel_module.release_cards(path)
+    assert record(panel, brain) == {'gpus': [0], 'own_progress': True}
+    # A job's id is its second: the first cutter's is taken.
+    time.sleep(1.05 - time.time() % 1)
+    cutter = panel.start('train_cutter')
+    assert said(panel, cutter, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
+
+
+def test_a_card_taken_while_the_brain_borrows_it_is_left_to_its_job(tmp_path, monkeypatch):
+    """The cards are read again a moment after they are written: a job the panel started on one meanwhile keeps it."""
+    answers = iter(([1, 2], [2]))
+    monkeypatch.setattr(panel_module, '_free_of_others', lambda logs, own, skip: next(answers))
+    monkeypatch.setattr(panel_module, 'BORROW_RECHECK_SECONDS', 0)
+    path = tmp_path / '20261110-150000-train_brain.json'
+    path.write_text(json.dumps({'gpus': [0], 'own_progress': True}))
+    assert panel_module.borrow_cards(tmp_path, 0, path) == [0, 2]
+    assert json.loads(path.read_text())['borrowed'] == [2]
+    # Given by NNSLR_SIGN_GPUS: as given, the others than its own written.
+    assert panel_module.borrow_cards(tmp_path, 0, path, [1, 0]) == [1, 0]
+    assert json.loads(path.read_text())['borrowed'] == [1]
+    # From a terminal: nothing written.
+    monkeypatch.setattr(panel_module, '_free_of_others', lambda logs, own, skip: [1])
+    assert panel_module.borrow_cards(tmp_path, 0, None) == [0, 1]
 
 
 def test_an_import_or_the_whole_pipeline_runs_alone_either_way(panel, checkout, monkeypatch):  # noqa: F811

@@ -376,16 +376,26 @@ def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None
                         'road_model': ROAD_MODEL_INFO, 'ocr': OCR_INFO}}
 
 
-def run_proposer_worker(setup: dict, root: Path, frames: list[dict], output: Path, run_id: str, route: str) -> list[dict]:
+def run_proposer_worker(setup: dict, root: Path, frames: list[dict], output: Path, run_id: str, route: str, *,
+                        gpu: str | None = None, log_path: Path | None = None) -> list[dict]:
     """Runs the worker of a proposer_setup on frames, writing into output (images/ and preannotations.jsonl);
-    returns its rows, one per frame in order."""
+    returns its rows, one per frame in order. gpu: the card it runs on, by nvidia-smi's number (None: the cards this
+    process sees); log_path: the file its lines go to (None: this process's own output)."""
     request={'schema_version':1,'run_id':run_id,'route_id':route,'data_root':str(root),
              'confidence':setup['confidence'],'frames':frames,'output':str(output),**setup['request']}
     request_path=output/'request.json'; request_path.write_text(json.dumps(request,allow_nan=False))
     env=dict(os.environ)
     # The worker imports nnslr_tools from this checkout, also from the GPU environment.
     env['PYTHONPATH']=str(Path(__file__).resolve().parents[1])+(os.pathsep+env['PYTHONPATH'] if env.get('PYTHONPATH') else '')
-    proc=subprocess.run([setup['python'],'-m',setup['worker'],str(request_path)],capture_output=False,env=env)
+    if gpu is not None:
+        # CUDA counts the cards by PCI bus, as nvidia-smi does.
+        env.update(CUDA_DEVICE_ORDER='PCI_BUS_ID',CUDA_VISIBLE_DEVICES=str(gpu))
+    command=[setup['python'],'-m',setup['worker'],str(request_path)]
+    if log_path is None:
+        proc=subprocess.run(command,capture_output=False,env=env,check=False)
+    else:
+        with open(log_path,'w',encoding='utf-8') as handle:
+            proc=subprocess.run(command,stdout=handle,stderr=subprocess.STDOUT,env=env,check=False)
     if proc.returncode:
         raise PreannotationError(f'preannotation failed; previous results preserved; diagnostic request: {request_path}')
     rows=[json.loads(line) for line in (output/'preannotations.jsonl').read_text().splitlines()]
