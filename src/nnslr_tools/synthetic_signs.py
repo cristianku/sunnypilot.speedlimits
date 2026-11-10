@@ -288,11 +288,19 @@ def frame_families(frame: dict[str, Any]) -> list[str | None]:
     return [None if box in plates else family for box, family in zip(frame["boxes"], frame.get("box_families") or [])]
 
 
-def paint_frame(image, boxes: list[list[float]], families: list[str | None], rng: random.Random):
-    """image (PIL, RGB) with each paintable box drawn as an end of limit with probability SHARE, and how many were."""
+def chosen_boxes(boxes: list[list[float]], families: list[str | None], rng: random.Random) -> list[bool]:
+    """Which boxes paint_frame draws: each paintable one with probability SHARE (one draw of rng each). Chosen before
+    the frame is read, a frame with none is not decoded at all (the cutter reads its band from the cache)."""
+    return [paintable(box, family) and rng.random() < SHARE for box, family in zip(boxes, families)]
+
+
+def paint_frame(image, boxes: list[list[float]], families: list[str | None], rng: random.Random,
+                chosen: list[bool] | None = None):
+    """image (PIL, RGB) with each paintable box drawn as an end of limit with probability SHARE, and how many were.
+    ``chosen``: the boxes to draw, already drawn by chosen_boxes."""
     painted = 0
-    for box, family in zip(boxes, families):
-        if paintable(box, family) and rng.random() < SHARE:
+    for index, (box, family) in enumerate(zip(boxes, families)):
+        if chosen[index] if chosen is not None else (paintable(box, family) and rng.random() < SHARE):
             image = paint_end_of_limit(image, box, style_of(family), rng)
             painted += 1
     return image, painted

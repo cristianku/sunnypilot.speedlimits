@@ -231,6 +231,43 @@ def test_a_tiny_training_logs_its_lines_and_saves_the_data(tmp_path):
         assert set(result[split]['car']) == set(result[split]['by_box_budget']['5'])
 
 
+def test_the_band_cache_gives_the_bands_of_the_frames(tmp_path, monkeypatch):
+    import random
+
+    from PIL import Image
+
+    from nnslr_tools import signnet, synthetic_signs
+    frames = []
+    for index in range(3):
+        image = Image.new('RGB', (128, 96), (90 + 20 * index, 90, 90))
+        image.paste((240, 20, 20), (40, 30, 64, 54))
+        image.save(tmp_path / f'f{index}.png')
+        frames.append({'image_path': f'f{index}.png', 'split': 'train', 'width': 128, 'height': 96,
+                       'boxes': [[40.0, 30.0, 64.0, 54.0]], 'box_families': ['maximum_speed']})
+    frames.append({'image_path': 'gone.png', 'split': 'train', 'width': 128, 'height': 96, 'boxes': [],
+                   'box_families': []})
+    cache = signnet.band_cache(frames, tmp_path, 96, workers=0)
+    assert (cache['frames'], cache['cut'], cache['kept']) == (4, 3, 0) and 'gone.png' not in cache['files']
+    assert signnet.band_cache(frames, tmp_path, 96, workers=0)['kept'] == 3  # cut once
+    plain = signnet._dataset(frames[:3], tmp_path, 8, train=False, seed=0, band_width=96)
+    ready = signnet._dataset(frames[:3], tmp_path, 8, train=False, seed=0, band_width=96, cached=cache['files'])
+    for index in range(3):
+        assert torch.equal(plain[index][0], ready[index][0])  # the very pixels of the frame's band
+        assert all(torch.equal(a, b) for a, b in zip(plain[index][1:5], ready[index][1:5]))
+    # In training, a frame with a speed sign is decoded only when a sign is drawn on it; otherwise its band is read.
+    decoded = []
+    band_image = signnet._band_image
+    monkeypatch.setattr(signnet, '_band_image', lambda *args: decoded.append(args) or band_image(*args))
+    train = signnet._dataset(frames[:3], tmp_path, 8, train=True, seed=0, band_width=96, cached=cache['files'])
+    monkeypatch.setattr(synthetic_signs, 'SHARE', 0.0)
+    train[0]
+    assert decoded == []
+    monkeypatch.setattr(synthetic_signs, 'SHARE', 1.0)
+    random.seed(0)
+    image = train[1][0]
+    assert len(decoded) == 1 and decoded[0][2] is not None and image.shape == plain[1][0].shape
+
+
 def test_the_mapillary_stage_names_its_lines_and_keeps_the_epoch_of_the_speed_signs(tmp_path):
     from PIL import Image
     frames = []

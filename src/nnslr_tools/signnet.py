@@ -22,8 +22,8 @@ Needs the GPU environment (.venv-gpu).
 
 A training cuts every frame's band once, before its first epoch, into data/derived/band-cache (band_cache): an epoch
 reads the bands ready instead of decoding every frame and resizing it, and the light of each band is set on the GPU,
-batch by batch. The bands are the very pixels of _band_of; only a train frame with a speed sign that may be drawn as
-an end of limit is decoded again every time it comes, since the drawing is made on the whole frame.
+batch by batch. The bands are the very pixels of _band_of; only a train frame whose speed sign is drawn as an end of
+limit this time (synthetic_signs.SHARE of them) is decoded again, since the drawing is made on the whole frame.
 
 SignNet is the one cutter: the car runs it (sunnypilot's speed_limits/vision.py, mirrored by the CAR_* constants), and
 the server's chain (nnslr_tools.chain: Prepare's Our networks, mine-negatives, evaluate-chain) reads it the same way:
@@ -365,7 +365,8 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
     import numpy as np
     from torch.utils.data import Dataset
     cached = cached or {}
-    # The frames whose speed signs may be drawn as an end of limit: decoded every time, the drawing is on the frame.
+    # The frames whose speed signs may be drawn as an end of limit: the boxes to draw chosen first, and the frame
+    # decoded only when one is (the drawing is on the frame), about one time in four.
     drawn = {index for index, frame in enumerate(frames) if paints(frame, train) and any(
         synthetic_signs.paintable(box, family)
         for box, family in zip(frame['boxes'], synthetic_signs.frame_families(frame)))}
@@ -376,17 +377,20 @@ def _dataset(frames: list[dict], data_root: Path, stride: int, *, train: bool, s
 
         def __getitem__(self, index):
             frame = frames[index]
-            ready = None if index in drawn else cached.get(frame['image_path'])
+            chosen = None
+            if index in drawn:
+                # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones are
+                # not enough to learn them. Python's random is seeded apart in every DataLoader worker.
+                families = synthetic_signs.frame_families(frame)
+                chosen = synthetic_signs.chosen_boxes(frame['boxes'], families, random)
+            ready = None if chosen and any(chosen) else cached.get(frame['image_path'])
             if ready is not None:
                 image, width = torch.from_numpy(np.load(ready)), frame['width']
             else:
                 paint = None
-                if index in drawn:
-                    # Some speed signs drawn as an end of limit, the box kept (synthetic_signs): the few real ones
-                    # are not enough to learn them. Python's random is seeded apart in every DataLoader worker.
+                if chosen and any(chosen):
                     def paint(image):
-                        return synthetic_signs.paint_frame(image, frame['boxes'],
-                                                           synthetic_signs.frame_families(frame), random)[0]
+                        return synthetic_signs.paint_frame(image, frame['boxes'], families, random, chosen)[0]
                 image, width = _band_image(data_root / frame['image_path'], band_width, paint)
             boxes = band_boxes(frame['boxes'], width, band_width)
             ignore = band_boxes(frame.get('ignore_boxes') or [], width, band_width, ignore=True)
