@@ -85,8 +85,12 @@ def cards(used0=0, used1=0):
 
 @pytest.fixture(autouse=True)
 def opened(only_this_checkout, monkeypatch):  # noqa: F811
-    """No card env from the machine running the tests, the driver's minors of CT 131, and the card files each process
-    has open ({pid: {minor}}, none unless a test says so)."""
+    """No card env from the machine running the tests, the driver's minors of CT 131, the networks that read the brain's
+    signs in use (#31: without them it is refused), and the card files each process has open ({pid: {minor}}, none unless
+    a test says so)."""
+    from nnslr_tools import preannotate
+    monkeypatch.setattr(preannotate, 'networks_in_use', lambda root: {
+        'cutter': 'cutter:c1/signnet', 'classifier': 'classifier:k1/classifier', 'decider': 'decider:d1/experiment-b/crop_geom'})
     for name in ('NNSLR_GPU_INDEX', 'CUDA_VISIBLE_DEVICES', 'CUDA_DEVICE_ORDER', 'NNSLR_PROGRESS_FILE', 'NNSLR_JOB_RECORD'):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(panel_module, '_CARD_INDEX', {})
