@@ -788,9 +788,12 @@ def frame_jpeg(root: Path, route: str, segment: int, decoded: int) -> bytes:
     the same pixels Sign review labels. Frame k of a minute of the player's video is frame k of that minute's
     fcamera.hevc (nnslr_tools.drive_video). SpeedReviewError 404 when the server has no such frame."""
     try:
-        return video_frames.preview(root, route, segment, decoded).read_bytes()
+        data = video_frames.preview(root, route, segment, decoded).read_bytes()
     except (video_frames.VideoFrameError, OSError) as exc:
         raise SpeedReviewError(404, 'no_video_frame', 'This frame of the video cannot be shown.') from exc
+    # The GOP after it (or before) decoded in the background: a step into it finds its frames ready.
+    video_frames.read_ahead(root, route, segment, decoded)
+    return data
 
 
 def save_block(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:

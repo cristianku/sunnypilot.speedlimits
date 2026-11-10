@@ -228,13 +228,14 @@ class ReviewService:
 
     def video_gop(self, route, segment: int, decoded: int) -> dict:
         """The frames of the road video around one, a GOP (nnslr_tools.video_frames), for the arrows of Sign review:
-        each with its key (the report's row when it is one), their previews ready in the cache. ``frame_count``: the
-        frames of the segment's video."""
+        each with its key (the report's row when it is one), their previews on their way to the cache: given once the
+        GOP's first frame is decoded, the page's request of another frame waiting only for that frame
+        (video_frames.preview). A GOP ffmpeg cannot decode is a 404, as a frame with no video: the arrows then go from
+        picture to picture. ``frame_count``: the frames of the segment's video."""
         directory, rows, _by_key = self.known_report(route)
         try:
             video = video_frames.video_of(self.root, route, segment)
-            first, last = video_frames.gop_of(video, decoded)
-            video_frames.preview(self.root, route, segment, first)
+            first, last = video_frames.gop_started(self.root, route, segment, decoded)
             count = video_frames.frame_count(video)
             # Ready for a save of one of these frames (video_frames.materialize).
             video_frames.read_timings_soon(video)

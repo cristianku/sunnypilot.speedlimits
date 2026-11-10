@@ -1,3 +1,21 @@
+<script lang="ts">
+import type {SpeedRow} from './speed-review';
+
+/** A drive's frames of its signs, as GET /api/routes sends them (review.route_summaries). */
+interface SignDrive {
+  route_id: string;
+  frame_count: number;
+  confirmed_count: number;
+  waiting_for_person?: number;
+  /** Where its signs are reviewed (review.signs_url): the Signs side, or the page of Sign review of a drive without video. */
+  url?: string;
+  drive?: {title: string | null; when: string | null; minutes: number | null; start?: string | null} | null;
+}
+/** The lists as they were last read, kept while the page is open: back on the tab (from another tab, or from a drive
+ * opened by its address) they stand at once and are read again behind, as on the way back from a drive. */
+const shown: {drives: SpeedRow[] | null; signs: SignDrive[] | null} = {drives: null, signs: null};
+</script>
+
 <script setup lang="ts">
 // Data › Speed review, the answers the brain learns from (speed_review.py): his own dashboard speed at every moment of a
 // drive is the answer, with nothing to confirm; a block corrects it from a time to a time, with another speed or left out
@@ -18,17 +36,16 @@ import {signsHref} from '../common/sign-link';
 import {clockOf, scanText} from './drive-review';
 import ReadLogsCard from './ReadLogsCard.vue';
 import SectionHead from './SectionHead.vue';
-import type {SpeedRow} from './speed-review';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {tabDrive} from './tabs';
 
 defineProps<{readOnly: boolean}>();
 
-const drives = shallowRef<SpeedRow[] | null>(null);
+const drives = shallowRef<SpeedRow[] | null>(shown.drives);
 const error = ref('');
 async function load(): Promise<void> {
   try {
-    drives.value = (await api<{drives: SpeedRow[]}>('/api/speed-review/drives')).drives;
+    drives.value = shown.drives = (await api<{drives: SpeedRow[]}>('/api/speed-review/drives')).drives;
     error.value = '';
   } catch (problem) {
     error.value = messageOf(problem);
@@ -51,25 +68,15 @@ const stateOf = (drive: SpeedRow): string => !drive.total_s ? scanText(drive.sca
 const marked = (drive: SpeedRow): boolean => drive.blocks > 0 || drive.works > 0 || drive.road > 0;
 const hrefOf = (drive: SpeedRow): string => '/speed-review?drive=' + encodeURIComponent(drive.route);
 
-/** A drive's frames of its signs, as GET /api/routes sends them (review.route_summaries). */
-interface SignDrive {
-  route_id: string;
-  frame_count: number;
-  confirmed_count: number;
-  waiting_for_person?: number;
-  /** Where its signs are reviewed (review.signs_url): the Signs side, or the page of Sign review of a drive without video. */
-  url?: string;
-  drive?: {title: string | null; when: string | null; minutes: number | null; start?: string | null} | null;
-}
-const signDrives = shallowRef<SignDrive[] | null>(null);
+const signDrives = shallowRef<SignDrive[] | null>(shown.signs);
 async function loadSigns(): Promise<void> {
   // The administrator's; a server without the list, or a failure, leaves the card out quietly.
   if (isGuest()) return;
   try {
     const answer = await api<{routes: SignDrive[]}>('/api/routes');
-    signDrives.value = Array.isArray(answer?.routes) ? answer.routes : null;
+    signDrives.value = shown.signs = Array.isArray(answer?.routes) ? answer.routes : null;
   } catch {
-    signDrives.value = null;
+    signDrives.value = shown.signs = null;
   }
 }
 /** The frames a person confirmed: confirmed_count counts the AI's saves too, which wait for a person. */

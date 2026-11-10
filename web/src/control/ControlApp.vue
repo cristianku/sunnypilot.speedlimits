@@ -2,11 +2,16 @@
 // Overview, Drives, Speed review, Training dataset, Training, Results, Versions, Publish: one app, the tab shown follows the address (tabs.ts). One status for all
 // tabs (/api/panel/status every 4 s, which also feeds the machine's history), the actions, and the sheet with the
 // details of a job. Evaluate reads the training runs itself (/api/panel/runs), Models the networks by role
-// (/api/panel/models).
-import {computed, provide, ref, watch} from 'vue';
-import type {Job} from '../common/panel-types';
+// (/api/panel/models). Speed review and Sign distance read only whether the buttons are on from the status, which costs
+// the server seconds of CPU at each reading: there it is read once a minute (and in a hidden browser tab everywhere), the
+// server pill and the dots of the busy tabs from the light /api/panel/system every 4 s, as on the other pages.
+import {computed, onBeforeUnmount, onMounted, provide, ref, watch} from 'vue';
+import {poll} from '../common/api';
+import type {Activity, Job, SystemInfo} from '../common/panel-types';
 import {markBusy} from '../composables/busy';
+import {showConnection} from '../composables/connection';
 import {usePanelStatus} from '../composables/panel-status';
+import {usePoll} from '../composables/poll';
 import {busyTabs} from './jobs';
 import LogSheet from './LogSheet.vue';
 import {recordMachine} from './machine-history';
@@ -25,7 +30,36 @@ import TrainTab from './TrainTab.vue';
 import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actions';
 
 useTabRouting();
-const {status, refresh} = usePanelStatus((value) => recordMachine(value.system));
+/** The tabs that need of the status only actions_enabled: their own data comes from their own addresses. */
+const LIGHT_TABS: ReadonlySet<string> = new Set(['speedreview', 'signdistance']);
+const STATUS_MS = 4000;
+const LIGHT_STATUS_MS = 60000;
+const hidden = ref(document.hidden);
+const light = computed(() => LIGHT_TABS.has(currentTab.value));
+const {status, refresh} = usePanelStatus((value) => recordMachine(value.system),
+  () => light.value || hidden.value ? LIGHT_STATUS_MS : STATUS_MS);
+// Back on a tab that shows the status, or on the browser tab: a fresh one now.
+watch([light, hidden], ([isLight, isHidden], [wasLight, wasHidden]) => {
+  if (!isLight && !isHidden && (wasLight || wasHidden)) void refresh();
+});
+function onVisibility(): void {
+  hidden.value = document.hidden;
+}
+onMounted(() => document.addEventListener('visibilitychange', onVisibility));
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibility));
+/** On the light tabs, the server pill and the busy dots every 4 s from /api/panel/system (0.15 s, 1 kB). */
+usePoll(async () => {
+  if (!light.value || hidden.value) return;
+  try {
+    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]}}>(
+      '/api/panel/system');
+    recordMachine(answer.system);
+    if (answer.running) markBusy(busyTabs(answer.running.jobs, answer.running.activities));
+    showConnection(null);
+  } catch (error) {
+    showConnection(error);
+  }
+}, STATUS_MS);
 const {run, stop, resume, retry, startPipeline, stopPipeline} = usePanelActions(refresh);
 // "Resume" on the card of a stopped training, wherever the card is shown.
 provide(RESUME_JOB, resume);

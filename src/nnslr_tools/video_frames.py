@@ -4,7 +4,9 @@ The timeline keeps one cell per second; the arrows of the page step through ever
 second). The frames between the pictures are taken out only when the page asks for them, a GOP at a time (a keyframe
 and the frames up to the next one, decoded on their own: a third of a second, the same pixels as a decode of the whole
 video), as JPEG previews in a cache under derived/video_cache that keeps at most CACHE_BYTES (the least recently shown
-go first). Nothing of that is a review or a row of the report.
+go first). Nothing of that is a review or a row of the report. A frame asked for is given as soon as ffmpeg has written
+it, not when its whole GOP is (0.4 s instead of 1.4 s for the first frame of a GOP at 2688 x 1520); the page then asks
+for the next GOP to be decoded in the background (read_ahead), and the cache is pruned outside the request (prune_soon).
 
 A frame between the seconds becomes one only when the reviewer confirms it, with boxes or as no sign (materialize):
 its picture is
@@ -24,6 +26,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,7 +38,16 @@ WIDE_VIDEO = 'ecamera.hevc'
 VIDEO_MANIFEST = 'video_frames.jsonl'
 VIDEO_PREFIX = 'video'
 CACHE_DIR = 'derived/video_cache'
-CACHE_BYTES = 1 << 30
+# About 16 minutes of video at full definition (2688 x 1520: 212 kB a frame, 254 MB a minute), 50 at 1344 x 760.
+CACHE_BYTES = 4 << 30
+# A prune leaves the cache at this share of CACHE_BYTES, so that the next decodes do not prune again at once.
+PRUNE_TO = 0.9
+# How often a request looks for its frame while ffmpeg writes the frames of its GOP.
+POLL_S = 0.005
+# The niceness of a GOP decoded ahead, before any page asks for it (the server's requests run at 0, the trainings at 10).
+AHEAD_NICE = 5
+# GOPs waiting to be decoded ahead: the newest first, the oldest forgotten.
+AHEAD_KEPT = 4
 # ffmpeg's JPEG quality (2 best .. 31): about the quality 92 of the report's previews.
 JPEG_QUALITY = '3'
 # The parameter sets of fcamera.hevc are at its start, before the first slice: never more than this.
@@ -230,46 +242,234 @@ def _cache_dir(root: Path, route: str, segment: int, video: Path, wide: bool = F
     stat = video.stat()
     identity = {'video': str(video.resolve()), 'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns}
     stamp = folder / 'video.json'
-    try:
-        current = json.loads(stamp.read_text()) == identity
-    except (OSError, ValueError):
-        current = False
-    if not current:
+
+    def current() -> bool:
+        try:
+            return json.loads(stamp.read_text()) == identity
+        except (OSError, ValueError):
+            return False
+    if not current():
         with _lock('cache', route, int(segment), wide):
-            shutil.rmtree(folder, ignore_errors=True)
-            folder.mkdir(parents=True, exist_ok=True)
-            stamp.write_text(json.dumps(identity))
+            # Looked at again: another request may have emptied it a moment ago, and its decode be writing there now.
+            if not current():
+                shutil.rmtree(folder, ignore_errors=True)
+                folder.mkdir(parents=True, exist_ok=True)
+                stamp.write_text(json.dumps(identity))
     return folder
+
+
+class _Decode:
+    """A GOP being decoded into its cache folder by ffmpeg, its frames appearing there one by one (written to a
+    temporary name and renamed: a frame in the folder is whole)."""
+
+    def __init__(self, folder: Path, first: int, last: int):
+        self.folder, self.first, self.last = folder, first, last
+        self.done = threading.Event()
+        self.error = ''
+
+    def wait_for(self, decoded: int) -> Path:
+        """The frame once ffmpeg has written it, without waiting for the rest of the GOP."""
+        wanted = self.folder / f'{decoded}.jpg'
+        while not wanted.is_file():
+            if self.done.wait(POLL_S) and not wanted.is_file():
+                raise VideoFrameError(self.error or f'frame {decoded} not decoded')
+        return wanted
+
+
+# The GOPs being decoded, by (cache folder, first frame).
+_decodes: dict[tuple[str, int], _Decode] = {}
+# The bytes of the cache of each data root as last counted (prune) plus the GOPs decoded since; absent: not counted yet.
+_cache_total: dict[str, int] = {}
+_prune_guard = threading.Lock()
+
+
+def _gop_cached(folder: Path, first: int, last: int) -> bool:
+    return (folder / f'{first}.jpg').is_file() and (folder / f'{last}.jpg').is_file()
+
+
+def _decode(root: Path, video: Path, folder: Path, first: int, last: int, wanted: Path | None, *,
+            ahead: bool = False) -> _Decode | None:
+    """The decode of a GOP into its cache folder: the one on its way, or one started now (ahead: niced). None when the
+    frame wanted (without one: the GOP) is already there."""
+    key = (str(folder), first)
+    with _locks_guard:
+        job = _decodes.get(key)
+        if job is not None:
+            return job
+        if wanted.is_file() if wanted is not None else _gop_cached(folder, first, last):
+            return None
+        job = _decodes[key] = _Decode(folder, first, last)
+    try:
+        data = gop_bytes(video, first, last)
+        # Written in the folder (not a path in the pattern, which may hold a %): <first>.jpg, <first + 1>.jpg...
+        process = subprocess.Popen([*(['nice', '-n', str(AHEAD_NICE)] if ahead else []), 'ffmpeg', '-v', 'error', '-y',
+                                    '-f', 'hevc', '-i', '-', '-vsync', '0', '-q:v', JPEG_QUALITY, '-atomic_writing', '1',
+                                    '-start_number', str(first), '%d.jpg'], cwd=folder, stdin=subprocess.PIPE,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except (OSError, VideoFrameError) as exc:
+        job.error = f'GOP {first}..{last} not decoded: {exc}'
+        with _locks_guard:
+            _decodes.pop(key, None)
+        job.done.set()
+        return job
+    threading.Thread(target=_finish, args=(root, key, job, process, data), name='video-gop', daemon=True).start()
+    return job
+
+
+def _finish(root: Path, key: tuple[str, int], job: _Decode, process: subprocess.Popen, data: bytes) -> None:
+    """Feeds ffmpeg its GOP and waits for it: every frame of the GOP written, or the decode failed (its frames half
+    written removed, the next request tries again). Then the cache is pruned if the frames made it too big."""
+    try:
+        _out, errors = process.communicate(data)
+        message = errors.decode(errors='replace').strip()
+    except OSError as exc:
+        message = str(exc)
+    sizes = []
+    for number in range(job.first, job.last + 1):
+        try:
+            sizes.append((job.folder / f'{number}.jpg').stat().st_size)
+        except OSError:
+            pass
+    if process.returncode != 0 or len(sizes) != job.last - job.first + 1:
+        job.error = f'GOP {job.first}..{job.last} not decoded: ' + message[:200]
+        for number in range(job.first, job.last + 1):
+            (job.folder / f'{number}.jpg.tmp').unlink(missing_ok=True)
+    with _locks_guard:
+        total = _cache_total.get(str(root))
+        if total is not None:
+            total = _cache_total[str(root)] = total + sum(sizes)
+    if total is None or total > CACHE_BYTES:
+        prune_soon(root)
+    with _locks_guard:
+        _decodes.pop(key, None)
+    job.done.set()
 
 
 def preview(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> Path:
     """The JPEG of a frame of the road video (wide: of the wide road camera, the same frame), its GOP taken out when
-    the cache does not have it."""
+    the cache does not have it: given as soon as ffmpeg has written that frame."""
     root = Path(root)
     video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
     first, last = gop_of(video, decoded)
     folder = _cache_dir(root, route, segment, video, wide)
     wanted = folder / f'{decoded}.jpg'
-    with _lock('gop', route, int(segment), first, wide):
-        if not wanted.is_file():
-            with tempfile.TemporaryDirectory(prefix='.gop-', dir=folder) as temporary:
-                staging = Path(temporary)
-                decode = subprocess.run(['ffmpeg', '-v', 'error', '-f', 'hevc', '-i', '-', '-vsync', '0',
-                                         '-q:v', JPEG_QUALITY, str(staging / 'f_%04d.jpg')],
-                                        input=gop_bytes(video, first, last), capture_output=True, check=False)
-                made = sorted(staging.glob('f_*.jpg'))
-                if decode.returncode != 0 or len(made) != last - first + 1:
-                    raise VideoFrameError(f'GOP {first}..{last} not decoded: '
-                                          + decode.stderr.decode(errors='replace').strip()[:200])
-                for number, path in enumerate(made):
-                    path.replace(folder / f'{first + number}.jpg')
-            prune(root)
-        os.utime(wanted)
-    return wanted
+    for _attempt in range(2):
+        job = _decode(root, video, folder, first, last, wanted)
+        if job is not None:
+            job.wait_for(decoded)
+        try:
+            os.utime(wanted)
+            return wanted
+        except FileNotFoundError:
+            # Pruned between the decode and now: decoded again.
+            continue
+    raise VideoFrameError(f'frame {decoded} not kept in the cache')
 
 
-def prune(root: Path, budget: int = CACHE_BYTES) -> None:
-    """Drop the least recently shown previews until the cache is within its budget."""
+def gop_started(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> tuple[int, int]:
+    """(first, last) of the GOP of a frame, its decode started: given once ffmpeg has written the GOP's first frame,
+    not the rest (the page asks for its frames next, preview). VideoFrameError for a GOP ffmpeg cannot decode at all:
+    ffmpeg gives up on one in about 0.6 s and writes nothing, where it writes the first frame of a good GOP in 0.3 s at
+    2688 x 1520."""
+    root = Path(root)
+    video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
+    first, last = gop_of(video, decoded)
+    job = _decode(root, video, _cache_dir(root, route, segment, video, wide), first, last, None)
+    if job is not None:
+        job.wait_for(first)
+    return first, last
+
+
+# The GOPs to decode ahead, by (cache folder, first frame), the newest last; one decoded at a time.
+_ahead: dict[tuple[str, int], tuple] = {}
+_ahead_ready = threading.Condition()
+_ahead_state = {'thread': None, 'busy': False}
+
+
+def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> None:
+    """After a page was given a frame: the next GOP of its video decoded in the background (niced), and the one before
+    while the frame is in the first third of its GOP, so that a step into either finds its frames ready. Only GOPs the
+    cache does not have; nothing is waited for."""
+    root = Path(root)
+    try:
+        video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
+        first, last = gop_of(video, decoded)
+        count = frame_count(video)
+        folder = _cache_dir(root, route, segment, video, wide)
+    except (VideoFrameError, OSError):
+        return
+    wanted = []
+    if decoded - first < (last - first + 1) / 3 and first > 0:
+        wanted.append(gop_of(video, first - 1))
+    if last + 1 < count:
+        wanted.append(gop_of(video, last + 1))
+    with _ahead_ready:
+        for gop in wanted:
+            if _gop_cached(folder, *gop):
+                continue
+            key = (str(folder), gop[0])
+            _ahead.pop(key, None)
+            _ahead[key] = (root, video, folder, *gop)
+        while len(_ahead) > AHEAD_KEPT:
+            del _ahead[next(iter(_ahead))]
+        if _ahead_state['thread'] is None:
+            _ahead_state['thread'] = threading.Thread(target=_ahead_loop, name='video-ahead', daemon=True)
+            _ahead_state['thread'].start()
+        _ahead_ready.notify()
+
+
+def _ahead_loop() -> None:
+    while True:
+        with _ahead_ready:
+            while not _ahead:
+                _ahead_state['busy'] = False
+                _ahead_ready.wait()
+            _ahead_state['busy'] = True
+            _key, (root, video, folder, first, last) = _ahead.popitem()
+        try:
+            job = _decode(root, video, folder, first, last, None, ahead=True)
+            if job is not None:
+                job.done.wait()
+        except Exception:  # noqa: BLE001 - a GOP not decoded ahead is decoded when a page asks for it
+            pass
+
+
+def settle(timeout: float = 30.0) -> bool:
+    """Waits until no GOP is being decoded or waits to be decoded ahead, nor the cache pruned (the tests count the
+    files of the cache). False after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with _ahead_ready:
+            queued = bool(_ahead) or _ahead_state['busy']
+        with _locks_guard:
+            running = list(_decodes.values())
+        if not queued and not running and not _prune_guard.locked():
+            return True
+        for job in running:
+            job.done.wait(0.05)
+        time.sleep(0.01)
+    return False
+
+
+def prune_soon(root: Path) -> None:
+    """prune in the background, one at a time, down to PRUNE_TO of the budget: never in a request."""
+    if not _prune_guard.acquire(blocking=False):
+        return
+
+    def run() -> None:
+        try:
+            prune(root, CACHE_BYTES, low=int(CACHE_BYTES * PRUNE_TO))
+        except Exception:  # noqa: BLE001 - the next decode prunes again
+            pass
+        finally:
+            _prune_guard.release()
+    threading.Thread(target=run, name='video-cache-prune', daemon=True).start()
+
+
+def prune(root: Path, budget: int | None = None, low: int | None = None) -> None:
+    """Drop the least recently shown previews until the cache is within its budget (CACHE_BYTES unless given; when it is
+    over it, down to `low`)."""
+    budget = CACHE_BYTES if budget is None else budget
     files = []
     for path in (Path(root) / CACHE_DIR).glob('*/*/*.jpg'):
         try:
@@ -278,11 +478,14 @@ def prune(root: Path, budget: int = CACHE_BYTES) -> None:
             continue
         files.append((stat.st_mtime_ns, stat.st_size, path))
     total = sum(size for _time, size, _path in files)
+    target = budget if low is None or total <= budget else min(low, budget)
     for _time, size, path in sorted(files):
-        if total <= budget:
+        if total <= target:
             break
         path.unlink(missing_ok=True)
         total -= size
+    with _locks_guard:
+        _cache_total[str(Path(root))] = total
 
 
 def manifest_stamp(root: Path, route: str) -> tuple:

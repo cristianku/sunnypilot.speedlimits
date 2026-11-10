@@ -749,6 +749,9 @@ function dragDown(event: PointerEvent, key: number, side: 'start' | 'end', from:
   event.preventDefault();
   handle.setPointerCapture(event.pointerId);
   player.value?.pause();
+  // The frames the end passes are not asked for at full definition (a GOP decoded on the server for each), only the
+  // one it is let go on.
+  player.value?.scrub(true);
   const before = side === 'start' ? endingAt(grabbed.start_ns) : null;
   const item = before ?? grabbed;
   const roll = before ? grabbed : side === 'end' ? blocks.value.find((other) => other.start_ns === grabbed.end_ns) ?? null : null;
@@ -780,6 +783,8 @@ function dragMove(event: PointerEvent): void {
 async function dragUp(event: PointerEvent): Promise<void> {
   const drag = dragging.value;
   if (!drag || drag.pointer !== event.pointerId) return;
+  // Before the server answers, and whatever it answers: the frame it ends on at full definition.
+  player.value?.scrub(false);
   const {item, roll, ns} = drag;
   if (event.type === 'pointerup' && drag.moved && ns !== drag.origin) {
     // Drawn where it was let go until the server answers: the block does not jump back meanwhile. A roll is one write

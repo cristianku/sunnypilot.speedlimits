@@ -187,6 +187,8 @@ watch([cursor, t0], () => emit('time', cursor.value, t0.value));
 const playing = ref(false);
 let frame = 0;
 let last = 0;
+/** The frame of the video the time shown was last moved to while playing. */
+let tickFrame = -1;
 function clamp(seconds: number): number {
   return Math.min(Math.max(0, seconds), end.value || seconds);
 }
@@ -231,8 +233,16 @@ function tick(now: number): void {
   if (element && starting) {
     // The picture is on its way.
   } else if (element && !element.paused) {
-    const at = plainVideo.value ? element.currentTime : logTimeOf(segments.value, element.currentTime);
-    if (at !== null) cursor.value = at;
+    // The time shown moves with the frame of the video (20 a second), not at every frame of the page (60 or more): the
+    // page draws what depends on it a third as often.
+    const shown = Math.floor(element.currentTime * FPS);
+    if (shown !== tickFrame) {
+      const at = plainVideo.value ? element.currentTime : logTimeOf(segments.value, element.currentTime);
+      if (at !== null) {
+        cursor.value = at;
+        tickFrame = shown;
+      }
+    }
     if (!frameCallbacks) present(element.currentTime);
   } else {
     // No picture here: the logs go on at their own pace, the video takes over where it has the time again.
@@ -253,6 +263,7 @@ function play(): void {
   if (end.value && cursor.value >= end.value - 0.05) seek(0);
   playing.value = true;
   last = 0;
+  tickFrame = -1;
   videoProblem.value = '';
   const element = player.value;
   const at = plainVideo.value ? cursor.value : videoTime.value;
@@ -326,8 +337,12 @@ function onStill(event?: Event): void {
   stillAt.value = element && element.paused && !element.seeking ? element.currentTime : null;
   if (!frameCallbacks && stillAt.value !== null) present(stillAt.value);
 }
+/** A drag on the strip or the lanes on its way: the frames it passes are not asked for at full definition (each would
+ * have its GOP decoded on the server), only the one it ends on. */
+const scrubbing = ref(false);
 const sharpFrame = computed(() => {
-  if (!props.sharp || !sharpOn.value || playing.value || stillAt.value === null || (!plainVideo.value && videoTime.value === null)) return null;
+  if (!props.sharp || !sharpOn.value || playing.value || scrubbing.value || stillAt.value === null
+    || (!plainVideo.value && videoTime.value === null)) return null;
   return rawFrameOf(video.value?.index, stillAt.value);
 });
 const sharpUrl = (segment: number, frame: number): string =>
@@ -336,8 +351,11 @@ const wantedSharp = computed(() => sharpFrame.value ? sharpUrl(sharpFrame.value.
 const shownSharp = ref<string | null>(null);
 const sharpFailed = ref(false);
 const loadPicture = pictureCache();
-/** One frame asked of the server at a time, the latest wanted winning; then the five on either side, so a step into the
- * next group of pictures (a GOP, decoded whole) finds it ready. */
+/** One frame asked of the server at a time, the latest wanted winning; then the next two in the direction of the last
+ * step (not five on either side: 200 kB each at full definition), so that a step on finds its frame in the browser. The
+ * next group of pictures (a GOP) is the server's to read ahead (video_frames.read_ahead). */
+let lastSharp: {segment: number; frame: number} | null = null;
+let sharpDirection = 1;
 let pumping = false;
 async function pumpSharp(): Promise<void> {
   if (pumping) return;
@@ -352,8 +370,11 @@ async function pumpSharp(): Promise<void> {
       sharpFailed.value = !ok;
       if (ok) {
         shownSharp.value = url;
-        for (const step of [1, -1, 2, -2, 3, -3, 4, -4, 5, -5]) {
-          if (at.frame + step >= 0 && at.frame + step < at.frames) void loadPicture(sharpUrl(at.segment, at.frame + step));
+        if (lastSharp?.segment === at.segment && lastSharp.frame !== at.frame) sharpDirection = Math.sign(at.frame - lastSharp.frame);
+        lastSharp = {segment: at.segment, frame: at.frame};
+        for (const step of [1, 2]) {
+          const next = at.frame + sharpDirection * step;
+          if (next >= 0 && next < at.frames) void loadPicture(sharpUrl(at.segment, next));
         }
       }
       break;
@@ -537,7 +558,12 @@ function timeOfFrame(segment: number, frame: number): number | null {
  * it (a page that edits a frame then shows it on its own picture, SpeedReviewDrive.vue). */
 const videoGone = computed(() => video.value?.state === 'failed' || video.value?.state === 'missing'
   || ready.value && videoProblem.value !== '');
-defineExpose({seek, pause, mapRunAt, mapEdges, playing, shownFrame, timeOfFrame, videoGone});
+/** A drag of the page over the video on its way (Speed review's block ends): like one on the strip or the lanes, no
+ * frame asked for at full definition until it ends. */
+function scrub(on: boolean): void {
+  scrubbing.value = on;
+}
+defineExpose({seek, pause, scrub, mapRunAt, mapEdges, playing, shownFrame, timeOfFrame, videoGone});
 /** The frame of the comma's road video the browser presents, playing or standing still (its minute and its frame k): what
  * a page draws over the picture at 20 frames a second (emitted as `frame`). From the presented frame's own time
  * (requestVideoFrameCallback, also after a seek or a step while paused) where the browser has it, else from the video's
@@ -614,11 +640,17 @@ function stripSeek(event: PointerEvent): void {
 }
 function stripDown(event: PointerEvent): void {
   dragging = true;
+  scrubbing.value = true;
   strip.value?.setPointerCapture(event.pointerId);
   stripSeek(event);
 }
 const stripMove = (event: PointerEvent): void => { if (dragging) stripSeek(event); };
-const stripUp = (): void => { dragging = false; };
+const stripUp = (): void => {
+  dragging = false;
+  scrubbing.value = false;
+};
+/** The time shown, for the lanes, which move their line with it without being drawn again (DriveReviewLanes.vue). */
+const cursorAt = (): number => cursor.value;
 
 // -- the head ------------------------------------------------------------------------------------------------------------
 const facts = computed(() => {
@@ -747,8 +779,8 @@ watch(() => props.route, () => {
             <rect :x="sx(windowFrom)" y="0.5" :width="Math.max(2, sx(windowTo) - sx(windowFrom))" height="19" rx="3" class="dr-strip-window"/>
             <rect :x="sx(cursor) - 1.5" y="0" width="3" height="20" class="dr-strip-head"/>
           </svg>
-          <DriveReviewLanes v-if="hasLogs" ref="lanes" :view="view" :from="windowFrom" :to="windowTo" :cursor="cursor"
-                            :simple="simpleLanes" :pick-map="pickMap" @seek="seek"
+          <DriveReviewLanes v-if="hasLogs" ref="lanes" :view="view" :from="windowFrom" :to="windowTo" :cursor-at="cursorAt"
+                            :simple="simpleLanes" :pick-map="pickMap" @seek="seek" @scrub="(on) => { scrubbing = on; }"
                             @pick-map="(from, to, kph) => emit('pickMap', from, to, kph)">
             <template #top="scale"><slot name="lane" v-bind="scale"></slot></template>
           </DriveReviewLanes>
@@ -779,7 +811,7 @@ watch(() => props.route, () => {
                 {{ clockOf(cursor - change.at) }} ago.</p>
             </component>
           </section>
-          <section v-if="today && (view.inference || view.map_today) && !simpleLanes" class="dr-now dr-today-card"
+          <section v-if="!simpleLanes && today && (view.inference || view.map_today)" class="dr-now dr-today-card"
                    aria-labelledby="dr-today-title">
             <h3 id="dr-today-title">On the server today</h3>
             <p class="dr-hint">Found now, not what the comma knew while driving.</p>

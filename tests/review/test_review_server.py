@@ -1,11 +1,13 @@
 """Web review server: token/cookie, routes index, saving frames into the review database."""
 from __future__ import annotations
 
+import gzip
 import re
 
 import pytest
 
 from nnslr_tools.pages import asset
+from nnslr_tools.review import GZIP_MIN, accepts_gzip
 from nnslr_tools.review_db import ReviewStore, db_path
 from review_helpers import (OTHER_ROUTE, ROUTE, RUN_ID, TOKEN, RunningServer, json_of, make_report,
                             page_body, sign_in)
@@ -359,6 +361,41 @@ def test_route_page_is_rendered_without_touching_the_report(loopback):
     assert status == 200 and response.getheader('Content-Type') == 'image/jpeg'
     status, response, data = server.request('GET', f'/route/{OTHER_ROUTE}/')
     assert status == 404
+
+
+def test_pages_and_json_go_gzipped_to_a_browser_that_takes_it(loopback):
+    server, root, rows = loopback
+    for path in (f'/route/{ROUTE}/', f'/api/route/{ROUTE}/page'):
+        status, response, plain = server.request('GET', path)
+        assert status == 200 and response.getheader('Content-Encoding') is None
+        assert response.getheader('Vary') == 'Accept-Encoding'
+        status, response, data = server.request('GET', path, headers={'Accept-Encoding': 'gzip, deflate, br'})
+        assert status == 200 and response.getheader('Content-Encoding') == 'gzip'
+        assert response.getheader('Vary') == 'Accept-Encoding'
+        assert int(response.getheader('Content-Length')) == len(data) < len(plain)
+        unzipped = gzip.decompress(data)
+        if path.startswith('/api/'):
+            assert json_of(unzipped) == json_of(plain)
+        else:
+            # The page differs only by its nonce, new at each request.
+            nonce = re.compile(rb'nonce-?[=\'"]*[A-Za-z0-9_-]{24}')
+            assert nonce.sub(b'', unzipped) == nonce.sub(b'', plain)
+    # Not taken (q=0), or too small to gain: as it is.
+    status, response, data = server.request('GET', '/api/routes', headers={'Accept-Encoding': 'gzip;q=0'})
+    assert response.getheader('Content-Encoding') is None and json_of(data)['routes']
+    status, response, data = server.request('GET', '/api/auth/state', headers={'Accept-Encoding': 'gzip'})
+    assert status == 200 and len(data) <= GZIP_MIN and response.getheader('Content-Encoding') is None
+    # Pictures go as they are.
+    status, response, data = server.request('GET', f'/route/{ROUTE}/images/00000001.jpg', headers={'Accept-Encoding': 'gzip'})
+    assert status == 200 and response.getheader('Content-Encoding') is None
+    assert data == (root / 'derived/preannotations' / ROUTE / RUN_ID / 'images/00000001.jpg').read_bytes()
+
+
+@pytest.mark.parametrize('header, taken', [(None, False), ('', False), ('identity', False), ('gzip', True),
+                                           ('br, GZIP;q=0.5', True), ('gzip;q=0', False), ('gzip;q=0.000', False),
+                                           ('deflate, br', False)])
+def test_accept_encoding_is_read_with_its_quality(header, taken):
+    assert accepts_gzip(header) is taken
 
 
 def test_static_report_page_still_works_offline(report):

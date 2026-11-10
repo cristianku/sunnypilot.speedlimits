@@ -2,8 +2,9 @@
 // answer can take longer than the interval, and requests sent on a fixed clock would pile up, each slowing the others.
 import {onBeforeUnmount, onMounted} from 'vue';
 
-/** Asks while the component is shown; the returned refresh() asks now, or once more after the request on its way. */
-export function usePoll(ask: () => Promise<void>, intervalMs: number): () => Promise<void> {
+/** Asks while the component is shown; the returned refresh() asks now, or once more after the request on its way. The
+ * interval may be a function, read after each answer (a page that needs the answer less often at times). */
+export function usePoll(ask: () => Promise<void>, intervalMs: number | (() => number)): () => Promise<void> {
   let timer: number | undefined;
   let pending: Promise<void> | null = null;
   let again = false;
@@ -22,7 +23,7 @@ export function usePoll(ask: () => Promise<void>, intervalMs: number): () => Pro
         again = false;
         void refresh();
       } else {
-        timer = window.setTimeout(() => void refresh(), intervalMs);
+        timer = window.setTimeout(() => void refresh(), typeof intervalMs === 'function' ? intervalMs() : intervalMs);
       }
     });
     return pending;

@@ -31,6 +31,7 @@ every one of their requests against a table of what a guest may open, and the wo
 """
 from __future__ import annotations
 
+import gzip
 import ipaddress
 import json
 import mimetypes
@@ -82,6 +83,24 @@ UNKNOWN_DRIVE_MESSAGE = 'This drive is not on the server, or it is not prepared 
 API_TOKEN_MESSAGE = ('Missing or wrong token: send it in the header "Authorization: Bearer <token>" '
                      '(or "X-Review-Token"), never in the address.')
 DEFAULT_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+# Pages and JSON over GZIP_MIN bytes go gzipped to a browser that takes it (Accept-Encoding): a page with its script
+# inlined (970 kB) or a drive's frames (up to 2.7 MB) shrink 3 to 18 times, for about 17 ms of a core at most at
+# GZIP_LEVEL. Pictures and video go as they are.
+GZIP_MIN = 1024
+GZIP_LEVEL = 5
+GZIP_TYPES = ('application/json', 'text/html')
+
+
+def accepts_gzip(header: str | None) -> bool:
+    """Whether an Accept-Encoding header takes gzip (not with q=0)."""
+    for item in (header or '').split(','):
+        name, _, params = item.strip().partition(';')
+        if name.strip().lower() in ('gzip', 'x-gzip'):
+            quality = params.strip().lower()
+            return not (quality.startswith('q=') and quality[2:].strip().rstrip('0').rstrip('.') in ('', '0'))
+    return False
+
+
 # [ai-reviewer] - START
 # The AI reviewer (nnslr_tools.llm_providers, nnslr_tools.ai_review): only a signed-in browser, or the site on
 # 127.0.0.1, changes the providers, tests them or asks the AI; the access token (an agent) only reads the settings,
@@ -1416,6 +1435,8 @@ def make_handler(app: ReviewApp):
             except (PreannotationError, ValueError, OSError):
                 self._problem(404, 'not_found', 'Frame of the video not found.', False)
                 return
+            # The GOP after it (or before) decoded in the background: a step into it finds its frames ready.
+            video_frames.read_ahead(app.root, route, segment, decoded)
             self.send_response(200)
             self.send_header('Content-Type', 'image/jpeg')
             self.send_header('Content-Length', str(len(data)))
@@ -2412,9 +2433,17 @@ def make_handler(app: ReviewApp):
             self.send_header('Content-Security-Policy', csp)
 
         def _send(self, status, content_type, body, csp=DEFAULT_CSP, extra=None):
+            text = content_type.startswith(GZIP_TYPES)
+            zipped = text and len(body) > GZIP_MIN and accepts_gzip(self.headers.get('Accept-Encoding'))
+            if zipped:
+                body = gzip.compress(body, compresslevel=GZIP_LEVEL, mtime=0)
             self.send_response(status)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(body)))
+            if zipped:
+                self.send_header('Content-Encoding', 'gzip')
+            if text:
+                self.send_header('Vary', 'Accept-Encoding')
             self._security_headers(csp)
             if extra is not None:
                 for name, value in extra:

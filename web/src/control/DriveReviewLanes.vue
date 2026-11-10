@@ -6,13 +6,16 @@
 // goes to that time. The slot "top" is a lane of the page that shows them (Speed review's answer, his speed and his
 // blocks), first of all, drawn with the scale of the others. Simple (Speed review) keeps only the vision's limit and the
 // map's under it: what the answer is checked against; his dashboard speed is the top lane's, never the car's vEgo. With
-// pickMap, a tap on a limit of the map's lane (no drag) gives that limit from its start to its end (pickMap).
-import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
+// pickMap, a tap on a limit of the map's lane (no drag) gives that limit from its start to its end (pickMap). The time
+// shown comes as a function (cursorAt), its line moved on the page without drawing the lanes again: a time that changed
+// as a prop would draw every lane, and the page's own, at every frame of the video while it plays. A drag says when it
+// begins and ends (scrub), so that the player asks for no frame at full definition on the way.
+import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watchEffect} from 'vue';
 import {combine, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
   type Value, visionAtSign} from './drive-review';
 
-const props = defineProps<{view: Timeline; from: number; to: number; cursor: number; simple?: boolean; pickMap?: boolean}>();
-const emit = defineEmits<{seek: [seconds: number]; pickMap: [from: number, to: number, kph: number]}>();
+const props = defineProps<{view: Timeline; from: number; to: number; cursorAt: () => number; simple?: boolean; pickMap?: boolean}>();
+const emit = defineEmits<{seek: [seconds: number]; scrub: [on: boolean]; pickMap: [from: number, to: number, kph: number]}>();
 
 const ruler = useTemplateRef<HTMLDivElement>('ruler');
 const width = ref(600);
@@ -28,7 +31,11 @@ onBeforeUnmount(() => observer?.disconnect());
 const span = computed(() => Math.max(1e-3, props.to - props.from));
 const x = (seconds: number): number => (seconds - props.from) / span.value * width.value;
 const w = (from: number, to: number): number => Math.max(0, x(to) - x(from));
-const cursorX = computed(() => x(props.cursor));
+const cursorLine = useTemplateRef<HTMLDivElement>('cursorLine');
+watchEffect(() => {
+  const left = 'calc(var(--dr-name) + ' + x(props.cursorAt()) + 'px)';
+  if (cursorLine.value) cursorLine.value.style.left = left;
+}, {flush: 'post'});
 const series = (name: string): Series | undefined => props.view.series[name];
 
 /** A lane of steps: its runs with a class and a text. */
@@ -216,6 +223,7 @@ function seekAt(event: PointerEvent): void {
 let picked: {x: number; seconds: number} | null = null;
 function down(event: PointerEvent): void {
   dragging = true;
+  emit('scrub', true);
   const seconds = secondAt(event);
   picked = props.pickMap && seconds !== null && (event.target as Element | null)?.closest?.('.dr-pick')
     ? {x: event.clientX, seconds} : null;
@@ -226,6 +234,7 @@ function move(event: PointerEvent): void {
   if (dragging) seekAt(event);
 }
 function up(event: PointerEvent): void {
+  if (dragging) emit('scrub', false);
   dragging = false;
   track.value?.releasePointerCapture?.(event.pointerId);
   const run = picked && event.type === 'pointerup' && Math.abs(event.clientX - picked.x) < 6 ? mapRunAt(picked.seconds) : null;
@@ -326,6 +335,6 @@ const textFits = (from: number, to: number, text: string): boolean => w(from, to
               :class="['dr-episode', item.channel]"/>
       </svg>
     </div>
-    <div class="dr-cursor" :style="{left: 'calc(var(--dr-name) + ' + cursorX + 'px)'}" aria-hidden="true"></div>
+    <div ref="cursorLine" class="dr-cursor" aria-hidden="true"></div>
   </div>
 </template>

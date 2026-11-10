@@ -803,9 +803,11 @@ def frame_jpeg(store: drive_review.DriveReviewStore, route: str, segment: int, d
     if not frame_allowed(store, route, segment, decoded):
         raise SignDistanceError(404, 'unknown_frame', 'This frame is not one of the frames of a sign.')
     try:
-        return video_frames.preview(store.root, route, segment, decoded, wide=wide).read_bytes()
+        data = video_frames.preview(store.root, route, segment, decoded, wide=wide).read_bytes()
     except (video_frames.VideoFrameError, OSError) as exc:
         raise SignDistanceError(404, 'no_video_frame', 'This frame of the video cannot be shown.') from exc
+    video_frames.read_ahead(store.root, route, segment, decoded, wide=wide)
+    return data
 
 
 def mark(store: drive_review.DriveReviewStore, route: str, body, reviewer: str) -> dict:

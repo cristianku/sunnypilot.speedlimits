@@ -73,6 +73,8 @@ def test_a_gop_has_the_pixels_of_a_decode_of_the_whole_video(drive, tmp_path):
     subprocess.run(['ffmpeg', '-v', 'error', '-i', str(video), '-vf', 'select=eq(n\\,25)', '-vsync', '0',
                     '-q:v', video_frames.JPEG_QUALITY, str(reference)], check=True)
     assert video_frames.preview(root, ROUTE, 0, 25).read_bytes() == reference.read_bytes()
+    # The frame is given once written; the rest of its GOP follows.
+    assert video_frames.settle()
     assert len(list((root / video_frames.CACHE_DIR / ROUTE / '0').glob('*.jpg'))) == 20
     # The page: the frames of the GOP, the picture at 1 a second under its own key.
     status, _response, data = server.request('GET', f'/api/route/{ROUTE}/video/0/25')
@@ -85,9 +87,118 @@ def test_a_gop_has_the_pixels_of_a_decode_of_the_whole_video(drive, tmp_path):
     assert status == 200 and response.getheader('Content-Type') == 'image/jpeg' and data == reference.read_bytes()
     assert server.request('GET', f'/api/route/{ROUTE}/video/0/60')[0] == 404
     # The cache stays within its budget, the least recently shown first.
+    assert video_frames.settle()
     video_frames.prune(root, budget=0)
     assert not list((root / video_frames.CACHE_DIR).glob('*/*/*.jpg'))
 
+
+
+def cached(root, wide=False):
+    """The frames in the cache of segment 0, by decoded index."""
+    folder = root / video_frames.CACHE_DIR / ROUTE / ('0-wide' if wide else '0')
+    return sorted(int(path.stem) for path in folder.glob('*.jpg'))
+
+
+def test_the_gop_json_answers_once_its_first_frame_is_decoded_and_a_frame_shown_reads_the_next_gop_ahead(drive, monkeypatch):
+    """The arrows of Sign review ask for the GOP first: it answers once ffmpeg has written the GOP's first frame, the
+    rest still being decoded. A frame given to a page has the GOP after it decoded ahead (and the one before, in the
+    first third of its GOP), so that a step into it does not wait for ffmpeg."""
+    root, video, rows, server = drive
+    started = []
+    real = video_frames._decode
+    monkeypatch.setattr(video_frames, '_decode', lambda *args, **kwargs: started.append((args[3], kwargs)) or real(*args, **kwargs))
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/video/0/25')
+    assert status == 200 and json_of(data)['gop'] == [20, 39]
+    assert started == [(20, {})] and 20 in cached(root)
+    assert video_frames.settle()
+    assert cached(root) == list(range(20, 40))
+    # Frame 45 (GOP 40..59, the last of the video), in the first third of its GOP: the GOP before is in the cache, no
+    # GOP after it.
+    started.clear()
+    assert server.request('GET', f'/route/{ROUTE}/video/0/45.jpg')[0] == 200
+    assert video_frames.settle()
+    assert cached(root) == list(range(20, 60)) and [first for first, _kwargs in started] == [40]
+    # Frame 5 (GOP 0..19): the next GOP is there already; nothing before the first.
+    started.clear()
+    assert server.request('GET', f'/route/{ROUTE}/video/0/5.jpg')[0] == 200
+    assert video_frames.settle()
+    assert cached(root) == list(range(60)) and [first for first, _kwargs in started] == [0]
+    # Frame 25, past the first third of GOP 20..39, after a prune: the GOP after it is decoded ahead (niced), not the
+    # one before.
+    video_frames.prune(root, budget=0)
+    assert video_frames.preview(root, ROUTE, 0, 25).is_file()
+    started.clear()
+    video_frames.read_ahead(root, ROUTE, 0, 32)
+    assert video_frames.settle()
+    assert cached(root) == list(range(20, 60)) and started == [(40, {'ahead': True})]
+
+
+def test_requests_for_a_gop_being_decoded_share_its_decode_and_a_failed_decode_is_tried_again(drive, monkeypatch):
+    root, video, _rows, _server = drive
+    spawned = []
+    real = video_frames.subprocess.Popen
+
+    def popen(command, **kwargs):
+        if 'ffmpeg' in command:
+            spawned.append(command)
+        return real(command, **kwargs)
+    monkeypatch.setattr(video_frames.subprocess, 'Popen', popen)
+    import threading
+    shown = {}
+    threads = [threading.Thread(target=lambda frame=frame: shown.setdefault(frame, video_frames.preview(root, ROUTE, 0, frame)))
+               for frame in (21, 30, 39)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(spawned) == 1 and sorted(shown) == [21, 30, 39] and all(path.is_file() for path in shown.values())
+    assert video_frames.settle() and cached(root) == list(range(20, 40))
+    # A GOP ffmpeg cannot decode: the frame is refused, nothing half written stays, and the next request decodes again.
+    monkeypatch.setattr(video_frames, 'gop_bytes', lambda *args: b'not a video')
+    with pytest.raises(video_frames.VideoFrameError, match='GOP 40..59 not decoded'):
+        video_frames.preview(root, ROUTE, 0, 45)
+    assert not video_frames._decodes and cached(root) == list(range(20, 40))
+    assert not list((root / video_frames.CACHE_DIR / ROUTE / '0').glob('*.tmp'))
+    monkeypatch.undo()
+    assert video_frames.preview(root, ROUTE, 0, 45).is_file()
+    assert video_frames.settle() and cached(root) == list(range(20, 60))
+
+
+@pytest.mark.parametrize('broken', ['not decoded by ffmpeg', 'not read'])
+def test_a_gop_that_cannot_be_decoded_is_a_404_so_the_arrows_go_from_picture_to_picture(drive, monkeypatch, broken):
+    """Sign review's arrows fall back on the pictures at 1 a second when the GOP of the frame they step to is refused
+    (video.ts moveOne): ffmpeg writing nothing of it, or its bytes not read, is that refusal, not a GOP of frames whose
+    pictures all fail."""
+    root, _video, _rows, server = drive
+
+    def unreadable(*_args):
+        raise video_frames.VideoFrameError('the road video cannot be read')
+    monkeypatch.setattr(video_frames, 'gop_bytes', (lambda *_args: b'not a video') if broken == 'not decoded by ffmpeg'
+                        else unreadable)
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/video/0/45')
+    assert status == 404 and json_of(data)['error'] == 'no_video_frame'
+    assert video_frames.settle() and cached(root) == [] and not video_frames._decodes
+    # The GOPs it can decode still answer.
+    monkeypatch.undo()
+    status, _response, data = server.request('GET', f'/api/route/{ROUTE}/video/0/45')
+    assert status == 200 and json_of(data)['gop'] == [40, 59]
+
+
+def test_the_cache_is_pruned_in_the_background_below_its_budget(drive, monkeypatch):
+    root, video, _rows, _server = drive
+    video_frames.preview(root, ROUTE, 0, 5)
+    assert video_frames.settle()
+    size = sum((root / video_frames.CACHE_DIR / ROUTE / '0' / f'{frame}.jpg').stat().st_size for frame in range(20))
+    # Room for about 30 frames: the decode of a second GOP passes the budget, the oldest go down to PRUNE_TO of it.
+    monkeypatch.setattr(video_frames, 'CACHE_BYTES', size * 3 // 2)
+    video_frames.prune(root)
+    video_frames.preview(root, ROUTE, 0, 25)
+    assert video_frames.settle()
+    left = cached(root)
+    assert left[-20:] == list(range(20, 40)) and 20 < len(left) < 40
+    total = sum((root / video_frames.CACHE_DIR / ROUTE / '0' / f'{frame}.jpg').stat().st_size for frame in left)
+    assert total <= video_frames.CACHE_BYTES * video_frames.PRUNE_TO
+    assert video_frames._cache_total[str(root)] == total
 
 def wide_video(root, frames_s, source='smptebars'):
     """A wide road video of segment 0 (ecamera.hevc), another picture from the road video's."""
@@ -116,6 +227,7 @@ def test_the_wide_camera_gives_the_same_frame_only_with_the_frames_of_the_road_v
     wide_video(root, 2.95)
     with pytest.raises(video_frames.VideoFrameError, match='not the frames of the road video'):
         video_frames.wide_video_of(root, ROUTE, 0)
+    assert video_frames.settle()
     video_frames.prune(root, budget=0)
     assert not list((root / video_frames.CACHE_DIR).glob('*/*/*.jpg'))
 
