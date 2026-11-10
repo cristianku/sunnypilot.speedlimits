@@ -291,6 +291,26 @@ def ours_missing(root: Path) -> str | None:
     return None
 
 
+def networks_in_use(root: Path) -> dict[str, str]:
+    """The cutter, classifier and decider in use (models/active.json) by id: what Our networks propose with."""
+    try:
+        active = json.loads((Path(root) / 'models' / 'active.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return {part: active[part]['id'] for part in OUR_PARTS if isinstance(active, dict) and isinstance(active.get(part), dict)
+            and isinstance(active[part].get('id'), str)}
+
+
+def proposed_by(root: Path, run: dict) -> dict:
+    """Who proposed the boxes of a report (its run.json): the proposer, Our networks' parts by id, and whether they are
+    the networks in use (in_use), those Propose again proposes with (issue #42). A report of another proposer is not."""
+    proposer = proposer_of(run)
+    model = run.get('model') if isinstance(run.get('model'), dict) else {}
+    networks = {part: model[part] for part in OUR_PARTS if isinstance(model.get(part), str)} if proposer == 'ours' else {}
+    in_use = networks_in_use(root)
+    return {'proposer': proposer, 'networks': networks, 'in_use': proposer == 'ours' and bool(in_use) and networks == in_use}
+
+
 def our_networks(root: Path) -> dict:
     """The cutter, the classifier and the decider that propose with --proposer ours: those in use (Models tab), only
     when Our networks are whole (ours_missing)."""

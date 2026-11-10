@@ -181,7 +181,7 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'sign_tracks': ('dry', 'routes'),
                   'box_fit_train': ('dry', 'refiner'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
-                  'prepare': ('proposer',), 'prepare_again': ('proposer',),
+                  'prepare': ('proposer',), 'prepare_again': ('proposer', 'route'),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
                   'try_on_comma': ('signnet',),
                   'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
@@ -2154,6 +2154,19 @@ class Panel:
         return self.regression()
 
     # -- Models › Drive ---------------------------------------------------------------------------
+    def _again_routes(self, value: str) -> list[str]:
+        """The drives of Propose again for {'route': 'R'} or 'R1,R2,…' (issue #42), each with a report, in the order
+        given, once: the helper's arguments after --again, which redo only those (their confirmed frames kept)."""
+        from nnslr_tools.review import list_reports
+        routes = list(dict.fromkeys(part.strip() for part in value.split(',') if part.strip()))
+        if not routes:
+            raise PanelError(400, 'bad_option', 'Propose again of a drive takes its id.')
+        known = {route for route, _directory in list_reports(self.root)}
+        for route in routes:
+            if not SIGN_TRACKS_ROUTE.match(route) or route not in known:
+                raise PanelError(400, 'bad_option', 'No proposals to redo for this drive: ' + route[:40] + '.')
+        return routes
+
     def _simulate_arguments(self, options: dict) -> list[str]:
         """The arguments of helpers/simulate_drive.sh from the options (strings, checked by start()): --set=<car|in-use>,
         then --route=<drive> for {'route': R}, a drive the portal has, or --certified for {'certified': '1'}, every
@@ -2352,6 +2365,8 @@ class Panel:
             if configured(self.root):
                 start_args.append('--host=' + configured(self.root))
         # [ai-reviewer] - END
+        if action == 'prepare_again' and (options or {}).get('route') is not None:
+            start_args += self._again_routes(options['route'])
         proposer = (options or {}).get('proposer')
         if proposer is None and action in PREPARING:
             # Started without a choice (the Overview's next step, Try again of an old job): the one of the Prepare
@@ -2961,10 +2976,8 @@ def _exit_code(path: Path) -> int | None:
 
 def _active_parts(root: Path) -> dict[str, str]:
     """The cutter, classifier and decider in use (models/active.json) by id: what Our networks propose with."""
-    from nnslr_tools.preannotate import OUR_PARTS
-    active = _read_json(root / 'models' / 'active.json') or {}
-    return {part: active[part]['id'] for part in OUR_PARTS
-            if isinstance(active.get(part), dict) and isinstance(active[part].get('id'), str)}
+    from nnslr_tools.preannotate import networks_in_use
+    return networks_in_use(root)
 
 
 def _networks_of(root: Path, log: Path) -> dict[str, str]:

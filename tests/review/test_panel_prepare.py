@@ -121,6 +121,29 @@ def test_our_networks_propose_only_whole(root, checkout):
 
 
 
+def test_propose_again_of_some_drives_redoes_only_those(root, checkout, monkeypatch):
+    from review_helpers import ROUTE
+    make_report(root, route='00000002--abcdef1234')
+    panel = Panel(root, repo=checkout)
+    # One drive (the button of its Signs side), or several: after --again, each once, in the order given.
+    job = panel.start('prepare_again', {'proposer': 'vietnam', 'route': ROUTE})
+    finished(panel, job['id'])
+    assert 'helpers/1_prepare.sh --again ' + ROUTE + '\n' in (panel.logs / (job['id'] + '.log')).read_text()
+    time.sleep(1.05)
+    job = panel.start('prepare_again', {'proposer': 'vietnam', 'route': '00000002--abcdef1234, ' + ROUTE + ',' + ROUTE})
+    finished(panel, job['id'])
+    assert '--again 00000002--abcdef1234 ' + ROUTE + '\n' in (panel.logs / (job['id'] + '.log')).read_text()
+    # A drive without a report, a word that is no drive, nothing: refused before anything starts.
+    for route in ('00000003--abcdef1234', '../00000001--abcdef1234', ' , '):
+        with pytest.raises(PanelError) as refused:
+            panel.start('prepare_again', {'proposer': 'vietnam', 'route': route})
+        assert refused.value.reason == 'bad_option'
+    # Only Propose again takes a drive.
+    with pytest.raises(PanelError) as refused:
+        panel.start('prepare', {'proposer': 'vietnam', 'route': ROUTE})
+    assert refused.value.reason == 'bad_option'
+
+
 def test_our_networks_take_signnet_as_the_cutter(root):
     from nnslr_tools import preannotate
     weights = {'s1/signnet-best.pt': 'cutter:s1/signnet', 'k1/classifier/reader-best.pt': 'classifier:k1/classifier',

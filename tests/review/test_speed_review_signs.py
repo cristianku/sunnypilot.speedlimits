@@ -16,6 +16,24 @@ from review_helpers import ROUTE, RunningServer, json_of, make_report, page_body
 CONTROL_JS = Path(__file__).resolve().parents[2] / 'src/nnslr_tools/web/js/control.js'
 
 
+def test_the_signs_say_whether_the_networks_in_use_proposed_them(tmp_path):
+    import json
+    make_report(tmp_path)
+    in_use = {'cutter': 'cutter:c2/signnet', 'classifier': 'classifier:k2/classifier', 'decider': 'decider:d2/full'}
+    (tmp_path / 'models').mkdir()
+    (tmp_path / 'models' / 'active.json').write_text(json.dumps({part: {'id': key} for part, key in in_use.items()}))
+    run = next((tmp_path / 'derived/preannotations' / ROUTE).glob('*/run.json'))
+    older = dict(in_use, cutter='cutter:c1/signnet')
+    server = RunningServer(tmp_path)
+    try:
+        for model, expected in ((older, False), (in_use, True)):
+            run.write_text(json.dumps({'run_id': run.parent.name, 'proposer': 'ours', 'model': {'proposer': 'ours', **model}}))
+            answer = json_of(server.request('GET', f'/api/speed-review/drives/{ROUTE}/signs')[2])
+            assert answer['proposed_by'] == {'proposer': 'ours', 'networks': model, 'in_use': expected}
+    finally:
+        server.close()
+
+
 def test_a_frame_confirmed_shows_its_own_boxes_and_never_the_proposals_again(tmp_path):
     rows = {row['frame_key']: row for row in make_report(tmp_path, count=4)}
     server = RunningServer(tmp_path)
@@ -39,6 +57,9 @@ def test_a_frame_confirmed_shows_its_own_boxes_and_never_the_proposals_again(tmp
         # One picture a second of the segment: its second is its place.
         assert [item['second'] for item in answer['frames']] == [0, 1, 2, 3]
         assert frames['0/0']['width'] and frames['0/0']['height']
+        # Who proposed the boxes (issue #42): a report of before the choice is the Vietnamese YOLO's, not the networks
+        # in use.
+        assert answer['proposed_by'] == {'proposer': 'vietnam', 'networks': {}, 'in_use': False}
         # A drive without frames in Sign review: a 404 the page takes as "no signs", nothing more.
         status, _response, data = server.request('GET', '/api/speed-review/drives/00000002--abcdef1234/signs')
         assert status == 404

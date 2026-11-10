@@ -575,6 +575,15 @@ def located(fresh: list[dict], by_key: dict) -> list[dict]:
     return fresh
 
 
+def _proposed_by(root: Path, directory: Path) -> dict:
+    from nnslr_tools.preannotate import proposed_by
+    try:
+        run = json.loads((directory / 'run.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        run = {}
+    return proposed_by(root, run if isinstance(run, dict) else {})
+
+
 def _report_proposer(directory: Path) -> str:
     from nnslr_tools.preannotate import proposer_of
     try:
@@ -1720,12 +1729,15 @@ def make_handler(app: ReviewApp):
             match = re.fullmatch(drive + '/signs', path)
             if match:
                 try:
-                    _directory, run_id, rows, _busy, _proposer = app.view(match.group(1))
+                    directory, run_id, rows, busy, _proposer = app.view(match.group(1))
                 except (PreannotationError, ValueError, OSError):
                     self._problem(404, 'unknown_route', 'This drive has no frames in Sign review.', True)
                     return
                 reviews = app.store.reviews(match.group(1), run_id)
-                self._json(200, {'ok': True, **drive_review.sign_frames(run_id, rows, reviews)})
+                # Who proposed its boxes, and whether with the networks in use (issue #42): not while Propose again
+                # works on it.
+                self._json(200, {'ok': True, **drive_review.sign_frames(run_id, rows, reviews),
+                                 'proposed_by': None if busy else _proposed_by(app.root, directory)})
                 return
             # The signs on every frame of the drive's video (nnslr_tools.sign_tracks), for the boxes over the video at
             # 20 frames a second: the file as it is, and whether the networks in use on these minutes made it.

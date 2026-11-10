@@ -24,9 +24,18 @@ export interface SignFrame {
   reviewer_kind: 'human' | 'ai' | null;
   boxes: Detection[];
 }
+/** Who proposed the boxes of a drive's report: the proposer, Our networks' parts by id, and whether those are the
+ * networks in use (issue #42). */
+export interface ProposedBy {
+  proposer: 'vietnam' | 'ours' | 'qwen';
+  networks: Record<string, string>;
+  in_use: boolean;
+}
 export interface SignFrames {
   run_id: string;
   frames: SignFrame[];
+  /** null while Propose again works on the drive; older servers do not send it. */
+  proposed_by?: ProposedBy | null;
 }
 
 /** A frame at its time of the drive, in seconds of the logs. */

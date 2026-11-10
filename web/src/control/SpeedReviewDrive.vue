@@ -35,13 +35,15 @@
 // same, without them. This side is where the signs are reviewed since the page of Sign review was retired (9 Nov 2026):
 // a link of the signs (common/sign-link.ts, "?side=signs&frame=<key>&segment=N&second=S", the server's address of Sign
 // review leading there) opens it on that frame, else the frame nearest the moment, else the first still to review; there
-// too "Review with AI" (components/AiRouteSheet.vue). A guest given only the drive's signs has only this side.
+// too "Review with AI" (components/AiRouteSheet.vue) and "Propose again" of the whole drive with the networks in use, the
+// confirmed frames kept (issue #42). A guest given only the drive's signs has only this side.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, ApiError, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
 import {isGuest} from '../common/guest';
 import {askedSigns} from '../common/sign-link';
 import AiRouteSheet from '../components/AiRouteSheet.vue';
+import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {boxColor, describe, shortName} from '../review/catalog';
 import {row as editRow} from '../review/current';
@@ -53,6 +55,7 @@ import SignEditorStage from '../review/SignEditorStage.vue';
 import {report as editReport, rowOf, state as editState} from '../review/store';
 import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} from './drive-review';
 import DriveReviewDrive from './DriveReviewDrive.vue';
+import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
 import {isOtherRoad, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, reviewedFrames, type SignTrack, trackFrames, type VideoFrame, type VideoIndex} from './sign-track';
@@ -678,6 +681,52 @@ const canAi = !props.readOnly && !isGuest();
 const leftToReview = computed(() => editor.value === 'ready'
   ? editReport.rows.filter((row) => frameStatus(row.frame_key) !== 'done').length
   : (signs.value?.frames ?? []).filter((frame) => !frame.confirmed).length);
+// Propose again of this drive (issue #42): its frames not confirmed get new boxes from the networks in use, the confirmed
+// frames stay (helpers/1_prepare.sh --again <drive>, the job of Data › Prepare). Said when the boxes come from others.
+const proposedBy = computed(() => signs.value?.proposed_by ?? null);
+const olderBoxes = computed(() => {
+  const by = proposedBy.value;
+  if (by === null || by.in_use) return null;
+  return by.proposer === 'ours' ? {text: 'Proposed by older networks', title: networksText(by.networks)}
+    : {text: 'Proposed by the ' + PROPOSER_LABELS[by.proposer], title: ''};
+});
+const proposing = ref(false);
+// After the start, the signs are asked again every BUSY_MS until the drive is in Propose again's hands (no proposed_by),
+// then the editor reads it again: read only, its new boxes as they come, Review them at the end (review/busy.ts).
+const BUSY_MS = 3000;
+const BUSY_TRIES = 40;
+let busyTimer: number | undefined;
+function reloadWhenBusy(tries: number): void {
+  window.clearTimeout(busyTimer);
+  busyTimer = window.setTimeout(async () => {
+    await readSigns();
+    if (signs.value?.proposed_by !== null) {
+      if (tries > 1) reloadWhenBusy(tries - 1);
+      return;
+    }
+    stopSignEditor();
+    editor.value = 'off';
+    void openEditor();
+  }, BUSY_MS);
+}
+onBeforeUnmount(() => window.clearTimeout(busyTimer));
+async function proposeAgain(): Promise<void> {
+  if (proposing.value) return;
+  const ok = await askConfirm({title: 'Propose this drive again?', action: 'Propose again',
+    text: 'The ' + plural(leftToReview.value, 'frame') + ' not confirmed get new boxes from the networks in use; the '
+      + 'confirmed frames stay as they are. The drive is read only until it is done.'});
+  if (!ok) return;
+  proposing.value = true;
+  try {
+    await post('/api/panel/run/prepare_again', {route: props.route, proposer: 'ours'});
+    toast('Proposing this drive again: its new boxes come in as they are made.');
+    reloadWhenBusy(BUSY_TRIES);
+  } catch (problem) {
+    toast(messageOf(problem), true);
+  } finally {
+    proposing.value = false;
+  }
+}
 // A confirmation saved: the lane of the signs and the read-only boxes read again.
 let signsTimer: number | undefined;
 watch(() => editState.saveCount, () => {
@@ -1178,7 +1227,12 @@ function worksIn(from: number, to: number) {
         <div v-if="canAi && panel === 'signs'" class="sr-ai">
           <button type="button" class="btn small ai-route" id="sr-ai" :data-ai-route="route" :data-ai-name="route"
                   :data-ai-left="leftToReview">Review with AI</button>
+          <button v-if="leftToReview > 0" type="button" class="btn small" id="sr-propose" :disabled="proposing || editReport.readOnly"
+                  title="New boxes for the frames not confirmed of the whole drive, from the cutter, classifier and applicability network in use; the confirmed frames stay"
+                  @click="proposeAgain">Propose again</button>
           <p class="dr-hint">The AI reviewer of Settings tries or saves the boxes of the frames left; you confirm what it saves.</p>
+          <p v-if="olderBoxes" class="dr-hint sr-older" id="sr-older" :title="olderBoxes.title">{{ olderBoxes.text }}: Propose
+            again uses those in use.</p>
         </div>
       </section>
       <Teleport v-if="canAi" to="body"><AiRouteSheet/></Teleport>
