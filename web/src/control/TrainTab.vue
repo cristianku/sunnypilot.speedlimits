@@ -286,12 +286,9 @@ const numbers = computed(() => {
     <p v-if="section === 'cutter'" class="role-what">SignNet, the same network the comma runs: it finds every box that could be a sign at the top of the frame. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
-    <template v-else-if="section === 'brain'">
-      <p class="role-what">The comma’s vision limit: one network with memory that says the speed to hold, four times a second, from the road
-        camera and what the car reads, never the map. It learns how you drive: your own speed on every second of the drives with sunnypilot
-        off, your blocks of Speed review the only corrections.</p>
-      <BrainChoices :choices="brainChoices" id="train-brain"/>
-    </template>
+    <p v-else-if="section === 'brain'" class="role-what">The comma’s vision limit: one network with memory that says the speed to hold, four
+      times a second, from the road camera and what the car reads, never the map. It learns how you drive: your own speed on every second of
+      the drives with sunnypilot off, your blocks of Speed review the only corrections.</p>
     <p v-else class="role-what">Our networks one after the other, each with the choices of its own section: the next one starts
       when one ends well. The classifier after a new cutter learns that cutter’s mistakes.</p>
 
@@ -302,13 +299,13 @@ const numbers = computed(() => {
         <TerminalActivity v-for="activity in sectionActivities" :key="activity.pid + activity.label" :activity="activity" :preparation="null"/>
       </template>
       <template v-else-if="section === 'cutter'">
+        <NetworkStartPicker :start="starts.cutter" id="train-cutter-start"/>
         <div class="seg-row">
           <Segmented v-model="cutterFamilies" :options="FAMILY_OPTIONS" label="Signs the cutter finds"/>
         </div>
         <MapillaryChoices :choices="cutterChoices" :status="status" label="Frames the cutter learns from" id-prefix="cutter-mapillary"
                           note-id="train-cutter-mapillary-note"
                           @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
-        <NetworkStartPicker :start="starts.cutter" id="train-cutter-start"/>
         <ActionList :items="CUTTER_ACTIONS" :actions="cutterActions" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies, ...starts.cutter.option,
                       ...cutterChoices.options})"/>
@@ -370,6 +367,7 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'brain'">
         <NetworkStartPicker :start="starts.brain" id="train-brain-start"/>
+        <BrainChoices :choices="brainChoices" id="train-brain"/>
         <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, {...brainChoices.option, ...starts.brain.option})"/>
         <p v-if="brainLabels?.training" class="latest-none" id="train-brain-marked">It learns every dashcam drive, each whole:
@@ -392,7 +390,7 @@ const numbers = computed(() => {
           v-for="(road, index) in brainRoads" :key="road.kind">{{ index ? ';' : '' }} {{ road.label }}
           <strong>{{ thousands(road.in) }}</strong> on, <strong>{{ thousands(road.out) }}</strong> off</template>.</template><template
           v-else-if="brainLabels.road_kinds?.length"> No kind of road is marked in Speed review yet.</template></p>
-        <p v-else class="latest-none" id="train-brain-labels">Loading…</p>
+        <p v-else class="latest-none" id="train-brain-labels">Counting the seconds of your drives…</p>
       </template>
       <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :brain-choices="brainChoices" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
@@ -402,9 +400,6 @@ const numbers = computed(() => {
         {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·
         <button type="button" class="link-button" @click="emit('details', job)">Details</button></p>
     </div>
-    <!-- How the brain learns, under the training and its button: what runs comes first. -->
-    <BrainFlow v-if="section === 'brain'" :choices="brainChoices"/>
-
     <!-- The settings of the next training of this network, also while one runs (it keeps its own). -->
     <TrainSettingsSection v-if="settingsAction" :training="settingsAction"
                           :running="job?.state === 'running' || sectionActivities.length > 0"/>
@@ -433,6 +428,9 @@ const numbers = computed(() => {
         <span class="latest-text">{{ section === 'decider' ? 'the chosen measure' : section === 'brain' ? 'km/h off' : 'recall' }} and loss, epoch by epoch</span></span><span class="latest-chev" aria-hidden="true">›</span></summary>
       <TrainingCharts :progress="charted.progress" :running="false"/>
     </details>
+
+    <!-- How the brain learns, at the bottom: its start, its choices, its button and its versions come first, as in every section. -->
+    <BrainFlow v-if="section === 'brain'" :choices="brainChoices"/>
 
   </section>
 </template>

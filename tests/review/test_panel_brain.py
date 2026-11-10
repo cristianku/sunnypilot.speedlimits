@@ -285,7 +285,7 @@ def brain_run(root, name, *, groups=('signs', 'plate', 'hour'), finished=True, s
                                                      'start': start}))
 
 
-def test_it_goes_on_from_a_brain_of_models_that_does_not_take_the_driver(root, checkout, monkeypatch):
+def test_it_goes_on_from_a_finished_brain_of_models(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
     scanned(root)
@@ -308,8 +308,9 @@ def test_it_goes_on_from_a_brain_of_models_that_does_not_take_the_driver(root, c
     assert init_of({}) == init_of({'start': 'fresh'}) == 'fresh'
     assert init_of({'start': 'brain:b1-s1/brain', 'pool': 'mean'}).endswith('/runs/b1-s1/brain-last.pt')
     assert init_of({'start': 'brain:b1-s1/brain'}, pipeline=True).endswith('/runs/b1-s1/brain-last.pt')
-    refused = {'brain:b0-s1/brain': 'That brain learnt to follow your pedals and the car’s speed: choose one without them.',
-               'brain:b2-s0/brain': 'That network has not finished its training: choose a finished one.',
+    # One that took your pedals and the car's speed too: the new one leaves those inputs out.
+    assert init_of({'start': 'brain:b0-s1/brain'}).endswith('/runs/b0-s1/brain-last.pt')
+    refused = {'brain:b2-s0/brain': 'That network has not finished its training: choose a finished one.',
                'cutter:b1-s1/signnet': 'Unknown network to start from: choose one of Models.',
                '/etc/passwd': 'Unknown network to start from: choose one of Models.'}
     for start, message in refused.items():

@@ -22,8 +22,8 @@ export function useClassifierChoices(status: Ref<PanelStatus | null>,
   const {mapillary, mapillarySigns, mapillaryOptions} = choice;
   /** Where the classifier starts: a finished classifier of Models with “not a sign”, whose weights it goes on learning
    * from (the one in use first, and the choice until another is made), or ImageNet (its test stays fair; the choice
-   * while none is in use). Not with “Mapillary, then ours”, which starts from its own Mapillary stage. A start that
-   * learnt another split may have seen some of today's test signs. */
+   * while none is in use). With “Mapillary, then ours” its Mapillary stage starts from it. A start that learnt another
+   * split may have seen some of today's test signs. */
   const startVersions = computed((): ClassifierModel[] => ((versionsOf('classifier') ?? []) as ClassifierModel[])
     .filter((version) => version.role === 'classifier' && version.part === 'classifier'
       && version.class_scheme !== undefined && version.finished)
@@ -44,16 +44,16 @@ export function useClassifierChoices(status: Ref<PanelStatus | null>,
       ? pickedStart.value! : startVersions.value.find((version) => version.in_use)?.id ?? 'imagenet',
     set: (value: string) => { pickedStart.value = value; },
   });
-  const startVersion = computed(() => mapillary.value === 'pretrain' ? null
-    : startVersions.value.find((version) => version.id === startKey.value) ?? null);
+  const startVersion = computed(() => startVersions.value.find((version) => version.id === startKey.value) ?? null);
   /** The options of “Train the classifier” (ActionOptions). */
-  const options = computed((): ActionOptions => mapillary.value === 'pretrain' ? mapillaryOptions.value
-    : {...mapillaryOptions.value, start: startVersion.value?.id ?? 'imagenet'});
+  const options = computed((): ActionOptions => ({...mapillaryOptions.value, start: startVersion.value?.id ?? 'imagenet'}));
   /** What it learns from, in words: after "A new classifier, taught on the signs and on the cutter’s mistakes". */
-  const words = computed(() => (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '')
-    + (mapillary.value === 'pretrain' ? ', first on about ' + thousands(mapillarySigns.value) + ' signs of Mapillary alone, '
-      + 'then on ours from there' : '')
-    + (startVersion.value ? ', starting from ' + startVersion.value.label + ' (' + isoWhen(startVersion.value.trained_at) + ')' : ''));
+  const words = computed(() => {
+    const from = startVersion.value ? ', starting from ' + startVersion.value.label + ' (' + isoWhen(startVersion.value.trained_at) + ')' : '';
+    return mapillary.value === 'pretrain' ? ', first on about ' + thousands(mapillarySigns.value) + ' signs of Mapillary alone'
+      + from + ', then on ours from there'
+      : (mapillary.value === 'on' ? ', with about ' + thousands(mapillarySigns.value) + ' signs of Mapillary' : '') + from;
+  });
   return reactive({...choice, startOptions, startKey, startVersion, startSplit, options, words});
 }
 export type ClassifierChoices = ReturnType<typeof useClassifierChoices>;

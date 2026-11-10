@@ -18,10 +18,10 @@ set -euo pipefail
 #      and the mined boxes; ImageNet start, darker and lower-contrast crops with jittered boxes, best epoch by the
 #      validation balanced accuracy (signs read right, not_a_sign rejected), early stop after 5 epochs without.
 #      With NNSLR_CLASSIFIER_MAPILLARY=pretrain, two stages: first the network learns the Mapillary crops alone
-#      (pretrain/: every crop of a v2 class, no cap per label, none of ours, from ImageNet; the epoch chosen on our
-#      validation signs), then our crops alone from those weights (classifier/, --init-from pretrain/reader-best.pt,
-#      the same class list, "not a sign" learnt there); NNSLR_CLASSIFIER_INIT_FROM starts from another v2
-#      reader-best.pt instead of ImageNet;
+#      (pretrain/: every crop of a v2 class, no cap per label, none of ours, from ImageNet or NNSLR_CLASSIFIER_INIT_FROM;
+#      the epoch chosen on our validation signs), then our crops alone from those weights (classifier/, --init-from
+#      pretrain/reader-best.pt, the same class list, "not a sign" learnt there); NNSLR_CLASSIFIER_INIT_FROM starts from
+#      another v2 reader-best.pt instead of ImageNet (with the two stages: their first);
 #   5. evaluates it alone on test and validation (every crop, the signs, the not_a_sign crops by source, the crops a
 #      person confirmed);
 #   6. evaluates the chain on test and validation (nnslr evaluate-chain): the cutter on every frame, each box cut at
@@ -54,7 +54,7 @@ set -euo pipefail
 # region's crops, always the same ones for the same share), NNSLR_CLASSIFIER_MAPILLARY=pretrain for the two stages
 # (Mapillary alone, then ours from it; region and share choose the crops of the first), NNSLR_CLASSIFIER_PRETRAIN_EPOCHS
 # (the epochs of the first stage, default NNSLR_CLASSIFIER_EPOCHS), NNSLR_CLASSIFIER_INIT_FROM (a v2 reader-best.pt
-# to start from instead of ImageNet), NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
+# to start from instead of ImageNet; with the two stages, the first starts from it), NNSLR_TRAIN_INIT=random, NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -116,11 +116,6 @@ done
 
 if [[ "$MAPILLARY_MODE" != "0" && "$MAPILLARY_MODE" != "1" && "$MAPILLARY_MODE" != "pretrain" ]]; then
   echo "error: NNSLR_CLASSIFIER_MAPILLARY must be 0, 1 or pretrain: $MAPILLARY_MODE" >&2
-  exit 2
-fi
-
-if [[ -n "$INIT_FROM" && "$MAPILLARY_MODE" == "pretrain" ]]; then
-  echo "error: NNSLR_CLASSIFIER_INIT_FROM and NNSLR_CLASSIFIER_MAPILLARY=pretrain are two different starts" >&2
   exit 2
 fi
 
@@ -240,12 +235,17 @@ elif [[ "${NNSLR_CLASSIFIER_MAPILLARY_REGION:-all}" != "all" || "${NNSLR_CLASSIF
   echo "error: NNSLR_CLASSIFIER_MAPILLARY_REGION and _SHARE choose Mapillary crops: add NNSLR_CLASSIFIER_MAPILLARY=1" >&2
   exit 2
 fi
-# The two stages (NNSLR_CLASSIFIER_MAPILLARY=pretrain): the first on the Mapillary crops alone, from ImageNet; the
-# second on ours alone, from the first's best epoch. Otherwise one training, from ImageNet or NNSLR_CLASSIFIER_INIT_FROM.
+# The two stages (NNSLR_CLASSIFIER_MAPILLARY=pretrain): the first on the Mapillary crops alone, from ImageNet or
+# NNSLR_CLASSIFIER_INIT_FROM; the second on ours alone, from the first's best epoch. Otherwise one training, from
+# ImageNet or NNSLR_CLASSIFIER_INIT_FROM.
 PRETRAIN_SETTINGS=()
 if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
+  FIRST_START=("${IMAGENET[@]}")
+  if [[ -n "$INIT_FROM" ]]; then
+    FIRST_START=(--init-from "$INIT_FROM")
+  fi
   PRETRAIN_SETTINGS=(--epochs "$PRETRAIN_EPOCHS" --patience "$PATIENCE" --batch-size "$BATCH_SIZE"
-                     --num-workers "$NUM_WORKERS" "${IMAGENET[@]}" "${AUGMENT[@]}" "${MAPILLARY[@]}" --mapillary-only)
+                     --num-workers "$NUM_WORKERS" "${FIRST_START[@]}" "${AUGMENT[@]}" "${MAPILLARY[@]}" --mapillary-only)
   SETTINGS+=("${AUGMENT[@]}" --init-from "$PRETRAIN_RUN/reader-best.pt")
 elif [[ -n "$INIT_FROM" ]]; then
   SETTINGS+=("${AUGMENT[@]}" "${MAPILLARY[@]}" --init-from "$INIT_FROM")

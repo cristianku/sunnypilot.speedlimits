@@ -521,10 +521,8 @@ def test_the_script_checks_its_arguments_first():
         process = subprocess.run(["bash", str(REPO / "scripts" / "run_classifier.sh"), *args], capture_output=True,
                                  text=True, timeout=60, env={"PATH": "/usr/bin:/bin", "NNSLR_DATA_ROOT": "/nonexistent"})
         assert process.returncode == 2 and message in process.stderr, process.stderr
-    # The two stages: a mode of three, one start, a file, a whole number of epochs.
+    # The two stages: a mode of three, a file, a whole number of epochs.
     for settings, message in (({"NNSLR_CLASSIFIER_MAPILLARY": "2"}, "must be 0, 1 or pretrain"),
-                              ({"NNSLR_CLASSIFIER_MAPILLARY": "pretrain", "NNSLR_CLASSIFIER_INIT_FROM": "/etc/hostname"},
-                               "two different starts"),
                               ({"NNSLR_CLASSIFIER_INIT_FROM": "/nonexistent/reader-best.pt"}, "is not a file"),
                               ({"NNSLR_CLASSIFIER_PRETRAIN_EPOCHS": "x"}, "PRETRAIN_EPOCHS must be a whole number")):
         process = subprocess.run(["bash", str(REPO / "scripts" / "run_classifier.sh"), "r"], capture_output=True, check=False,

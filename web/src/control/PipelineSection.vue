@@ -128,11 +128,11 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
               : step.action === 'train_cutter' ? 'A new SignNet. ' + cutterChoices.minutes + '.' : step.text }}</span></span>
         </label>
         <div v-if="on(step.action) && step.action === 'train_cutter'" class="pl-choices">
+          <NetworkStartPicker :start="starts.cutter" id="pipeline-cutter-start"/>
           <div class="seg-row"><Segmented v-model="families" :options="familyOptions" label="Signs the cutter finds"/></div>
           <MapillaryChoices :choices="cutterChoices" :status="status" label="Frames the cutter learns from" id-prefix="cutter-mapillary"
                             note-id="pipeline-cutter-mapillary-note"
                             @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
-          <NetworkStartPicker :start="starts.cutter" id="pipeline-cutter-start"/>
           <p v-if="cutterChoices.withMapillary" class="latest-none" id="pipeline-cutter-mapillary-note">The Mapillary windows join its
             training only: every measure stays on your drives.</p>
         </div>
@@ -146,8 +146,8 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
           <NetworkStartPicker :start="starts.decider" id="pipeline-decider-start"/>
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_brain'" class="pl-choices">
-          <BrainChoices :choices="brainChoices" id="pipeline-brain"/>
           <NetworkStartPicker :start="starts.brain" id="pipeline-brain-start"/>
+          <BrainChoices :choices="brainChoices" id="pipeline-brain"/>
         </div>
       </li>
     </ol>

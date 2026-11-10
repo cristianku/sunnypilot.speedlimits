@@ -34,7 +34,7 @@ from nnslr_tools.car_release import CAR_SCRIPT, brain_refused, build_pending, ca
 from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
 from nnslr_tools.model_roles import (BRAIN_WEIGHTS, CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError,
-                                     ModelIndex, takes_the_driver)
+                                     ModelIndex)
 from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -2075,18 +2075,14 @@ class Panel:
             raise PanelError(409, 'not_available', 'That SignNet has not finished its training on this server.')
         return cutter
 
-    def _classifier_start(self, start: object, mapillary: object) -> dict:
+    def _classifier_start(self, start: object) -> dict:
         """The environment of where "Train the classifier" starts: nothing for ImageNet (the default), or
         NNSLR_CLASSIFIER_INIT_FROM, the reader-best.pt of a finished classifier with "not a sign" of the Models tab
-        given by its id ('classifier:<run>/classifier'); never with the two stages, which start from their own
-        Mapillary stage."""
+        given by its id ('classifier:<run>/classifier'); with the two stages, their Mapillary stage starts from it."""
         if start is None or start == CLASSIFIER_IMAGENET:
             return {}
         if not isinstance(start, str):
             raise PanelError(400, 'bad_option', 'The start is a string: imagenet or the id of a classifier.')
-        if mapillary == 'pretrain':
-            raise PanelError(400, 'bad_option', 'Mapillary, then ours starts from its own Mapillary stage: '
-                             'choose ImageNet, or another choice of signs.')
         entry = next((entry for entry in self.models_index.artifacts(('classifier',))['classifier']
                       if entry['id'] == start), None)
         if entry is None:
@@ -2267,8 +2263,8 @@ class Panel:
         """The environment of where the cutter's, the applicability's or the brain's training starts (one of
         NETWORK_STARTS): nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in
         Models given by its id: the signnet-best.pt of a SignNet of the comma's band and grid, the experiment-b folder of
-        an applicability run, the brain-last.pt of a brain that does not take the driver (its script's dry run checks
-        the rest: stepped as the new one, on the same split)."""
+        an applicability run, the brain-last.pt of a brain (one that took the driver's pedals and speed too: the new
+        one leaves those inputs out; its script's dry run checks the rest: stepped as the new one, on the same split)."""
         if start is None or start == NETWORK_FRESH:
             return {}
         if not isinstance(start, str):
@@ -2288,9 +2284,6 @@ class Panel:
             from nnslr_tools.chain import SIGNNET_FILE
             return {variable: str(run / SIGNNET_FILE)}
         if role == 'brain':
-            if takes_the_driver(entry):
-                raise PanelError(400, 'bad_option', 'That brain learnt to follow your pedals and the car’s speed: '
-                                                    'choose one without them.')
             return {variable: str(run / BRAIN_WEIGHTS)}
         return {variable: str(run / entry['part'].split('/')[0])}
 
@@ -2427,7 +2420,7 @@ class Panel:
                 start_env[MAPILLARY_ENV[action]] = '1' if mapillary == 'on' else 'pretrain'
         start_env.update(self._mapillary_choice(action, options or {}, mapillary in ('on', 'pretrain')))
         if action == 'train_classifier':
-            start_env.update(self._classifier_start((options or {}).get('start'), mapillary))
+            start_env.update(self._classifier_start((options or {}).get('start')))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
         for key in ('works', 'road', 'driver', 'pool'):

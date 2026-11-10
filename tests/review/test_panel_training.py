@@ -809,10 +809,13 @@ def test_the_classifier_can_start_from_a_finished_classifier_of_models(root, che
         with pytest.raises(PanelError) as error:
             panel.start('train_classifier', {'start': start})
         assert (error.value.status, error.value.message) == (400, message), start
-    # Two stages start from their own Mapillary stage: no other start.
-    with pytest.raises(PanelError) as error:
-        panel.start('train_classifier', {'start': 'classifier:c1/classifier', 'mapillary': 'pretrain'})
-    assert error.value.status == 400 and 'its own Mapillary stage' in error.value.message
+    # The two stages too: their Mapillary stage goes on from it.
+    time.sleep(1.1)
+    job = panel.start('train_classifier', {'start': 'classifier:c1/classifier', 'mapillary': 'pretrain'})
+    finished(panel, job['id'])
+    assert re.search(r'init=' + re.escape(str((done / 'classifier/reader-best.pt').resolve())) + '$',
+                     full_log(panel, job['id']), re.M)
+    time.sleep(1.1)
     # Weights gone since the list was read.
     (done / 'classifier/reader-best.pt').unlink()
     with pytest.raises(PanelError) as error:
