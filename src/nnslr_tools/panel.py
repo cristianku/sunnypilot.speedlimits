@@ -2950,11 +2950,10 @@ def _exit_code(path: Path) -> int | None:
 
 
 def _active_parts(root: Path) -> dict[str, str]:
-    """The cutter, classifier and decider in use (models/active.json) by id: what Our networks propose with."""
-    from nnslr_tools.preannotate import OUR_PARTS
-    active = _read_json(root / 'models' / 'active.json') or {}
-    return {part: active[part]['id'] for part in OUR_PARTS
-            if isinstance(active.get(part), dict) and isinstance(active[part].get('id'), str)}
+    """The cutter, classifier and decider Our networks propose with, by id: those on the car, else those in use
+    (preannotate.our_network_ids)."""
+    from nnslr_tools.preannotate import our_network_ids
+    return {part: item['id'] for part, item in our_network_ids(root).items()}
 
 
 def _networks_of(root: Path, log: Path) -> dict[str, str]:
