@@ -1,29 +1,33 @@
-// Where the next training of the cutter or of applicability starts, kept once for its section and for its step of
-// Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it goes on from
-// (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
-// applicability; the choice while none is in use). An applicability run is one choice: each of its networks goes on
-// from its own of that run.
+// Where the next training of the cutter, of applicability or of the brain starts, kept once for its section and for its
+// step of Train › Pipeline (the same choice in both): a finished version of its role in Models, whose weights it goes on
+// from (the one in use, until another is chosen), or its usual start (random weights for SignNet, ImageNet for
+// applicability and the brain; the choice while none is in use). An applicability run is one choice: each of its
+// networks goes on from its own of that run. A brain is one seed: its three seeds go on from it; it learnt on the
+// brain's frozen split, and the server refuses one stepped otherwise (nnslr_tools.brain_train.brain_start).
 import {computed, reactive, ref, type Ref} from 'vue';
 import {isoWhen, plural} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion, PanelStatus} from '../common/panel-types';
 import type {PickerOption} from '../components/PickerSheet.vue';
 
-export type StartRole = 'cutter' | 'decider';
+export type StartRole = 'cutter' | 'decider' | 'brain';
 type Split = 'same' | 'another' | 'unknown';
 const SPLIT_WORDS: Record<Split, string> = {same: 'learnt on today’s split', another: 'learnt on another split',
   unknown: 'its split not recorded'};
 /** The usual start of each, first in the list: its test stays fair. */
-const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet'};
-const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability'};
+const FRESH: Record<StartRole, string> = {cutter: 'Random weights', decider: 'ImageNet', brain: 'ImageNet'};
+const NAME: Record<StartRole, string> = {cutter: 'SignNet', decider: 'Applicability', brain: 'Brain'};
+const POOL_WORDS = {grid: 'a grid', mean: 'a mean'} as const;
 export const FRESH_START = 'fresh';
 
 export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>,
-  versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined) {
+  versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined, pool?: () => string) {
   /** A finished version that can be a start: a SignNet the comma runs (its band and grid), a whole applicability
-   * training (not a smoke run). */
+   * training (not a smoke run), a brain stepped as today's (four times a second, its memory's size recorded: not one of
+   * before 8 Nov 2026) that can be in use (not one that learnt to follow the driver's pedals and speed). */
   const startable = (version: ModelVersion): boolean => version.role === role && version.finished
     && (version.role !== 'cutter' || (version.kind === 'signnet' && version.fits_the_car === true))
-    && (version.role !== 'decider' || !version.smoke_limit);
+    && (version.role !== 'decider' || !version.smoke_limit)
+    && (version.role !== 'brain' || (version.selectable !== false && (version.hidden ?? null) !== null));
   /** One choice per run (the one in use there, else its newest), the run in use first, then the newest. */
   const starts = computed(() => {
     const byRun = new Map<string, ModelVersion[]>();
@@ -34,7 +38,7 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
       count: items.length, inUse: items.some((item) => item.in_use)}))
       .sort((a, b) => Number(b.inUse) - Number(a.inUse));
   });
-  const titleOf = (version: ModelVersion): string => (role === 'cutter' ? version.label : NAME[role]) + ' '
+  const titleOf = (version: ModelVersion): string => (role === 'decider' ? NAME[role] : version.label) + ' '
     + (version.trained_at ? isoWhen(version.trained_at) : version.run);
   /** Whether it learnt on the split the new one is measured on. */
   const currentSplit = computed(() => status.value?.classifier_options?.split_sha256 ?? null);
@@ -46,8 +50,10 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
     {key: FRESH_START, title: FRESH[role], sub: 'a fresh start: always a fair test'},
     ...starts.value.map(({version, count, inUse}) => {
       const split = splitOf(version);
+      const off = version.role === 'brain' ? version.test?.mean_error_kph ?? null : null;
       return {key: version.id, title: titleOf(version), short: titleOf(version), badge: inUse ? 'In use' : undefined,
-        sub: [split ? SPLIT_WORDS[split] : '', role === 'cutter' ? '' : plural(count, 'network')].filter(Boolean).join(' · ')};
+        sub: [split ? SPLIT_WORDS[split] : '', role === 'decider' ? plural(count, 'network') : '',
+          off === null ? '' : off.toFixed(1) + ' km/h off on the test'].filter(Boolean).join(' · ')};
     }),
   ]);
   /** The choice made here (null: none yet, the one in use). */
@@ -61,6 +67,13 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
   /** A line under the choice: what it goes on from, and whether the new one's test stays fair. */
   const note = computed((): {text: string; warn: boolean} | null => {
     if (version.value === null) return null;
+    if (version.value.role === 'brain') {
+      const theirs = version.value.pool;
+      if (theirs && pool && pool() !== theirs) return {text: 'That brain sees the picture as ' + POOL_WORDS[theirs] + ': choose '
+        + (theirs === 'grid' ? 'Grid' : 'Mean') + ' in Picture, or the training stops at its first check.', warn: true};
+      return {text: 'Its three seeds go on from that brain’s weights, learnt on the brain’s frozen split: the test stays fair. '
+        + 'An input it did not have starts at zero.', warn: false};
+    }
     const split = splitOf(version.value);
     const what = role === 'cutter' ? 'It goes on from that SignNet’s weights'
       : role === 'decider' ? 'Each version goes on from its own of that run (one it lacks from ImageNet)'

@@ -147,7 +147,8 @@ const cutterFamilies = computed({
  * pipeline. */
 const versionsOf = (role: ModelRole) => roleOf(role)?.versions;
 const starts = {cutter: useNetworkStart('cutter', toRef(props, 'status'), versionsOf),
-  decider: useNetworkStart('decider', toRef(props, 'status'), versionsOf)};
+  decider: useNetworkStart('decider', toRef(props, 'status'), versionsOf),
+  brain: useNetworkStart('brain', toRef(props, 'status'), versionsOf, () => brainChoices.pool)};
 /** The cutter's Mapillary switch (cutter-choices.ts), the same in its section and in the pipeline. */
 const cutterChoices = useCutterChoices(toRef(props, 'status'));
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
@@ -177,11 +178,16 @@ const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
   ['train_decider', 'Three versions of applicability (is this sign for our road?): the crop alone, with position and speed, with '
     + 'the scene' + starts.decider.words + '. About 15 minutes on the GPU.'],
 ]);
-/** What the brain learns (brain-choices.ts), the same in its section and in the pipeline. */
+/** What the brain learns (brain-choices.ts), the same in its section and in the pipeline; the picture as the brain it
+ * goes on from sees it, once that one is chosen. */
 const brainChoices = useBrainChoices();
+watch(() => starts.brain.version?.id, () => {
+  const version = starts.brain.version;
+  if (version?.role === 'brain' && version.pool) brainChoices.pool = version.pool;
+}, {immediate: true});
 /** The brain's training, in its card: three seeds, to choose one in Models. */
 const BRAIN_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_brain', 'Three seeds of the brain' + brainChoices.words + ', one after the other, about 3 minutes each on the GPU, after '
+  ['train_brain', 'Three seeds of the brain' + brainChoices.words + starts.brain.words + ', one after the other, about 3 minutes each on the GPU, after '
     + 'reading the signs of the drives as the car does, and with our networks in use those they have not read yet (the next limit). '
     + 'Then you choose one in Models and Publish it.'],
 ]);
@@ -363,8 +369,9 @@ const numbers = computed(() => {
         <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
       </template>
       <template v-else-if="section === 'brain'">
+        <NetworkStartPicker :start="starts.brain" id="train-brain-start"/>
         <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
-                    @run="(name, state) => emit('run', name, state, undefined, brainChoices.option)"/>
+                    @run="(name, state) => emit('run', name, state, undefined, {...brainChoices.option, ...starts.brain.option})"/>
         <p v-if="brainLabels?.training" class="latest-none" id="train-brain-marked">It learns every dashcam drive, each whole:
           <strong>{{ plural(brainLabels.training.drives, 'drive') }}</strong>,
           <strong>{{ brainLabels.training.hours.toFixed(1) }}</strong> h.</p>

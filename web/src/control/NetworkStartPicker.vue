@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Where the next training of the cutter or of applicability starts (network-start.ts), in its
+// Where the next training of the cutter, of applicability or of the brain starts (network-start.ts), in its
 // section and in its step of Train › Pipeline; nothing while it has no finished version to go on from.
 import PickerSheet from '../components/PickerSheet.vue';
 import type {NetworkStartChoice} from './network-start';

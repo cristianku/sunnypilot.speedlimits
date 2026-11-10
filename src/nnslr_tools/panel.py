@@ -33,7 +33,8 @@ from pathlib import Path
 from nnslr_tools.car_release import CAR_SCRIPT, brain_refused, build_pending, car_missing
 from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
-from nnslr_tools.model_roles import CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError, ModelIndex
+from nnslr_tools.model_roles import (BRAIN_WEIGHTS, CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError,
+                                     ModelIndex, takes_the_driver)
 from nnslr_tools.runs import RunsIndex, WatchError
 
 REPO = Path(__file__).resolve().parents[2]
@@ -69,11 +70,13 @@ CLASSIFIER_SCRIPT = 'scripts/run_classifier.sh'
 # sign" of the Models tab, by its id (its reader-best.pt becomes NNSLR_CLASSIFIER_INIT_FROM).
 CLASSIFIER_IMAGENET = 'imagenet'
 CLASSIFIER_ID = re.compile(r'classifier:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/classifier')
-# Where the cutter's and the applicability's trainings start ({'start': ...}): their default (NETWORK_FRESH: random
-# weights for SignNet, ImageNet for the other), or a finished version of their role in Models, by its id; its script
-# gets the earlier run's weights or folder (the variable here), where each applicability variant goes on from its own.
+# Where the cutter's, the applicability's and the brain's trainings start ({'start': ...}): their default (NETWORK_FRESH:
+# random weights for SignNet, ImageNet for the others), or a finished version of their role in Models, by its id; its
+# script gets the earlier run's weights or folder (the variable here), where each applicability variant goes on from its
+# own and every seed of the brain from the one brain.
 NETWORK_FRESH = 'fresh'
-NETWORK_STARTS = {'train_cutter': ('cutter', 'NNSLR_CUTTER_INIT_FROM'), 'train_decider': ('decider', 'NNSLR_DECIDER_INIT_FROM')}
+NETWORK_STARTS = {'train_cutter': ('cutter', 'NNSLR_CUTTER_INIT_FROM'), 'train_decider': ('decider', 'NNSLR_DECIDER_INIT_FROM'),
+                  'train_brain': ('brain', 'NNSLR_BRAIN_INIT_FROM')}
 # A split file's sha256 (splits/latest.json).
 SPLIT_SHA = re.compile(r'[0-9a-f]{64}')
 # The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
@@ -174,7 +177,7 @@ MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_brain': ('works', 'road', 'types', 'driver', 'pool'),
+                  'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'start'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
@@ -349,12 +352,12 @@ def _flags(settings: str) -> dict[str, str]:
 
 
 def _start_words(path: str) -> str:
-    """The start of a classifier or a SignNet (--init-from) in words: the run of a
-    .../runs/<run>/classifier/reader-best.pt or of a .../runs/<run>/signnet-best.pt."""
+    """The start of a classifier, a SignNet or a brain (--init-from) in words: the run of a
+    .../runs/<run>/classifier/reader-best.pt, of a .../runs/<run>/signnet-best.pt or of a .../runs/<run>/brain-last.pt."""
     parts = Path(path).parts
     if len(parts) >= 3 and parts[-2] in ('classifier', 'pretrain', 'reader'):
         return parts[-3]
-    return parts[-2] if len(parts) >= 2 and parts[-1] == 'signnet-best.pt' else Path(path).name
+    return parts[-2] if len(parts) >= 2 and parts[-1] in ('signnet-best.pt', 'brain-last.pt') else Path(path).name
 
 
 def _region_words(region: str) -> str:
@@ -2261,10 +2264,11 @@ class Panel:
                 'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool}
 
     def _network_start(self, action: str, start: object) -> dict:
-        """The environment of where the cutter's or the applicability's training starts (one of NETWORK_STARTS):
-        nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in Models given by
-        its id: the signnet-best.pt of a SignNet of the comma's band and grid, the experiment-b folder of an
-        applicability run."""
+        """The environment of where the cutter's, the applicability's or the brain's training starts (one of
+        NETWORK_STARTS): nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in
+        Models given by its id: the signnet-best.pt of a SignNet of the comma's band and grid, the experiment-b folder of
+        an applicability run, the brain-last.pt of a brain that does not take the driver (its script's dry run checks
+        the rest: stepped as the new one, on the same split)."""
         if start is None or start == NETWORK_FRESH:
             return {}
         if not isinstance(start, str):
@@ -2283,6 +2287,11 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only a SignNet of the comma’s band and grid can be a start.')
             from nnslr_tools.chain import SIGNNET_FILE
             return {variable: str(run / SIGNNET_FILE)}
+        if role == 'brain':
+            if takes_the_driver(entry):
+                raise PanelError(400, 'bad_option', 'That brain learnt to follow your pedals and the car’s speed: '
+                                                    'choose one without them.')
+            return {variable: str(run / BRAIN_WEIGHTS)}
         return {variable: str(run / entry['part'].split('/')[0])}
 
     def start(self, action: str, options: dict | None = None, *, check_only: bool = False) -> dict | None:

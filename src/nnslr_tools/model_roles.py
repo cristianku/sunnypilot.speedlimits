@@ -411,7 +411,11 @@ def brain_digest(result: Any) -> dict:
             'kph': {key: _int(kph.get(key)) for key in ('from', 'to', 'step')},
             'road_kinds': list(result.get('road_kinds') or []), 'road_types': list(result.get('road_types') or []),
             'plates': bool(result.get('plates')), 'hours': bool(result.get('hours')), 'wet': bool(result.get('wet')), 'dry_run': bool(result.get('dry_run')), 'epochs': len(result.get('history') or []),
-            'validation': speed('validation'), 'test': speed('test')}
+            'validation': speed('validation'), 'test': speed('test'),
+            # The split it learnt on and the brain it went on from (None: ImageNet and random weights; before 10 Nov 2026
+            # not recorded).
+            'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
+            'start': network_start_digest(result.get('start'), result.get('split_sha256'))}
 
 
 def decider_digest(result: Any) -> dict:
@@ -867,11 +871,14 @@ class ModelIndex:
         seed = trained.get('seed')
         entry.update({'label': 'Brain' if seed is None else f'Brain, seed {seed}', 'detail': 'says the speed to hold',
                       'groups': trained.get('groups'),
-                      'architecture': 'mobilenet_v3_small+gru', 'initialization': 'ImageNet', 'best_epoch': None,
+                      'architecture': 'mobilenet_v3_small+gru',
+                      'initialization': 'start' if trained.get('start') else 'ImageNet', 'best_epoch': None,
+                      'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
                       'seed': seed, 'works': trained.get('works'), 'plates': bool(trained.get('plates')),
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
-                      **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types')},
+                      **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
+                                                           'pool')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test')})
         return entry

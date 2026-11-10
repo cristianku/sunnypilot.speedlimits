@@ -31,7 +31,7 @@ const decider = computed(() => props.version.role === 'decider' ? props.version 
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
 /** The earlier run a SignNet or an applicability variant went on from (Train › Start from). */
 const networkStart = computed(() => props.version.role === 'cutter' || props.version.role === 'decider'
-  ? props.version.start ?? null : null);
+  || props.version.role === 'brain' ? props.version.start ?? null : null);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);

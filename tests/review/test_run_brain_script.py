@@ -75,6 +75,23 @@ def test_the_choices_reach_the_check_and_every_seed(tmp_path):
     assert [line for line in lines if line.startswith('args: brain-targets')][0].endswith('--no-road-types')
 
 
+def test_an_earlier_brain_to_go_on_from_reaches_the_check_and_every_seed(tmp_path):
+    start = tmp_path / 'data' / 'runs' / 'b1-s1' / 'brain-last.pt'
+    start.parent.mkdir(parents=True)
+    start.write_text('weights')
+    process = run_script(tmp_path, env={'NNSLR_BRAIN_INIT_FROM': str(start)})
+    assert process.returncode == 0, process.stderr + process.stdout
+    lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
+    trainings = [line for line in lines if line.startswith('args: train-brain')]
+    assert len(trainings) == 4 and all(f'--init-from {start}' in line for line in trainings)
+    # Without it, ImageNet and random weights, as before: no flag.
+    assert '--init-from' not in (run_script(tmp_path, name='n2').stdout + (tmp_path / 'data/runs/n2/brain.log').read_text())
+    # A start that is not a file stops before anything runs.
+    process = run_script(tmp_path, name='n3', env={'NNSLR_BRAIN_INIT_FROM': str(tmp_path / 'gone.pt')})
+    assert process.returncode == 2 and 'NNSLR_BRAIN_INIT_FROM is not a file' in process.stderr
+    assert not (tmp_path / 'data' / 'runs' / 'n3').exists()
+
+
 def test_the_usual_training_keeps_the_roadworks_and_the_kinds_of_road_and_leaves_the_driver_out(tmp_path):
     assert run_script(tmp_path).returncode == 0
     log = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text()

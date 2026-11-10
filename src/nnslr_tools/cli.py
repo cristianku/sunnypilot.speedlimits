@@ -1756,6 +1756,9 @@ def build_parser() -> argparse.ArgumentParser:
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
     p_brain_net.add_argument("--seed", type=int, default=0)
+    p_brain_net.add_argument("--init-from", default=None,
+                             help="an earlier brain's brain-last.pt to go on from, stepped as this one and on the same "
+                                  "split (scripts/run_brain.sh: NNSLR_BRAIN_INIT_FROM). Default: ImageNet and random weights")
     p_brain_net.add_argument("--device", help="default: cuda; the CPU for a dry run")
     p_brain_net.add_argument("--dry-run", action="store_true", help="two steps on the CPU on a few frames: the chain works, "
                                                                     "nothing is learned, nothing written outside --run-dir")
@@ -2841,12 +2844,15 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     from nnslr_tools.drive_review import DriveReviewStore
     from nnslr_tools.preannotate import resolve_data_root
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.init_from and not Path(args.init_from).is_file():
+        raise ValueError(f"--init-from is not a file: {args.init_from}")
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, road=not args.no_road,
                                      types=not args.no_road_types, device=args.device,
                                      dry_run=args.dry_run, routes=args.route,
-                                     epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)
+                                     epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
+                                     init_from=Path(args.init_from) if args.init_from else None)
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))

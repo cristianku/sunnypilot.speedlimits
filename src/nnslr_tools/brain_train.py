@@ -72,9 +72,14 @@ types): the measure is on those too, so a brain with types and one without measu
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. His pedals
 and the car's speed are never inputs (brain_targets.LEFT_OUT, since 10 Nov 2026; off by default since 8 Nov): the answer is
 his own speed, and with the car's among the inputs the network learns to say it back, on the car its own.
+
+A training can go on from an earlier brain (brain_start, nnslr train-brain --init-from, Train › Brain's "Start from"):
+its weights instead of ImageNet's and random ones, the rest of the training the same. Only a brain stepped as this one
+(rate, picture, pool, sizes) on the same split; an input it lacks starts at zero, so the new one starts as the old.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import time
@@ -570,9 +575,99 @@ def _spoken(speeds: list[int]) -> str:
     return f'{len(speeds)} speed{"s" if len(speeds) > 1 else ""}, {speeds[0]}-{speeds[-1]} km/h'
 
 
+def _group_sizes(groups) -> list[tuple[str, int]]:
+    """A checkpoint's groups with the columns of each: names (their INPUT_SIZES), or [name, size]."""
+    return [(group[0], int(group[1])) if isinstance(group, (list, tuple)) else (group, INPUT_SIZES[group]) for group in groups]
+
+
+def brain_start(torch, model, path: Path, source: dict) -> dict:
+    """The weights of an earlier brain (its brain-last.pt, nnslr train-brain --init-from) in this fresh one: every layer of
+    the same name and shape; the rows of the speed and next heads by km/h, of the road and type heads by name (one the
+    start lacks keeps the fresh row); the memory's input by group, an input the start lacks at zero and one it took and
+    this one does not left out, so the network starts saying what the start said. A head the start has not stays fresh.
+    Refuses a start stepped otherwise (rate, picture, pool, features, memory), learnt on another split, or whose inputs
+    are not as wide as its groups say. Returns what result.json records of it: its file and sha256, run, epoch, split,
+    the layers left fresh, the inputs added and left out, and whether the car's file of the inputs was the same."""
+    path = Path(path)
+    saved = torch.load(path, map_location='cpu', weights_only=False)
+    if not isinstance(saved, dict) or not isinstance(saved.get('weights'), dict) or not saved.get('groups'):
+        raise ValueError(f'the start is not a brain: {path}')
+    theirs = {'rate_hz': saved.get('rate_hz', 1.0), 'picture': saved.get('picture', 'road_type'), 'pool': saved.get('pool'),
+              'features': saved.get('features'), 'hidden': saved.get('hidden')}
+    other = [key for key, value in theirs.items() if value != source[key]]
+    if other:
+        raise ValueError(f'the start is a brain stepped otherwise ({", ".join(f"{key} {theirs[key]}" for key in other)}, '
+                         f'this one {", ".join(str(source[key]) for key in other)}): {path}')
+    if saved.get('split') and saved['split'] != source['split']:
+        raise ValueError(f'the start learnt on another split: its train may hold the frames of this test: {path}')
+    weights = saved['weights']
+    state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+    # The memory's input: the picture's features, then each group's columns in its order (pack_inputs).
+    columns, at = {}, source['features']
+    for name, size in _group_sizes(saved['groups']):
+        columns[name] = (at, size)
+        at += size
+    memory = 'gru.weight_ih_l0'
+    if weights[memory].shape[1] != at:
+        raise ValueError(f'the start takes {weights[memory].shape[1] - source["features"]} inputs, its groups say '
+                         f'{at - source["features"]}: {path}')
+    table = [int(round(value)) for value in weights['class_kph'].tolist()] if 'class_kph' in weights else []
+    own = [int(round(value)) for value in model.class_kph.tolist()]
+    rows = {'speed_head.': ({kph: row for row, kph in enumerate(table)}, own),
+            'next_head.': ({**{kph: row for row, kph in enumerate(table)}, None: len(table)}, own + [None]),
+            'road_head.': ({kind: row for row, kind in enumerate(saved.get('road_kinds') or [])}, source['road_kinds']),
+            'type_head.': ({kind: row for row, kind in enumerate(saved.get('road_types') or [])}, source['road_types'])}
+    fresh, added = [], []
+    for key, current in state.items():
+        if key in ('class_kph', 'mean', 'std'):
+            continue  # its own table and the ImageNet constants
+        head = next((prefix for prefix in rows if key.startswith(prefix)), None)
+        if key == memory:
+            current[:, :source['features']] = weights[key][:, :source['features']]
+            at = source['features']
+            for name, size in _group_sizes(source['groups']):
+                if name in columns and columns[name][1] == size:
+                    current[:, at:at + size] = weights[key][:, columns[name][0]:columns[name][0] + size]
+                else:
+                    current[:, at:at + size] = 0
+                    added.append(name)
+                at += size
+        elif head is not None and key in weights:
+            found, wanted = rows[head]
+            missing = [str(name) for name in wanted if name not in found]
+            for row, name in enumerate(wanted):
+                if name in found:
+                    current[row] = weights[key][found[name]]
+            if missing:
+                fresh.append(f'{key} ({", ".join(missing[:5])}{"..." if len(missing) > 5 else ""})')
+        elif key in weights and tuple(weights[key].shape) == tuple(current.shape):
+            state[key] = weights[key]
+        else:
+            fresh.append(key)
+    if any(key.startswith('backbone.') for key in fresh):
+        raise ValueError(f'the start has another picture encoder: {path}')
+    model.load_state_dict(state, strict=True)
+    ours = {name for name, _ in _group_sizes(source['groups'])}
+    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'run': path.parent.name,
+            'epoch': saved.get('epoch'), 'split_sha256': saved.get('split'), 'fresh': fresh, 'inputs_added': added,
+            'inputs_left_out': [name for name in columns if name not in ours],
+            'same_inputs_file': saved.get('inputs_sha256') == source['inputs_sha256']}
+
+
+def _start_text(start: dict) -> str:
+    """The log's line of what a training goes on from."""
+    epoch = '' if start['epoch'] is None else f' (epoch {start["epoch"] + 1})'
+    return (f'Starts from the brain {start["run"]}{epoch}: every layer'
+            + (f' but {", ".join(start["fresh"])}' if start['fresh'] else '')
+            + (f'; new inputs at zero: {", ".join(start["inputs_added"])}' if start['inputs_added'] else '')
+            + (f'; inputs it took, left out: {", ".join(start["inputs_left_out"])}' if start['inputs_left_out'] else '')
+            + ('' if start['same_inputs_file'] else '; the car’s file of the inputs has changed since') + '.')
+
+
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
                 road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
-                dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, log=_print) -> dict:
+                dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
+                log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
@@ -580,7 +675,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     speed. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
     types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
-    the ones still in training_routes; None, every drive of training_routes."""
+    the ones still in training_routes; None, every drive of training_routes. init_from: an earlier brain-last.pt whose
+    weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -637,6 +733,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'hours': hours, 'wet': wet, 'ahead': getattr(model, 'ahead', False),
               'rate_hz': drives[0].get('rate', 1.0), 'picture': 'brain' if drives[0].get('rate', 1.0) == RATE_HZ else 'road_type',
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
+    start = None
+    if init_from is not None:
+        start = brain_start(torch, model, Path(init_from), source)
+        log(_start_text(start))
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
     balance = next_balance(drives)
@@ -667,6 +767,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'hidden': HIDDEN, 'kph': {'from': table[0], 'to': table[-1], 'step': table[1] - table[0] if len(table) > 1 else 0},
               'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
               'seed': seed, 'right_kph': RIGHT_KPH, 'history': history, 'next_balance': balance,
+              'split_sha256': source['split'], 'start': start,
               'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),

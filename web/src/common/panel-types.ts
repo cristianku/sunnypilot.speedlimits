@@ -1430,7 +1430,7 @@ export interface ClassifierStart {
   another_split: boolean;
 }
 
-/** The earlier run a SignNet or an applicability variant went on from (--init-from): its run, that run's epoch, and
+/** The earlier run a SignNet, an applicability variant or a brain went on from (--init-from): its run, that run's epoch, and
  * whether it learnt on another split, so its test may hold frames the start saw. */
 export interface NetworkStart {
   run: string | null;
@@ -1484,6 +1484,12 @@ export interface BrainModel extends ModelBase {
   road_kinds: string[];
   road_types: string[];
   seed: number | null;
+  /** The picture's features as a grid or as a mean: a training that goes on from it takes the same. */
+  pool?: 'grid' | 'mean' | null;
+  /** The brain's frozen split it learnt on (null: not recorded in its result), and the brain it went on from (null:
+   * ImageNet). */
+  split_sha256?: string | null;
+  start?: NetworkStart | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;
 }

@@ -1003,3 +1003,94 @@ def test_the_export_checks_the_brain_along_a_drive_it_learnt_from_with_its_pictu
     found[:] = found[:1]
     with pytest.raises(ValueError, match="r1: the brain's pictures are not made"):
         brain_export.rollout_drive(tmp_path, None, (), 'r1')
+
+
+# -- going on from an earlier brain (brain_start) -----------------------------------------------------------------
+def start_file(torch, tmp_path, model, groups=GROUPS, **saved):
+    """The brain-last.pt of an earlier run, as train_brain writes it."""
+    from nnslr_tools.road_type_net import FEATURES, HIDDEN
+    path = tmp_path / 'runs' / 'b1-s1' / 'brain-last.pt'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({'weights': model.state_dict(), 'epoch': 39, 'groups': list(groups), 'pool': 'grid', 'works': True,
+                'road_kinds': ['tunnel'], 'road_types': [], 'features': FEATURES, 'hidden': HIDDEN, 'rate_hz': 4.0,
+                'picture': 'brain', 'split': 'a' * 64, 'inputs_sha256': 'b' * 64, **saved}, path)
+    return path
+
+
+def source_of(groups, **changed):
+    from nnslr_tools.road_type_net import FEATURES, HIDDEN
+    return {'groups': tuple(groups), 'pool': 'grid', 'features': FEATURES, 'hidden': HIDDEN, 'rate_hz': 4.0,
+            'picture': 'brain', 'road_kinds': ['tunnel'], 'road_types': [], 'split': 'a' * 64, 'inputs_sha256': 'b' * 64,
+            **changed}
+
+
+def said_by(torch, model, groups, drive, array):
+    from nnslr_tools.brain_targets import pack_inputs
+    model.eval()
+    images = torch.from_numpy(array).permute(0, 3, 1, 2).float()[None] / 255
+    with torch.no_grad():
+        speed, _works, _state, following, _metres, road = model(
+            images, torch.from_numpy(pack_inputs(drive['inputs'], groups))[None], ahead=True, road=True)
+    return speed, following, road
+
+
+def test_a_brain_going_on_from_another_says_what_it_said_without_the_inputs_it_drops_and_with_those_it_adds(tmp_path):
+    from nnslr_tools.brain_train import brain_start
+    torch = torch_or_skip()
+    old = tiny(torch, ahead=True, road_kinds=1)
+    for value in old.parameters():  # not the fresh numbers both start from
+        value.data.add_(torch.randn_like(value) * 0.05)
+    path = start_file(torch, tmp_path, old)
+    # Without the driver's pedals and speed, with an input of its own the start never took.
+    groups = tuple(name for name in GROUPS if name not in ('pedals', 'speed')) + ('engaged',)
+    new = tiny(torch, groups=groups, ahead=True, road_kinds=1)
+    start = brain_start(torch, new, path, source_of(groups))
+    assert (start['run'], start['epoch'], start['split_sha256'], start['fresh']) == ('b1-s1', 39, 'a' * 64, [])
+    assert (start['inputs_added'], start['inputs_left_out'], start['same_inputs_file']) == (['engaged'], ['pedals', 'speed'], True)
+    drive = fake_drive(['train'] * T)
+    for name in ('signs', 'lead', 'engaged'):
+        drive['inputs'][name][:] = numpy_random(drive['inputs'][name].shape)
+    array = pictures(drive)
+    # The start with its dropped inputs at zero; the new one whatever its new input says.
+    for got, wanted in zip(said_by(torch, new, groups, drive, array), said_by(torch, old, GROUPS, drive, array)):
+        assert torch.allclose(got, wanted, atol=1e-5)
+
+
+def numpy_random(shape):
+    import numpy
+    return numpy.random.default_rng(1).random(shape).astype(numpy.float32)
+
+
+def test_the_speeds_go_on_by_km_h_and_a_speed_the_start_lacks_starts_fresh(tmp_path):
+    from nnslr_tools.brain_train import brain_start
+    torch = torch_or_skip()
+    old = tiny(torch, ahead=True, kph=[10, 20, 30], road_kinds=1)
+    path = start_file(torch, tmp_path, old)
+    new = tiny(torch, ahead=True, kph=[20, 30, 40], road_kinds=1)
+    start = brain_start(torch, new, path, source_of(GROUPS))
+    assert sorted(start['fresh']) == ['next_head.bias (40)', 'next_head.weight (40)', 'speed_head.bias (40)',
+                                      'speed_head.weight (40)']
+    weights = old.state_dict()
+    assert torch.equal(new.speed_head.weight[:2], weights['speed_head.weight'][1:])
+    # The next head's last row is "none ahead", the start's own.
+    assert torch.equal(new.next_head.weight[-1], weights['next_head.weight'][-1])
+    assert new.class_kph.tolist() == [20, 30, 40]
+
+
+@pytest.mark.parametrize('changed,words', [({'pool': 'mean'}, 'stepped otherwise'), ({'rate_hz': 1.0}, 'stepped otherwise'),
+                                           ({'split': 'c' * 64}, 'another split')])
+def test_a_start_stepped_otherwise_or_on_another_split_is_refused(tmp_path, changed, words):
+    from nnslr_tools.brain_train import brain_start
+    torch = torch_or_skip()
+    path = start_file(torch, tmp_path, tiny(torch, ahead=True, road_kinds=1), **changed)
+    with pytest.raises(ValueError, match=words):
+        brain_start(torch, tiny(torch, ahead=True, road_kinds=1), path, source_of(GROUPS))
+
+
+def test_a_file_that_is_not_a_brain_is_refused(tmp_path):
+    from nnslr_tools.brain_train import brain_start
+    torch = torch_or_skip()
+    path = tmp_path / 'brain-last.pt'
+    torch.save({'state_dict': {}}, path)
+    with pytest.raises(ValueError, match='not a brain'):
+        brain_start(torch, tiny(torch, ahead=True), path, source_of(GROUPS))

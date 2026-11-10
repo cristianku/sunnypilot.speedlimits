@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import sys
+import time
 
 import pytest
 
@@ -31,6 +32,12 @@ brain_s0 epoch 2/40 train_loss 2.1000 val_error_kph 9.75 val_accuracy 0.5012 on 
 """
 
 
+@pytest.fixture(autouse=True)
+def no_cards(monkeypatch):
+    """No card on this machine: a start takes none and is never refused for the server's own GPUs, busy or not."""
+    monkeypatch.setattr(Panel, 'system', lambda self: {'gpu': {'processes': 0}})
+
+
 def ready_payload(gpu_processes=0):
     return {'actions_enabled': True, 'routes': [], 'reviewed_routes': 0, 'min_routes': 3,
             'system': {'gpu': {'processes': gpu_processes}}}
@@ -42,7 +49,8 @@ def brain_script(checkout):
     script.write_text('#!/usr/bin/env bash\necho "== Brain =="\necho "run:          $1"\n'
                       'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_POOL"\n'
                       'echo "road types: $NNSLR_BRAIN_TYPES"\n'
-                      'echo "driver: ${NNSLR_BRAIN_DRIVER-unset}"\n')
+                      'echo "driver: ${NNSLR_BRAIN_DRIVER-unset}"\n'
+                      'echo "init=${NNSLR_BRAIN_INIT_FROM:-fresh}"\n')
     script.chmod(0o755)
     return script
 
@@ -265,6 +273,60 @@ def test_it_is_a_step_of_the_pipeline_with_its_choices(root, checkout, monkeypat
     job = next(item for item in panel.jobs() if item['action'] == 'train_brain')
     finished(panel, job['id'])
     assert 'choices: 0 1 mean' in full_log(panel, job['id']).splitlines()
+
+
+def brain_run(root, name, *, groups=('signs', 'plate', 'hour'), finished=True, start=None):
+    """A brain of Models: its weights, and with finished its result.json."""
+    run = root / 'runs' / name
+    run.mkdir(parents=True)
+    (run / 'brain-last.pt').write_text('weights')
+    if finished:
+        (run / 'result.json').write_text(json.dumps({'groups': list(groups), 'seed': 1, 'test': {}, 'split_sha256': 'a' * 64,
+                                                     'start': start}))
+
+
+def test_it_goes_on_from_a_brain_of_models_that_does_not_take_the_driver(root, checkout, monkeypatch):
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    brain_run(root, 'b1-s1')
+    brain_run(root, 'b0-s1', groups=('signs', 'pedals', 'speed'))
+    brain_run(root, 'b2-s0', finished=False)
+
+    def init_of(options, pipeline=False):
+        if pipeline:
+            panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': options}]}, None)
+            job = next(item for item in panel.jobs() if item['action'] == 'train_brain' and item['state'] == 'running')
+        else:
+            job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return re.search(r'^init=(.*)$', full_log(panel, job['id']), re.M).group(1)
+
+    # The usual start, as before: nothing in the environment; a brain of Models by its id: its weights, alone or in a step.
+    assert init_of({}) == init_of({'start': 'fresh'}) == 'fresh'
+    assert init_of({'start': 'brain:b1-s1/brain', 'pool': 'mean'}).endswith('/runs/b1-s1/brain-last.pt')
+    assert init_of({'start': 'brain:b1-s1/brain'}, pipeline=True).endswith('/runs/b1-s1/brain-last.pt')
+    refused = {'brain:b0-s1/brain': 'That brain learnt to follow your pedals and the car’s speed: choose one without them.',
+               'brain:b2-s0/brain': 'That network has not finished its training: choose a finished one.',
+               'cutter:b1-s1/signnet': 'Unknown network to start from: choose one of Models.',
+               '/etc/passwd': 'Unknown network to start from: choose one of Models.'}
+    for start, message in refused.items():
+        with pytest.raises(PanelError) as error:
+            panel.start('train_brain', {'start': start})
+        assert (error.value.status, error.value.message) == (400, message), start
+    # Models say what a brain went on from; the job's chip too.
+    brain_run(root, 'b3-s0', start={'path': '/d/runs/b1-s1/brain-last.pt', 'run': 'b1-s1', 'epoch': 39,
+                                    'split_sha256': 'a' * 64})
+    found = {entry['id']: entry for entry in panel.models_index.artifacts(('brain',))['brain']}
+    assert (found['brain:b3-s0/brain']['initialization'], found['brain:b3-s0/brain']['start']) == \
+        ('start', {'run': 'b1-s1', 'epoch': 39, 'another_split': False})
+    assert (found['brain:b1-s1/brain']['initialization'], found['brain:b1-s1/brain']['start']) == ('ImageNet', None)
+    log = root / 'brain.log'
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --init-from '
+                   '/d/runs/b1-s1/brain-last.pt\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'from b1-s1']
 
 
 def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_log(root, checkout):

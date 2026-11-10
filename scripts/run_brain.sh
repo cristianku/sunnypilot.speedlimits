@@ -38,7 +38,9 @@ set -euo pipefail
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
 # one; 0: not, every second),
-# NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
+# NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_BRAIN_INIT_FROM (an earlier
+# brain's brain-last.pt every seed goes on from, instead of ImageNet and random weights: Train › Brain's "Start from";
+# the dry run of step 1 refuses one stepped otherwise or learnt on another split), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -56,6 +58,7 @@ WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
+INIT_FROM="${NNSLR_BRAIN_INIT_FROM:-}"
 SEEDS=(0 1 2)
 
 if [[ -z "$RUN_ID" || $# -ne 1 ]]; then
@@ -105,6 +108,11 @@ fi
 
 if [[ "$POOL" != "mean" && "$POOL" != "grid" ]]; then
   echo "error: NNSLR_BRAIN_POOL must be mean or grid: $POOL" >&2
+  exit 2
+fi
+
+if [[ -n "$INIT_FROM" && ! -f "$INIT_FROM" ]]; then
+  echo "error: NNSLR_BRAIN_INIT_FROM is not a file: $INIT_FROM" >&2
   exit 2
 fi
 
@@ -168,6 +176,9 @@ if [[ "$ROAD" == "0" ]]; then
 fi
 if [[ "$TYPES" == "0" ]]; then
   SETTINGS+=(--no-road-types)
+fi
+if [[ -n "$INIT_FROM" ]]; then
+  SETTINGS+=(--init-from "$INIT_FROM")
 fi
 
 echo "== Brain =="

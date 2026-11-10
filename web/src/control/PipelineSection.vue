@@ -49,7 +49,7 @@ function optionsOf(action: PipelineAction): ActionOptions {
   if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option, ...props.cutterChoices.options};
   if (action === 'train_classifier') return props.choices.options;
   if (action === 'train_decider') return props.starts.decider.option;
-  if (action === 'train_brain') return props.brainChoices.option;
+  if (action === 'train_brain') return {...props.brainChoices.option, ...props.starts.brain.option};
   return {};
 }
 /** Why it cannot start now ('' when it can): the reason of a training chosen (the classifier after a new cutter needs
@@ -77,7 +77,7 @@ function start(): void {
       + props.cutterChoices.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
       : step.action === 'dataset' ? 'the import of the reviews'
-        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words
+        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words + props.starts.brain.words
           : LABEL[step.action].toLowerCase() + props.starts.decider.words);
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
     + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
@@ -147,6 +147,7 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
         </div>
         <div v-else-if="on(step.action) && step.action === 'train_brain'" class="pl-choices">
           <BrainChoices :choices="brainChoices" id="pipeline-brain"/>
+          <NetworkStartPicker :start="starts.brain" id="pipeline-brain-start"/>
         </div>
       </li>
     </ol>
