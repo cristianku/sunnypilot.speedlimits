@@ -17,7 +17,7 @@ from nnslr_tools.pages import CONTROL_TABS, OLD_ADDRESSES, SECTIONS, sub_nav
 from nnslr_tools.panel import Panel, PanelError
 from test_guest_reviewers import fast_scrypt, give_all, outside, proof, proxied  # noqa: F401  (fixtures and helpers)
 from test_panel import checkout, finished, full_log, only_this_checkout, root  # noqa: F401  (fixtures and helpers)
-from test_panel_gpus import (APPS, FREE, GPU_SCRIPT, fake_nvidia, holders, opened, panel, reasons, record,  # noqa: F401
+from test_panel_gpus import (APPS, FREE, GPU_SCRIPT, cards, fake_nvidia, holders, opened, panel, reasons, record,  # noqa: F401
                              refused, said)
 from test_panel_training import signnet_script
 
@@ -232,7 +232,10 @@ def test_a_replay_takes_the_freest_card_beside_a_training_one_at_a_time(panel, r
         409, 'busy', 'A replay of a drive is running: wait for it to finish.')
     assert reasons(panel)['simulate'] == {'label': 'Replay a drive', 'allowed': False,
                                           'reason': 'A replay of a drive is running'}
-    # A training waits for a card, and is told what holds them.
+    # A training shares a card with a training or a replay (issue #41), and waits, told what holds them, when none
+    # has the room.
+    assert reasons(panel)['train_cutter']['reason'] == ''
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(30000, 30000), ''))
     assert reasons(panel)['train_cutter']['reason'] == (
         'both GPUs are busy: a cutter training on GPU 0, a replay of a drive on GPU 1')
 

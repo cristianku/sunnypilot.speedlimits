@@ -75,7 +75,7 @@ MINORS = {1: '81:00.0', 0: 'c1:00.0'}
 GPU_SCRIPT = ('#!/usr/bin/env bash\necho "run:          ${1:-x}"\necho "arguments: $*"\n'
               'echo "gpu=${NNSLR_GPU_INDEX:-none} cuda=${CUDA_VISIBLE_DEVICES:-none} order=${CUDA_DEVICE_ORDER:-none}"\n'
               'echo "progress=${NNSLR_PROGRESS_FILE:-none}"\necho "record=${NNSLR_JOB_RECORD:-none}"\n'
-              'sleep "${FAKE_SLEEP:-0}"\n')
+              'echo "workers=${NNSLR_NUM_WORKERS:-none}"\nsleep "${FAKE_SLEEP:-0}"\n')
 
 
 def cards(used0=0, used1=0):
@@ -153,12 +153,19 @@ def refused(panel, action, options=None):
     return error.value.status, error.value.reason, error.value.message
 
 
+def next_second() -> None:
+    """A job's id has the second it started: two jobs in the same second would share it."""
+    time.sleep(1.01 - time.time() % 1)
+
+
 def reasons(panel):
     return panel._action_states({**ready_payload(), 'system': panel.system()}, panel.activities())
 
 
 def test_two_free_cards_run_two_trainings_each_on_its_own_card(panel, root, checkout, monkeypatch):  # noqa: F811
     monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(FREE, ''))
+    monkeypatch.setattr(os, 'cpu_count', lambda: 24)
+    monkeypatch.delenv('NNSLR_NUM_WORKERS', raising=False)
     monkeypatch.setenv('FAKE_SLEEP', '30')
     signnet_script(checkout, GPU_SCRIPT)
     classifier_script(checkout, GPU_SCRIPT)
@@ -178,7 +185,24 @@ def test_two_free_cards_run_two_trainings_each_on_its_own_card(panel, root, chec
     # One activity for each label and session, with its job and the job's cards.
     assert sorted((item['label'], item['job'], item['gpus']) for item in panel.activities() if item['group'] == 'train') == [
         ('classifier training', classifier['id'], [1]), ('cutter training', cutter['id'], [0])]
-    # A third finds no card, and says what holds them.
+    # Half the cores each for the processes that read their data, as the scripts' default.
+    assert [said(panel, job, 'workers=') for job in (cutter, classifier)] == ['workers=12', 'workers=12']
+    # A third shares the card with the most room (issue #41): both as free, the one of lowest index; the cores shared
+    # among the three.
+    assert reasons(panel)['train_cutter'] == {'label': 'Train the cutter', 'allowed': True, 'reason': ''}
+    next_second()
+    third = panel.start('train_cutter')
+    assert said(panel, third, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID' and said(panel, third, 'workers=') == 'workers=8'
+    assert record(panel, third) == {'gpus': [0], 'own_progress': True}
+    assert holders(panel)[0] == (0, False, [{'job': cutter['id'], 'label': 'A cutter training'},
+                                            {'job': third['id'], 'label': 'A cutter training'}])
+    # The memory each may take is kept for it while it starts: the next goes beside the classifier, then where most is
+    # left.
+    next_second()
+    fourth = panel.start('train_classifier')
+    assert said(panel, fourth, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
+    # No card with the room: the next waits, and is told what holds them.
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(30000, 29000), ''))
     busy = 'both GPUs are busy: a cutter training on GPU 0, a classifier training on GPU 1'
     assert refused(panel, 'train_cutter') == (409, 'busy', busy[0].upper() + busy[1:] + ': wait for it to finish.')
     assert reasons(panel)['train_cutter'] == {'label': 'Train the cutter', 'allowed': False, 'reason': busy}
@@ -200,11 +224,13 @@ def test_the_brain_takes_one_card_and_the_regression_never_runs_beside_it(panel,
     assert record(panel, brain)['gpus'] == [0]
     assert holders(panel)[1] == (1, True, [])
     assert reasons(panel)['regression']['reason'] == 'A brain training is running'
-    # A cutter beside it, on the other card.
+    # A cutter beside it, on the other card; a second one shares the cutter's card, never the brain's.
     cutter = panel.start('train_cutter')
     assert said(panel, cutter, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
-    assert reasons(panel)['train_cutter']['reason'] == (
-        'both GPUs are busy: a brain training on GPU 0, a cutter training on GPU 1')
+    assert reasons(panel)['train_cutter']['reason'] == ''
+    next_second()
+    second = panel.start('train_cutter')
+    assert said(panel, second, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
 
 
 def test_the_cards_the_brain_borrows_for_its_signs_are_its_own_until_it_gives_them_back(panel, root, checkout,  # noqa: F811
@@ -363,9 +389,11 @@ def test_a_card_with_a_compute_process_is_not_free(panel, checkout, monkeypatch)
     assert reasons(panel)['train_cutter']['allowed'] is True
     cutter = panel.start('train_cutter')
     assert said(panel, cutter, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
-    busy = 'both GPUs are busy: a cutter training on GPU 0, a program the server cannot name on GPU 1'
-    assert reasons(panel)['train_cutter']['reason'] == busy
-    assert refused(panel, 'train_cutter')[1] == 'busy'
+    # A second shares the cutter's card, never the one of the program the server cannot name.
+    assert reasons(panel)['train_cutter']['reason'] == ''
+    next_second()
+    second = panel.start('train_cutter')
+    assert said(panel, second, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
 
 
 def test_a_job_started_before_the_cards_is_found_through_the_card_files_it_has_open(panel, root, checkout,  # noqa: F811
@@ -387,6 +415,7 @@ def test_a_job_started_before_the_cards_is_found_through_the_card_files_it_has_o
     again = Panel(root, repo=checkout)
     assert next(item for item in again.jobs() if item['id'] == job['id'])['gpus'] is None
     assert [card['free'] for card in again.system()['gpus']] == [False, False]
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(30000, 30000), ''))
     assert refused(again, 'train_cutter') == (409, 'busy', 'Both GPUs are busy with a cutter training: wait for it to '
                                               'finish.')
 
@@ -425,6 +454,9 @@ def test_a_training_from_a_terminal_whose_card_is_not_found_holds_every_card(roo
     assert [item['gpus'] for item in panel.activities() if item['pid'] == process.pid] == [None]
     holder = [{'job': None, 'label': 'A cutter training'}]
     assert holders(panel) == [(0, False, holder), (1, False, holder)]
+    # A cutter may share them (issue #41), with the memory the other may take kept for it on each.
+    assert reasons(panel)['train_cutter']['reason'] == ''
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(29000, 29000), ''))
     assert reasons(panel)['train_cutter']['reason'] == 'both GPUs are busy with a cutter training'
 
 
@@ -524,6 +556,9 @@ def test_one_card_as_before(panel, checkout, monkeypatch):  # noqa: F811
     monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(ONE, ''))
     cutter = panel.start('train_cutter')
     assert said(panel, cutter, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
+    # A second shares the card while it has the room (issue #41).
+    assert reasons(panel)['train_cutter']['reason'] == ''
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(ONE.replace(', 0, 0, 32768', ', 0, 30000, 32768'), ''))
     assert reasons(panel)['train_cutter']['reason'] == 'the GPU is busy with a cutter training'
     assert refused(panel, 'train_cutter') == (409, 'busy', 'The GPU is busy with a cutter training: wait for it to finish.')
 
@@ -626,6 +661,7 @@ def test_two_trainings_of_the_same_kind_from_a_terminal_are_two_activities(panel
     assert activity == sorted([(first.pid, None, [0]), (second.pid, None, [1])])
     holder = [{'job': None, 'label': 'A cutter training'}]
     assert holders(panel) == [(0, False, holder), (1, False, holder)]
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(30000, 30000), ''))
     assert refused(panel, 'train_cutter') == (409, 'busy', 'Both GPUs are busy with a cutter training: wait for it to '
                                               'finish.')
 
@@ -687,8 +723,13 @@ def test_a_preparation_needs_no_free_card_and_holds_the_one_it_takes(panel, root
     assert said(panel, preparation, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
     cutter = panel.start('train_cutter')
     assert said(panel, cutter, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
+    # A second training shares the cutter's card, never the preparation's; without the room it waits.
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(29000, 0), ''))
     assert refused(panel, 'train_classifier') == (
         409, 'busy', 'Both GPUs are busy: a cutter training on GPU 0, a preparation on GPU 1: wait for it to finish.')
+    monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(cards(5000, 0), ''))
+    classifier = panel.start('train_classifier')
+    assert said(panel, classifier, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
 
 
 def test_a_real_road_labeler_or_sign_tracks_run_takes_the_free_card(panel, root, checkout, monkeypatch):  # noqa: F811

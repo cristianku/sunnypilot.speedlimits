@@ -561,6 +561,11 @@ EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 
 # The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
 # replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
 SHARED_GPU = {'simulate': 2 * 1024}
+# The trainings that take a free card when there is one, and otherwise share the one with the most room with other
+# trainings of this list and the replays (issue #41): a V100 holds several, each about 1 GB today (the cutter at batch
+# 16, the classifier on its crops), the memory each may take at most (MB) reserved on its card while it starts.
+# Their pair rules stay (_pair_apart); the others keep a card of their own.
+SHARED_TRAINING_MB = {'train_classifier': 4 * 1024, 'train_cutter': 4 * 1024, 'train_decider': 4 * 1024}
 # Of those, the ones whose dry run ({'dry': 'on'}, --dry-run) runs on the CPU and takes no card.
 DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'sign_tracks')
 # The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
@@ -1418,7 +1423,7 @@ class Panel:
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
                 reason = (f'{payload["min_routes"]} reviewed drives are needed, '
                           f'now {payload["reviewed_routes"]}')
-            elif name.startswith('train') and gpu_reason:
+            elif name.startswith('train') and gpu_reason and _shared_card(cards, name) is None:
                 reason = gpu_reason
             elif name in ('measure_proposer', 'setup_vlm') and gpu_reason:
                 # Each takes a card of its own, as a training.
@@ -2593,6 +2598,12 @@ class Panel:
                 # counts the cards in the same order (by PCI bus) and sees only it.
                 environment.update(CUDA_DEVICE_ORDER='PCI_BUS_ID', NNSLR_GPU_INDEX=str(gpus[0]),
                                    CUDA_VISIBLE_DEVICES=str(gpus[0]))
+            if action in SHARED_TRAINING_MB and 'NNSLR_NUM_WORKERS' not in environment:
+                # The processes that read its data: the cores shared among the trainings that run with it (half the
+                # cores each for two, as the scripts' default; a third one a third of them), 4 to 16.
+                trainings = 1 + sum(1 for holder in self._gpu_holders(activities)
+                                    if holder.get('action') in EXCLUSIVE_GPU)
+                environment['NNSLR_NUM_WORKERS'] = str(min(16, max(4, (os.cpu_count() or 8) // max(2, trainings))))
             # The record of the job (<job id>.json): its cards (what holds which, _job_gpus), that it has its own
             # progress file, and who proposes, for the page (the running job's choice) and Try again: the log does
             # not always say. Our networks: the parts in use now, by name (the Models tab can change them while it
@@ -2643,6 +2654,8 @@ class Panel:
                 raise PanelError(409, 'gpu_taken', taken + '.')
             return [best['index']]
         reason = _gpu_busy(states, holders)
+        if reason and (shared := _shared_card(states, action)) is not None:
+            return [shared['index']]
         if reason:
             raise PanelError(409, 'busy', reason[0].upper() + reason[1:] + ': wait for it to finish.')
         free = [card for card in states if card['free']]
@@ -3487,6 +3500,27 @@ def _card_states(cards: list[dict], holders: list[dict]) -> list[dict]:
                    'action': None}]
         states.append({**card, 'holders': on, 'free': not on})
     return states
+
+
+def _shared_card(states: list[dict], action: str) -> dict | None:
+    """The card a training of SHARED_TRAINING_MB shares when none is free: of those held only by such trainings and
+    replays, the one with the most room, if it has the memory the training needs; None for another action or when
+    none has the room. A card's room is its memory less what its holders use, or less what they may take while they
+    start (SHARED_TRAINING_MB, SHARED_GPU), whichever is more."""
+    need = SHARED_TRAINING_MB.get(action)
+    if need is None:
+        return None
+    rooms = []
+    for card in states:
+        actions = [holder.get('action') for holder in card['holders']]
+        total, used = card.get('memory_total_mb'), card.get('memory_used_mb')
+        if not actions or not all(a in SHARED_TRAINING_MB or a in SHARED_GPU for a in actions) or not isinstance(
+                total, (int, float)) or not isinstance(used, (int, float)):
+            continue
+        taken = max(used, sum(SHARED_TRAINING_MB.get(a) or SHARED_GPU[a] for a in actions))
+        if total - taken >= need:
+            rooms.append((-(total - taken), len(actions), card['index'], card))
+    return min(rooms, key=lambda room: room[:3])[3] if rooms else None
 
 
 def _gpu_busy(states: list[dict], holders: list[dict]) -> str:

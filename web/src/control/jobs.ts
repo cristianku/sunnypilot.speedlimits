@@ -250,11 +250,12 @@ export function gpusBusyText(system: SystemInfo | null | undefined): string {
 
 /** The tooltip where trainings start, on a machine with two GPUs or more from a server that gives each its own job (it
  * says which cards are free); undefined otherwise (no tooltip): a server from before only reads both cards, one training
- * at a time. */
+ * at a time. A cutter, classifier or decider shares a card when none is free (issue #41). */
 export function twoGpusTip(system: SystemInfo | null | undefined): string | undefined {
   const cards = gpuCards(system);
   return cards.length > 1 && cards.some((card) => card.free !== undefined)
-    ? 'Two GPUs: two trainings can run at once, one per card. The brain uses one card for now.' : undefined;
+    ? 'Two GPUs: each training takes a free card; with both taken, a cutter, classifier or decider shares the one with the '
+      + 'most room. The brain uses one card for now.' : undefined;
 }
 
 /** About how long a running job has left: the server's time when it sends one (Propose again), else from the time so

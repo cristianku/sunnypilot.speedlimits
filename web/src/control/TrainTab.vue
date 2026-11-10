@@ -169,7 +169,7 @@ const cutterActions = computed(() => {
 /** The speed signs of the windows (every family but the other signs). */
 const windowSigns = computed(() => Object.values(cutterChoices.mapillaryState?.boxes_by_family ?? {})
   .reduce((total, count) => total + count, 0));
-/** With two GPUs, the line more in the tooltip of each training's button (two at once, one per card). */
+/** With two GPUs, the line more in the tooltip of each training's button (a card each, shared when both are taken). */
 const gpuTip = computed(() => twoGpusTip(props.status?.system));
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */

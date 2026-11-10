@@ -800,7 +800,8 @@ and finishes an interrupted run when run again with the same name.
 For the complete guarded pipeline on the training host (`NNSLR_GPU_INDEX` is
 nvidia-smi's number of the card, `0` or `1`; the script exports
 `CUDA_DEVICE_ORDER=PCI_BUS_ID`, so CUDA counts the cards the same way, and the
-panel gives each run a free card):
+panel gives each run a free card, or to a cutter, classifier or decider training
+the one with the most room when none is free):
 
 ```sh
 export NNSLR_GPU_INDEX=0
