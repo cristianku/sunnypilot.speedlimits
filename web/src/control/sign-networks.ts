@@ -28,8 +28,10 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
   /** "SignNet 896 × 288 29 Oct 14:02", "Applicability, Crop + geometry 10 Nov 01:11". */
   const titleOf = (version: ModelVersion): string => (version.role === 'decider' ? 'Applicability, ' + version.label
     : version.label) + ' ' + (version.trained_at ? isoWhen(version.trained_at) : version.run);
+  /** On the button, under its label ("Signs: Applicability"): "Crop + geometry 10 Nov 01:11". */
+  const shortOf = (version: ModelVersion): string => version.label + ' ' + (version.trained_at ? isoWhen(version.trained_at) : version.run);
   const options = computed(() => Object.fromEntries(SIGN_PARTS.map(({part}) => [part, versions(part).map(
-    (version): PickerOption => ({key: version.id, title: titleOf(version), short: titleOf(version),
+    (version): PickerOption => ({key: version.id, title: titleOf(version), short: shortOf(version),
       badge: version.in_use ? 'In use' : undefined, sub: version.run}))])) as Record<SignPart, PickerOption[]>);
   /** The choice made here (none yet: the one in use, else the newest). */
   const picked = ref<Partial<Record<SignPart, string>>>({});

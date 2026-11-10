@@ -32,7 +32,7 @@ function choose(key: string): void {
   <button type="button" class="picker" :id="id" :disabled="options.length < 2" :aria-label="label + ': ' + (chosen?.title ?? '')"
           aria-haspopup="dialog" @click="open = true">
     <span class="picker-label">{{ label }}</span>
-    <span class="picker-title">{{ chosen?.short ?? chosen?.title ?? '–' }}<span v-if="chosen?.badge" class="picker-badge">{{ chosen.badge }}</span></span>
+    <span class="picker-title"><span class="picker-text">{{ chosen?.short ?? chosen?.title ?? '–' }}</span><span v-if="chosen?.badge" class="picker-badge">{{ chosen.badge }}</span></span>
     <span v-if="chosen?.sub" class="picker-sub">{{ chosen.sub }}</span>
     <span v-if="options.length > 1" class="picker-chev" aria-hidden="true">›</span>
   </button>
