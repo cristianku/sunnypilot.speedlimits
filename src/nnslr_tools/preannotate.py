@@ -274,65 +274,41 @@ GPU_PYTHON = Path(__file__).resolve().parents[2] / '.venv-gpu' / 'bin' / 'python
 
 
 # Our networks propose only whole (Cristian, 25 October 2026): the cutter finds the boxes, the classifier says what they
-# are, the decider whom they apply to (_chain_proposer). They are the networks on the car (Cristian, 10 Nov 2026: the
-# drives are proposed by what the comma runs, never by older ones): models/on-car.json, what the last Publish put
-# there. A part the car has none of (a release without a decider), or no record at all: the one in use (Models tab).
+# are, the decider whom they apply to (_chain_proposer). Each must be in use (Models tab).
 OUR_PARTS = ('cutter', 'classifier', 'decider')
 
 
-def _ids_of(path: Path) -> dict[str, str]:
-    """{part: id} of OUR_PARTS in models/active.json or models/on-car.json; a part it has none of is left out."""
-    try:
-        record = json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(record, dict):
-        return {}
-    return {part: record[part]['id'] for part in OUR_PARTS
-            if isinstance(record.get(part), dict) and isinstance(record[part].get('id'), str)}
-
-
-def our_network_ids(root: Path) -> dict[str, dict[str, str]]:
-    """{part: {'id', 'from'}} of the networks Our networks propose with: 'car' (models/on-car.json), else 'in use'
-    (models/active.json); a part neither has is left out."""
-    car = _ids_of(Path(root) / 'models' / 'on-car.json')
-    active = _ids_of(Path(root) / 'models' / 'active.json')
-    return {part: {'id': car[part], 'from': 'car'} if part in car else {'id': active[part], 'from': 'in use'}
-            for part in OUR_PARTS if part in car or part in active}
-
-
 def ours_missing(root: Path) -> str | None:
-    """Why Our networks cannot propose on this server, or None: the parts neither on the car nor in use."""
-    ids = our_network_ids(root)
-    missing = [part for part in OUR_PARTS if part not in ids]
+    """Why Our networks cannot propose on this server, or None: the parts not in use."""
+    try:
+        active = json.loads((Path(root) / 'models' / 'active.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        active = {}
+    missing = [part for part in OUR_PARTS if not (isinstance(active, dict) and active.get(part))]
     if missing:
-        return ('Our networks propose only with all three parts on the car or in use (Models tab): '
-                + ', '.join(missing) + (' is' if len(missing) == 1 else ' are') + ' in neither yet')
+        return ('Our networks propose only with all three parts in use (Models tab): ' + ', '.join(missing)
+                + (' is' if len(missing) == 1 else ' are') + ' not in use yet')
     return None
 
 
 def our_networks(root: Path) -> dict:
-    """The cutter, the classifier and the decider that propose with --proposer ours: those on the car, else those in
-    use (our_network_ids), only when Our networks are whole (ours_missing)."""
+    """The cutter, the classifier and the decider that propose with --proposer ours: those in use (Models tab), only
+    when Our networks are whole (ours_missing)."""
     from nnslr_tools.chain import resolve_model
     missing = ours_missing(root)
     if missing:
         raise PreannotationError(missing)
-    ids = our_network_ids(root)
-    resolved = {}
-    for part in OUR_PARTS:
-        try:
-            resolved[part] = resolve_model(ids[part]['id'], part, root)
-        except ValueError as exc:
-            where = 'on the car' if ids[part]['from'] == 'car' else 'in use'
-            raise PreannotationError(f'Our networks cannot load the {part} {where}: {exc}') from exc
-    cutter, classifier, decider = (resolved[part] for part in OUR_PARTS)
+    try:
+        cutter = resolve_model('active', 'cutter', root)
+        classifier = resolve_model('active', 'classifier', root)
+        decider = resolve_model('active', 'decider', root)
+    except ValueError as exc:
+        raise PreannotationError(f'Our networks cannot load a part in use: {exc}') from exc
     return {'repository': 'ours', 'proposer': 'ours', 'training_domain': 'our reviewed Swiss drives',
             'cutter': cutter['id'] or str(cutter['path']), 'cutter_path': str(cutter['path']),
             'classifier': classifier['id'] or str(classifier['path']), 'classifier_path': str(classifier['path']),
-            'classifier_chosen': 'on the car' if ids['classifier']['from'] == 'car' else 'in use',
-            'decider': decider['id'] or str(decider['path']), 'decider_path': str(decider['path']),
-            'networks_from': {part: ids[part]['from'] for part in OUR_PARTS}}
+            'classifier_chosen': 'in use',
+            'decider': decider['id'] or str(decider['path']), 'decider_path': str(decider['path'])}
 
 
 def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None,

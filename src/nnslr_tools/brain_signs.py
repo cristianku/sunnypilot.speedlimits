@@ -1,8 +1,8 @@
-"""The signs our networks on the car read on every drive the brain learns from: the answers of its next limit and the metres
+"""The signs our networks in use read on every drive the brain learns from: the answers of its next limit and the metres
 to it where nobody confirmed the frames in Sign review (brain_targets.reviewed_signs), his rule of 8 Nov 2026: "every
 dashcam drive, read with our cutter, classifier and applicability; where I confirmed something different, take mine".
 
-The networks are those on the car, else those in use (preannotate.our_networks), as Our networks propose in Prepare: the cutter finds the
+The networks are those in use (Models tab, models/active.json; preannotate.our_networks), as Our networks propose in Prepare: the cutter finds the
 boxes, the classifier reads each, the applicability network says whom each speed sign applies to (nnslr_tools.
 _chain_proposer, on the GPU environment). They read the drive's pictures at 1 a second (derived/frames, the frames of
 Sign review: a frame he confirmed is the same frame, and his answer replaces theirs). Nothing in Sign review changes: its

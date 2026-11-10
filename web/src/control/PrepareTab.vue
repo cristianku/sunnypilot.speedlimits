@@ -150,8 +150,7 @@ function proposerLine(job: Job): string {
   return job.proposer && job.proposer in PROPOSER_LABELS ? proposerText(job.proposer as Proposer, job.networks)
     : String(job.proposer);
 }
-/** The networks Our networks run now (the ones on the car, models/on-car.json; a part it has none of, the one in use in
- * Models), in words; '' while unknown. */
+/** The networks Our networks run now (the ones in use in Models), in words; '' while unknown. */
 const oursInUse = computed(() => networksText(props.status?.proposers?.networks ?? measures.value?.networks));
 
 /** The comma pill of the top bar, opened as a click on it would: Download new drives is there. */
@@ -182,8 +181,8 @@ function openComma(): void {
       <Segmented v-model="proposer" :options="PROPOSERS" label="Who proposes the signs" :disabled="runningProposer !== null"/>
       <p class="figure-note">{{ PROPOSER_TEXT[proposer] }} {{ measureText(proposer) }}<template v-if="runningProposer"> It is
         proposing now: you can choose again when it ends.</template></p>
-      <p v-if="proposer === 'ours' && oursInUse" class="figure-note" id="proposer-networks">The car's networks: {{ oursInUse }}.
-        <a href="/publish">Publish puts new ones on the car</a></p>
+      <p v-if="proposer === 'ours' && oursInUse" class="figure-note" id="proposer-networks">In use now: {{ oursInUse }}.
+        <a href="/models">Change them in Models</a></p>
       <p v-if="oursMissing" class="figure-note proposer-missing">{{ sentence(oursMissing) }}</p>
       <template v-if="unavailable">
         <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')

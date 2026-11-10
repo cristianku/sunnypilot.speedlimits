@@ -108,11 +108,11 @@ def test_our_networks_propose_only_whole(root, checkout):
     # Cutter and classifier in use: still waiting for the decider.
     (root / 'models').mkdir(parents=True, exist_ok=True)
     (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': None}))
-    assert preannotate.ours_missing(root).endswith('decider is in neither yet')
+    assert preannotate.ours_missing(root).endswith('decider is not in use yet')
     # All three in use: whole; their weights must still be on this server.
     (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': {'id': 'd'}}))
     assert preannotate.ours_missing(root) is None
-    with pytest.raises(preannotate.PreannotationError, match='cannot load the cutter in use'):
+    with pytest.raises(preannotate.PreannotationError, match='cannot load a part'):
         preannotate.our_networks(root)
     # Not whole but chosen all the same, it stays chosen (Prepare says why, its buttons off), and is never the best.
     (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'c'}, 'classifier': {'id': 'k'}, 'decider': None}))
@@ -137,33 +137,6 @@ def test_our_networks_take_signnet_as_the_cutter(root):
     assert (networks['classifier'], networks['decider']) == ('classifier:k1/classifier', 'decider:d1/experiment-b/full')
     (root / 'runs' / 's1' / 'signnet-best.pt').unlink()
     with pytest.raises(preannotate.PreannotationError, match='cutter:s1/signnet has no runs/s1/signnet-best.pt'):
-        preannotate.our_networks(root)
-
-
-def test_our_networks_are_the_ones_on_the_car(root):
-    # The drives are proposed by what the comma runs (models/on-car.json), not by the networks in use; a part the car
-    # has none of (no decider in its release) is the one in use.
-    from nnslr_tools import preannotate
-    weights = {'s1/signnet-best.pt': 'cutter:s1/signnet', 's2/signnet-best.pt': 'cutter:s2/signnet',
-               'k1/classifier/reader-best.pt': 'classifier:k1/classifier',
-               'k2/classifier/reader-best.pt': 'classifier:k2/classifier',
-               'd1/experiment-b/full/full-best.pt': 'decider:d1/experiment-b/full'}
-    for path in weights:
-        (root / 'runs' / path).parent.mkdir(parents=True, exist_ok=True)
-        (root / 'runs' / path).write_bytes(b'weights')
-    (root / 'models').mkdir(parents=True, exist_ok=True)
-    (root / 'models' / 'active.json').write_text(json.dumps({'cutter': {'id': 'cutter:s2/signnet'},
-        'classifier': {'id': 'classifier:k2/classifier'}, 'decider': {'id': 'decider:d1/experiment-b/full'}}))
-    (root / 'models' / 'on-car.json').write_text(json.dumps({'cutter': {'id': 'cutter:s1/signnet', 'file': 'signnet.onnx'},
-        'classifier': {'id': 'classifier:k1/classifier', 'file': 'classifier.onnx'}, 'brain': {'id': 'brain:b/brain'}}))
-    networks = preannotate.our_networks(root)
-    assert (networks['cutter'], networks['classifier'], networks['decider']) == (
-        'cutter:s1/signnet', 'classifier:k1/classifier', 'decider:d1/experiment-b/full')
-    assert networks['networks_from'] == {'cutter': 'car', 'classifier': 'car', 'decider': 'in use'}
-    assert networks['classifier_chosen'] == 'on the car'
-    # A car network whose weights are not on this server is said, never swapped for the one in use.
-    (root / 'runs' / 's1' / 'signnet-best.pt').unlink()
-    with pytest.raises(preannotate.PreannotationError, match='cannot load the cutter on the car'):
         preannotate.our_networks(root)
 
 def test_qwen_is_refused_and_said_so_when_the_gpu_is_taken(root, checkout, monkeypatch):

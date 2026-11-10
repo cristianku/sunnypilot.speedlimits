@@ -23,7 +23,7 @@
 # shows them).
 # Every route writes its own log in data/logs/prepare/<route>.log.
 # Who proposes the signs: NNSLR_PROPOSER=vietnam (the Vietnamese YOLO of Hugging Face), ours (our cutter,
-# classifier and decider on the car, models/on-car.json, else those in use; on the GPU) or qwen; unset, the choice of the Prepare tab (data/web/proposer.json),
+# classifier and decider in use, on the GPU) or qwen; unset, the choice of the Prepare tab (data/web/proposer.json),
 # vietnam only before any choice.
 # -h, --help: this help.
 # Env: COMMA_VIDEOS_DIR (default ../comma-videos next to this repo), NNSLR_DATA_ROOT (default data/), NNSLR_GPU_INDEX (the GPU, nvidia-smi's

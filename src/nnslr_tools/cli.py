@@ -1679,7 +1679,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                    "per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
                                                    "with an answer on roadworks and with the next limit (the signs our "
-                                                   "networks on the car read, Sign review's over them where the frames "
+                                                   "networks in use read, Sign review's over them where the frames "
                                                    "are confirmed), "
                                                    "and why the others are out. Reads only: it writes nothing and "
                                                    "trains nothing")
@@ -1691,7 +1691,7 @@ def build_parser() -> argparse.ArgumentParser:
                          help="as a training with --no-road-types: the seconds without a road type answer too")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
-    p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks on the car "
+    p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks in use "
                                                        "(cutter, classifier and applicability, Models tab) on its "
                                                        "pictures at 1 a second, on the GPU: derived/brain_signs/<route>"
                                                        ".jsonl, the next limit and its metres the brain is taught where "
@@ -1737,7 +1737,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                      ".venv-gpu): the speed to hold, the driver's own corrected by the "
                                                      "blocks of Speed review, with the roadworks and the kinds of road "
                                                      "as tasks of the same network and the next limit of the signs our "
-                                                     "networks on the car read (nnslr brain-signs), Sign review's over them, "
+                                                     "networks in use read (nnslr brain-signs), Sign review's over them, "
                                                      "measured on "
                                                      "sites it never learned. Writes brain-last.pt and result.json "
                                                      "into --run-dir")

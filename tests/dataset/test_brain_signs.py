@@ -1,4 +1,4 @@
-"""The signs our networks on the car read on the drives the brain learns from (nnslr_tools.brain_signs), with the worker
+"""The signs our networks in use read on the drives the brain learns from (nnslr_tools.brain_signs), with the worker
 replaced: what is read again, what a failure leaves, and a training that goes on without the networks."""
 import pytest
 

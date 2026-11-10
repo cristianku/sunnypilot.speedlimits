@@ -15,7 +15,7 @@ set -euo pipefail
 #   3. reads the signs of every drive it learns from (every dashcam drive) as the car does today
 #      (nnslr road-type-signs --labelled; a drive already read by the car's reader of today is not read again: a new
 #      vision.py or a new network reads them all again, and the training refuses anything else), the signs it is given;
-#      then reads them with the networks on the car, cutter, classifier and applicability, on the pictures at 1 a second
+#      then reads them with the networks in use, cutter, classifier and applicability, on the pictures at 1 a second
 #      (nnslr brain-signs, the same: a new network reads them all again), the next limit and its metres it is taught
 #      where nobody confirmed the frames in Sign review; then says what the labels give (nnslr brain-targets). Both
 #      readings run on the brain's card and on every other card nothing computes on and no other job of the panel
