@@ -806,3 +806,19 @@ def test_publish_gives_the_export_a_card_and_does_not_hide_them():
     script = (Path(__file__).resolve().parents[2] / 'scripts' / 'send_to_car.sh').read_text(encoding='utf-8')
     assert 'CUDA_VISIBLE_DEVICES=""' not in script
     assert 'CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}"' in script
+
+
+def test_a_brain_goes_on_the_car_only_with_the_networks_that_read_its_signs():
+    """#31: a brain learnt from the signs read by its three networks; a release with another one is refused, a brain from
+    before 10 Nov 2026 (none recorded) is not checked."""
+    from nnslr_tools import car_release
+    found = {'finder': {'id': 'cutter:a/signnet'}, 'classifier': {'id': 'classifier:b/classifier'},
+             'decider': {'id': 'decider:c/crop_geom'},
+             'brain': {'id': 'brain:d', 'sign_networks': {'cutter': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier',
+                                                          'decider': 'decider:c/crop_geom'}}}
+    car_release._check_sign_networks(found)
+    found['classifier'] = {'id': 'classifier:e/classifier'}
+    with pytest.raises(ValueError, match='classifier:b/classifier; this release reads them with classifier:e/classifier'):
+        car_release._check_sign_networks(found)
+    found['brain']['sign_networks'] = None
+    car_release._check_sign_networks(found)

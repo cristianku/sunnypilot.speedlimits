@@ -1753,6 +1753,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_regression_brain.add_argument("--device", default="cuda", help="cuda or cpu")
     p_regression_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_regression_brain.set_defaults(func=_cmd_regression_brain)
+    p_regression_networks = sub.add_parser("regression-sign-networks", help="scripts/run_regression.sh, step 2: the "
+                                                                          "networks each brain's signs were read with "
+                                                                          "(#31), one line per choice: '-' for the "
+                                                                          "car's release of the sunnypilot clone (a "
+                                                                          "brain from before 10 Nov 2026), else a "
+                                                                          "networks.json for road-type-signs "
+                                                                          "--sign-networks")
+    p_regression_networks.add_argument("--brains", required=True, help="the runs of the brains, separated by commas")
+    p_regression_networks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_regression_networks.set_defaults(func=_cmd_regression_sign_networks)
     p_brain_net = sub.add_parser("train-brain", help="train the brain on every dashcam drive with its logs read, "
                                                      "each whole (GPU, "
                                                      ".venv-gpu): the speed to hold, the driver's own corrected by the "
@@ -2888,6 +2898,30 @@ def _cmd_regression_brain(args: argparse.Namespace) -> int:
                                    lambda route: store.merged(route, keep=False), device=torch.device(args.device),
                                    log=lambda line: print(line, flush=True))
     return 1 if failed else 0
+
+
+def _cmd_regression_sign_networks(args: argparse.Namespace) -> int:
+    from nnslr_tools import sign_networks
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    lines = []
+    for run in [run for run in args.brains.split(",") if run]:
+        try:
+            result = json.loads((root / "runs" / run / "result.json").read_text(encoding="utf-8"))
+            networks = sign_networks.of_brain(root, result.get("sign_networks"))
+        except (OSError, ValueError) as problem:  # regression-brain records it on each drive
+            print(f"{run}: {problem}", file=sys.stderr, flush=True)
+            continue
+        if networks is None:
+            line = "-"
+        else:
+            ids = {part: networks[part] for part in sign_networks.PARTS}
+            line = str(sign_networks.write(root / "regression" / "networks" / sign_networks.set_key(ids), ids,
+                                           networks["models"]))
+        if line not in lines:
+            lines.append(line)
+    print(*lines, sep="\n")
+    return 0
 
 
 def _cmd_train_brain(args: argparse.Namespace) -> int:

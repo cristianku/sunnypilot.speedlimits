@@ -379,16 +379,17 @@ def route_view(root: Path, route: str, merged: dict | None, models: list[dict], 
 
 
 # -- the brain along a drive (.venv-gpu) ----------------------------------------------------------------------------------
-def brain_drive(root: Path, route: str, merged: dict, rate: float = 1.0) -> dict:
+def brain_drive(root: Path, route: str, merged: dict, rate: float = 1.0, models: Path | None = None) -> dict:
     """A drive for brain_train.predict at a brain's rate, in the split or not: brain_targets.dataset() makes the answers
     too, needs the split and leaves out a drive whose frames changed since it was frozen. Whatever the brain's table of
-    the speeds, predict says them in km/h."""
+    the speeds, predict says them in km/h. models: the folder of the networks the brain's signs were read with
+    (sign_networks.of_brain), None for the car's release of the sunnypilot clone."""
     import numpy as np
 
     from nnslr_tools.brain_targets import RATE_HZ, brain_frames, drive_frames, drive_inputs, memory_cuts
     from nnslr_tools.road_type_signs import load_signs, pictures_ready
     frames = drive_frames(root, route, merged)
-    record = load_signs(root, route)
+    record = load_signs(root, route, models)
     if rate == RATE_HZ:
         frames, _, _ = brain_frames(root, frames, ['train'] * len(frames), [None] * len(frames), merged, record)
     ns = np.array([-1 if frame['ns'] is None else frame['ns'] for frame in frames], dtype=np.int64)
@@ -419,8 +420,17 @@ def run_brains(root: Path, runs: list[str], merged_of, *, device, log=print) -> 
     from nnslr_tools.model_roles import BRAIN_WEIGHTS
     from nnslr_tools.road_type_net import FrameStore
     from nnslr_tools.road_type_signs import load_signs
+    from nnslr_tools.sign_networks import of_brain
     routes = [route for route in sorted(certified(root)) if frames_ready(root, route)]
     accepted = (inputs_sha256(), *BRAIN_INPUTS.SAME_GROUPS)
+    folders, broken = {}, {}  # each brain's signs read by its own networks (#31): the folder of their release
+    for run in runs:
+        try:
+            result = json.loads((Path(root) / 'runs' / run / 'result.json').read_text(encoding='utf-8'))
+            networks = of_brain(root, result.get('sign_networks'))
+            folders[run] = networks['models'] if networks else None
+        except (OSError, ValueError) as problem:
+            broken[run] = str(problem)
     failed = 0
     for position, route in enumerate(routes, 1):
         log(f'regression item brains {position - 1}/{len(routes)} {route}')
@@ -428,31 +438,36 @@ def run_brains(root: Path, runs: list[str], merged_of, *, device, log=print) -> 
             merged = merged_of(route)
             if merged is None:
                 raise ValueError('no scanned logs')
-            record = load_signs(root, route)
-            reader = record.get('fingerprint') if record else None
-            wanted = brains_to_run(root, route, runs, reader)
+            records = {folder: load_signs(root, route, folder) for folder in set(folders.values())}
+            readers = {run: (records[folder] or {}).get('fingerprint') for run, folder in folders.items()}
+            wanted = [run for run in runs if run in broken
+                      or brains_to_run(root, route, [run], readers[run])]
             if not wanted:
                 continue
-            if record is None:
-                raise ValueError('its signs were not read')
         except Exception as problem:
             log(f'{route}: left out: {problem}')
             failed += 1
             continue
-        drives, stores = {}, {}  # each brain at its own rate (its checkpoint's): the frames and pictures of that rate
+        drives, stores = {}, {}  # each brain at its own rate and with its networks: the frames and pictures of those
         for run in wanted:
+            reader = readers.get(run)
             try:
+                if run in broken:
+                    raise ValueError(broken[run])
+                if records[folders[run]] is None:
+                    raise ValueError('its signs were not read by the networks the brain learnt from')
                 model, saved = load_brain(Path(root) / 'runs' / run / BRAIN_WEIGHTS)
                 if saved['inputs_sha256'] not in accepted:
                     raise ValueError('made with other inputs than the car has today: train it again')
                 rate = float(saved.get('rate_hz', 1.0))
-                if rate not in drives:
-                    found = brain_drive(root, route, merged, rate)
+                key = (rate, folders[run])
+                if key not in drives:
+                    found = brain_drive(root, route, merged, rate, folders[run])
                     if not found['pictures']:
                         raise ValueError("the brain's pictures were not made: nnslr road-type-signs --certified")
-                    stores[rate] = FrameStore(_pictures(root, [found], dry_run=False, log=log), device)
-                    drives[rate] = found
-                drive, store = drives[rate], stores[rate]
+                    stores[key] = FrameStore(_pictures(root, [found], dry_run=False, log=log), device)
+                    drives[key] = found
+                drive, store = drives[key], stores[key]
                 drive['extra'] = pack_inputs(drive['inputs'], tuple(saved['groups']))
                 said = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
                 usable = [at for at, frame in enumerate(drive['frames']) if frame['ns'] is not None and frame['present']]

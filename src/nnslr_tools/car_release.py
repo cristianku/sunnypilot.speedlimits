@@ -180,7 +180,25 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_
     found['decider'] = _decider(runs, index, decider)
     found['brain'] = _brain(Path(root), runs, index, brain_on_car) if brain else None
     _check_plates(runs, found, chosen)
+    if brain_on_car:
+        _check_sign_networks(found)
     return found
+
+
+def _check_sign_networks(found: dict) -> None:
+    """A brain learnt from the signs its three networks read (sign_networks, #31): it goes on the car only with them,
+    else the car gives it signs read by others. A brain from before 10 Nov 2026 has none recorded and is not checked."""
+    brain = found.get('brain')
+    read = brain.get('sign_networks') if brain else None
+    if not read:
+        return
+    used = {'cutter': found['finder']['id'], 'classifier': found['classifier']['id'],
+            'decider': (found.get('decider') or {}).get('id')}
+    other = [part for part in ('cutter', 'classifier', 'decider') if read.get(part) != used[part]]
+    if other:
+        raise ValueError(f"the brain {brain['id']} learnt from the signs read by " + ', '.join(read[part] for part in other)
+                         + '; this release reads them with ' + ', '.join(str(used[part]) for part in other)
+                         + ': choose those networks, or a brain trained with these')
 
 
 def _classes(runs: RunsIndex, classifier: dict) -> Any:
@@ -230,7 +248,7 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
     if weights is None:
         raise ValueError(f'{entry["id"]} has no weights on this server')
     return {'id': entry['id'], 'run': entry['run'], 'weights': weights, 'root': root, 'plates': entry['plates'], 'hours': entry['hours'],
-            'wet': entry['wet']}
+            'wet': entry['wet'], 'sign_networks': entry.get('sign_networks')}
 
 
 def _decider(runs: RunsIndex, index: ModelIndex, chosen: Any = None) -> dict | None:
@@ -286,10 +304,13 @@ def export_brain(chosen: dict, folder: Path, drive_check: bool = True) -> None:
             return
         from nnslr_tools.drive_review import DriveReviewStore
 
+        from nnslr_tools.sign_networks import of_brain
+
         root = chosen['brain']['root']
         store = DriveReviewStore(root)
         export_brain_onnx(chosen['brain']['weights'], folder / BRAIN_FILE, data_root=root,
                           merged_of=lambda route: store.merged(route, keep=False),
+                          networks=of_brain(root, chosen['brain'].get('sign_networks')),
                           log=lambda text: print(text, flush=True), device=check_device())
 
 

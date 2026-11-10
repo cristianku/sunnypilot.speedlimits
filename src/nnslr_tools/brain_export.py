@@ -131,12 +131,13 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
 
 
 def rollout_drive(root: Path, merged_of, groups: tuple[str, ...], route: str | None = None, device: str = 'cpu',
-                  rate: float = 1.0) -> tuple[dict, FrameStore]:
+                  rate: float = 1.0, networks: dict | None = None) -> tuple[dict, FrameStore]:
     """A drive of the labels at the brain's rate, with its pictures: route, or the one with the most frames in test. With
     no route, among the drives the brain learns from (training_routes), the ones with their pictures (a drive added after
     the training has none until the next one: it is passed by). A drive without the brain's pictures is refused: the
-    check would run on black pictures and say nothing."""
-    drives = dataset(root, merged_of, [route] if route else None, rate=rate)
+    check would run on black pictures and say nothing. networks: the ones the brain's signs were read with
+    (sign_networks.of_brain), None for the car's release of the sunnypilot clone."""
+    drives = dataset(root, merged_of, [route] if route else None, rate=rate, networks=networks)
     if not drives:
         raise ValueError(f'{route or "no drive"}: not a drive the brain can run along (brain_targets.training_routes)')
     pictured = [drive for drive in drives if drive.get('pictures', True)]
@@ -173,10 +174,11 @@ def check_session(onnxruntime, path: Path):
 
 
 def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None = None, merged_of=None,
-                      route: str | None = None, log=None, device: str = 'cpu') -> dict:
+                      route: str | None = None, log=None, device: str = 'cpu', networks: dict | None = None) -> dict:
     """The step and its contract, checked: raises when it differs from PyTorch or when the car's file of the inputs is not the
     one the network was trained with. data_root and merged_of add the check along a real drive; log hears its progress;
-    device: where PyTorch runs that drive (Publish: the GPU, car_release.check_device)."""
+    device: where PyTorch runs that drive (Publish: the GPU, car_release.check_device); networks: the ones its signs
+    were read with (sign_networks.of_brain)."""
     torch = _torch()
     import onnx
     import onnxruntime
@@ -213,7 +215,8 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     if not passed:
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
-        drive, store = rollout_drive(Path(data_root), merged_of, groups, route, device=device, rate=rate)
+        drive, store = rollout_drive(Path(data_root), merged_of, groups, route, device=device, rate=rate,
+                                     networks=networks)
         verification['rollout'] = drive_rollout(model, run, drive, store, device=device, log=log)
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')

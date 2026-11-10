@@ -5,8 +5,9 @@ set -euo pipefail
 # so after a training only the new model runs. On one GPU, one step after the other:
 #
 #   1. the driving models, drive by drive (helpers/route_speed.sh of openpilot.distill, one decoding of the video for all);
-#   2. the signs of the certified drives as the car reads them today (nnslr road-type-signs --certified; a drive already
-#      read by today's reader is not read again);
+#   2. the signs of the certified drives as the car reads them, with the networks each brain learnt from (nnslr
+#      regression-sign-networks, then road-type-signs --certified [--sign-networks]; a drive already read by them is not
+#      read again);
 #   3. the brains, along the whole drive as on the car (nnslr regression-brain).
 #
 # usage: NNSLR_REGRESSION_OPENPILOT=stock,teacher NNSLR_REGRESSION_BRAINS=<run>,<run> scripts/run_regression.sh
@@ -111,7 +112,15 @@ done
 
 if [[ -n "$BRAINS" ]]; then
   echo "== 2/3 Read the signs of the certified drives as the car does today =="
-  "$NN" road-type-signs --certified --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT"
+  # Each brain's signs read by the networks it learnt from (#31): '-' is the car's release of the sunnypilot clone.
+  NETWORKS_OUT=$("$NN" regression-sign-networks --brains "$BRAINS" --data-root "$DATA_ROOT") || failed=1
+  mapfile -t NETWORKS <<< "$NETWORKS_OUT"
+  for networks in "${NETWORKS[@]}"; do
+    [[ -n "$networks" ]] || continue
+    NETWORK_ARGS=()
+    [[ "$networks" == "-" ]] || NETWORK_ARGS=(--sign-networks "$networks")
+    "$NN" road-type-signs --certified --num-workers "$SIGN_WORKERS" --data-root "$DATA_ROOT" "${NETWORK_ARGS[@]}"
+  done
   echo "== 3/3 Run the brains along the certified drives =="
   "$VENV/bin/nnslr" regression-brain --brains "$BRAINS" --data-root "$DATA_ROOT" || failed=1
 else

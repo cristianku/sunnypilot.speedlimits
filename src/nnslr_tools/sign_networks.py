@@ -151,6 +151,20 @@ def load(path: Path) -> dict:
     return {**{part: found[part] for part in PARTS}, 'models': Path(found['models'])}
 
 
+def of_brain(root: Path, recorded: dict | None) -> dict | None:
+    """The networks a brain's signs were read with (its result.json's sign_networks), as load's, for what runs it along a
+    drive (Publish's check, Regression): None for a brain from before 10 Nov 2026, which learnt from the car's release of
+    the sunnypilot clone. Raises ValueError when their folder is gone."""
+    if not recorded:
+        return None
+    ids = {part: recorded[part] for part in PARTS}
+    folder = exported(root, ids)
+    if folder is None:
+        raise ValueError('the networks its signs were read with are not exported any more: nnslr brain-networks '
+                         f"--run-dir D --cutter {ids['cutter']} --classifier {ids['classifier']} --decider {ids['decider']}")
+    return {**ids, 'models': folder}
+
+
 def prepare(root: Path, run_dir: Path, *, cutter: str | None = None, classifier: str | None = None,
             decider: str | None = None, log=print) -> dict:
     """scripts/run_brain.sh, step 3: the run's choice, written once (a run started again keeps the networks it chose,

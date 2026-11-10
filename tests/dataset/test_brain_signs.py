@@ -192,3 +192,14 @@ def test_without_our_networks_the_training_goes_on_with_sign_review_alone(tmp_pa
     out = capsys.readouterr().out
     assert 'WARNING' in out and 'Sign review alone' in out
     assert signs.stamp_in_use(tmp_path) is None and signs.unread(tmp_path, [ROUTE]) is None
+
+
+def test_a_brains_networks_are_found_by_its_record_and_their_export(tmp_path, monkeypatch):
+    from nnslr_tools import sign_networks
+    ids = {'cutter': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier', 'decider': 'decider:c/crop_geom'}
+    assert sign_networks.of_brain(tmp_path, None) is None
+    monkeypatch.setattr(sign_networks, 'exported', lambda root, chosen: None)
+    with pytest.raises(ValueError, match='not exported any more'):
+        sign_networks.of_brain(tmp_path, ids)
+    monkeypatch.setattr(sign_networks, 'exported', lambda root, chosen: tmp_path / 'set')
+    assert sign_networks.of_brain(tmp_path, {**ids, 'other': 1}) == {**ids, 'models': tmp_path / 'set'}
