@@ -1117,6 +1117,36 @@ def _cmd_send_to_car(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_simulate(args: argparse.Namespace) -> int:
+    """Models › Drive: drives replayed through the car's loop with a set of networks (nnslr_tools.simulation)."""
+    from nnslr_tools import simulation
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if bool(args.route) == bool(args.certified):
+        raise ValueError("which drives? --route <drive> (may repeat), or --certified")
+    routes = sorted(simulation.certified(root)) if args.certified else list(dict.fromkeys(args.route))
+    if not routes:
+        raise ValueError("no drive is certified yet: certify one on Models › Drive first")
+    failed = simulation.run(root, routes, args.set, device=args.device, again=args.again,
+                            log=lambda text: print(text, flush=True))
+    return 1 if failed else 0
+
+
+def _cmd_simulate_set(args: argparse.Namespace) -> int:
+    """The release of a set of networks made ready for a replay: the versions in use exported (simulation.export_set)."""
+    from nnslr_tools import simulation
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.set == 'car':
+        directory = simulation.set_directory(root, 'car')
+        if simulation.release_networks(directory) is None:
+            raise ValueError(f"no release of the networks in {directory}")
+        print(f"the networks on the car: {simulation.release_name(directory)}", flush=True)
+        return 0
+    simulation.export_set(root, log=lambda text: print(text, flush=True))
+    return 0
+
+
 def _cmd_try_on_comma(args: argparse.Namespace) -> int:
     """Try on the comma now, or back to the build's networks (nnslr_tools.comma_trial)."""
     from nnslr_tools import comma_trial
@@ -2338,6 +2368,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_car.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_car.add_argument("--dry-run", action="store_true", help="check and print the record, write nothing")
     p_car.set_defaults(func=_cmd_on_car)
+
+    p_simulate = sub.add_parser(
+        "simulate",
+        help="replay drives through the car's own vision loop with a set of networks, on the GPU, and write what the "
+             "comma's screen would show along them (derived/simulation/<drive>/<set>.json.gz): Models › Drive; "
+             "helpers/simulate_drive.sh",
+    )
+    p_simulate.add_argument("--set", required=True, choices=("car", "in-use"),
+                            help="car: the release in the sunnypilot clone; in-use: the versions in use on Models "
+                                 "(exported by nnslr simulate-set)")
+    p_simulate.add_argument("--route", action="append", help="a drive (may repeat)")
+    p_simulate.add_argument("--certified", action="store_true", help="every certified drive: the regression test")
+    p_simulate.add_argument("--again", action="store_true", help="also the drives replayed already with these networks")
+    p_simulate.add_argument("--device", default="cuda", choices=("cuda", "cpu"),
+                            help="cuda (default); cpu is for the tests alone: a replay never moves to the CPU by itself")
+    p_simulate.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_simulate.set_defaults(func=_cmd_simulate)
+
+    p_simulate_set = sub.add_parser(
+        "simulate-set",
+        help="make the networks of a set ready for nnslr simulate: for in-use, export the versions in use on Models "
+             "as Publish would (in the GPU environment, PyTorch), into derived/simulation/sets/in-use; nothing when "
+             "they are exported already",
+    )
+    p_simulate_set.add_argument("--set", required=True, choices=("car", "in-use"))
+    p_simulate_set.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_simulate_set.set_defaults(func=_cmd_simulate_set)
 
     p_send = sub.add_parser(
         "send-to-car",

@@ -71,7 +71,7 @@ LOGIN_MESSAGE = 'Sign-in required: reload the page and sign in with your name an
 PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/setup')
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
-PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|regression|publish|reviewers|reviews|panoramica|prepara|allena|pannello|stato|account|'
+PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|drive|regression|publish|reviewers|reviews|panoramica|prepara|allena|pannello|stato|account|'
                      r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # [sign-review-retired] - START
@@ -897,10 +897,12 @@ def make_handler(app: ReviewApp):
             if path in CONTROL_TABS or (path == GUEST_HOME and self.guest is not None):
                 nonce = secrets.token_urlsafe(18)
                 # img-src: the frames of the Watch panel of the Evaluate tab (the previews of /route/<id>/images/);
-                # media-src: the video of a drive in the Drive view of Results (/route/<id>/video.mp4).
+                # media-src: the video of a drive in its player, on Speed review and Models › Drive
+                # (/route/<id>/video.mp4); font-src data:: the comma's own font, inline in the page, for its squares on
+                # Models › Drive.
                 csp = ("default-src 'none'; script-src 'nonce-" + nonce + "'; style-src 'unsafe-inline'; "
-                       "img-src 'self'; media-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
-                       "frame-ancestors 'none'")
+                       "img-src 'self'; media-src 'self'; font-src data:; connect-src 'self'; base-uri 'none'; "
+                       "form-action 'none'; frame-ancestors 'none'")
                 page = render_guest(nonce) if self.guest is not None else render_control(nonce, CONTROL_TABS[path])
                 self._send(200, 'text/html; charset=utf-8', page.encode('utf-8'), csp)
                 return
@@ -951,7 +953,7 @@ def make_handler(app: ReviewApp):
                 self._json(200, app.panel.frames(match.group(1), value('model'), value('partition') or 'test',
                                                  value('route') or None, app.frame_rows))
                 return
-            # The video of a drive for the Drive view of Results (nnslr_tools.drive_video): ready, or being made;
+            # The video of a drive for its player (nnslr_tools.drive_video): ready, or being made;
             # ?start=1 begins making it when it is missing.
             match = re.fullmatch(r'/api/panel/drive-video/([0-9a-f]{8}--[0-9a-f]{10})', path)
             if match:
@@ -961,7 +963,7 @@ def make_handler(app: ReviewApp):
                 return
             # [drive-review] - START
             # A drive's logs, their reading and its timeline (nnslr_tools.drive_review): the drive player of Speed
-            # review, Regression and the guests' reviews.
+            # review, Models › Drive and the guests' reviews.
             if path.startswith('/api/drive-review/'):
                 self._drive_review_get(path)
                 return
@@ -984,6 +986,12 @@ def make_handler(app: ReviewApp):
                 self._regression_get(path, urlsplit(self.path).query)
                 return
             # [regression] - END
+            # [simulation] - START
+            # Models › Drive (nnslr_tools.simulation): the drives with their replays, a drive's replay with a set of networks.
+            if path.startswith('/api/simulation/'):
+                self._simulation_get(path, urlsplit(self.path).query)
+                return
+            # [simulation] - END
             # The networks by role (cutter, classifier, decider) and the one in use, for the Models tab.
             if path == '/api/panel/models':
                 self._json(200, app.panel.models())
@@ -1784,6 +1792,61 @@ def make_handler(app: ReviewApp):
                 self._problem(exc.status, exc.reason, exc.message, True)
         # [regression] - END
 
+        # [simulation] - START
+        def _simulation_get(self, path, query):
+            """Models › Drive, reading only: the sets of networks and the drives with their replays, and a drive's replay
+            with a set (?set=car|in-use|certified, in-use when not said) as the page draws it over the video."""
+            from nnslr_tools import simulation
+            if path == '/api/simulation/drives':
+                self._json(200, app.panel.simulation())
+                return
+            match = re.fullmatch(r'/api/simulation/drives/([0-9a-f]{8}--[0-9a-f]{10})', path)
+            if match is None:
+                if re.fullmatch(r'/api/simulation/drives/[0-9a-f]{8}--[0-9a-f]{10}/certify', path):
+                    self._problem(405, 'method_not_allowed', 'Use POST.', True)
+                    return
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            try:
+                self._json(200, app.panel.simulation_drive(match.group(1), parse_qs(query).get('set', ['in-use'])[0]))
+            except simulation.SimulationError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+
+        def _simulation_post(self, path):
+            """A drive certified with its replay of a set ({"certified": true, "set": "car"|"in-use", "made_at": of the
+            replay looked at, optional}) or no longer certified ({"certified": false}): same origin, JSON, a person on
+            the site and a panel that is not read-only."""
+            from nnslr_tools import simulation
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return
+            self._require_ai_session()
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            match = re.fullmatch(r'/api/simulation/drives/([0-9a-f]{8}--[0-9a-f]{10})/certify', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            body = self._read_json()
+            on = body.get('certified') if isinstance(body, dict) else None
+            chosen = body.get('set') if isinstance(body, dict) else None
+            made_at = body.get('made_at') if isinstance(body, dict) else None
+            if not isinstance(on, bool) or (on and (not isinstance(chosen, str) or chosen not in simulation.SETS)) or \
+                    (made_at is not None and not isinstance(made_at, str)):
+                self._problem(400, 'bad_request', 'Say {"certified": true, "set": "car" or "in-use", "made_at": "..."}, '
+                              'or {"certified": false}.', True)
+                return
+            who, _via = self._who()
+            try:
+                self._json(200, app.panel.simulation_certify(match.group(1), on, chosen, who or 'local', made_at))
+            except simulation.SimulationError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+        # [simulation] - END
+
         def _speed_review_post(self, path):
             """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
             to leave the moments out, "from_start_ns" to move the block that started there to these ends; {"remove":
@@ -1944,6 +2007,11 @@ def make_handler(app: ReviewApp):
                 self._regression_post(path)
                 return
             # [regression] - END
+            # [simulation] - START
+            if path.startswith('/api/simulation/'):
+                self._simulation_post(path)
+                return
+            # [simulation] - END
             # [control-panel] - START
             run = re.fullmatch(r'/api/panel/run/([a-z_]+)', path)
             stop = re.fullmatch(r'/api/panel/job/([0-9a-z_-]+)/stop', path)
@@ -1979,7 +2047,8 @@ def make_handler(app: ReviewApp):
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
                     # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "driver", "pool"}), the models of a
                     # regression ({"openpilot", "brains"}), the route, provider,
-                    # save and limit of an AI action, all checked by Panel.start.
+                    # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
+                    # "certified"}), all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool', 'rebuild',
@@ -2001,6 +2070,11 @@ def make_handler(app: ReviewApp):
                     # Whether Train Fit box trains the refiner too ({"refiner": "off"}), the same way: a refiner sent as
                     # false must be refused, never dropped into the hour of the refiner.
                     options.update((key, body[key]) for key in ('refiner',)
+                                   if isinstance(body, dict) and body.get(key) is not None)
+                    # The networks of a replay and whether it goes through every certified drive ({"set": "in-use",
+                    # "certified": "1"}), the same way: a set left out, or sent as something else, must be refused,
+                    # never dropped into a replay with other networks or of another drive.
+                    options.update((key, body[key]) for key in ('set', 'certified')
                                    if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END

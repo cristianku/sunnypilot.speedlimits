@@ -94,6 +94,12 @@ BRAIN_DRIVER = {'off': '0', 'on': '1'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
 REGRESSION_SCRIPT = 'scripts/run_regression.sh'
+# Models › Drive (nnslr_tools.simulation): a recorded drive replayed through the car's own vision loop with a set of
+# networks, for the comma's screen over its video and the regression test on the certified drives. Always on a V100 (the
+# video is decoded and the networks run there): it has no run on the CPU. Its options: {'set': 'car' | 'in-use'} the
+# networks, and one of {'route': R} a drive, {'certified': '1'} every certified drive.
+SIMULATE_SCRIPT = 'helpers/simulate_drive.sh'
+SIMULATE_OPTIONS = ('set', 'certified')
 # The map's limit of every frame (Read the map, on Data › Speed review): the GPS of the drives, the maps they need, the
 # map roads near them and the way each frame is on.
 ROAD_TYPES_SCRIPT = 'helpers/road_types.sh'
@@ -171,6 +177,7 @@ QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool'),
                   'regression': ('openpilot', 'brains'),
+                  'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
                   'sign_tracks': ('dry', 'routes'),
                   'box_fit_train': ('dry', 'refiner'),
@@ -391,6 +398,9 @@ ACTIONS = {
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
     'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
+    # A drive, or every certified drive, replayed with a set of networks for Models › Drive (SIMULATE_SCRIPT; start()
+    # adds --set and --route or --certified). In the train group: the GPU.
+    'simulate': {'label': 'Replay a drive', 'group': 'train', 'command': [SIMULATE_SCRIPT]},
     # The road labeler (ROAD_LABELER_SCRIPT): trained on the GPU on the corrections of Speed review, and run along every
     # drive to label Speed review ({'labeler': run}): its base layer. In the train group: the GPU.
     'road_labeler_train': {'label': 'Train the road labeler', 'group': 'train', 'command': [ROAD_LABELER_SCRIPT, 'train']},
@@ -452,6 +462,8 @@ ACTIVITIES = (
     ('train', 'brain training', 'run_brain.sh'),
     ('train', 'brain training', 'nnslr train-brain'),
     ('train', 'regression', 'run_regression.sh'),
+    ('train', 'drive replay', SIMULATE_SCRIPT),
+    ('train', 'drive replay', 'nnslr simulate'),
     ('train', 'road labeler', ROAD_LABELER_SCRIPT),
     ('train', 'road labeler', 'nnslr road-labeler-train'),
     ('train', 'road labeler', 'nnslr road-labeler-predict'),
@@ -485,6 +497,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
                  'train_brain': 'a brain training', 'regression': 'a regression run',
+                 'simulate': 'a replay of a drive',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'sign_tracks': 'a search of the signs on every frame',
                  'box_fit_train': 'a training of Fit box',
@@ -501,6 +514,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training', 'regression': 'a regression run',
+                  'drive replay': 'a replay of a drive',
                   'road labeler': 'a road labeler run', 'sign tracks': 'a search of the signs on every frame',
                   'Fit box training': 'a training of Fit box',
                   'code update': 'a code update', 'AI review': 'an AI review',
@@ -526,8 +540,10 @@ PAIRED_GROUPS = ('train',)
 # and the split the others read, and the install of Qwen3-VL tests it on the GPU.
 TRAIN_ALONE = ('dataset', 'train', 'train_continue', 'train_resume', 'setup_vlm')
 # Never two of the same: each writes files of its own kind that a second one would write too (the brain's labels, the
-# regression's results, the road labeler's marks, the sign tracks, the proposers' measures).
-TRAIN_ONCE = ('train_brain', 'regression', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks', 'measure_proposer')
+# regression's results, the replays of the drives and the export of the versions in use, the road labeler's marks, the
+# sign tracks, the proposers' measures).
+TRAIN_ONCE = ('train_brain', 'regression', 'simulate', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks',
+              'measure_proposer')
 # Never together: the regression runs the brains along the drives the brain learns from, and the road labeler's run
 # writes the labels of Speed review the brain, the regression and a new road labeler read.
 TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain', 'road_labeler_predict')),
@@ -536,12 +552,16 @@ TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain
 # The work of the train group started from a terminal, by its label (ACTIVITIES), as the action it is for these rules.
 TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain',
                   'classifier training': 'train_classifier', 'regression': 'regression',
+                  'drive replay': 'simulate',
                   'road labeler': 'road_labeler_train', 'sign tracks': 'sign_tracks',
                   'dataset and training': 'train', 'GPU training': 'train'}
 # The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
 EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
                  'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
                  'road_labeler_predict', 'sign_tracks')
+# The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
+# replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
+SHARED_GPU = {'simulate': 2 * 1024}
 # Of those, the ones whose dry run ({'dry': 'on'}, --dry-run) runs on the CPU and takes no card.
 DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'sign_tracks')
 # The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
@@ -750,7 +770,7 @@ class Panel:
             # None: the helpers' default proposer, on the GPU.
             proposer = _proposer_of(path)
             return proposer is None or proposer in GPU_PROPOSERS
-        return action in EXCLUSIVE_GPU
+        return action in EXCLUSIVE_GPU or action in SHARED_GPU
 
     def _scan_cards(self, key: tuple, pids: list[int]) -> list[int] | None:
         """_tree_cards of the processes, kept a while by key: SCAN_FOUND_SECONDS when some cards are found,
@@ -1144,10 +1164,11 @@ class Panel:
             return
         # The runs of the panel's trainings at work: their logs (runs/<run>/..., logs/train-<run>.log) are theirs.
         taken = {job['run'] for job in payload['jobs'] if job['state'] == 'running' and job.get('run')}
-        # The road labeler and the signs on every frame started from a terminal have no log of their own to read: no
-        # progress, and not the whole pipeline's either.
+        # The road labeler, the signs on every frame and the replay of a drive started from a terminal have no log of
+        # their own to read: no progress, and not the whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'brain training': 'train_brain', 'road labeler': 'road_labeler', 'sign tracks': 'sign_tracks'}
+                    'brain training': 'train_brain', 'road labeler': 'road_labeler', 'sign tracks': 'sign_tracks',
+                    'drive replay': 'simulate'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
                     ('train_brain', ('runs/*/brain.log',)))
@@ -1340,6 +1361,16 @@ class Panel:
                 reason = gpu_reason
             elif name == 'regression':
                 # What it needs (a certified drive, a model chosen) is checked by Models › Regression and by start().
+                pass
+            elif name == 'simulate' and not (self.repo / SIMULATE_SCRIPT).is_file():
+                reason = SIMULATE_SCRIPT + ' is missing in this installation'
+            elif name == 'simulate' and (room := _room_reason(best, SHARED_GPU[name], 'A replay')):
+                # The replay decodes the video and runs the networks on a V100, never on the CPU: it shares the card
+                # with the most free memory, and waits only while none has the room.
+                reason = room
+            elif name == 'simulate':
+                # Its drive and its set of networks are checked by Models › Drive and by start(); it reads the drives'
+                # videos and logs, so it needs no confirmed frame.
                 pass
             elif name in ('networks_prepare', 'networks_publish') and not (self.repo / NETWORKS_SCRIPT).is_file():
                 reason = NETWORKS_SCRIPT + ' is missing in this installation'
@@ -2110,6 +2141,83 @@ class Panel:
             regression.uncertify(self.root, route)
         return self.regression()
 
+    # -- Models › Drive ---------------------------------------------------------------------------
+    def _simulate_arguments(self, options: dict) -> list[str]:
+        """The arguments of helpers/simulate_drive.sh from the options (strings, checked by start()): --set=<car|in-use>,
+        then --route=<drive> for {'route': R}, a drive the portal has, or --certified for {'certified': '1'}, every
+        certified drive: exactly one of the two. No dry run: the replay is always on a V100, and start() takes its card
+        (refused while none is free)."""
+        from nnslr_tools import drive_review, simulation
+        chosen = options.get('set')
+        if chosen not in simulation.SETS:
+            raise PanelError(400, 'bad_option', 'Choose the networks of the replay: ' + ' or '.join(simulation.SETS) + '.')
+        route, certified = options.get('route'), options.get('certified')
+        if certified not in (None, '1'):
+            raise PanelError(400, 'bad_option', 'Every certified drive is "1", or none.')
+        if (route is None) == (certified is None):
+            raise PanelError(400, 'bad_option', 'Replay one drive (route) or every certified drive (certified): one of '
+                             'the two.')
+        if certified:
+            if not simulation.certified(self.root):
+                raise PanelError(409, 'not_available', 'Certify a drive first.')
+            return ['--set=' + chosen, '--certified']
+        if not SIGN_TRACKS_ROUTE.match(route) or route not in drive_review.all_routes(self.root):
+            raise PanelError(400, 'bad_option', 'Unknown drive: ' + route[:40] + '.')
+        return ['--set=' + chosen, '--route=' + route]
+
+    def _simulation_sets(self) -> dict:
+        """The two sets of networks as Models › Drive shows them (simulation.set_states): the release on the car and the
+        export of the versions in use, which is ready only while it is of the versions in use on Models now (by the
+        car's names of the networks, CAR_NETWORKS)."""
+        from nnslr_tools import simulation
+        active, _problem = self.models_index.read_active()
+        in_use = {network: (active.get(role) or {}).get('id') for network, role in CAR_NETWORKS.items()}
+        return simulation.set_states(self.root, in_use=in_use)
+
+    def simulation(self) -> dict:
+        """GET /api/simulation/drives: the sets of networks and every drive (the rows of Speed review's list), each
+        with what it has: its replays by set, its certification and how each replay stands next to the certified one.
+        The sets and the car's code are read once for the whole list."""
+        from nnslr_tools import drive_review, simulation, speed_review
+        states, code = self._simulation_sets(), simulation.code_hashes()
+        rows = []
+        for drive in speed_review.drives_list(speed_review.store_for(self.root), drive_review.store_for(self.root)):
+            found = simulation.summary(self.root, drive['route'], states, code)
+            rows.append({**drive, **{key: found[key] for key in ('sets', 'certified', 'regression')}})
+        return {'ok': True, 'sets': states, 'drives': rows}
+
+    def simulation_drive(self, route: str, set_key: str) -> dict:
+        """GET /api/simulation/drives/<route>?set=<car|in-use|certified>: the replay of a drive with a set as the page
+        draws it (view: None when that set was never replayed on it; 'certified': the certified replay), and, for a
+        set next to a certified drive, where the two differ (differences). On the clock of the drive's logs as the
+        timeline has it (the last scan's t0_ns): SimulationError 409 no_logs before Read the logs."""
+        from nnslr_tools import drive_review, simulation
+        if set_key != 'certified' and set_key not in simulation.SETS:
+            raise simulation.SimulationError(400, 'bad_set', 'The set is ' + ', '.join(simulation.SETS) + ' or certified.')
+        t0_ns = (drive_review.store_for(self.root).summary(route) or {}).get('t0_ns')
+        if t0_ns is None:
+            raise simulation.SimulationError(409, 'no_logs', 'The logs of this drive are not read yet: Read the logs on '
+                                             'Data › Speed review first, the replay is drawn on their clock.')
+        states = self._simulation_sets()
+        was = simulation.reference(self.root, route)
+        record = was if set_key == 'certified' else simulation.read(self.root, route, set_key)
+        differences = None
+        if set_key != 'certified' and was is not None and record is not None:
+            differences = simulation.differences(simulation.compare(was, record), t0_ns)
+        return {'ok': True, 'route': route, 'sets': states, 'summary': simulation.summary(self.root, route, states),
+                'view': None if record is None else simulation.view(record, t0_ns), 'differences': differences}
+
+    def simulation_certify(self, route: str, on: bool, set_key: str | None, who: str, made_at: str | None = None) -> dict:
+        """POST /api/simulation/drives/<route>/certify: the drive's replay with a set becomes its reference
+        (SimulationError 409 no_simulation without one; 409 changed when it is no longer the one of made_at, the replay
+        the person looked at), or the drive leaves the certified ones."""
+        from nnslr_tools import simulation
+        if on:
+            simulation.certify(self.root, route, set_key, who, made_at)
+        else:
+            simulation.uncertify(self.root, route)
+        return {'ok': True, 'summary': simulation.summary(self.root, route, self._simulation_sets())}
+
     def _brain_choices(self, options: dict) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'driver',
         'pool'}), the usual ones when not given: the roadworks, the kinds of road and the road types on, the driver's inputs
@@ -2156,7 +2264,8 @@ class Panel:
         action (_ai_arguments), whether the classifier adds the Mapillary signs ('on', 'off', or 'pretrain': first
         on them alone, then on ours from those weights) and where it starts ({'start': 'imagenet' or a classifier's
         id}, _classifier_start) and the cutter it learns the false boxes of ({'cutter': a SignNet's id}, else the one
-        in use): never a command.
+        in use), and the networks and the drive of a replay ({'set', 'route' or 'certified'}, _simulate_arguments): never
+        a command.
         The classifier's and the cutter's trainings run on a new run named here (new_run_name)."""
         if action not in ACTIONS:
             raise PanelError(404, 'unknown_action', 'Unknown action.')
@@ -2209,6 +2318,18 @@ class Panel:
             if not (self.repo / BOX_FIT_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', BOX_FIT_SCRIPT + ' is missing in this installation.')
             start_args += self._box_fit_arguments(options or {})
+        # The set of networks and the certified drives of a replay: refused on every other action (its drive is the
+        # 'route' checked above).
+        for key in SIMULATE_OPTIONS:
+            value = (options or {}).get(key)
+            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
+                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take ' + key + '.')
+            if value is not None and not isinstance(value, str):
+                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
+        if action == 'simulate':
+            if not (self.repo / SIMULATE_SCRIPT).is_file():
+                raise PanelError(403, 'actions_disabled', SIMULATE_SCRIPT + ' is missing in this installation.')
+            start_args += self._simulate_arguments(options or {})
         # [ai-reviewer] - START
         if action == 'fetch':
             # The address set in the comma panel of the top bar; without one the script's ssh host "comma".
@@ -2416,7 +2537,7 @@ class Panel:
         # the GPU the one with the most free memory. nvidia-smi is read now, outside the lock (it can take a second);
         # the card is chosen and recorded under it, so two starts never take the same one.
         dry = action in DRY_ON_CPU and '--dry-run' in start_args
-        takes_card = (action in EXCLUSIVE_GPU and not dry) or (
+        takes_card = (action in EXCLUSIVE_GPU and not dry) or action in SHARED_GPU or (
             action in PREPARING and (proposer is None or proposer in GPU_PROPOSERS))
         cards = _cards_of(self.system()) if takes_card else []
         with self._lock:
@@ -2485,11 +2606,20 @@ class Panel:
 
     def _take_card(self, action: str, proposer: str | None, cards: list[dict], activities: list[dict]) -> list[int] | None:
         """The card a job starts on (called under the lock): a preparation the one with the most free memory (Qwen3-VL
-        refused there without QWEN_GPU_MB free), shared with what else runs; any other the free one of lowest index,
-        refused 'busy' with what holds them when none is free. Without nvidia-smi the cards are not known: None (no card
-        is named to the job), refused while a training holds the GPU."""
+        refused there without QWEN_GPU_MB free), shared with what else runs; a replay (SHARED_GPU) the same, refused
+        without the memory it needs; any other the free one of lowest index, refused 'busy' with what holds them when
+        none is free. Without nvidia-smi the cards are not known: None (no card is named to the job: a replay's helper
+        then takes the freest card itself, or stops), refused while a training holds the GPU."""
         holders = self._gpu_holders(activities)
         states = _card_states(cards, holders)
+        if action in SHARED_GPU:
+            best = _best_card(states)
+            if best is None:
+                return None
+            room = _room_reason(best, SHARED_GPU[action], 'A replay')
+            if room:
+                raise PanelError(409, 'gpu_taken', room + ': free some memory on a card, then try again.')
+            return [best['index']]
         if action in PREPARING:
             best = _best_card(states)
             if best is None:
@@ -2853,6 +2983,16 @@ def _best_proposer(reports: list[dict], left_out: set[str]) -> str | None:
     measured = [report for report in reports if report.get('partition') == 'test' and report.get('proposer') in PROPOSERS
                 and report['proposer'] not in left_out and (report.get('speed_signs') or {}).get('truth')]
     return max(measured, key=score)['proposer'] if measured else None
+
+
+def _room_reason(gpu: dict | None, needed_mb: int, who: str) -> str:
+    """Why a job that shares a card cannot start on it ('' when it can, or when its memory is not known): it needs
+    needed_mb free."""
+    free = _free_mb(gpu or {})
+    if free < 0 or free >= needed_mb:
+        return ''
+    return (f'{who} needs about {needed_mb / 1024:g} GB of a GPU and the freest card has only {free / 1024:.1f} GB '
+            f'free (GPU {(gpu or {}).get("index", 0)})')
 
 
 def _qwen_gpu_reason(gpu: dict | None) -> str:

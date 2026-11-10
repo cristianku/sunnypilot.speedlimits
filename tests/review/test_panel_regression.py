@@ -10,7 +10,7 @@ from review_helpers import RunningServer, json_of
 from nnslr_tools import regression
 from nnslr_tools.job_progress import progress
 from nnslr_tools.panel import Panel, PanelError
-from test_panel import checkout, finished, full_log, root  # noqa: F401  (fixtures and helpers)
+from test_panel import checkout, finished, full_log, only_this_checkout, root  # noqa: F401  (fixtures and helpers)
 
 ROUTE = '00000168--2b00afdc52'
 OTHER = '00000170--0123456789'

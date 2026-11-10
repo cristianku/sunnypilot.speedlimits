@@ -1,29 +1,29 @@
 // Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
 // ("/", "/prepare", "/dataset", "/speed-review", "/sign-distance", "/train", "/evaluate",
-// "/models", "/regression", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives,
-// Speed review, Sign distance, Training dataset, Reviewers), Training, Models (Versions, Results, Regression, Publish); the
+// "/models", "/drive", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives,
+// Speed review, Sign distance, Training dataset, Reviewers), Training, Models (Versions, Drive, Results, Publish); the
 // section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload. Signs are reviewed on the Signs side of Speed review
-// (the route list /routes and the page of Sign review lead there since 9 Nov 2026). A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Speed review, Sign distance or Regression is "/speed-review?drive=<route>"
+// (the route list /routes and the page of Sign review lead there since 9 Nov 2026). A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Speed review, Sign distance or Models › Drive is "/speed-review?drive=<route>"
 // ("/sign-distance?drive=<route>&sign=<key>"):
 // an address of its own, Back returns to the list.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 import {isGuest} from '../common/guest';
 
 export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'speedreview' | 'signdistance'
-  | 'reviewers' | 'train' | 'evaluate' | 'models' | 'regression' | 'publish';
+  | 'reviewers' | 'train' | 'evaluate' | 'models' | 'drive' | 'publish';
 export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
   overview: isGuest() ? '/reviews' : '/', prepare: '/prepare', dataset: '/dataset',
   speedreview: '/speed-review', signdistance: '/sign-distance', reviewers: '/reviewers', train: '/train', evaluate: '/evaluate', models: '/models',
-  regression: '/regression', publish: '/publish',
+  drive: '/drive', publish: '/publish',
 };
 /** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
   overview: 'Overview', prepare: 'Drives', dataset: 'Training dataset',
   speedreview: 'Speed review', signdistance: 'Sign distance', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
-  regression: 'Regression', publish: 'Publish',
+  drive: 'Drive', publish: 'Publish',
 };
 /** A page of a section: its address and name. */
 export interface SectionPage {
@@ -39,8 +39,8 @@ export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = 
     {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'},
     {key: 'dataset', href: '/dataset', label: 'Training dataset'}, {key: 'reviewers', href: '/reviewers', label: 'Reviewers'}]},
   train: {title: 'Training', pages: []},
-  models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'evaluate', href: '/evaluate', label: 'Results'},
-    {key: 'regression', href: '/regression', label: 'Regression'}, {key: 'publish', href: '/publish', label: 'Publish'}]},
+  models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'drive', href: '/drive', label: 'Drive'},
+    {key: 'evaluate', href: '/evaluate', label: 'Results'}, {key: 'publish', href: '/publish', label: 'Publish'}]},
 };
 export function sectionOf(tab: ControlTab): Section {
   return (Object.keys(SECTIONS) as Section[]).find((key) => SECTIONS[key].pages.some((page) => page.key === tab))
@@ -56,10 +56,10 @@ export function tabOf(path: string): ControlTab | null {
 export const currentTab = ref<ControlTab>(tabOf(location.pathname) ?? 'overview');
 
 /** The tabs with a drive of their own at "?drive=<route>". */
-const DRIVE_TABS: readonly ControlTab[] = ['speedreview', 'signdistance', 'regression'];
+const DRIVE_TABS: readonly ControlTab[] = ['speedreview', 'signdistance', 'drive'];
 /** The tabs whose drive has one thing of its own opened in the address: a sign on Sign distance ("&sign=<key>"). */
 const ITEM_KEY: Partial<Record<ControlTab, string>> = {signdistance: 'sign'};
-/** The drive of an address on Speed review, Sign distance or Regression ("/speed-review?drive=<route>"), or null (the
+/** The drive of an address on Speed review, Sign distance or Models › Drive ("/speed-review?drive=<route>"), or null (the
  * list, or another tab). */
 function driveOf(path: string, search: string): string | null {
   const tab = tabOf(path);
@@ -71,7 +71,7 @@ function itemOf(path: string, search: string): string | null {
   const key = tab === null ? undefined : ITEM_KEY[tab];
   return key === undefined ? null : new URLSearchParams(search).get(key) || null;
 }
-/** The drive opened on Speed review, Sign distance or Regression, null for the list. */
+/** The drive opened on Speed review, Sign distance or Models › Drive, null for the list. */
 export const tabDrive = ref<string | null>(driveOf(location.pathname, location.search));
 /** The sign opened in the drive shown, null for none. */
 const tabItem = ref<string | null>(itemOf(location.pathname, location.search));
@@ -99,7 +99,7 @@ function markCurrent(tab: ControlTab): void {
 }
 
 /** Shows a tab and puts its address in the history; with a hash ("#dataset"), scrolls to it once the tab is drawn; with
- * a drive, that drive of Speed review, Sign distance or Regression (and a sign of it on Sign distance). */
+ * a drive, that drive of Speed review, Sign distance or Models › Drive (and a sign of it on Sign distance). */
 export function goTo(wanted: ControlTab, hash = '', drive: string | null = null, item: string | null = null): void {
   // A reviewer from outside has one list, their own.
   const tab = isGuest() && drive === null ? 'overview' : wanted;

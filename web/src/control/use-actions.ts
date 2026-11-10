@@ -54,6 +54,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Runs the chosen models along the certified drives, only what is missing, on the GPU: a few minutes per model and '
         + 'drive. It trains nothing and changes nothing on the car.'};
   }
+  if (name === 'simulate' && options?.certified) {
+    // One drive (Compute, in the drive opened) starts at the click; every certified drive is a longer run.
+    return {title: 'Replay the certified drives?', action: 'Replay',
+      text: 'Replays every certified drive not replayed with these networks yet through the car’s own vision loop, on the GPU, one '
+        + 'after the other, and compares each with what was certified. It trains nothing and changes nothing on the car.'};
+  }
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
     const driver = options?.driver === 'on' ? ' With the driver’s inputs.' : '';
@@ -223,6 +229,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   sign_tracks: 'The drives done stay, and the minutes done of the drive at work: running again carries on from there.',
   box_fit_train: 'Models already written stay (the rankers once their step is over); the refiner is written only at '
     + 'its end. Training again starts over.',
+  simulate: 'The drives already replayed keep their result: replaying again skips them.',
 };
 
 /** run() and stop() for the buttons; refresh reads /api/panel/status again. */

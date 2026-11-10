@@ -1,12 +1,12 @@
 <script setup lang="ts">
-// The player of a drive, on Speed review (SpeedReviewDrive.vue) and Regression (RegressionDrive.vue): its video
-// (nnslr_tools.drive_video, the same as Results › Drive) in step with the comma's logs (GET
+// The player of a drive, on Speed review (SpeedReviewDrive.vue) and Models › Drive (DriveSimulation.vue): its video
+// (nnslr_tools.drive_video) in step with the comma's logs (GET
 // /api/drive-review/drives/<route>/timeline): a time of the logs is a picture of the video through the encode index of
 // every frame (drive-review.ts videoTimeOf), never a file's date. On the picture the limit the comma's vision held; under
 // it the lanes (DriveReviewLanes.vue) between two times, the whole drive as a strip, and at the side what the comma had
 // at the time shown. The commands of the video lie on the picture, at its foot, and the zoom of the lanes next to the
 // title, so that the picture and the lanes keep the room; on a computer the grip under the picture makes it bigger than
-// the page's own (StageGrip.vue): the drive then leaves the page's width, its side under the lanes when they no longer fit. Review the signs here (Regression) opens the Signs side of Speed
+// the page's own (StageGrip.vue): the drive then leaves the page's width, its side under the lanes when they no longer fit. Review the signs here (Models › Drive) opens the Signs side of Speed
 // review on the frame of the time shown (?segment=N&second=S opens a drive at that time, common/sign-link.ts). Without logs the video
 // plays all the same, with what to do to get them:
 // the logs found on the server are imported by a search, others are sent from here (a folder of the comma's segments,
@@ -18,7 +18,9 @@
 // on a limit of the map's lane (pickMap); each follows the time shown through the event time and moves it with seek.
 // Speed review also draws over the picture (slot "picture": the boxes of Sign review, given whether the frame shown is a
 // picture of the time shown and not zoomed in), and places the frames of Sign review on the drive with the segments of the
-// logs (event segments, at every reading of the drive).
+// logs (event segments, at every reading of the drive). Models › Drive draws the comma's own screen over the picture
+// (slot "picture") and so hides the player's squares of the vision's and the map's limit (limits false); the car's
+// speed stays.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -26,7 +28,7 @@ import {isGuest} from '../common/guest';
 import {signsHref} from '../common/sign-link';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
-import {aheadAt, clockOf, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
+import {aheadAt, clockOf, EYE_ICON, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
   REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type SyncSegment, type Timeline, valueAt, videoTimeOf,
   type VideoState, visionAtSign} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
@@ -38,8 +40,8 @@ import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
   simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
-  pickMap?: boolean; arrows?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one', pickMap: false,
-  arrows: true});
+  pickMap?: boolean; arrows?: boolean; limits?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one',
+  pickMap: false, arrows: true, limits: true});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
   segments: [segments: SyncSegment[]]; index: [index: VideoState['index']];
@@ -49,8 +51,7 @@ const ownSpeed = computed(() => props.carKph !== undefined);
 
 // The squares on the picture, as on the comma: an eye for the vision's limit, a car for the car's speed.
 const HUD_ICONS = {
-  eye: 'M12 1C6.6 1 2.4 4.4 1 8.5 2.4 12.6 6.6 16 12 16s9.6-3.4 11-7.5C21.6 4.4 17.4 1 12 1ZM12 4.3a4.2 4.2 0 1 0 0 8.4a4.2 4.2 0 1 0 0-8.4Z'
-    + 'M12 6.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4Z',
+  eye: EYE_ICON,
   car: 'M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1'
     + 'c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5'
     + 's.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z',
@@ -734,10 +735,10 @@ watch(() => props.route, () => {
             : video.state === 'failed' ? 'The video could not be made: ' + (video.reason ?? 'unknown error') + '.'
             : 'No video of this drive on the server.' }}</div>
           <div v-if="now" class="dr-hud" aria-hidden="true">
-            <span class="dr-box dr-box-vision" :class="{empty: now.visionKph === null, ahead: !!now.visionAhead}"><svg viewBox="0 0 24 17">
+            <span v-if="limits" class="dr-box dr-box-vision" :class="{empty: now.visionKph === null, ahead: !!now.visionAhead}"><svg viewBox="0 0 24 17">
               <path :d="HUD_ICONS.eye" fill="currentColor" fill-rule="evenodd"/></svg><b>{{ now.visionKph ?? '–' }}</b>
               <small v-if="now.visionAhead" class="dr-box-ahead">{{ now.visionAhead }}</small></span>
-            <span class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
+            <span v-if="limits" class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
             <span class="dr-box dr-box-car"><svg viewBox="2 4 20 18"><path :d="HUD_ICONS.car" fill="currentColor"/></svg>
               <b>{{ (ownSpeed ? carKph : now.carKph) ?? '–' }}</b></span>
             <slot name="hud"></slot>

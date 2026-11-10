@@ -1,4 +1,4 @@
-// The drives as the comma recorded them, against its own logs, for the drive player of Speed review and Regression
+// The drives as the comma recorded them, against its own logs, for the drive player of Speed review and Models › Drive
 // (DriveReviewDrive.vue) and Sign review's car bar; the signs of a moment are reviewed on the Signs side (signReviewHref).
 // The server reads the logs (nnslr_tools.drive_review: no networks, CPU only). Here: the types of /api/drive-review, a
 // series' value at a time, and a time of the logs as a time of the drive's video (the encode index of every frame: never
@@ -175,6 +175,11 @@ export interface Timeline {
   /** The drive has frames in Sign review (a pre-annotation report). */
   sign_review: boolean;
 }
+
+/** The eye of the vision's squares on the picture, in a box of 24 × 17 as the comma's (the player's own square, and the
+ * comma's screen of Models › Drive, CommaScreen.vue). */
+export const EYE_ICON = 'M12 1C6.6 1 2.4 4.4 1 8.5 2.4 12.6 6.6 16 12 16s9.6-3.4 11-7.5C21.6 4.4 17.4 1 12 1ZM12 4.3a4.2 4.2 0 1 0 0 8.4a4.2 4.2 0 1 0 0-8.4Z'
+  + 'M12 6.5a2 2 0 1 0 0 4a2 2 0 1 0 0-4Z';
 
 // -- words ---------------------------------------------------------------------------------------------------------------
 

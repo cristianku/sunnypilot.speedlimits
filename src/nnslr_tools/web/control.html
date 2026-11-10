@@ -1856,6 +1856,86 @@ color:var(--fg);font:inherit;font-size:16px}
 .rw-kind[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
 .rw-kind:disabled{opacity:.4;cursor:default}
 @media (pointer:coarse){.rw-kind,.rw-name{min-height:40px}}
+/* Models › Drive (DriveTab.vue, DriveSimulation.vue): the set of networks with its versions, the regression test of the
+   certified drives and the drives; then one drive in the drive player (DriveReviewDrive.vue) with the comma's screen on
+   its picture (.cms-… below), SignNet's boxes of the frame read, three lanes over the player's and its card at the top
+   of the side. */
+.dv-networks,.dv-test{display:flex;flex-direction:column;gap:10px}
+.dv-nets{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:3px 14px;font-size:13.5px}
+.dv-nets dt{color:var(--muted)}
+.dv-nets dd{margin:0;font-family:var(--font-data);font-size:12.5px;overflow-wrap:anywhere}
+.dv-run{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.dv-run p{margin:0;flex:1 1 220px}
+/* The job of a replay inside a card: no card of its own; in the side of a drive its steps go under its bar. */
+.dv-job .jp{padding:0;box-shadow:none;background:none;border-radius:0;overflow:visible}
+.dv-job .jp-running::before{display:none}
+.dv-job-side{padding-top:10px;border-top:1px solid var(--line)}
+.dv-job-side .jp.has-steps .jp-body{grid-template-columns:minmax(0,1fr)}
+.dv-job-side .jp-big{font-size:30px}
+/* A drive of the list: under its name the drive's id, and at the right what it has for the set chosen (on a narrow
+   phone on a line of its own, still at the right). */
+.dv-has{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:13px;font-variant-numeric:tabular-nums}
+.dv-has .dr-route{color:var(--muted)}
+.dv-state{display:inline-flex;align-items:center;gap:8px;margin-left:auto}
+.dv-badge{display:inline-flex;align-items:center;flex:none;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);
+font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;
+text-transform:uppercase}
+/* Over the picture, in the box of the video (the same letterbox): SignNet's boxes in the frame's pixels, red a sign of
+   our road, grey and dashed one of another road. A tap still plays and pauses the video under them. */
+.dv-overlay{position:absolute;inset:0;pointer-events:none}
+.dv-boxes{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.dv-box rect{fill:none;stroke:var(--ov-speed);stroke-width:2.5;vector-effect:non-scaling-stroke}
+.dv-box text{fill:var(--ov-speed);stroke:var(--ov-halo);stroke-opacity:.9;stroke-width:.16em;stroke-linejoin:round;paint-order:stroke;
+font-family:var(--font-ui);font-weight:700}
+.dv-box.other rect{stroke:var(--ov-none);stroke-dasharray:6 4}
+.dv-box.other text{fill:var(--ov-none)}
+/* The lanes: the speed to hold in the fuchsia of its square; where a replay differs from the certified drive, red the
+   speed to hold and orange the reading, each with room around it for a finger. */
+.dr-lanes rect.dv-hold{fill:rgba(176,38,212,.3)}
+.dr-lanes .dv-differ{cursor:pointer}
+.dr-lanes rect.dv-hit{fill:transparent;stroke:none}
+.dr-lanes rect.dv-differ-limit{fill:var(--bad);stroke:none}
+.dr-lanes rect.dv-differ-reading{fill:var(--warn);stroke:none}
+/* The side: whose squares, two a row so that their names fit a phone (an odd last one takes the row), the values at the
+   time shown, then the regression test and the certification, each under a line. */
+.dv-source{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+.dv-source button{min-width:0;padding-left:6px;padding-right:6px;white-space:nowrap}
+.dv-source button:last-child:nth-child(odd){grid-column:1/-1}
+.dv-now{margin:0;display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;font-size:13.5px}
+.dv-now dt{color:var(--muted)}
+.dv-now dd{margin:0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.dv-regression,.dv-certified{display:flex;flex-direction:column;gap:8px;padding-top:10px;border-top:1px solid var(--line)}
+.dv-certified{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+.dv-certified p{flex:1 1 0;min-width:0}
+.dv-verdict{margin:0;font-size:14px;font-weight:600;color:var(--bad)}
+.dv-verdict.same{color:var(--ok)}
+/* The comma's screen on the picture of a drive (CommaScreen.vue): the car's two squares in the comma's own pixels and
+   colours (sunnypilot's vision_speed_limit.py and sign_reading.py). The vision square is fuchsia with a speed to hold,
+   dark with a dash without; the reading square dark, its border red while the sign is in view; white where there is
+   something to read, grey where not. Places, sizes and the pulse come from the component; the page places the screen. */
+/* CommaInter: the comma's own font for its squares, Inter Bold 3.012 as the car loads it (sunnypilot
+   selfdrive/assets/fonts/Inter-Bold.ttf, from https://github.com/rsms/inter), subset to what the squares can show
+   (digits, the letters of END MWY EXP TOWN, a-z for the road types and the units, % - ? and the space), without
+   hinting, kerning or substitutions, which raylib does not use either. Copyright 2020 The Inter Project Authors,
+   licensed under the SIL Open Font License 1.1 (https://openfontlicense.org), its notices kept in the font. The page's
+   CSP allows font-src data:. In .cms no kerning, ligatures or hinting: each letter's advance as raylib's. */
+@font-face{font-family:CommaInter;font-style:normal;font-weight:700;font-display:swap;src:url(data:font/woff2;base64,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) format('woff2')}
+.cms{position:absolute;display:block;overflow:visible;pointer-events:none;font-family:CommaInter,Inter,var(--font-ui);font-weight:700;
+letter-spacing:0;font-kerning:none;font-variant-ligatures:none;text-rendering:geometricPrecision}
+.cms-line{fill:none;stroke-width:3}
+.cms-vision{fill:rgba(176,38,212,.45)}
+.cms-vision.none{fill:rgba(40,40,40,.45)}
+.cms-vision-line{stroke:rgba(226,120,248,.82)}
+.cms-vision-line.none{stroke:rgba(176,38,212,.45)}
+.cms-reading{fill:rgba(40,40,40,.45)}
+.cms-reading-line{stroke:#919b95}
+.cms-reading-line.seen{stroke:rgba(235,60,60,.92)}
+.cms-text{fill:#fff;text-anchor:middle}
+.cms-text.none{fill:#919b95}
+.cms-cross{stroke:#fff;stroke-width:3}
+.cms-road{fill:rgba(226,120,248,.82);text-anchor:end}
+.cms-pulse rect{fill:#fff}
+.cms-pulse .cms-line{fill:none;stroke:#fff}
 /* __NNSLR_SIGN_EDITOR_CSS__ */
 /* __NNSLR_AI_SHEET_CSS__ */
 .sr-ai{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin-top:12px}

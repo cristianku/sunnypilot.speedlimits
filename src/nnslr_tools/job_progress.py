@@ -87,6 +87,11 @@ PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames 
 # also segment by segment ("SEGMENT 3/33 <folder>", evaluation/route_speed.py of openpilot.distill).
 REGRESSION_STEPS = (('openpilot', 'Run the driving models', 70), ('signs', 'Read the signs of the drives', 15),
                     ('brains', 'Run the brains', 15))
+# helpers/simulate_drive.sh: "== 1/2 Get the networks ready ==" (the versions in use exported, when they changed),
+# "== 2/2 Replay the drive ==", then nnslr simulate: "drives: N", "minute j/M: ..." a minute of the drive being replayed
+# (and its report, nnslr_tools.progress, task 'simulate') and one "drive i/N <route>: ..." a drive (replayed, replayed
+# already or failed).
+SIMULATE_STEPS = (('networks', 'Get the networks ready', 10), ('replay', 'Replay the drive', 90))
 # scripts/publish_networks.sh: "== 1/4 Export the cutter" ... (prepare), "== 1/3 Check the package" ... (upload).
 NETWORKS_PREPARE_STEPS = (('cutter', 'Export the cutter', 40), ('classifier', 'Export the classifier', 20),
                           ('decider', 'Export applicability', 30), ('package', 'Model card and checks', 10))
@@ -142,7 +147,8 @@ AI_MEASURE_STEPS = (('measure', 'Measure the AI reviewer', 100),)
 STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEPS, 'train': TRAIN_STEPS,
          'train_continue': TRAIN_STEPS, 'train_resume': TRAIN_STEPS, 'train_classifier': CLASSIFIER_STEPS,
          'train_cutter': CUTTER_STEPS, 'train_decider': DECIDER_STEPS,
-         'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS, 'update': UPDATE_STEPS, 'ai_review': AI_REVIEW_STEPS,
+         'train_brain': BRAIN_STEPS, 'regression': REGRESSION_STEPS, 'simulate': SIMULATE_STEPS, 'update': UPDATE_STEPS,
+         'ai_review': AI_REVIEW_STEPS,
          'measure_ai_reviewer': AI_MEASURE_STEPS, 'networks_prepare': NETWORKS_PREPARE_STEPS,
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS,
@@ -150,7 +156,7 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'sign_tracks': SIGN_TRACKS_STEPS, 'box_fit_train': BOX_FIT_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-            'train_brain', 'regression', 'dataset', 'ai_review',
+            'train_brain', 'regression', 'simulate', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
             'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks',
             'box_fit_train')
@@ -173,6 +179,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'train_decider': (5, DECIDER_PIPELINE),
             'train_brain': (6, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}),
             'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
+            'simulate': (2, {1: 'networks', 2: 'replay'}),
             'networks_prepare': (4, {1: 'cutter', 2: 'classifier', 3: 'decider', 4: 'package'}),
             'networks_publish': (3, {1: 'check', 2: 'catalog', 3: 'upload'}),
             'send_to_car': (5, {1: 'export', 2: 'publish', 3: 'record', 4: 'move', 5: 'build'}),
@@ -206,17 +213,21 @@ MARKERS = (
     (re.compile(r'^road_labeler epoch \d'), 'road_labeler', ()),
 )
 # helpers/road_labeler.sh: how many drives it goes through ("drives:       12"), the step that goes through them, and
-# the line of each drive done (its features, or left out; for predict, its summary). helpers/sign_tracks.sh the same.
+# the line of each drive done (its features, or left out; for predict, its summary). helpers/sign_tracks.sh and
+# helpers/simulate_drive.sh the same.
 LABELER_DRIVES = re.compile(r'^drives:\s+(\d+)\s*$')
-LABELER_DRIVE_STEP = {'road_labeler_train': 'features', 'road_labeler_predict': 'predict', 'sign_tracks': 'frames'}
+LABELER_DRIVE_STEP = {'road_labeler_train': 'features', 'road_labeler_predict': 'predict', 'sign_tracks': 'frames',
+                      'simulate': 'replay'}
 LABELER_DRIVE_LINE = {
     'road_labeler_train': re.compile(r'^\S+: (?:features of \d+ steps|no finished scan or no frames, left out|'
                                      r'no scan, left out)'),
     'road_labeler_predict': re.compile(r'^(?:\{"route_id": |\S+: no scan, left out)'),
     'sign_tracks': re.compile(r'^drive \d+/\d+ \S+: '),
+    'simulate': re.compile(r'^drive \d+/\d+ \S+: '),
 }
-# nnslr sign-tracks: "minute j/M: ..." as each minute of the drive being read is done (before its "drive i/N" line).
-LABELER_MINUTE = {'sign_tracks': re.compile(r'^minute (\d+)/(\d+):')}
+# nnslr sign-tracks and nnslr simulate: "minute j/M: ..." as each minute of the drive being read is done (before its
+# "drive i/N" line).
+LABELER_MINUTE = {'sign_tracks': re.compile(r'^minute (\d+)/(\d+):'), 'simulate': re.compile(r'^minute (\d+)/(\d+):')}
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
 REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
@@ -275,6 +286,13 @@ FAILURES = (
      'The GPU was busy with another job: wait for it to finish, or start a dry run on the CPU.'),
     (re.compile(r'^helpers/(?:road_labeler|sign_tracks)\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
      'No GPU answered: a dry run runs on the CPU.'),
+    # helpers/simulate_drive.sh and nnslr simulate: the replay is always on a V100, never on the CPU.
+    (re.compile(r'^helpers/simulate_drive\.sh: GPU \d+ has only', re.M),
+     'No card had the room for the replay: it needs about 2 GB of a V100 and never runs on the CPU. Free some memory on '
+     'a card, then try again.'),
+    (re.compile(r'^helpers/simulate_drive\.sh: (?:no nvidia-smi|nvidia-smi)|did not load on the GPU|no onnxruntime for the GPU|'
+                r'The GPU did not decode', re.M),
+     'No GPU for the replay: it always runs on a V100, never on the CPU. Free a card, then try again.'),
     # scripts/train_box_fit.sh and its refiner.
     (re.compile(r'^Too few boxes drawn by people to train the box fit', re.M),
      'Too few boxes drawn by people to train Fit box yet: nothing changed.'),
@@ -361,8 +379,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     # The road labeler: the drives it goes through, and those done.
     labeler_drives: int | None = None
     labeler_done = 0
-    # The share of the drive being read that is done (its minutes, for sign_tracks).
+    # The share of the drive being read that is done (its minutes, for sign_tracks and simulate), and those minutes: the
+    # last one done and how many it has.
     labeler_share = 0.0
+    labeler_minute: tuple[int, int] | None = None
     # The curves of the training: per network, one point per epoch.
     curves: dict[str, dict] = {}
     for raw in text.splitlines():
@@ -449,8 +469,10 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             elif LABELER_DRIVE_LINE[action].match(line):
                 labeler_done += 1
                 labeler_share = 0.0
+                labeler_minute = None
             elif action in LABELER_MINUTE and (match := LABELER_MINUTE[action].match(line)):
                 labeler_share = min(int(match.group(1)) / max(int(match.group(2)), 1), 1.0)
+                labeler_minute = (int(match.group(1)), max(int(match.group(2)), 1))
     # Step 4 of two stages is the pretraining until the script starts the second ("-- the second stage").
     if two_stages and current == 'classifier' and not SECOND_STAGE.search(text):
         current = 'pretrain'
@@ -469,12 +491,18 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         inside = {'done': done_share, 'total': item[2], 'percent': round(done_share * 100 / item[2], 1),
                   'text': f'drive {min(item[1] + 1, item[2])} of {item[2]}'}
     labeler_step = action in LABELER_DRIVE_STEP and current == LABELER_DRIVE_STEP[action] and bool(labeler_drives)
+    # One drive replayed (Compute on its page of Models › Drive), not the certified ones one after the other.
+    one_replay = action == 'simulate' and labeler_drives == 1
     if labeler_step and not complete:
         reached_drives = min(labeler_done, labeler_drives)
         reached_share = min(reached_drives + (labeler_share if reached_drives < labeler_drives else 0.0), labeler_drives)
         inside = {'done': reached_share, 'total': labeler_drives,
                   'percent': round(reached_share * 100 / labeler_drives, 1),
                   'text': f'drive {min(reached_drives + 1, labeler_drives)} of {labeler_drives}'}
+        if one_replay:
+            # The minute at work says more than "drive 1 of 1".
+            inside['text'] = (f'minute {min(labeler_minute[0] + 1, labeler_minute[1])} of {labeler_minute[1]}'
+                              if labeler_minute else '')
     finished_ok = state == 'ok'
     rows = []
     for key, label, _ in steps:
@@ -512,7 +540,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         name = dict((key, label) for key, label, _ in steps).get(epoch[0], epoch[0]) \
             if epoch[0].startswith(('experiment_b', 'brain')) else NET_NAMES.get(epoch[0], epoch[0])
         detail = name + ' · epoch ' + str(epoch[1]) + ' of ' + str(epoch[2])
-    elif labeler_step and state == 'running':
+    elif labeler_step and state == 'running' and not one_replay:
         detail = f'{min(labeler_done, labeler_drives)} of {labeler_drives} drives done'
     elif action == 'prepare_again' and preparation is not None and preparation.get('again'):
         detail = again_detail(preparation)
@@ -613,6 +641,8 @@ TASK_STEPS = {'import': 'import', 'validate': 'split', 'split': 'split', 'detect
               'mine': 'mine', 'classifier': 'classifier', 'chain': 'chain',
               # Its first stage on the Mapillary crops alone (NNSLR_CLASSIFIER_MAPILLARY=pretrain).
               'pretrain': 'pretrain',
+              # nnslr simulate: the minutes of the drive being replayed.
+              'simulate': 'replay',
               # [ai-reviewer] - START
               # nnslr ai-review and nnslr measure-ai-reviewer: a frame at a time.
               'ai_review': 'review', 'ai_measure': 'measure'}
@@ -629,7 +659,11 @@ def with_step_progress(result: dict, action: str, record: dict | None, setup_lin
     if current is None:
         return result
     step_progress = result.get('step_progress')
-    if record is not None and TASK_STEPS.get(record.get('task')) == current and record.get('total'):
+    # A replay's log counts the drives done and the minutes of the one at work (progress()); its report counts those
+    # minutes only, from 0 again for each drive: it stands in while the log has no count of its own, not to go back
+    # from 100% to 0 at every certified drive.
+    counted = action == 'simulate' and step_progress is not None
+    if record is not None and not counted and TASK_STEPS.get(record.get('task')) == current and record.get('total'):
         done, total = int(record['done']), int(record['total'])
         share = min(done, total) / total
         text = str(record.get('text') or '')

@@ -396,11 +396,12 @@ def test_panel_page_status_and_run_over_http(served):
     # The tabs are one page (Overview is the home page); the old addresses lead to them.
     # Each tab served with its own window title, as the bar names it.
     for path, title in (('/', 'Overview'), ('/prepare', 'Drives'), ('/dataset', 'Training dataset'), ('/train', 'Training'),
-                        ('/evaluate', 'Results'), ('/models', 'Versions'), ('/publish', 'Publish')):
+                        ('/evaluate', 'Results'), ('/models', 'Versions'), ('/drive', 'Drive'), ('/publish', 'Publish')):
         status, response, data = served.request('GET', path)
         assert status == 200 and f'<title>Speed limits · {title}</title>' in data.decode(), path
     for path, target in (('/pannello', '/'), ('/stato', '/'), ('/panoramica', '/'), ('/prepara', '/prepare'),
-                         ('/allena', '/train'), ('/settings', '/account'), ('/review', '/speed-review')):
+                         ('/allena', '/train'), ('/settings', '/account'), ('/review', '/speed-review'),
+                         ('/regression', '/drive')):
         status, response, data = served.request('GET', path)
         assert status == 303 and response.getheader('Location') == target, path
     payload = json_of(served.request('GET', '/api/panel/status')[2])
@@ -437,7 +438,7 @@ def test_panel_needs_the_sign_in_like_the_rest_of_the_site(root, checkout):
     server.app.panel = Panel(root, repo=checkout)
     try:
         # Signed out, the pages show the sign-in page and the API answers 401.
-        for path in ['/', '/prepare', '/train', '/evaluate', '/models']:
+        for path in ['/', '/prepare', '/train', '/evaluate', '/models', '/drive']:
             status, response, data = server.request('GET', path)
             assert status in (200, 401) and asset('js/login.js').encode() in data, path
         assert server.request('GET', '/api/panel/status')[0] == 401

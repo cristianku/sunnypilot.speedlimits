@@ -27,7 +27,7 @@ def served(tmp_path):
 
 # Each page and the section its tab marks; the review page of a drive has no tab bar (its controls are at the bottom).
 PAGES = [('/', 'Overview'), ('/prepare', 'Data'), ('/dataset', 'Data'), ('/train', 'Training'), ('/evaluate', 'Models'),
-         ('/models', 'Models'), ('/publish', 'Models'), ('/speed-review', 'Data'),
+         ('/models', 'Models'), ('/drive', 'Models'), ('/publish', 'Models'), ('/speed-review', 'Data'),
          ('/account', None), (f'/route/{ROUTE}/', None), ('/nonexistent', None)]
 
 
@@ -56,6 +56,7 @@ def test_every_page_has_the_shared_look_the_account_menu_and_its_script(served, 
 
 
 @pytest.mark.parametrize('path, title', [('/', 'Overview'), ('/prepare', 'Drives'), ('/speed-review', 'Speed review'),
+                                         ('/drive', 'Drive'),
                                          ('/account', 'Settings'), (f'/route/{ROUTE}/', 'Sign review'),
                                          ('/nonexistent', 'Page not found')])
 def test_every_page_title_names_the_page_as_the_bar_does(served, path, title):

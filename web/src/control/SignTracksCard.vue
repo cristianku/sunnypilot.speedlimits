@@ -65,7 +65,7 @@ const STATE_TEXT: Record<SignTracksDrive['state'], string> = {
   none: 'not read yet', done: 'read by the networks in use', old: 'read by older networks or on other minutes',
   partial: 'stopped half way',
 };
-const stateText = (drive: SignTracksDrive): string => !drive.video ? 'its video must be made again first (Drive view)'
+const stateText = (drive: SignTracksDrive): string => !drive.video ? 'its video must be made again first (open it in Models › Drive)'
   : drive.state === 'partial' ? STATE_TEXT.partial + ': ' + drive.done_minutes + ' of ' + plural(drive.minutes, 'minute')
     : STATE_TEXT[drive.state];
 const driveFacts = (drive: SignTracksDrive): string => drive.made_at

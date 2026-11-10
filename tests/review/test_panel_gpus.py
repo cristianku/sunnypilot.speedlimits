@@ -230,6 +230,8 @@ def test_an_import_or_the_whole_pipeline_runs_alone_either_way(panel, checkout, 
     ('train_cutter', 'train_classifier', False), ('train_cutter', 'train_cutter', False),
     ('train_classifier', 'train_decider', False), ('train_brain', 'train_cutter', False),
     ('road_labeler_train', 'sign_tracks', False), ('regression', 'train_classifier', False),
+    ('simulate', 'train_cutter', False), ('simulate', 'train_brain', False), ('simulate', 'regression', False),
+    ('simulate', 'sign_tracks', False), ('simulate', 'simulate', True), ('simulate', 'dataset', True),
     ('train_brain', 'train_brain', True), ('regression', 'regression', True), ('sign_tracks', 'sign_tracks', True),
     ('measure_proposer', 'measure_proposer', True), ('road_labeler_train', 'road_labeler_train', True),
     ('road_labeler_predict', 'road_labeler_predict', True),
@@ -679,17 +681,22 @@ def test_the_actions_that_take_a_card_of_their_own():
     assert set(panel_module.EXCLUSIVE_GPU) == {
         'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain',
         'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks'}
+    # The replay of a drive (Models › Drive) shares the card with the most free memory: about 1 GB of a V100.
+    assert panel_module.SHARED_GPU == {'simulate': 2048}
+    # Nor among those with a dry run: it has no run on the CPU.
     assert set(panel_module.DRY_ON_CPU) == {'road_labeler_train', 'road_labeler_predict', 'sign_tracks'}
 
 
 @pytest.mark.parametrize('action, options', [
     ('train', None), ('train_continue', None), ('train_resume', {'run': '2026-11-10_1200-run'}), ('train_decider', None),
-    ('regression', None), ('measure_proposer', None), ('setup_vlm', None),
+    ('regression', None), ('simulate', None), ('measure_proposer', None), ('setup_vlm', None),
 ])
 def test_each_gpu_action_takes_a_card(panel, root, checkout, monkeypatch, action, options):  # noqa: F811
     monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(FREE, ''))
-    # The regression's drives and models are its own tests' (test_regression*.py).
+    # The regression's drives and models are its own tests' (test_regression*.py), the replay's drive and networks
+    # too (test_panel_simulation.py).
     monkeypatch.setattr(panel, '_regression_choices', lambda options: {})
+    monkeypatch.setattr(panel, '_simulate_arguments', lambda options: [])
     script = checkout / panel_module.ACTIONS[action]['command'][0]
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(GPU_SCRIPT)
@@ -847,7 +854,7 @@ def test_every_label_of_the_train_group_has_its_kind():
 @pytest.mark.parametrize('label, kind', [
     ('cutter training', 'train_cutter'), ('brain training', 'train_brain'), ('classifier training', 'train_classifier'),
     ('regression', 'regression'), ('road labeler', 'road_labeler_train'), ('sign tracks', 'sign_tracks'),
-    ('dataset and training', 'train'), ('GPU training', 'train'),
+    ('drive replay', 'simulate'), ('dataset and training', 'train'), ('GPU training', 'train'),
 ])
 def test_work_from_a_terminal_follows_the_pairs_of_its_kind(root, label, kind):  # noqa: F811
     panel = Panel(root)

@@ -56,7 +56,8 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 # review (the one review page of a drive: the speed a person wants held along it on its Speed side, the boxes of its
 # signs on its Signs side, which took the place of the page of Sign review on 9 Nov 2026), Sign distance
 # (where the comma's vision says a sign is passed against the frame a person marks) and the training dataset; Models the
-# versions to choose, their results and the package to publish.
+# versions to choose, Drive (a recorded drive replayed with a set of networks: the comma's screen over its video, and the
+# certified drives of the regression test), their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
@@ -64,8 +65,8 @@ SECTIONS = (
                                   ('signdistance', '/sign-distance', 'Sign distance'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
-    ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('evaluate', '/evaluate', 'Results'),
-                                     ('regression', '/regression', 'Regression'), ('publish', '/publish', 'Publish'))),
+    ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('drive', '/drive', 'Drive'),
+                                     ('evaluate', '/evaluate', 'Results'), ('publish', '/publish', 'Publish'))),
 )
 # Every page of the site: (key, address, label), the page label for a page of a section ("Drives").
 SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (pages or ((key, href, label),)))
@@ -74,7 +75,8 @@ SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages o
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset',
                 '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
-                '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/regression': 'regression', '/publish': 'publish'}
+                '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/drive': 'drive',
+                '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).
 SECTION_ICONS = {
     'overview': '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
@@ -87,12 +89,15 @@ SECTION_ICONS = {
 # review is gone (7 Nov 2026): its drive player is Speed review's, where its links lead with their drive and moment.
 # Sign review's list of drives (/routes, /review, /index.html) is gone too (9 Nov 2026): its drives are in Speed review's
 # list, and a drive's page of Sign review (/route/<id>/) leads to the Signs side of Speed review (signs_address).
+# The Regression tab is gone as well (10 Nov 2026): Models › Drive took its place, and its links lead there with
+# their drive.
 # The home of a reviewer from outside. / cannot be: on the public names it is the page of the project, open to all, and
 # what is open carries nobody's name. The administrator has none of their own and lands on the Overview.
 GUEST_HOME = '/reviews'
 OLD_ADDRESSES = {GUEST_HOME: '/', '/panoramica': '/', '/pannello': '/', '/stato': '/', '/prepara': '/prepare', '/allena': '/train',
                  '/settings': '/account', '/review': '/speed-review', '/routes': '/speed-review',
-                 '/index.html': '/speed-review', '/roads': '/speed-review', '/drive-review': '/speed-review'}
+                 '/index.html': '/speed-review', '/roads': '/speed-review', '/drive-review': '/speed-review',
+                 '/regression': '/drive'}
 
 
 def signs_address(route: str, *, segment: int | None = None, second: float | None = None, frame: str | None = None) -> str:

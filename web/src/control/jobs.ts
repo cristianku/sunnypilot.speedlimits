@@ -18,7 +18,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
   review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train', sign_tracks: 'train',
-  box_fit_train: 'box_fit',
+  box_fit_train: 'box_fit', simulate: 'train',
 };
 
 /** The icon of each action, on its button. */
@@ -29,7 +29,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
   review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes', sign_tracks: 'routes',
-  box_fit_train: 'train',
+  box_fit_train: 'train', simulate: 'resume',
 };
 
 /**
@@ -41,7 +41,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   dataset: '/dataset', road_types: '/prepare', review_box: '/reviewers',
   train: '/train', train_continue: '/train', train_resume: '/train', train_classifier: '/train', train_brain: '/train',
   train_cutter: '/train', train_decider: '/train', ai_review: '/train', mapillary_locations: '/train', mapillary_windows: '/train',
-  measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/regression',
+  measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
   road_labeler_train: '/models', road_labeler_predict: '/models', sign_tracks: '/models', box_fit_train: '/models',
@@ -56,11 +56,12 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 
 /** The tab of work started from a terminal, by its group (nnslr_tools.panel.ACTIVITIES); a measure is Evaluate's, the
  * map reading is Prepare's like the rest of its group (in its own card there, RoadTypesCard.vue), the Mapillary positions
- * and windows Train's (its classifier and its cutter). */
+ * and windows Train's (its classifier and its cutter), the replay of a drive Models › Drive's. */
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.group === 'mapillary') return '/train';
   if (activity.group === 'box_fit') return '/models';
   if (activity.label === 'networks on the comma' || activity.label === 'sign tracks') return '/models';
+  if (activity.label === 'drive replay') return '/drive';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
   if (activity.group === 'publish') return '/publish';
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;
@@ -155,10 +156,10 @@ export function terminalActivities(status: PanelStatus | null, groups?: string[]
 }
 
 /** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings, the
- * road labeler and the signs on every frame but for their dry runs). */
+ * road labeler and the signs on every frame but for their dry runs, the replay of a drive). */
 const GPU_ACTIONS: ActionName[] = ['prepare', 'prepare_again', 'measure_proposer', 'setup_vlm', 'train', 'train_continue',
   'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain', 'regression', 'road_labeler_train',
-  'road_labeler_predict', 'sign_tracks'];
+  'road_labeler_predict', 'sign_tracks', 'simulate'];
 /** The same for work started from a terminal, by group ("other": the driving model of openpilot.distill). */
 const GPU_GROUPS = ['prepare', 'train', 'other'];
 

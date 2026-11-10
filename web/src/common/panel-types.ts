@@ -4,7 +4,7 @@ import type {AiState} from './ai-types';
 export type ActionName = 'fetch' | 'prepare' | 'prepare_again' | 'measure_proposer' | 'setup_vlm' | 'dataset' | 'train' | 'train_continue' | 'train_resume' | 'train_classifier'
   | 'train_cutter' | 'train_decider' | 'train_brain' | 'regression' | 'update' | 'ai_review' | 'measure_ai_reviewer' | 'networks_prepare' | 'networks_publish'
   | 'road_types' | 'send_to_car' | 'try_on_comma' | 'comma_restore' | 'mapillary_locations' | 'mapillary_windows' | 'review_box'
-  | 'road_labeler_train' | 'road_labeler_predict' | 'sign_tracks' | 'box_fit_train';
+  | 'road_labeler_train' | 'road_labeler_predict' | 'sign_tracks' | 'box_fit_train' | 'simulate';
 /** What a cutter learns to find: every sign (the speed signs and the other signs) or the speed signs only. */
 export type CutterFamilies = 'all' | 'speed';
 /** The options of “Train the cutter” (POST /api/panel/run/train_cutter {"families"}): a SignNet at the car's band. */
@@ -95,6 +95,10 @@ export interface ActionOptions {
   /** Train Fit box (box_fit_train): off trains the two rankers alone, without the box refiner (--no-refiner); a dry run
    * (dry) only counts the boxes. */
   refiner?: 'on' | 'off';
+  /** Replay a drive (simulate, Models › Drive): the set of networks ("car", "in-use"), with the drive in route, or with
+   * certified "1" every certified drive instead (the regression test). */
+  set?: string;
+  certified?: string;
 }
 /** GET /api/panel/box-fit (nnslr_tools.panel.Panel.box_fit): the last summary of each part of Fit box, null before the
  * first training. The mean IoU is with the person's box on routes left out, from 0 to 1. */
@@ -138,8 +142,8 @@ export interface BoxFitPayload {
 }
 /** GET /api/panel/sign-tracks (nnslr_tools.sign_tracks.summary): a drive with its video and its signs on every frame.
  * none: not read yet; done: by the networks in use on these minutes; old: by other networks or on other minutes;
- * partial: a run stopped on it (the minutes done are kept). video: its video matches its minutes (else Drive view makes
- * it again first). */
+ * partial: a run stopped on it (the minutes done are kept). video: its video matches its minutes (else opening the
+ * drive makes it again first). */
 export interface SignTracksDrive {
   route: string;
   minutes: number;

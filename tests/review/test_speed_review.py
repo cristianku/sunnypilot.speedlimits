@@ -910,5 +910,7 @@ def test_an_agent_has_no_way_to_write_a_speed():
 
 
 def test_every_control_page_shows_the_sign_in_page_without_a_session():
-    assert '/speed-review' in CONTROL_TABS
+    assert '/speed-review' in CONTROL_TABS and '/drive' in CONTROL_TABS
     assert [path for path in CONTROL_TABS if not PAGE_RE.fullmatch(path)] == []
+    # An address that left the tabs (Regression, now Models › Drive) still asks for the sign-in before it leads on.
+    assert '/regression' not in CONTROL_TABS and PAGE_RE.fullmatch('/regression')

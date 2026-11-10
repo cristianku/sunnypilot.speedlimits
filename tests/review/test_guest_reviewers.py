@@ -294,7 +294,10 @@ def test_a_walk_of_the_site_finds_only_what_the_table_opens(outside):
             else:
                 opened.append((method, path))
     assert ('GET', '/api/auth/state') in opened and ('GET', '/reviews') in opened
-    assert all(not path.startswith(('/api/ai', '/api/settings', '/api/regression')) for _, path in opened)
+    assert all(not path.startswith(('/api/ai', '/api/settings', '/api/regression', '/api/simulation'))
+               for _, path in opened)
+    # The addresses of Models › Drive are in the walk, and stayed closed.
+    assert {'/drive', '/api/simulation/drives'} <= walked
     assert all('/scan' not in path and '/logs' not in path for _, path in opened)
 
 

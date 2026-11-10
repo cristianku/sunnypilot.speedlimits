@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Read the logs, at the top of Data › Speed review: reads the comma's logs (rlog, qlog) of every drive not read yet
-// (POST /api/drive-review/scan-all: no networks, CPU only), what the proposals there, Sign distance, Regression and the
+// (POST /api/drive-review/scan-all: no networks, CPU only), what the proposals there, Sign distance, Models › Drive and the
 // brain's training read. The drives and the state of their logs are the list's (SpeedReviewTab.vue, the same rows as
 // GET /api/speed-review/drives); the list reads them again every 2 s while logs are read. A single drive is read from
 // its player (Search the logs).
@@ -49,7 +49,7 @@ async function readAll(): Promise<void> {
         <strong>{{ !drives ? (error ? 'The drives could not be read' : 'Reading the drives…') : busy ? 'Reading the logs…'
           : toRead ? 'Logs of ' + plural(toRead, 'drive') + ' to read' : 'The logs of every drive are read' }}</strong>
         <span>Reads the comma's logs (rlog, qlog) of the drives: the limits it had, the car's speed and what openpilot did, for the
-          answers of Speed review, Sign distance, Regression and the brain's training. No networks: only the logs, on the CPU.</span>
+          answers of Speed review, Sign distance, Models › Drive and the brain's training. No networks: only the logs, on the CPU.</span>
       </div>
       <button type="button" class="btn" :class="{primary: toRead > 0}" id="read-logs-all" :disabled="readOnly || starting || busy || !toRead"
               @click="readAll">Read the logs</button>

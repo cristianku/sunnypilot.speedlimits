@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// Results, in two views. Drive (DriveView.vue, the first): a test drive replayed as in the car, with the limit the
-// networks would show next to the signs'. Scores: by network, choose what to judge (the whole chain, the cutter, the classifier, the decider); every
+// Results, the scores: by network, choose what to judge (the whole chain, the cutter, the classifier, the decider); every
 // version of it in one table, judged by the one number that matters for that network, next to the version in use;
 // the version chosen (or the one “Open the run ›” of Models and Train asks for, ?model=) played frame by frame on the
 // test (WatchSection), and all the numbers of its run folded below. Chains measured with another cutter are marked
@@ -25,26 +24,19 @@ import RunDetailView from './RunDetail.vue';
 import Segmented from './Segmented.vue';
 import WatchSection from './WatchSection.vue';
 import SectionHead from './SectionHead.vue';
-import DriveView from './DriveView.vue';
 import {usePoll} from '../composables/poll';
 
 const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]}>();
-/** A measure (of a proposer, of an AI reviewer) running, or the last one when it failed: its card at the top, in every
- * view (its dot in the top bar leads here, jobs.ts ACTION_TAB). */
+/** A measure (of a proposer, of an AI reviewer) running, or the last one when it failed: its card at the top (its dot
+ * in the top bar leads here, jobs.ts ACTION_TAB). */
 const measureJob = computed(() => {
   const job = jobOf(props.status, EVALUATE_ACTIONS);
   return job && (job.state === 'running' || job.state === 'failed') ? job : null;
 });
 /** The words of a proposer or AI reviewer not measured yet: Measure is pressed only when no measure runs. */
 const notMeasured = computed(() => measureJob.value?.state === 'running' ? 'not measured yet' : 'not measured yet: press Measure');
-
-/** Drive (as in the car) or Scores (the numbers of every version), kept in this browser. */
-type Mode = 'drive' | 'scores';
-const MODES: {key: Mode; label: string}[] = [{key: 'drive', label: 'Drive'}, {key: 'scores', label: 'Scores'}];
-const mode = ref<Mode>(localStorage.getItem('nnslr-results-mode') === 'scores' ? 'scores' : 'drive');
-watch(mode, (value) => localStorage.setItem('nnslr-results-mode', value));
 
 type View = 'proposers' | 'chain' | 'cutter' | 'classifier' | 'decider' | 'ai';
 const VIEWS: {key: View; label: string}[] = [
@@ -302,7 +294,6 @@ function openWanted(): void {
   selectedRun.value = null;
   const target = version === null ? undefined : ROLE_VIEW[version.role];
   if (version === null || target === undefined) return;
-  mode.value = 'scores';
   if (view.value === target) {
     picked.value = version.id;
   } else {
@@ -360,7 +351,6 @@ const nothingToPlay = computed((): string => {
 
 <template>
   <SectionHead tab="evaluate"/>
-  <Segmented v-model="mode" :options="MODES" label="Results as" class="results-mode"/>
 
   <section v-if="measureJob" class="live-section" :class="{now: measureJob.state === 'running'}" aria-labelledby="measure-job-title">
     <h2 class="section-title" id="measure-job-title">{{ measureJob.state === 'running' ? 'Running' : 'Last measure failed' }}</h2>
@@ -369,8 +359,6 @@ const nothingToPlay = computed((): string => {
     </div>
   </section>
 
-  <DriveView v-if="mode === 'drive'"/>
-  <template v-else>
   <section class="card ev-card" aria-labelledby="eval-title">
     <div class="ev-head">
       <h2 id="eval-title">What to judge</h2>
@@ -456,6 +444,5 @@ const nothingToPlay = computed((): string => {
       <summary>All the numbers of run {{ shown.run }}</summary>
       <RunDetailView :key="runSummary.name" :summary="runSummary" :detail="detail" :loading="loading" :error="error" no-watch/>
     </details>
-  </template>
   </template>
 </template>
