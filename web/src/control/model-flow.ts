@@ -110,12 +110,12 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
   // weights through their losses and were dropped from the file the car gets (brain_export).
   const extras = [
     {on: version.road_types.length > 0, id: 'type', title: 'Road type', sub: 'motorway, rural, town…',
-      what: 'the road type it sees', answer: 'Road types', where: 'OpenStreetMap, offline only, corrected in Speed review',
+      what: 'the road type it sees', answer: 'Road type (map)', where: 'OpenStreetMap, offline only, corrected in Speed review',
       note: 'The map only made these labels, offline: the car never gets it.'},
     {on: version.works === true, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
       what: 'whether the car is inside roadworks', answer: 'Roadworks', where: 'your marks in Speed review'},
-    {on: version.road_kinds.length > 0, id: 'road', title: 'Road characteristics', sub: version.road_kinds.join(', '),
-      what: 'the kinds of road it sees', answer: 'Kinds of road', where: 'your marks in Speed review'},
+    {on: version.road_kinds.length > 0, id: 'road', title: 'Road conditions', sub: version.road_kinds.join(', '),
+      what: 'the kinds of road it sees', answer: 'Road conditions', where: 'your marks in Speed review'},
   ].filter((extra) => extra.on);
   const trained: FlowBlock[] = [];
   if (extras.length) {

@@ -28,6 +28,8 @@ import {pct} from './evaluate';
 import {sizeText, useModels} from './models';
 import {useNetworkStart} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
+import {useSignNetworks} from './sign-networks';
+import SignNetworksPicker from './SignNetworksPicker.vue';
 import PipelineSection from './PipelineSection.vue';
 import Segmented from './Segmented.vue';
 import TerminalActivity from './TerminalActivity.vue';
@@ -185,11 +187,14 @@ watch(() => starts.brain.version?.id, () => {
   const version = starts.brain.version;
   if (version?.role === 'brain' && version.pool) brainChoices.pool = version.pool;
 }, {immediate: true});
+/** The networks that read its signs (sign-networks.ts), the same in its section and in the pipeline. */
+const signNetworks = useSignNetworks(versionsOf);
 /** The brain's training, in its card: three seeds, to choose one in Models. */
 const BRAIN_ACTIONS = computed((): [ActionName, string][] => [
-  ['train_brain', 'Three seeds of the brain' + brainChoices.words + starts.brain.words + ', one after the other, about 3 minutes each on the GPU, after '
-    + 'reading the signs of the drives as the car does, and with our networks in use those they have not read yet (the next limit). '
-    + 'Then you choose one in Models and Publish it.'],
+  ['train_brain', 'Three seeds of the brain' + brainChoices.words + starts.brain.words + signNetworks.words
+    + ', one after the other, about 3 minutes each on the GPU, after reading the signs of the drives as the car does '
+    + '(the applicability network leaves out those of another road), and with the same networks those they have not read '
+    + 'yet (the next limit). Then you choose one in Models and Publish it.'],
 ]);
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
@@ -368,8 +373,9 @@ const numbers = computed(() => {
       <template v-else-if="section === 'brain'">
         <NetworkStartPicker :start="starts.brain" id="train-brain-start"/>
         <BrainChoices :choices="brainChoices" id="train-brain"/>
+        <SignNetworksPicker :choice="signNetworks" id="train-brain"/>
         <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
-                    @run="(name, state) => emit('run', name, state, undefined, {...brainChoices.option, ...starts.brain.option})"/>
+                    @run="(name, state) => emit('run', name, state, undefined, {...brainChoices.option, ...starts.brain.option, ...signNetworks.option})"/>
         <p v-if="brainLabels?.training" class="latest-none" id="train-brain-marked">It learns every dashcam drive, each whole:
           <strong>{{ plural(brainLabels.training.drives, 'drive') }}</strong>,
           <strong>{{ brainLabels.training.hours.toFixed(1) }}</strong> h.</p>
@@ -383,16 +389,16 @@ const numbers = computed(() => {
           v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
           v-if="brainLabels.signs_to_read"> Our networks in use read {{ plural(brainLabels.signs_to_read, 'drive') }} first for the next limit.</template><template
           v-else-if="brainLabels.signs_to_read === null"> Our networks are not whole in Models: the next limit comes from your Sign review alone.</template><template
-          v-if="brainLabels.types"> With Road types on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
+          v-if="brainLabels.types"> With Road type (map) on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
           <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
           v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template
-          v-if="brainRoads.length"> The kinds of road of Speed review, seconds to learn from on each and checked off it:<template
+          v-if="brainRoads.length"> The road conditions of Speed review, seconds to learn from on each and checked off it:<template
           v-for="(road, index) in brainRoads" :key="road.kind">{{ index ? ';' : '' }} {{ road.label }}
           <strong>{{ thousands(road.in) }}</strong> on, <strong>{{ thousands(road.out) }}</strong> off</template>.</template><template
           v-else-if="brainLabels.road_kinds?.length"> No kind of road is marked in Speed review yet.</template></p>
         <p v-else class="latest-none" id="train-brain-labels">Counting the seconds of your drives…</p>
       </template>
-      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :brain-choices="brainChoices" :fresh="numbers?.fresh ?? 0"
+      <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :brain-choices="brainChoices" :sign-networks="signNetworks" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
                        @run="(name, state, start) => emit('run', name, state, start)"/>

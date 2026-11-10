@@ -38,6 +38,19 @@ def no_cards(monkeypatch):
     monkeypatch.setattr(Panel, 'system', lambda self: {'gpu': {'processes': 0}})
 
 
+# The networks in use that read the brain's signs (models/active.json): without an applicability network the brain is
+# refused (#31).
+IN_USE = {'cutter': 'cutter:c1/signnet', 'classifier': 'classifier:k1/classifier', 'decider': 'decider:d1/experiment-b/crop_geom'}
+
+
+@pytest.fixture(autouse=True)
+def sign_networks_in_use(monkeypatch):
+    from nnslr_tools import preannotate
+    in_use = dict(IN_USE)
+    monkeypatch.setattr(preannotate, 'networks_in_use', lambda root: dict(in_use))
+    return in_use
+
+
 def ready_payload(gpu_processes=0):
     return {'actions_enabled': True, 'routes': [], 'reviewed_routes': 0, 'min_routes': 3,
             'system': {'gpu': {'processes': gpu_processes}}}
@@ -50,7 +63,8 @@ def brain_script(checkout):
                       'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_POOL"\n'
                       'echo "road types: $NNSLR_BRAIN_TYPES"\n'
                       'echo "driver: ${NNSLR_BRAIN_DRIVER-unset}"\n'
-                      'echo "init=${NNSLR_BRAIN_INIT_FROM:-fresh}"\n')
+                      'echo "init=${NNSLR_BRAIN_INIT_FROM:-fresh}"\n'
+                      'echo "signs: ${NNSLR_BRAIN_CUTTER-unset} ${NNSLR_BRAIN_CLASSIFIER-unset} ${NNSLR_BRAIN_DECIDER-unset}"\n')
     script.chmod(0o755)
     return script
 
@@ -403,8 +417,13 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
     rows = [{'route': 'r1', 'reader_current': False}, {'route': 'r2', 'reader_current': True}]
     monkeypatch.setattr(brain_targets, 'dataset', lambda *args, **kwargs: [])
     monkeypatch.setattr(brain_targets, 'summary', lambda drives: {'partitions': {}, 'drives': rows})
+    # The networks in use not exported yet for the brain (sign_networks): every drive is read again first.
+    assert panel.brain_labels()['to_read'] == 2
+    from nnslr_tools import sign_networks
+    seen = []
+    monkeypatch.setattr(sign_networks, 'exported', lambda root, ids: seen.append(ids) or root / 'set')
     labels = panel.brain_labels()
-    assert labels['to_read'] == 1
+    assert labels['to_read'] == 1 and seen == [IN_USE]
     assert labels['training'] == {'drives': 0, 'hours': 0.0, 'sunnypilot_on': 0}
     # The names of the kinds of road, the first ones while Speed review has no file yet.
     assert labels['road_labels'] == {'narrow': 'Narrow road', 'country': 'Country road', 'gravel': 'Gravel road',
@@ -459,3 +478,80 @@ def test_models_say_how_the_car_steps_a_brain():
     new = brain_digest({'groups': ['signs'], 'test': {}, 'rate_hz': 4, 'ahead': True, 'hidden': 128,
                         'kph': {'from': 1, 'to': 200, 'step': 1}})
     assert (new['rate_hz'], new['ahead'], new['hidden'], new['kph']) == (4, True, 128, {'from': 1, 'to': 200, 'step': 1})
+
+
+def sign_network_entries(panel, monkeypatch):
+    """Models with a SignNet of the car and an old Detector, a classifier and an old Reader, a whole applicability run and
+    a smoke run."""
+    entries = {
+        'cutter': [{'id': 'cutter:c2/signnet', 'run': 'c2', 'part': 'signnet', 'finished': True, 'kind': 'signnet',
+                    'fits_the_car': True},
+                   {'id': 'cutter:c0/detector', 'run': 'c0', 'part': 'detector', 'finished': True, 'kind': 'detector'}],
+        'classifier': [{'id': 'classifier:k2/classifier', 'run': 'k2', 'part': 'classifier', 'finished': True},
+                       {'id': 'classifier:k0/reader', 'run': 'k0', 'part': 'reader', 'finished': True},
+                       {'id': 'classifier:k3/classifier', 'run': 'k3', 'part': 'classifier', 'finished': False}],
+        'decider': [{'id': 'decider:d2/experiment-b/crop_geom', 'run': 'd2', 'part': 'experiment-b/crop_geom',
+                     'finished': True, 'smoke_limit': None},
+                    {'id': 'decider:d3/experiment-b/crop_geom', 'run': 'd3', 'part': 'experiment-b/crop_geom',
+                     'finished': True, 'smoke_limit': 20}]}
+    monkeypatch.setattr(panel.models_index, 'artifacts', lambda roles=tuple(entries): {role: entries.get(role, []) for role in roles})
+
+
+def test_the_networks_that_read_its_signs_are_chosen_and_reach_the_script(root, checkout, monkeypatch, sign_networks_in_use):
+    """Train › Brain's Signs: the cutter, the classifier and the applicability network that read the signs it learns from
+    (#31), those in use when none is given (the script takes them), else finished versions of Models the comma runs."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    sign_network_entries(panel, monkeypatch)
+
+    def signs_of(options, pipeline=False):
+        if pipeline:
+            panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': options}]}, None)
+            job = next(item for item in panel.jobs() if item['action'] == 'train_brain' and item['state'] == 'running')
+        else:
+            job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return re.search(r'^signs: (.*)$', full_log(panel, job['id']), re.M).group(1)
+
+    assert signs_of({}) == 'unset unset unset'
+    chosen = {'sign_cutter': 'cutter:c2/signnet', 'sign_classifier': 'classifier:k2/classifier',
+              'sign_decider': 'decider:d2/experiment-b/crop_geom'}
+    assert signs_of(chosen) == 'cutter:c2/signnet classifier:k2/classifier decider:d2/experiment-b/crop_geom'
+    assert signs_of({'sign_decider': 'decider:d2/experiment-b/crop_geom'}, pipeline=True) == \
+        'unset unset decider:d2/experiment-b/crop_geom'
+    refused = {('sign_cutter', 'cutter:c0/detector'): 'The comma reads its signs with a SignNet of its band and grid.',
+               ('sign_classifier', 'classifier:k0/reader'): 'The comma reads its signs with a classifier with “not a sign”.',
+               ('sign_classifier', 'classifier:k3/classifier'): 'That network has not finished its training: choose a finished one.',
+               ('sign_decider', 'decider:d3/experiment-b/crop_geom'): 'A smoke run learnt on a few frames: choose a whole '
+                                                                      'applicability training.',
+               ('sign_decider', '/etc/passwd'): 'Unknown network to read the signs with: choose one of Models.',
+               ('sign_cutter', 'decider:d2/experiment-b/crop_geom'): 'Unknown network to read the signs with: choose one of Models.'}
+    for (key, value), message in refused.items():
+        with pytest.raises(PanelError) as error:
+            panel.start('train_brain', {key: value})
+        assert (error.value.status, error.value.message) == (400, message), (key, value)
+    # Without an applicability network in use the brain is refused, unless one is chosen.
+    del sign_networks_in_use['decider']
+    with pytest.raises(PanelError) as error:
+        panel.start('train_brain', {})
+    assert (error.value.status, error.value.reason) == (409, 'no_sign_networks')
+    assert 'no applicability network' in error.value.message
+    with pytest.raises(PanelError):
+        panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {}}]}, None)
+    assert signs_of({'sign_decider': 'decider:d2/experiment-b/crop_geom'}) == 'unset unset decider:d2/experiment-b/crop_geom'
+    # Only the brain takes them.
+    with pytest.raises(PanelError) as error:
+        panel.start('train_decider', {'sign_decider': 'decider:d2/experiment-b/crop_geom'})
+    assert error.value.status == 400
+
+
+def test_models_say_which_networks_read_a_brains_signs():
+    from nnslr_tools.model_roles import brain_digest
+    base = {'groups': ['signs'], 'test': {}}
+    assert brain_digest(base)['sign_networks'] is None
+    networks = {'cutter': 'cutter:c1/signnet', 'classifier': 'classifier:k1/classifier', 'decider': 'decider:d1/x'}
+    assert brain_digest({**base, 'sign_networks': networks})['sign_networks'] == networks
+    assert brain_digest({**base, 'sign_networks': {'cutter': 'cutter:c1/signnet'}})['sign_networks'] is None

@@ -677,6 +677,11 @@ font-variant-numeric:tabular-nums;appearance:textfield}
 .mly-share.bad .picker-sub{color:var(--bad)}
 /* Where the classifier starts (TrainTab.vue): ImageNet or a finished classifier, a PickerSheet; the whole row on a phone. */
 .cls-start{display:flex;max-width:640px}
+/* The networks that read the brain's signs (SignNetworksPicker.vue): three pickers in a row, each the whole row on a
+   phone. */
+.sn-row{margin-top:14px}
+.sn-row .picker{flex:1 1 180px;min-width:0}
+@media (max-width:420px){.sn-row .picker{flex-basis:100%}}
 .cls-start .picker{flex:0 1 340px}
 @media (max-width:420px){.cls-start .picker{flex-basis:100%}}
 .rp-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

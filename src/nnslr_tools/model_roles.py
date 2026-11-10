@@ -415,7 +415,13 @@ def brain_digest(result: Any) -> dict:
             # The split it learnt on and the brain it went on from (None: ImageNet and random weights; before 10 Nov 2026
             # not recorded).
             'split_sha256': result.get('split_sha256') if isinstance(result.get('split_sha256'), str) else None,
-            'start': network_start_digest(result.get('start'), result.get('split_sha256'))}
+            'start': network_start_digest(result.get('start'), result.get('split_sha256')),
+            # The networks its signs were read with (sign_networks, #31: the cutter, the classifier, the applicability
+            # network); None before 10 Nov 2026, when no applicability network left out the signs of other roads.
+            'sign_networks': {part: result['sign_networks'][part] for part in ('cutter', 'classifier', 'decider')}
+            if isinstance(result.get('sign_networks'), dict) and all(isinstance(result['sign_networks'].get(part), str)
+                                                                     for part in ('cutter', 'classifier', 'decider'))
+            else None}
 
 
 def decider_digest(result: Any) -> dict:
@@ -878,7 +884,7 @@ class ModelIndex:
                       'hours': bool(trained.get('hours')), 'wet': bool(trained.get('wet')),
                       # How the car steps it and what it says (Models › How it works, model-flow.ts).
                       **{key: trained.get(key) for key in ('rate_hz', 'ahead', 'hidden', 'kph', 'road_kinds', 'road_types',
-                                                           'pool')},
+                                                           'pool', 'sign_networks')},
                       'epochs': trained.get('epochs'), 'epochs_run': trained.get('epochs'),
                       'validation': trained.get('validation'), 'test': trained.get('test')})
         return entry

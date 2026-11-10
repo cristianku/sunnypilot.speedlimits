@@ -51,7 +51,7 @@ const extras = computed<(Block & {source: string; map: boolean})[]>(() => [
     what: 'the road type it sees, compared with the map’s, corrected in Speed review where it is wrong'},
   {on: learns.value.works, id: 'works', title: 'Roadworks', sub: 'inside roadworks or not',
     source: 'your marks in Speed review', what: 'whether the car is inside roadworks, compared with the ones marked in Speed review'},
-  {on: learns.value.road, id: 'road', title: 'Road characteristics', sub: 'narrow, country, gravel, potholes',
+  {on: learns.value.road, id: 'road', title: 'Road conditions', sub: 'narrow, country, gravel, potholes',
     source: 'your marks in Speed review', what: 'the kinds of road it sees, compared with the ones marked in Speed review'},
 ].filter((extra) => extra.on).map((extra) => ({id: extra.id, title: extra.title, sub: extra.sub, kind: 'train' as Kind,
   source: extra.source, map: extra.map === true, facts: [{name: extra.title, what: extra.what}],

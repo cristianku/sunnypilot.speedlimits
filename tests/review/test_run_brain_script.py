@@ -170,7 +170,8 @@ def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
     lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
     calls = [line for line in lines if line.startswith('args: ')]
     assert calls[0].startswith('args: train-brain --dry-run') and '--route' not in calls[0]
-    assert all(pinned in line for line in calls[1:] if not line.startswith(('args: env', 'args: borrow-cards'))), calls
+    assert all(pinned in line for line in calls[1:]
+               if not line.startswith(('args: env', 'args: borrow-cards', 'args: brain-networks'))), calls
     # road-type-signs, brain-signs, brain-targets and the three seeds.
     assert len([line for line in calls if pinned in line]) == 6
     assert 'drives:       2 (routes.json)' in lines
@@ -181,7 +182,7 @@ def test_every_step_and_every_seed_takes_the_drives_of_the_start(tmp_path):
     process = run_script(tmp_path, env={'NNSLR_FAKE_ROUTES': first[:-1] + ', "00000003--cccccccccc"]'})
     assert process.returncode == 0, process.stderr + process.stdout
     calls = [line for line in (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
-             if line.startswith('args: ') and not line.startswith(('args: env', 'args: borrow-cards'))]
+             if line.startswith('args: ') and not line.startswith(('args: env', 'args: borrow-cards', 'args: brain-networks'))]
     assert len(calls) == 7 and all(pinned in line for line in calls)
     assert not any('00000003--cccccccccc' in line for line in calls)
 
@@ -191,3 +192,26 @@ def test_a_dry_run_that_does_not_say_its_drives_stops_the_run(tmp_path):
     assert process.returncode == 3 and 'error: no drive in' in process.stdout + process.stderr
     # Nothing is kept: the same NAME again takes the drives marked then.
     assert not (tmp_path / 'data' / 'runs' / 'n1' / 'routes.json').exists()
+
+
+def test_the_networks_that_read_the_signs_are_chosen_once_and_reach_every_reader(tmp_path):
+    """Step 3 writes the run's networks of the signs (nnslr brain-networks: those of Train › Brain, else those in use, with
+    the applicability network), and the reading as the car, the next limit, the labels and every seed take that file."""
+    chosen = {'NNSLR_BRAIN_CUTTER': 'cutter:c2/signnet', 'NNSLR_BRAIN_DECIDER': 'decider:d2/experiment-b/crop_geom'}
+    process = run_script(tmp_path, env=chosen)
+    assert process.returncode == 0, process.stderr + process.stdout
+    run = tmp_path / 'data' / 'runs' / 'n1'
+    calls = [line for line in (run / 'brain.log').read_text().splitlines() if line.startswith('args: ')]
+    networks = [line for line in calls if line.startswith('args: brain-networks')]
+    assert networks == [f'args: brain-networks --run-dir {run} --data-root {tmp_path / "data"} --cutter cutter:c2/signnet '
+                        '--decider decider:d2/experiment-b/crop_geom']
+    first = calls.index(networks[0])
+    readers = [line for line in calls[first + 1:] if line.startswith(('args: road-type-signs', 'args: brain-signs',
+                                                                      'args: brain-targets', 'args: train-brain'))]
+    assert len(readers) == 6 and all(f'--sign-networks {run}/networks.json' in line for line in readers), readers
+    assert '--sign-networks' not in calls[0]
+    # Not an id of Models: refused before anything runs.
+    process = run_script(tmp_path, name='n3', env={'NNSLR_BRAIN_CLASSIFIER': '../x; rm -rf /'})
+    assert process.returncode != 0 and 'must be an id of the Models tab' in process.stderr
+    assert not (tmp_path / 'data' / 'runs' / 'n3' / 'brain.log').exists() or \
+        'brain-networks' not in (tmp_path / 'data' / 'runs' / 'n3' / 'brain.log').read_text()

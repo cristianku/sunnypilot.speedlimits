@@ -173,11 +173,17 @@ CUTTER_FAMILY = 'all'
 # The trainings with a Mapillary switch and the variable of their script (NNSLR_..._MAPILLARY: 1 or pretrain; its
 # _REGION and _SHARE): the classifier's crops (helpers/mapillary.sh), the cutter's windows (helpers/mapillary_windows.sh).
 MAPILLARY_ENV = {'train_classifier': 'NNSLR_CLASSIFIER_MAPILLARY', 'train_cutter': 'NNSLR_CUTTER_MAPILLARY'}
+# The networks that read the signs a brain learns from (sign_networks, #31): its option, the Models role it is a version
+# of, the variable of scripts/run_brain.sh. None given: those in use.
+BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
+                       'sign_classifier': ('classifier', 'NNSLR_BRAIN_CLASSIFIER'),
+                       'sign_decider': ('decider', 'NNSLR_BRAIN_DECIDER')}
 # The options an action takes, besides a training's start and the run to resume (checked by Panel.start).
 # The GPU memory Qwen3-VL-8B takes in float16 (scripts/setup_vlm.sh: 17.5 GB), with a margin for one frame.
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
-                  'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'start'),
+                  'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'start', 'sign_cutter', 'sign_classifier',
+                                  'sign_decider'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
@@ -1625,26 +1631,32 @@ class Panel:
         """Train › Brain, what a training gets today from every drive it learns from (training_routes: every dashcam
         drive, each whole; training: brain_targets.training_counts, their number and hours): his speed with the blocks of
         Speed review, the roadworks, the next limit of our networks' signs with his Sign review over them, as
-        brain_targets.summary, with the drives the next training reads again first (to_read: not read, read by
-        another reader than the car's of today, or without the brain's pictures; signs_to_read: not read by our networks
-        in use, brain_signs.unread) and the names of the kinds of road (road_labels). Without the inputs, which it
-        does not show: about 10 s over every drive, asked when the section opens, never by the status."""
+        brain_targets.summary, with the drives the next training reads again first (to_read: not read by the networks in
+        use as the car reads them, applicability included (sign_networks: every drive while those three are not exported
+        yet), or without the brain's pictures; signs_to_read: not read by our networks in use, brain_signs.unread) and
+        the names of the kinds of road (road_labels). Without the inputs, which it does not show: about 10 s over every
+        drive, asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone.
-            from nnslr_tools import brain_signs, brain_targets
+            from nnslr_tools import brain_signs, brain_targets, sign_networks
+            used = sign_networks.in_use(self.root)
+            folder = sign_networks.exported(self.root, used) if all(used.get(part) for part in sign_networks.PARTS) \
+                else None
             # As the training will have them, once it has read again what it reads first.
             found = brain_targets.summary(brain_targets.dataset(self.root, lambda route: store.merged(route, keep=False),
                                                                 log=lambda text: None, rate=brain_targets.RATE_HZ,
-                                                                need_pictures=False, inputs=False, types=True))
+                                                                need_pictures=False, inputs=False, types=True,
+                                                                networks={**used, 'models': folder} if folder else None))
             labels = brain_targets.road_labels(self.root)
             signs_to_read = brain_signs.unread(self.root, [row['route'] for row in found['drives']])
             training = brain_targets.training_counts(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
         return {**found, 'road_labels': labels, 'signs_to_read': signs_to_read, 'training': training,
-                'to_read': sum(not row['reader_current'] or not row.get('pictures', True) for row in found['drives'])}
+                'to_read': sum(folder is None or not row['reader_current'] or not row.get('pictures', True)
+                               for row in found['drives'])}
 
     # -- the dataset and the starting points of a training ----------------------------------------
     def dataset_summary(self) -> dict | None:
@@ -2257,7 +2269,40 @@ class Panel:
             raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road and the road types are on or off, the '
                                                 'picture mean or grid.')
         return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
-                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool}
+                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool, **self._brain_sign_networks(options)}
+
+    def _brain_sign_networks(self, options: dict) -> dict:
+        """The variables of the networks that read the brain's signs (BRAIN_SIGN_NETWORKS): a finished version of
+        Models for each one chosen (a SignNet the comma runs, a classifier, an applicability network that is not a smoke
+        run), nothing for one not chosen (scripts/run_brain.sh takes the one in use). Refused when no applicability
+        network is in use nor chosen: the brain would learn from the signs of other roads, which the car leaves out."""
+        from nnslr_tools.preannotate import networks_in_use
+        found = {}
+        for key, (role, variable) in BRAIN_SIGN_NETWORKS.items():
+            chosen = options.get(key)
+            if chosen is None:
+                continue
+            entry = next((entry for entry in self.models_index.artifacts((role,))[role] if entry['id'] == chosen), None)
+            if entry is None:
+                raise PanelError(400, 'bad_option', 'Unknown network to read the signs with: choose one of Models.')
+            if not entry['finished']:
+                raise PanelError(400, 'bad_option', 'That network has not finished its training: choose a finished one.')
+            if role == 'cutter' and (entry.get('kind') != 'signnet' or not entry.get('fits_the_car')):
+                raise PanelError(400, 'bad_option', 'The comma reads its signs with a SignNet of its band and grid.')
+            if role == 'classifier' and entry.get('part') != 'classifier':
+                raise PanelError(400, 'bad_option', 'The comma reads its signs with a classifier with “not a sign”.')
+            if role == 'decider' and entry.get('smoke_limit'):
+                raise PanelError(400, 'bad_option', 'A smoke run learnt on a few frames: choose a whole applicability '
+                                                    'training.')
+            found[variable] = chosen
+        used = networks_in_use(self.root)
+        missing = [word for key, word in (('cutter', 'cutter'), ('classifier', 'classifier'),
+                                          ('decider', 'applicability network'))
+                   if BRAIN_SIGN_NETWORKS['sign_' + key][1] not in found and key not in used]
+        if missing:
+            raise PanelError(409, 'no_sign_networks', 'The brain reads its signs as the car does: no '
+                             + ', '.join(missing) + ' is in use or chosen (Models).')
+        return found
 
     def _network_start(self, action: str, start: object) -> dict:
         """The environment of where the cutter's, the applicability's or the brain's training starts (one of
@@ -2423,7 +2468,7 @@ class Panel:
             start_env.update(self._classifier_start((options or {}).get('start')))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
-        for key in ('works', 'road', 'driver', 'pool'):
+        for key in ('works', 'road', 'driver', 'pool', *BRAIN_SIGN_NETWORKS):
             if (options or {}).get(key) is not None and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':

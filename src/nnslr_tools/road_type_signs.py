@@ -2,22 +2,28 @@
 ago a motorway or expressway sign was confirmed), derived offline the way the car derives it.
 
 On the car, speedvisiond reads the road camera about 4 times a second with SignNet and the classifier
-(vision.read_signs), keeps the signs read sure enough (vision.MIN_CONFIDENCE) and gives their classes to
-vision.SpeedLimitMemory. That confirms a sign seen in CONFIRM_FRAMES frames within CONFIRM_SECONDS and notes when a
+(vision.read_signs), lets the applicability network rule them (applicability.Applicability, with the car's speed)
+and leaves out those of another road (applicability.taken), keeps the signs read sure enough (vision.MIN_CONFIDENCE)
+and gives their classes to vision.SpeedLimitMemory. That confirms a sign seen in CONFIRM_FRAMES frames within CONFIRM_SECONDS and notes when a
 motorway or expressway sign was confirmed (_road_sign_at). The road-type network gets the seconds since then
 (sign_features). In Switzerland the motorway sign (4.01) stands where the entry ramp starts, so it is seen as the ramp
 begins, and the network can learn that the carriageway comes after that ramp.
 
-Here the car's own code does the same on the recorded drives: the car's vision.py and its two networks from the
-sunnypilot clone (read only: openpilot/sunnypilot/speed_limits and its models), on each segment's fcamera.hevc
-decoded to NV12 by ffmpeg (the road camera's pixel format), one decoded frame in VIDEO_STEP (20 fps: 4 a second, as
-speedvisiond), the settings of the car's release in place. The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
+Here the car's own code does the same on the recorded drives: the car's vision.py and applicability.py from the
+sunnypilot clone (read only: openpilot/sunnypilot/speed_limits) with the networks of a release, its models folder by
+default (SignNet, the classifier, and the applicability network when the release has one), or another folder exported
+as Publish exports one (models: the brain's, sign_networks), on each segment's fcamera.hevc decoded to NV12 by ffmpeg
+(the road camera's pixel format), one decoded frame in VIDEO_STEP (20 fps: 4 a second, as speedvisiond), the settings
+of that release in place. The applicability network gets the car's speed of each frame (vEgo of carState at the
+frame's exposure, from the drive's joined logs; unknown without them, as the car gives it before its first carState).
+The signs it gives to another road are left out as on the car, and kept apart in the record ('other_road'). The reviewed sign labels are not used: most drives were reviewed before the other signs had boxes, and
 the car never has them; what the car's networks miss or misread, the road-type network meets the same way.
 
 Per drive, data/derived/road_type_signs/<route>.json: the fingerprint of the code and networks used, the frames read
 per segment, every frame with a sign read sure enough (time in seconds from the start of the drive, class, confidence;
 'boxes', in the same order, their boxes in the frame's pixels, what vision.SignDistance measures the sign by) and the
-road signs SpeedLimitMemory confirms (time, road).
+road signs SpeedLimitMemory confirms (time, road); 'other_road', the frames with a sign the applicability network left
+out (time, [[class, confidence], ...]); 'networks', the ids of the networks read with (their contracts' checkpoint).
 
 The brain's pictures come from the same pass (pictures=True: every drive the brain learns from and the certified ones): each
 frame read through the car's vision.BrainInput, the same class and the same NV12 frame as speedvisiond, saved per segment
@@ -46,6 +52,7 @@ Two sources of the sign times (SIGN_SOURCES):
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import multiprocessing
@@ -61,13 +68,15 @@ import numpy as np
 from nnslr_tools.media import FRAME_SIZE, FULL_SIZE, REDUCE_FILTER
 
 SIGNS_RELATIVE = Path('derived') / 'road_type_signs'
+RELEASES_RELATIVE = SIGNS_RELATIVE / 'releases'  # the readings by a release other than the clone's (cache_path)
 RAW_RELATIVE = Path('raw') / 'routes'
 PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
 SUNNYPILOT_ENV, SUNNYPILOT_DEFAULT = 'NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'
 NETWORK_FILES = {'finder': 'signnet.onnx', 'classifier': 'classifier.onnx'}
+DECIDER_FILE = 'decider.onnx'  # the applicability network, when the release has one
 RELEASE_MANIFEST = 'speed_limits.json'
 NOT_A_SIGN = 'not_a_sign'  # read sure enough, but neither a speed nor a road sign: left out of the cache
-CACHE_VERSION = 3  # 2: the boards; 3: the boxes of the signs
+CACHE_VERSION = 4  # 2: the boards; 3: the boxes of the signs; 4: the applicability network, a sign of another road left out
 PROBE_ATTEMPTS = 4
 PROBE_PAUSE_S = 10
 CLASSIFIERS_RELATIVE = SIGNS_RELATIVE / 'classifiers'
@@ -110,30 +119,52 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def network_paths(package: Path, classifier: Path | None = None) -> dict[str, Path]:
-    """The ONNX of the two networks: the car's of the sunnypilot clone, the classifier another one when given (an
-    ONNX with its .contract.json beside it)."""
-    paths = {name: Path(package) / 'models' / file for name, file in NETWORK_FILES.items()}
+def models_path(package: Path, models: Path | None = None) -> Path:
+    """The folder of the release read with: models, else the car's of the sunnypilot clone (package/models)."""
+    return Path(models) if models is not None else Path(package) / 'models'
+
+
+def network_paths(package: Path, classifier: Path | None = None, models: Path | None = None) -> dict[str, Path]:
+    """The ONNX of the networks of a release (models_path): SignNet, the classifier, another one when given (an ONNX
+    with its .contract.json beside it), and the applicability network ('decider') when the release has one."""
+    folder = models_path(package, models)
+    paths = {name: folder / file for name, file in NETWORK_FILES.items()}
     if classifier is not None:
         paths['classifier'] = Path(classifier)
+    if (folder / DECIDER_FILE).is_file():
+        paths['decider'] = folder / DECIDER_FILE
     return paths
 
 
-def release_settings(package: Path) -> dict:
-    """The settings of the car's release, as speedvisiond gives them to vision.apply_settings."""
+def release_settings(package: Path, models: Path | None = None) -> dict:
+    """The settings of the release (models_path), as speedvisiond gives them to vision.apply_settings."""
     try:
-        settings = json.loads((Path(package) / 'models' / RELEASE_MANIFEST).read_text('utf-8')).get('settings')
+        settings = json.loads((models_path(package, models) / RELEASE_MANIFEST).read_text('utf-8')).get('settings')
     except (OSError, ValueError, AttributeError):
         return {}
     return settings if isinstance(settings, dict) else {}
 
 
-def fingerprint(package: Path, classifier: Path | None = None) -> dict:
-    """What the readings depend on: the car's vision.py and the two networks (sha256), its settings, the rate."""
+def fingerprint(package: Path, classifier: Path | None = None, models: Path | None = None) -> dict:
+    """What the readings depend on: the car's vision.py, its applicability.py with an applicability network, the
+    networks (sha256), the release's settings, the rate."""
     package = Path(package)
-    return {'version': CACHE_VERSION, 'video_step': VIDEO_STEP, 'settings': release_settings(package),
+    paths = network_paths(package, classifier, models)
+    return {'version': CACHE_VERSION, 'video_step': VIDEO_STEP, 'settings': release_settings(package, models),
             'vision': _sha256(package / 'vision.py'),
-            **{name: _sha256(path) for name, path in network_paths(package, classifier).items()}}
+            **({'applicability': _sha256(package / 'applicability.py')} if 'decider' in paths else {}),
+            **{name: _sha256(path) for name, path in paths.items()}}
+
+
+def network_ids(paths: dict[str, Path]) -> dict[str, str | None]:
+    """The id of each network read with, as its contract names its checkpoint (None when it does not)."""
+    found = {}
+    for name, path in paths.items():
+        try:
+            found[name] = json.loads(Path(path).with_name(Path(path).name + '.contract.json').read_text('utf-8')).get('checkpoint')
+        except (OSError, ValueError, AttributeError):
+            found[name] = None
+    return found
 
 
 def classifier_onnx(root: Path, weights: Path) -> Path:
@@ -154,17 +185,29 @@ def classifier_classes(path: Path) -> list[str]:
     return json.loads(path.with_name(path.name + '.contract.json').read_text('utf-8'))['output']['classes']
 
 
-def load_vision(package: Path):
-    """The car's vision.py as speedvisiond starts it, with the settings of its release."""
+def load_vision(package: Path, models: Path | None = None):
+    """The car's vision.py as speedvisiond starts it, with the settings of the release (models_path)."""
     from nnslr_tools.comma_trial import load_vision as load
     vision = load(Path(package) / 'vision.py')
-    vision.apply_settings(release_settings(package))
+    vision.apply_settings(release_settings(package, models))
     return vision
+
+
+def load_applicability(package: Path):
+    """The car's applicability.py as a module of its own: it imports nothing of openpilot, the vision module is given
+    to it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('comma_speed_limits_applicability', Path(package) / 'applicability.py')
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"the car's applicability.py cannot be read in {package}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class _Network:
     """One of the car's networks under onnxruntime, on the GPU when asked and it works there (one inference on zeros
-    tries it), else on one CPU thread: numpy in, numpy out."""
+    tries it), else on one CPU thread: numpy in, numpy out (the first input, the first output)."""
 
     def __init__(self, path: Path, gpu: bool = False):
         import onnxruntime
@@ -177,8 +220,8 @@ class _Network:
                 onnxruntime.preload_dlls()
             try:
                 self.session = onnxruntime.InferenceSession(str(path), options, providers=[CUDA, CPU])
-                shape = [size if isinstance(size, int) else 1 for size in self.session.get_inputs()[0].shape]
-                self.session.run(None, {self.session.get_inputs()[0].name: np.zeros(shape, dtype=np.float32)})
+                self.session.run(None, {one.name: np.zeros([size if isinstance(size, int) else 1 for size in one.shape],
+                                                           dtype=np.float32) for one in self.session.get_inputs()})
             except Exception:
                 self.session = None
         if self.session is None:
@@ -190,11 +233,35 @@ class _Network:
         return self.session.run(None, {self.name: np.asarray(x, dtype=np.float32)})[0]
 
 
+class _StepNetwork(_Network):
+    """The applicability network, as the car's runner.StepNetwork: numpy in by name, numpy (float32) out by name."""
+
+    def __init__(self, path: Path, gpu: bool = False):
+        super().__init__(path, gpu)
+        self.outputs = [one.name for one in self.session.get_outputs()]
+
+    def __call__(self, **inputs):
+        feed = {name: np.asarray(value, dtype=np.float32) for name, value in inputs.items()}
+        return dict(zip(self.outputs, self.session.run(None, feed), strict=True))
+
+
 _WORKER: dict = {}
 
 
+def _ruler(width: int, height: int):
+    """The worker's applicability network for frames of this size (the car's applicability.Applicability), None
+    without one in the release."""
+    if _WORKER.get('decider') is None:
+        return None
+    rulers = _WORKER.setdefault('rulers', {})
+    if (width, height) not in rulers:
+        rulers[(width, height)] = _WORKER['applicability'].Applicability(
+            _WORKER['decider'], _WORKER['decider_contract'], _WORKER['vision'], width, height)
+    return rulers[(width, height)]
+
+
 def _worker_start(package: str, gpu: bool = False, classifier: str | None = None, cards: list[str] | None = None,
-                  turn=None) -> None:
+                  turn=None, models: str | None = None) -> None:
     if cards:
         # This process's card, the next in turn, before its networks and its ffmpeg open one (#36): the NVDEC of one
         # V100 is what holds the reading back.
@@ -202,10 +269,14 @@ def _worker_start(package: str, gpu: bool = False, classifier: str | None = None
             place = turn.value
             turn.value += 1
         os.environ.update(CUDA_DEVICE_ORDER='PCI_BUS_ID', CUDA_VISIBLE_DEVICES=cards[place % len(cards)])
-    paths = network_paths(Path(package), Path(classifier) if classifier else None)
-    _WORKER.update(vision=load_vision(Path(package)), finder=_Network(paths['finder'], gpu),
+    models = Path(models) if models else None
+    paths = network_paths(Path(package), Path(classifier) if classifier else None, models)
+    decider = paths.get('decider')
+    _WORKER.update(vision=load_vision(Path(package), models), finder=_Network(paths['finder'], gpu),
                    classifier=_Network(paths['classifier'], gpu), classes=classifier_classes(paths['classifier']),
-                   nvdec=gpu)
+                   nvdec=gpu, decider=_StepNetwork(decider, gpu) if decider else None,
+                   decider_contract=json.loads(decider.with_name(decider.name + '.contract.json').read_text('utf-8'))
+                   if decider else None, applicability=load_applicability(Path(package)) if decider else None, rulers={})
 
 
 def _video_size(video: Path) -> tuple[int, int]:
@@ -222,23 +293,28 @@ def _video_size(video: Path) -> tuple[int, int]:
     raise RuntimeError(f'ffprobe cannot read {video}: {done.stderr.strip()}')
 
 
-def read_segment(task: tuple[str, int, str | None]) -> dict:
-    """The car's read_signs on one segment's road video, one frame in VIDEO_STEP: {'segment', 'frames' (read), 'signs':
-    [[seconds into the segment, [[class, confidence], ...]], ...] (the frames with a sign read sure enough), 'boxes' (their
-    boxes, in the same order), 'gpu' (the networks ran there), 'nvdec' (the video was decoded there), 'pictures' (how many
-    were saved to the task's path, None without one)}. NVDEC first when the worker may use the GPU: a video it cannot decode
-    is read again on the CPU."""
-    video, segment, pictures = task
+def read_segment(task: tuple) -> dict:
+    """The car's read_signs on one segment's road video, one frame in VIDEO_STEP, ruled by the applicability network
+    when the release has one: {'segment', 'frames' (read), 'signs': [[seconds into the segment, [[class, confidence],
+    ...]], ...] (the frames with a sign read sure enough and not of another road), 'boxes' (their boxes, in the same
+    order), 'other_road' (the frames with a sign read sure enough the applicability network gave to another road, as
+    'signs'), 'gpu' (the networks ran there), 'nvdec' (the video was decoded there), 'pictures' (how many were saved to
+    the task's path, None without one)}. task: (video, segment, pictures path or None, and the car's speed in m/s of
+    each frame read, by its place among them, None where unknown; without it, unknown). NVDEC first when the worker may
+    use the GPU: a video it cannot decode is read again on the CPU."""
+    video, segment, pictures, *rest = task
+    speeds = rest[0] if rest else None
     width, height = _video_size(Path(video))
     # A video at full definition is read at the size of the others: these signs are big, no crop of the frame is needed.
     reduce = (width, height) == FULL_SIZE
     if reduce:
         width, height = FRAME_SIZE
     if _WORKER.get('nvdec'):
-        result = _read_video(video, width, height, nvdec=True, reduce=reduce, pictures=pictures)
+        result = _read_video(video, width, height, nvdec=True, reduce=reduce, pictures=pictures, speeds=speeds)
         if result['frames']:
             return {'segment': segment, **result}
-    return {'segment': segment, **_read_video(video, width, height, nvdec=False, reduce=reduce, pictures=pictures)}
+    return {'segment': segment, **_read_video(video, width, height, nvdec=False, reduce=reduce, pictures=pictures,
+                                              speeds=speeds)}
 
 
 def _save_pictures(path: Path, pictures: list[np.ndarray]) -> None:
@@ -249,8 +325,9 @@ def _save_pictures(path: Path, pictures: list[np.ndarray]) -> None:
 
 
 def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: bool = False,
-                pictures: str | None = None) -> dict:
+                pictures: str | None = None, speeds: list | None = None) -> dict:
     vision, finder, classifier, classes = (_WORKER[name] for name in ('vision', 'finder', 'classifier', 'classes'))
+    ruler = _ruler(width, height)
     size = width * height * 3 // 2
     chosen = f'select=not(mod(n\\,{VIDEO_STEP}))' + (',' + REDUCE_FILTER if reduce else '')
     command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', *(['-hwaccel', 'cuda'] if nvdec else []), '-threads', '1',
@@ -258,7 +335,7 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
                'rawvideo', '-']
     signnet_input = vision.SignNetInput(width, height)
     brain_input = vision.BrainInput(width, height) if pictures else None
-    found, boxes, saved, count = [], [], [], 0
+    found, boxes, other, saved, count = [], [], [], [], 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
         while True:
             buffer = process.stdout.read(size)
@@ -267,6 +344,15 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
             data = np.frombuffer(buffer, dtype=np.uint8)
             y, uv = vision.nv12_planes(data, width, height, width, width * height)
             signs = vision.read_signs(y, uv, signnet_input, finder, classifier, classes)
+            if ruler is not None:
+                # As speedvisiond: right after the classifier, with the car's speed; a sign of another road is not taken.
+                ruler.rule(y, uv, signs, speeds[count] if speeds is not None and count < len(speeds) else None)
+                left = [sign for sign in signs if sign.get('road') == _WORKER['applicability'].OTHER_ROAD
+                        and sign['confidence'] >= vision.MIN_CONFIDENCE and sign['class'] != NOT_A_SIGN]
+                if left:
+                    other.append([round(count * VIDEO_STEP / VIDEO_FPS, 3),
+                                  [[sign['class'], round(sign['confidence'], 4)] for sign in left]])
+                signs = _WORKER['applicability'].taken(signs)
             kept = [sign for sign in signs if sign['confidence'] >= vision.MIN_CONFIDENCE and sign['class'] != NOT_A_SIGN]
             if kept:
                 found.append([round(count * VIDEO_STEP / VIDEO_FPS, 3),
@@ -277,7 +363,8 @@ def _read_video(video: str, width: int, height: int, *, nvdec: bool, reduce: boo
             count += 1
     if pictures and count:
         _save_pictures(Path(pictures), saved)
-    return {'frames': count, 'signs': found, 'boxes': boxes, 'gpu': finder.gpu, 'nvdec': nvdec,
+    return {'frames': count, 'signs': found, 'boxes': boxes, 'other_road': other,
+            'gpu': finder.gpu and (ruler is None or _WORKER['decider'].gpu), 'nvdec': nvdec,
             'pictures': count if pictures and count else None}
 
 
@@ -329,8 +416,36 @@ def number_confirmations(vision, readings: list[tuple[float, list]]) -> list[lis
     return found
 
 
-def cache_path(root: Path, route: str) -> Path:
-    return Path(root) / SIGNS_RELATIVE / f'{route}.json'
+def frame_speeds(merged: dict | None) -> dict[int, list]:
+    """The car's speed (m/s) at each frame the reading takes of a drive, as the applicability network gets it on the
+    car: {segment: [vEgo of the last carState at or before the frame's exposure, None where unknown, ...]} by the frame's
+    place among those read (decoded // VIDEO_STEP). Empty without the drive's joined logs."""
+    from nnslr_tools import drive_logs
+    if not merged:
+        return {}
+    points = sorted((merged.get('series') or {}).get('v_ego') or [], key=lambda point: point[0])
+    times = [point[0] for point in points]
+    found = {}
+    for _first, segment, sof, ids in drive_logs.frame_index(merged):
+        speeds = found.setdefault(segment, [])
+        for decoded, t in sorted(zip(ids, sof)):
+            if decoded % VIDEO_STEP:
+                continue
+            row = decoded // VIDEO_STEP
+            at = bisect.bisect_right(times, t) - 1
+            speeds.extend([None] * (row + 1 - len(speeds)))
+            speeds[row] = None if at < 0 or points[at][1] is None else round(float(points[at][1]) / 3.6, 3)
+    return found
+
+
+def cache_path(root: Path, route: str, models: Path | None = None) -> Path:
+    """The readings of a drive: by the car's release of the sunnypilot clone (models None), else by the release in
+    models, each its own (RELEASES_RELATIVE/<the sha256 of its folder>/), so that the brain's networks and the clone's
+    (Models › Regression) never read a drive again in turn."""
+    if models is None:
+        return Path(root) / SIGNS_RELATIVE / f'{route}.json'
+    key = hashlib.sha256(str(Path(models).resolve()).encode()).hexdigest()[:16]
+    return Path(root) / RELEASES_RELATIVE / key / f'{route}.json'
 
 
 def picture_path(root: Path, route: str, segment: int) -> Path:
@@ -365,17 +480,17 @@ def _video_stamp(videos: dict[int, Path]) -> list:
     return [[segment, path.stat().st_size, int(path.stat().st_mtime)] for segment, path in videos.items()]
 
 
-def load_signs(root: Path, route: str) -> dict | None:
-    path = cache_path(root, route)
+def load_signs(root: Path, route: str, models: Path | None = None) -> dict | None:
+    path = cache_path(root, route, models)
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding='utf-8'))
 
 
 def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: list, classifier: Path | None,
-                package: Path) -> dict:
+                package: Path, models: Path | None = None, networks: dict | None = None, speeds: bool = False) -> dict:
     """The record of a drive read to the end, written to its cache. 'pictures' only when every segment saved them."""
-    vision = load_vision(package)
+    vision = load_vision(package, models)
     segments.sort(key=lambda item: item['segment'])
     readings = [(item['segment'] * SEGMENT_SECONDS + seconds, signs)
                 for item in segments for seconds, signs in item['signs']]
@@ -385,10 +500,13 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
               'boxes': [boxes for item in segments for boxes in item['boxes']],
               'confirmed': confirmations(vision, readings),
               'boards': board_confirmations(vision, readings),
+              'other_road': [[round(item['segment'] * SEGMENT_SECONDS + seconds, 3), signs]
+                             for item in segments for seconds, signs in item.get('other_road') or []],
+              'networks': networks, 'speeds': speeds,
               'classifier': str(classifier) if classifier is not None else None}
     if all(item.get('pictures') == item['frames'] for item in segments if item['frames']):
         record['pictures'] = {str(item['segment']): item['pictures'] for item in segments if item['frames']}
-    path = cache_path(root, route)
+    path = cache_path(root, route, models)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.json.tmp')
     temporary.write_text(json.dumps(record, separators=(',', ':')), encoding='utf-8')
@@ -398,33 +516,45 @@ def _save_signs(root: Path, route: str, segments: list[dict], stamp, videos: lis
 
 def build_signs(root: Path, routes: list[str], *, package: Path | None = None, workers: int | None = None,
                 device: str = 'auto', gpus: list[str] | None = None, classifier: Path | None = None,
-                pictures: bool = False, log=print) -> dict[str, dict]:
+                pictures: bool = False, models: Path | None = None, speeds_of=None, log=print) -> dict[str, dict]:
     """The readings of every drive (cached; read again when the code, a network or a video changed): {route: record}.
     The segments of all drives are read in parallel by workers processes (default half the cores), on the GPU when
     there is one (device 'auto'; 'cpu' never), each process on a card of gpus in turn (nvidia-smi's numbers; None: every
     process on the first card this process sees). classifier: a v2 reader-best.pt to read with instead of the car's (classifier_onnx).
     pictures: also the brain's pictures (picture_path), read again where they are missing; a drive that has them gets
-    them again whenever it is read."""
+    them again whenever it is read. models: the release to read with (models_path; the brain's: sign_networks).
+    speeds_of: route -> its joined logs (or None), for the car's speed the applicability network gets (frame_speeds);
+    without it, or a drive without logs, the speed is unknown as on the car before its first carState."""
     package = package_path() if package is None else Path(package)
+    models = Path(models) if models is not None else None
     onnx = classifier_onnx(root, classifier) if classifier is not None else None
-    stamp = fingerprint(package, onnx)
-    records, tasks, stamps = {}, [], {}
+    stamp = fingerprint(package, onnx, models)
+    paths = network_paths(package, onnx, models)
+    ids = network_ids(paths)
+    ruled = 'decider' in paths
+    records, tasks, stamps, known = {}, [], {}, {}
     for route in routes:
         videos = _videos(root, route)
         stamps[route] = _video_stamp(videos)
-        record = load_signs(root, route)
+        record = load_signs(root, route, models)
         if record and record.get('fingerprint') == stamp and record.get('videos') == stamps[route] and \
                 (not pictures or pictures_ready(root, record)):
             records[route] = record
             continue
         keep = pictures or bool(record and record.get('pictures'))
-        tasks += [(route, segment, str(path), str(picture_path(root, route, segment)) if keep else None)
-                  for segment, path in videos.items()]
+        speeds = frame_speeds(speeds_of(route)) if ruled and speeds_of is not None and videos else {}
+        known[route] = bool(speeds)
+        tasks += [(route, segment, str(path), str(picture_path(root, route, segment)) if keep else None,
+                   speeds.get(segment)) for segment, path in videos.items()]
     if tasks:
         workers = workers or max(1, min(len(tasks), (os.cpu_count() or 4) // 2))
-        which = f'the classifier {classifier}' if classifier is not None else "the car's classifier"
-        log(f'road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the car\'s '
-            f'SignNet and {which}, 4 frames a second, {workers} processes'
+        which = f'the classifier {classifier}' if classifier is not None else f"the classifier {ids.get('classifier')}"
+        log(f"road-type signs: reading {len(tasks)} segments of {len({t[0] for t in tasks})} drives with the SignNet "
+            f"{ids.get('finder')} and {which}"
+            + (f", the applicability network {ids.get('decider')} leaving out the signs of another road (the car's speed "
+               f"from the logs of {sum(1 for route in known if known[route])} of them)" if ruled
+               else ', no applicability network: every sign taken')
+            + f', 4 frames a second, {workers} processes'
             + (f', the brain\'s pictures of {sum(1 for t in tasks if t[3])} of them' if any(t[3] for t in tasks) else ''))
         results: dict[str, list] = {}
         left = Counter(task[0] for task in tasks)
@@ -435,9 +565,10 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
             log(f"road-type signs: the processes on the cards {', '.join(cards)} in turn")
         with ProcessPoolExecutor(max_workers=workers, mp_context=context, initializer=_worker_start,
                                  initargs=(str(package), gpu, str(onnx) if onnx else None, cards,
-                                           context.Value('i', 0) if cards else None)) as pool:
+                                           context.Value('i', 0) if cards else None,
+                                           str(models) if models is not None else None)) as pool:
             done = 0
-            for (route, _, _, _), result in zip(tasks, pool.map(read_segment, [(v, s, p) for _, s, v, p in tasks])):
+            for (route, *_), result in zip(tasks, pool.map(read_segment, [(v, s, p, f) for _, s, v, p, f in tasks])):
                 if cards and not result['gpu']:
                     # A process whose card does not work stops the reading: on the cards given, never the CPU.
                     raise RuntimeError(f"road-type signs: segment {result['segment']} of {route} was read by the "
@@ -450,7 +581,8 @@ def build_signs(root: Path, routes: list[str], *, package: Path | None = None, w
                 left[route] -= 1
                 # A drive is kept as soon as it is read: a failure further on does not cost it again.
                 if not left[route]:
-                    records[route] = _save_signs(root, route, results.pop(route), stamp, stamps[route], classifier, package)
+                    records[route] = _save_signs(root, route, results.pop(route), stamp, stamps[route], classifier,
+                                                 package, models, ids, known[route])
                 if done == 1:
                     log('road-type signs: the networks on the ' + ('GPU' if result['gpu'] else 'CPU') + ', the video decoded'
                         ' on the ' + ('GPU (NVDEC)' if result['nvdec'] else 'CPU'))

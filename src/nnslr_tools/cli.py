@@ -1689,8 +1689,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain.add_argument("--json", action="store_true", help="the same as JSON")
     p_brain.add_argument("--no-road-types", action="store_true",
                          help="as a training with --no-road-types: the seconds without a road type answer too")
+    p_brain.add_argument("--sign-networks", default=None,
+                         help="a run's networks.json (nnslr brain-networks): its drives read by those networks. "
+                              "Default: the car's release of the sunnypilot clone and Our networks in use")
     p_brain.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain.set_defaults(func=_cmd_brain_targets)
+    p_brain_networks = sub.add_parser("brain-networks", help="scripts/run_brain.sh, step 3: the networks the brain's "
+                                                             "signs are read with, for its inputs and its labels: the "
+                                                             "cutter (a SignNet the comma runs), the classifier and the "
+                                                             "applicability network chosen in Train › Brain, those in use "
+                                                             "unless others are given. Exported as Publish exports them "
+                                                             "(PyTorch to ONNX, checked; .venv-gpu) into "
+                                                             "derived/road_type_signs/sets/<key>/ and written into "
+                                                             "--run-dir/networks.json; a run started again keeps its own")
+    p_brain_networks.add_argument("--run-dir", required=True, help="the folder of the brain's run")
+    p_brain_networks.add_argument("--cutter", default=None, help="a SignNet's id of the Models tab (default: in use)")
+    p_brain_networks.add_argument("--classifier", default=None, help="a classifier's id (default: in use)")
+    p_brain_networks.add_argument("--decider", default=None,
+                                  help="an applicability network's id (default: in use; one is required)")
+    p_brain_networks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_brain_networks.set_defaults(func=_cmd_brain_networks)
     p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks in use "
                                                        "(cutter, classifier and applicability, Models tab) on its "
                                                        "pictures at 1 a second, on the GPU: derived/brain_signs/<route>"
@@ -1705,6 +1723,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_signs.add_argument("--gpus", type=_cards, default=None,
                                help="the cards the workers run on, in turn, by nvidia-smi's numbers: 0,1 (default: "
                                     "every worker on the first card this process sees)")
+    p_brain_signs.add_argument("--sign-networks", default=None,
+                               help="a run's networks.json (nnslr brain-networks): read with those three networks "
+                                    "instead of those in use")
     p_brain_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_signs.set_defaults(func=_cmd_brain_signs)
     p_borrow = sub.add_parser("borrow-cards", help="scripts/run_brain.sh, step 3 (#36): prints the cards its readings "
@@ -1759,6 +1780,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--init-from", default=None,
                              help="an earlier brain's brain-last.pt to go on from, stepped as this one and on the same "
                                   "split (scripts/run_brain.sh: NNSLR_BRAIN_INIT_FROM). Default: ImageNet and random weights")
+    p_brain_net.add_argument("--sign-networks", default=None,
+                             help="a run's networks.json (nnslr brain-networks; scripts/run_brain.sh): the signs of "
+                                  "its inputs and labels read by those networks. Default: the car's release of the "
+                                  "sunnypilot clone and Our networks in use")
     p_brain_net.add_argument("--device", help="default: cuda; the CPU for a dry run")
     p_brain_net.add_argument("--dry-run", action="store_true", help="two steps on the CPU on a few frames: the chain works, "
                                                                     "nothing is learned, nothing written outside --run-dir")
@@ -1915,7 +1940,9 @@ def build_parser() -> argparse.ArgumentParser:
                            help="only count the boxes, cases and route groups: one JSON line, nothing written")
     p_box_fit.set_defaults(func=_cmd_train_box_fit)
     p_road_signs = sub.add_parser("road-type-signs", help="read the signs of the drives as the comma does (its "
-                                                          "vision.py, SignNet and classifier from the sunnypilot clone, "
+                                                          "vision.py and applicability.py, SignNet, classifier and "
+                                                          "applicability network from the sunnypilot clone or "
+                                                          "--sign-networks, a sign of another road left out, "
                                                           "4 frames a second of fcamera.hevc): "
                                                           "derived/road_type_signs/<route>.json, the signs the brain is "
                                                           "given (the GPU when there is one)")
@@ -1946,6 +1973,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_road_signs.add_argument("--certified", action="store_true",
                               help="the drives certified in Models › Regression, those prepared, with the brain's "
                                    "pictures: what its brains need (scripts/run_regression.sh)")
+    p_road_signs.add_argument("--sign-networks", default=None,
+                              help="a run's networks.json (nnslr brain-networks; scripts/run_brain.sh): read with the "
+                                   "release exported there (the cutter, classifier and applicability network chosen "
+                                   "for the brain) instead of the clone's, the car's speed from each drive's logs")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
@@ -2754,7 +2785,7 @@ def _cmd_brain_targets(args: argparse.Namespace) -> int:
     store = DriveReviewStore(root)
     drives = brain_targets.dataset(root, lambda route: store.merged(route, keep=False), args.route,
                                    rate=brain_targets.RATE_HZ, need_pictures=False, inputs=False,
-                                   types=not args.no_road_types)
+                                   types=not args.no_road_types, networks=_sign_networks(args))
     found = brain_targets.summary(drives)
     print(json.dumps(found, indent=2) if args.json else brain_targets.summary_text(found))
     return 0
@@ -2784,6 +2815,25 @@ def _cmd_borrow_cards(args: argparse.Namespace) -> int:
     return 0
 
 
+def _sign_networks(args: argparse.Namespace) -> dict | None:
+    """--sign-networks: the run's networks.json (sign_networks.load), None without it."""
+    if not getattr(args, 'sign_networks', None):
+        return None
+    from nnslr_tools import sign_networks
+    return sign_networks.load(Path(args.sign_networks))
+
+
+def _cmd_brain_networks(args: argparse.Namespace) -> int:
+    from nnslr_tools import sign_networks
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    chosen = sign_networks.prepare(root, Path(args.run_dir), cutter=args.cutter or None,
+                                   classifier=args.classifier or None, decider=args.decider or None,
+                                   log=lambda line: print(line, flush=True))
+    print(json.dumps({part: chosen[part] for part in sign_networks.PARTS}), flush=True)
+    return 0
+
+
 def _cmd_brain_signs(args: argparse.Namespace) -> int:
     from nnslr_tools import brain_signs
     from nnslr_tools.brain_targets import training_routes
@@ -2796,8 +2846,9 @@ def _cmd_brain_signs(args: argparse.Namespace) -> int:
         print("nnslr brain-signs: no drive to learn from (sunnypilot off, its logs read to the end and its frames: "
               "Read the logs in Data › Speed review)", file=sys.stderr)
         return 2
+    chosen = _sign_networks(args)
     try:
-        setup = brain_signs.reader_setup(root)
+        setup = brain_signs.reader_setup(root, {part: chosen[part] for part in brain_signs.PARTS} if chosen else None)
     except PreannotationError as exc:
         # The training goes on: its next limit is taught from Sign review alone (brain_targets.reviewed_signs).
         print(f"WARNING: no drive read by our networks, the next limit is taught from Sign review alone: {exc}", flush=True)
@@ -2852,7 +2903,8 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
                                      types=not args.no_road_types, device=args.device,
                                      dry_run=args.dry_run, routes=args.route,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
-                                     init_from=Path(args.init_from) if args.init_from else None)
+                                     init_from=Path(args.init_from) if args.init_from else None,
+                                     sign_networks=_sign_networks(args))
     print(json.dumps({**{part: {key: result[part][key] for key in ('speed', 'speeds_said', 'one_speed', 'follow_the_sign')}
                          for part in ('train', 'validation', 'test')},
                       **{part: result[part] for part in ('validation_swapped', 'test_swapped')}}, indent=2))
@@ -3249,12 +3301,21 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
                                            if args.labelled else "no drive with road types (nnslr road-types)"),
               file=sys.stderr)
         return 2
+    chosen = _sign_networks(args)
+    if chosen and args.classifier:
+        raise ValueError("--classifier and --sign-networks: the classifier is the one of the networks chosen")
+    from nnslr_tools.drive_review import DriveReviewStore
+    store = DriveReviewStore(root)
     records = build_signs(root, routes, package=package_path(Path(args.sunnypilot) if args.sunnypilot else None),
                           workers=args.workers or None, device=args.device, gpus=args.gpus,
                           classifier=Path(args.classifier) if args.classifier else None,
-                          pictures=bool(args.labelled or args.certified), log=lambda line: print(line, flush=True))
+                          pictures=bool(args.labelled or args.certified), models=chosen['models'] if chosen else None,
+                          speeds_of=lambda route: store.merged(route, keep=False),
+                          log=lambda line: print(line, flush=True))
     for route, record in records.items():
+        left = record.get('other_road') or []
         print(f"{route}: {sum(record['frames'].values())} frames read, {len(record['readings'])} with a sign, "
+              + (f"{len(left)} with a sign of another road left out, " if left else '') +
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}, "
               f"green boards at {', '.join(f'{t:.0f} s' for t in board_times(record)) or 'none'}", flush=True)
     return 0

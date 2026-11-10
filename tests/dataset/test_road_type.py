@@ -548,7 +548,7 @@ def test_a_chosen_classifier_is_part_of_the_readings_fingerprint(tmp_path):
     other.write_bytes(b'another classifier')
     assert signs.network_paths(package, other)['classifier'] == other
     assert signs.fingerprint(package) != signs.fingerprint(package, other)
-    assert signs.fingerprint(package)['version'] == signs.CACHE_VERSION == 3
+    assert signs.fingerprint(package)["version"] == signs.CACHE_VERSION == 4
 
 
 def test_the_readings_go_by_the_settings_of_the_release(tmp_path):
@@ -1171,15 +1171,15 @@ def test_a_drive_read_to_the_end_is_kept_when_a_later_one_fails(tmp_path, monkey
         def __exit__(self, *error): return False
         def map(self, function, tasks):
             yield from ({'segment': segment, 'frames': 1, 'signs': [], 'boxes': [], 'gpu': False, 'nvdec': False,
-                         'pictures': None} for _, segment, _ in tasks[:1])
+                         'pictures': None} for _, segment, *_ in tasks[:1])
             raise RuntimeError('the NAS went away')
 
     video = tmp_path / 'fcamera.hevc'
     video.write_bytes(b'x')
     monkeypatch.setattr(signs, 'ProcessPoolExecutor', Pool)
     monkeypatch.setattr(signs, '_videos', lambda root, route: {0: video})
-    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx: 'stamp')
-    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx, models=None: 'stamp')
+    monkeypatch.setattr(signs, 'load_vision', lambda package, models=None: None)
     monkeypatch.setattr(signs, 'confirmations', lambda vision, readings: [])
     monkeypatch.setattr(signs, 'board_confirmations', lambda vision, readings: [])
     with pytest.raises(RuntimeError):
@@ -1192,9 +1192,9 @@ def test_the_processes_take_the_cards_in_turn(tmp_path, monkeypatch):
     import multiprocessing
     import os
     from nnslr_tools import road_type_signs as signs
-    monkeypatch.setattr(signs, 'network_paths', lambda package, classifier=None: {'finder': tmp_path / 'finder',
+    monkeypatch.setattr(signs, 'network_paths', lambda package, classifier=None, models=None: {'finder': tmp_path / 'finder',
                                                                                   'classifier': tmp_path / 'classifier'})
-    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, 'load_vision', lambda package, models=None: None)
     monkeypatch.setattr(signs, '_Network', lambda path, gpu: None)
     monkeypatch.setattr(signs, 'classifier_classes', lambda path: [])
     monkeypatch.setattr(signs, '_WORKER', {})
@@ -1224,14 +1224,14 @@ def test_the_cards_reach_the_processes_only_on_the_gpu(tmp_path, monkeypatch):
         def __exit__(self, *error): return False
         def map(self, function, tasks):
             return ({'segment': segment, 'frames': 1, 'signs': [], 'boxes': [], **on, 'pictures': None}
-                    for _, segment, _ in tasks)
+                    for _, segment, *_ in tasks)
 
     video = tmp_path / 'fcamera.hevc'
     video.write_bytes(b'x')
     monkeypatch.setattr(signs, 'ProcessPoolExecutor', Pool)
     monkeypatch.setattr(signs, '_videos', lambda root, route: {0: video})
-    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx: 'stamp')
-    monkeypatch.setattr(signs, 'load_vision', lambda package: None)
+    monkeypatch.setattr(signs, 'fingerprint', lambda package, onnx, models=None: 'stamp')
+    monkeypatch.setattr(signs, 'load_vision', lambda package, models=None: None)
     monkeypatch.setattr(signs, 'confirmations', lambda vision, readings: [])
     monkeypatch.setattr(signs, 'board_confirmations', lambda vision, readings: [])
     lines = []
@@ -1240,9 +1240,9 @@ def test_the_cards_reach_the_processes_only_on_the_gpu(tmp_path, monkeypatch):
     assert 'road-type signs: the processes on the cards 0, 1 in turn' in lines
     signs.build_signs(tmp_path, ['second'], package=tmp_path, workers=2, gpus=['0', '1'], device='cpu',
                       log=lambda line: None)
-    assert started[-1][3:] == (None, None)
+    assert started[-1][3:5] == (None, None)
     signs.build_signs(tmp_path, ['third'], package=tmp_path, workers=2, log=lambda line: None)
-    assert started[-1][3:] == (None, None)
+    assert started[-1][3:5] == (None, None)
     # On the cards given a video NVDEC cannot decode is said, the networks on the CPU stop the reading.
     on['nvdec'] = False
     lines.clear()
@@ -1297,3 +1297,65 @@ def test_a_segment_read_keeps_the_boxes_and_the_brain_pictures(tmp_path, monkeyp
     assert not signs.pictures_ready(tmp_path, {**record, 'pictures': {'3': 3}})
     assert not signs.pictures_ready(tmp_path, {**record, 'frames': {'3': 4, '5': 2}})
     assert not signs.pictures_ready(tmp_path, {key: value for key, value in record.items() if key != 'pictures'})
+
+
+def test_the_applicability_network_leaves_out_a_sign_of_another_road_as_on_the_car(tmp_path, monkeypatch):
+    """#31: with an applicability network in the release, each frame's signs are ruled right after the classifier with
+    the car's speed at that frame (None where unknown), and a sign of another road is not taken, as speedvisiond does;
+    it is kept apart in other_road."""
+    import subprocess
+    from nnslr_tools import road_type_signs as signs
+    package = signs.package_path()
+    if not (package / 'vision.py').is_file() or not (package / 'applicability.py').is_file():
+        pytest.skip('no sunnypilot clone with the car code')
+    car = signs.load_vision(package)
+    applicability = signs.load_applicability(package)
+    video = tmp_path / 'fcamera.hevc'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=64x36:rate=20:duration=1',
+                    '-pix_fmt', 'yuv420p', '-x265-params', 'log-level=error', str(video)], check=True)
+
+    def read_signs(y, uv, signnet_input, finder, classifier, classes):
+        return [{'class': 'maximum_speed:120', 'confidence': 0.9, 'box': (1, 1, 10, 10)},
+                {'class': 'maximum_speed:60', 'confidence': 0.8, 'box': (20, 1, 30, 10)}]
+
+    ruled = []
+
+    class Ruler:
+        def rule(self, y, uv, found, v_ego):
+            ruled.append(v_ego)
+            for sign in found:
+                sign['road'] = applicability.OTHER_ROAD if sign['class'] == 'maximum_speed:60' else applicability.OWN_ROAD
+
+    made = []
+    module = SimpleNamespace(OTHER_ROAD=applicability.OTHER_ROAD, taken=applicability.taken,
+                             Applicability=lambda *args: made.append(args[3:]) or Ruler())
+    Vision = SimpleNamespace(MIN_CONFIDENCE=car.MIN_CONFIDENCE, SignNetInput=lambda width, height: None,
+                             BrainInput=car.BrainInput, nv12_planes=car.nv12_planes, read_signs=read_signs)
+    monkeypatch.setattr(signs, '_WORKER', {'vision': Vision, 'finder': SimpleNamespace(gpu=True), 'classifier': None,
+                                           'classes': None, 'nvdec': False, 'decider': SimpleNamespace(gpu=True),
+                                           'decider_contract': {}, 'applicability': module})
+    monkeypatch.setattr(signs, '_video_size', lambda path: (64, 36))
+    read = signs.read_segment((str(video), 3, None, [10.0, None]))
+    assert made == [(64, 36)] and ruled == [10.0, None, None, None]
+    assert [classes for _, classes in read['signs']] == [[['maximum_speed:120', 0.9]]] * 4
+    assert [t for t, _ in read['other_road']] == [0.0, 0.25, 0.5, 0.75]
+    assert read['other_road'][0][1] == [['maximum_speed:60', 0.8]] and read['gpu']
+    # The decider on the CPU is the reading on the CPU: on the cards given it stops (build_signs).
+    signs._WORKER['decider'] = SimpleNamespace(gpu=False)
+    assert not signs.read_segment((str(video), 3, None))['gpu']
+    # Without an applicability network in the release nothing is left out.
+    signs._WORKER.update(decider=None, rulers={})
+    read = signs.read_segment((str(video), 3, None))
+    assert read['other_road'] == [] and read['signs'][0][1] == [['maximum_speed:120', 0.9], ['maximum_speed:60', 0.8]]
+
+
+def test_the_speed_of_each_frame_read_is_the_last_carstate_before_it(monkeypatch):
+    from nnslr_tools import drive_logs
+    from nnslr_tools import road_type_signs as signs
+    step = signs.VIDEO_STEP
+    merged = {'series': {'v_ego': [[100, 36.0], [300, 72.0], [500, None]]}}
+    monkeypatch.setattr(drive_logs, 'frame_index', lambda found: [
+        (0, 2, [50, 150, 350, 600], [0, step, 2 * step + 1, 3 * step])])
+    # The frame before any carState: unknown; a frame not read (not on the step) is skipped; km/h -> m/s.
+    assert signs.frame_speeds(merged) == {2: [None, 10.0, None, None]}
+    assert signs.frame_speeds(None) == {}

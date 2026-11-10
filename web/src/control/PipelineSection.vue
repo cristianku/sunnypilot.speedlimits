@@ -17,12 +17,14 @@ import type {NetworkStartChoice, StartRole} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
 import type {BrainChoice} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
+import type {SignNetworksChoice} from './sign-networks';
+import SignNetworksPicker from './SignNetworksPicker.vue';
 import Segmented from './Segmented.vue';
 import TrainStart from './TrainStart.vue';
 
 const props = defineProps<{status: PanelStatus | null; choices: Choices; cutterChoices: CutterChoices;
   starts: Record<StartRole, NetworkStartChoice>;
-  brainChoices: BrainChoice; fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
+  brainChoices: BrainChoice; signNetworks: SignNetworksChoice; fresh: number; familyOptions: {key: CutterFamilies; label: string}[]}>();
 const families = defineModel<CutterFamilies>('families', {required: true});
 const emit = defineEmits<{pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string];
   stopPipeline: []; stop: [job: Job]; details: [job: Job]; run: [name: ActionName, state: ActionState, start?: TrainingStart]}>();
@@ -32,7 +34,7 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_brain', label: 'Brain', text: 'Three seeds, from your speed on every drive with sunnypilot off and its logs read, the next limit from the signs our networks in use read. About 15 minutes, and about 40 s for each drive they have not read yet.'},
+  {action: 'train_brain', label: 'Brain', text: 'Three seeds, from your speed on every drive with sunnypilot off and its logs read, the next limit from the signs the networks chosen below read, those of another road left out. About 15 minutes, and about 40 s for each drive they have not read yet.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
 
@@ -49,7 +51,7 @@ function optionsOf(action: PipelineAction): ActionOptions {
   if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option, ...props.cutterChoices.options};
   if (action === 'train_classifier') return props.choices.options;
   if (action === 'train_decider') return props.starts.decider.option;
-  if (action === 'train_brain') return {...props.brainChoices.option, ...props.starts.brain.option};
+  if (action === 'train_brain') return {...props.brainChoices.option, ...props.starts.brain.option, ...props.signNetworks.option};
   return {};
 }
 /** Why it cannot start now ('' when it can): the reason of a training chosen (the classifier after a new cutter needs
@@ -65,6 +67,8 @@ const reason = computed(() => {
   }
   if (on('train_cutter') && props.cutterChoices.invalid) return sentence('Cutter: ' + props.cutterChoices.invalid);
   if (on('train_classifier') && props.choices.invalid) return sentence('Classifier: ' + props.choices.invalid);
+  if (on('train_brain') && props.signNetworks.missing.length)
+    return sentence('Brain: no ' + props.signNetworks.missing.join(', no ') + ' to read its signs with');
   return '';
 });
 const startLabel = computed(() => chosen.value.length === 1 ? 'Train ' + chosen.value[0]!.label.toLowerCase()
@@ -77,7 +81,7 @@ function start(): void {
       + props.cutterChoices.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
       : step.action === 'dataset' ? 'the import of the reviews'
-        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words + props.starts.brain.words
+        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words + props.starts.brain.words + props.signNetworks.words
           : LABEL[step.action].toLowerCase() + props.starts.decider.words);
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
     + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
@@ -148,6 +152,7 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
         <div v-else-if="on(step.action) && step.action === 'train_brain'" class="pl-choices">
           <NetworkStartPicker :start="starts.brain" id="pipeline-brain-start"/>
           <BrainChoices :choices="brainChoices" id="pipeline-brain"/>
+          <SignNetworksPicker :choice="signNetworks" id="pipeline-brain"/>
         </div>
       </li>
     </ol>

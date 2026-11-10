@@ -55,7 +55,7 @@ def test_a_drive_is_read_once_by_the_networks_in_use(tmp_path, monkeypatch):
     assert calls == [ROUTE]
     # A classifier trained again in place reads the drive again.
     again = setup_of(tmp_path, size=2)
-    monkeypatch.setattr(signs, 'stamp_in_use', lambda root: signs.networks_stamp(again['model']))
+    monkeypatch.setattr(signs, 'stamp_in_use', lambda root, chosen=None: signs.networks_stamp(again['model']))
     assert signs.unread(tmp_path, [ROUTE]) == 1
     assert signs.read_drives(tmp_path, [ROUTE], setup=again, log=lambda line: None) == {ROUTE: 'read'}
     assert signs.unread(tmp_path, [ROUTE]) == 0 and calls == [ROUTE, ROUTE]
@@ -150,7 +150,7 @@ def test_the_command_takes_the_drives_at_once_and_the_cards(tmp_path, monkeypatc
         seen.update(jobs=jobs, gpus=gpus)
         return {route: 'read' for route in routes}
 
-    monkeypatch.setattr(signs, 'reader_setup', lambda root: {'model': {}})
+    monkeypatch.setattr(signs, 'reader_setup', lambda root, chosen=None: {'model': {}})
     monkeypatch.setattr(signs, 'read_drives', read_drives)
     base = ['brain-signs', '--route', ROUTE, '--data-root', str(tmp_path)]
     assert cli.main(base + ['--jobs', '3', '--gpus', '1, 0,1']) == 0
@@ -167,7 +167,7 @@ def test_the_reader_runs_in_the_gpu_environment_of_the_training(tmp_path, monkey
     from nnslr_tools import preannotate
     seen = {}
 
-    def proposer_setup(proposer, root, *, confidence=None, python_executable=None):
+    def proposer_setup(proposer, root, *, confidence=None, python_executable=None, networks=None):
         seen.update(proposer=proposer, python=python_executable)
         return {'model': {}, 'confidence': 0.1, 'request': {'model': {}}}
 
@@ -184,7 +184,7 @@ def test_without_our_networks_the_training_goes_on_with_sign_review_alone(tmp_pa
     signs = _signs()
     from nnslr_tools import cli, preannotate
 
-    def missing(root):
+    def missing(root, chosen=None):
         raise preannotate.PreannotationError('Our networks propose only with all three parts in use')
 
     monkeypatch.setattr(signs, 'reader_setup', missing)

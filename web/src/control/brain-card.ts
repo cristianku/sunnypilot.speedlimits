@@ -53,8 +53,8 @@ export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'next, metres', what: 'from the signs our networks in use (cutter, classifier, applicability) read on every picture of the '
     + 'drive, yours of Sign review over them where you confirmed the frames; passed where Sign distance reaches zero'},
   {name: 'works_head', what: 'the roadworks on the road, where they are marked in Speed review (Roadworks on)'},
-  {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Kinds of road on)'},
-  {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road types on)'},
+  {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Road conditions on)'},
+  {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},
 ];
 
 /** The seconds that answer nothing (brain_targets.OUT_REASONS): they still go through the memory, as on the car. */
@@ -65,5 +65,5 @@ export const BRAIN_OUT: BrainFact[] = [
   {name: 'left_out', what: 'a block of yours with no speed'},
   {name: 'boundary', what: '2 s around the jump at the edge of a block'},
   {name: 'no_frame', what: 'no picture'},
-  {name: 'no_road_type', what: 'no road type, with Road types on'},
+  {name: 'no_road_type', what: 'no road type, with Road type (map) on'},
 ];

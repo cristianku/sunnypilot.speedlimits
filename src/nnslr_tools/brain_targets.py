@@ -198,6 +198,7 @@ import math
 import sqlite3
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -225,6 +226,8 @@ SPLIT_FRAMES_RELATIVE = Path('splits') / 'speed-brain-frames.json'
 EDGE_SECONDS = 2
 SITE_MARGIN_S = 60
 READ_COMMAND = 'nnslr road-type-signs --labelled'
+IN_USE = object()  # reviewed_signs' stamp by default: the reading of Our networks in use counts
+SIGN_PARTS = brain_signs.PARTS
 NO_SPEED, STOPPED, BLOCKED_OUT, BOUNDARY, NO_FRAME, CRUISE, NO_TYPE = range(1, 8)
 OUT_REASONS = {NO_SPEED: 'no_speed', STOPPED: 'stopped', BLOCKED_OUT: 'left_out', BOUNDARY: 'boundary', NO_FRAME: 'no_frame',
                CRUISE: 'cruise', NO_TYPE: 'no_road_type'}
@@ -816,15 +819,18 @@ def _kind(box: dict):
     return (family, box.get('sign_type')) if family == 'other_sign' else family
 
 
-def reviewed_signs(root: Path, route: str, merged: dict) -> dict:
+def reviewed_signs(root: Path, route: str, merged: dict, stamp: Any = IN_USE) -> dict:
     """{'signs': [(pass_ns, kph, None for an end)], 'covered': [(start_ns, end_ns)], 'masked': [(start_ns, end_ns)],
     'fingerprint', 'read_by'} of a drive from Sign review, the networks' reading (brain_signs) and Sign distance, read
     only: see the module's text. fingerprint: a hash of the rows, the reading and the marks it came from, None with
-    neither; read_by: the networks that read the drive, None when they never did."""
+    neither; read_by: the networks that read the drive, None when they never did. stamp: the networks whose reading
+    counts (brain_signs.networks_stamp; IN_USE: those in use, brain_signs.stamp_in_use)."""
     run, rows = _sign_review(root, route)
     network = brain_signs.load(root, route)
-    if network is not None and network['read_by'].get('networks') != brain_signs.stamp_in_use(root):
-        # Read by networks no longer in use, or Our networks are not whole now: Sign review alone.
+    if stamp is IN_USE:
+        stamp = brain_signs.stamp_in_use(root)
+    if network is not None and network['read_by'].get('networks') != stamp:
+        # Read by other networks than those chosen, or they are not whole now: Sign review alone.
         network = None
     found = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None, 'read_by': None}
     if run is None and network is None:
@@ -1095,7 +1101,8 @@ def memory_cuts(ns: np.ndarray) -> set[int]:
 
 
 def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dict, *, rate: float = 1.0,
-                  need_pictures: bool = True, inputs: bool = True, kinds: tuple[str, ...] = (), types: bool = False) -> dict:
+                  need_pictures: bool = True, inputs: bool = True, kinds: tuple[str, ...] = (), types: bool = False,
+                  models: Path | None = None, stamp: Any = IN_USE) -> dict:
     """A drive for the training at rate frames a second (1 or RATE_HZ): frames, ns, partitions, cells, cuts (memory_cuts),
     speed (class per frame), speed_out (why a frame is out of the loss, 0 when in), speed_weight, blocks (Speed review's),
     blocked (a block with a speed holds there), works, works_weight, road, road_weight (road_answers, a column for each of
@@ -1108,11 +1115,12 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     speed and no frame with its picture: prepare keeps only the slow ones at the start and the end of a drive).
     labels: read_labels' of the drive, NO_LABELS without a block or a mark. need_pictures=False (a dry run): a frame
     without its picture keeps its answers. inputs=False (only what the answers are, for summary): inputs is None, since
-    the country of every frame is most of the time a drive takes."""
+    the country of every frame is most of the time a drive takes. models: the release its signs were read with
+    (road_type_signs.cache_path; None: the car's of the sunnypilot clone); stamp: reviewed_signs'."""
     frames = drive_frames(root, route, merged)
     partitions = frame_partitions(route, frames, split)
     cells = frame_cells(frames)
-    record = load_signs(root, route)
+    record = load_signs(root, route, models)
     if rate == RATE_HZ:
         frames, partitions, cells = brain_frames(root, frames, partitions, cells, merged, record)
     elif rate != 1.0:
@@ -1143,7 +1151,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     readings = record['readings'] if record else None
     v_ego = series.get('v_ego') or []
     own = _last_at(drive_logs.dashboard_speed(merged), ns)
-    reviewed = reviewed_signs(root, route, merged)
+    reviewed = reviewed_signs(root, route, merged, stamp)
     # Without vEgo the car has driven no metres: no limit is ahead of any frame. The signs ahead are there whoever held
     # the speed.
     asked = np.isin(speed_out, (0, CRUISE)) & any(point[1] is not None for point in v_ego)
@@ -1199,15 +1207,19 @@ def _say(text: str) -> None:
 
 
 def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *, rate: float = 1.0,
-            need_pictures: bool = True, inputs: bool = True, types: bool = False) -> list[dict]:
+            need_pictures: bool = True, inputs: bool = True, types: bool = False, networks: dict | None = None) -> list[dict]:
     """Every drive of training_routes (or only routes), as drive_targets at rate with its labels (inputs and types as
-    there), each with reader_current: read by the car's reader of today. merged_of(route): the drive's joined logs, None
+    there), each with reader_current: read by the car's reader of today (networks: by the networks chosen for the
+    brain, sign_networks.load's: their release for the inputs, the three for the labels; None: the car's release of
+    the sunnypilot clone and Our networks in use). merged_of(route): the drive's joined logs, None
     before a scan. A drive that is no dashcam drive, one whose logs show openpilot driving (engaged_series) and one of the frozen split
     whose frames changed are left out with a line in log. Sites stay whole only across the drives asked for. Every drive
     has the kinds of road of today (road_kinds), in the same columns."""
     split = read_split(root)
     kinds = road_kinds(root)
-    reader = fingerprint(package_path())
+    models = networks['models'] if networks else None
+    reader = fingerprint(package_path(), models=models)
+    stamp = brain_signs.stamp_in_use(root, {part: networks[part] for part in SIGN_PARTS}) if networks else IN_USE
     left_out: dict[str, str] = {}
     labels, trainable = read_labels(root), training_routes(root, left_out)
     for route in sorted(set(labels) | set(routes or ()) | set(left_out)):
@@ -1227,7 +1239,8 @@ def dataset(root: Path, merged_of, routes: list[str] | None = None, log=_say, *,
             continue
         try:
             drive = drive_targets(root, route, labels.get(route, NO_LABELS), merged, split, rate=rate,
-                                  need_pictures=need_pictures, inputs=inputs, kinds=kinds, types=types)
+                                  need_pictures=need_pictures, inputs=inputs, kinds=kinds, types=types, models=models,
+                                  stamp=stamp)
         except FramesChanged as error:
             log(f'{error}, left out')
             continue

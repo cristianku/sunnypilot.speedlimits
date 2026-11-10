@@ -667,7 +667,7 @@ def _start_text(start: dict) -> str:
 def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
                 road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, init_from: Path | None = None,
-                log=_print) -> dict:
+                sign_networks: dict | None = None, log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
@@ -676,7 +676,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
     types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
     the ones still in training_routes; None, every drive of training_routes. init_from: an earlier brain-last.pt whose
-    weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights."""
+    weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights. sign_networks: the
+    networks its signs were read with (sign_networks.load: the cutter, classifier and applicability network chosen in
+    Train › Brain, for its inputs and its labels), recorded in result.json; None, the car's release of the sunnypilot
+    clone and Our networks in use."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -691,7 +694,11 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     if routes is not None:
         log(f'Only the {len(routes)} drive{"" if len(routes) == 1 else "s"} of the start of this run (--route): '
             'one added since waits for the next run.')
-    drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types)
+    if sign_networks is not None:
+        log('The signs read by the cutter ' + sign_networks['cutter'] + ', the classifier ' + sign_networks['classifier']
+            + ' and the applicability network ' + sign_networks['decider'] + ': a sign of another road is left out.')
+    drives = dataset(root, merged_of, routes, log=log, rate=RATE_HZ, need_pictures=not dry_run, types=types,
+                     networks=sign_networks)
     if not drives and not counts['drives']:
         raise ValueError('no dashcam drive to learn from: drive with sunnylink › Toggles › Enable sunnypilot off, '
                          'then Read the logs on Data › Speed review')
@@ -768,6 +775,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
               'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
               'seed': seed, 'right_kph': RIGHT_KPH, 'history': history, 'next_balance': balance,
               'split_sha256': source['split'], 'start': start,
+              'sign_networks': {part: sign_networks[part] for part in ('cutter', 'classifier', 'decider')}
+              if sign_networks is not None else None,
               'answers': {drive['route']: int((drive['speed_weight'] > 0).sum()) for drive in drives},
               'train': measure(drives, answers, 'train'), 'validation': measure(drives, answers, 'validation'),
               'test': measure(drives, answers, 'test'), 'validation_cold': measure(drives, cold, 'validation'),

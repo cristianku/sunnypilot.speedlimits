@@ -311,28 +311,30 @@ def proposed_by(root: Path, run: dict) -> dict:
     return {'proposer': proposer, 'networks': networks, 'in_use': proposer == 'ours' and bool(in_use) and networks == in_use}
 
 
-def our_networks(root: Path) -> dict:
+def our_networks(root: Path, chosen: dict | None = None) -> dict:
     """The cutter, the classifier and the decider that propose with --proposer ours: those in use (Models tab), only
-    when Our networks are whole (ours_missing)."""
+    when Our networks are whole (ours_missing); chosen: these three instead ({part: id of the Models tab}, the networks
+    the brain's signs are read with: sign_networks)."""
     from nnslr_tools.chain import resolve_model
-    missing = ours_missing(root)
-    if missing:
-        raise PreannotationError(missing)
+    if chosen is None:
+        missing = ours_missing(root)
+        if missing:
+            raise PreannotationError(missing)
     try:
-        cutter = resolve_model('active', 'cutter', root)
-        classifier = resolve_model('active', 'classifier', root)
-        decider = resolve_model('active', 'decider', root)
+        cutter = resolve_model(chosen['cutter'] if chosen else 'active', 'cutter', root)
+        classifier = resolve_model(chosen['classifier'] if chosen else 'active', 'classifier', root)
+        decider = resolve_model(chosen['decider'] if chosen else 'active', 'decider', root)
     except ValueError as exc:
-        raise PreannotationError(f'Our networks cannot load a part in use: {exc}') from exc
+        raise PreannotationError(f"Our networks cannot load a part {'chosen' if chosen else 'in use'}: {exc}") from exc
     return {'repository': 'ours', 'proposer': 'ours', 'training_domain': 'our reviewed Swiss drives',
             'cutter': cutter['id'] or str(cutter['path']), 'cutter_path': str(cutter['path']),
             'classifier': classifier['id'] or str(classifier['path']), 'classifier_path': str(classifier['path']),
-            'classifier_chosen': 'in use',
+            'classifier_chosen': 'chosen' if chosen else 'in use',
             'decider': decider['id'] or str(decider['path']), 'decider_path': str(decider['path'])}
 
 
 def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None,
-                   python_executable: str | None = None) -> dict:
+                   python_executable: str | None = None, networks: dict | None = None) -> dict:
     """What runs a proposer: its python, worker module, lowest score, the model as the rows record it, and the
     fields of its request. Shared by Prepare (run_preannotation) and the measure of the proposers
     (proposer_eval)."""
@@ -357,7 +359,7 @@ def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None
         check=subprocess.run([python,'-c','import torch, torchvision'],capture_output=True,text=True)
         if check.returncode:
             raise PreannotationError('our networks need the GPU environment (.venv-gpu with torch): see docs/INSTALL.md')
-        model=our_networks(root)
+        model=our_networks(root, networks)
         return {'python': python, 'worker': 'nnslr_tools._chain_proposer', 'confidence': confidence, 'model': model,
                 'road_model': None, 'ocr': None, 'request': {'model': model}}
     python=python_executable or sys.executable

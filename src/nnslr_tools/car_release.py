@@ -124,12 +124,15 @@ def build_pending(root: Path) -> bool:
 
 
 # -- 1. which networks --------------------------------------------------------------------------------------
-def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_car: bool = True) -> dict:
+def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_car: bool = True, decider: Any = None,
+           brain: bool = True) -> dict:
     """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
     of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
-    applicability network (decider) and the brain in use, each None when none is chosen. Each with its id and its
-    weights on this server. A brain that takes the driver's inputs never goes on the car (brain_refused); brain_on_car
-    False, where the brain in use does not go on the car (Models › Drive's replay, a trial on the comma), takes it too."""
+    applicability network (decider): the one given (an id) or the one in use, None when none is; the brain in use, None
+    when none is chosen or brain is False (the networks that read the signs the brain learns from, sign_networks).
+    Each with its id and its weights on this server. A brain that takes the driver's inputs never goes on the car
+    (brain_refused); brain_on_car False, where the brain in use does not go on the car (Models › Drive's replay, a
+    trial on the comma), takes it too."""
     if signnet is not None and (not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet)):
         raise ValueError(f'{signnet!r} is not a run name')
     runs = RunsIndex(Path(root))
@@ -174,8 +177,8 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_
         if weights is None:
             raise ValueError(f'{entry["id"]} has no weights on this server')
         found[network] = {'id': entry['id'], 'run': entry['run'], 'weights': weights}
-    found['decider'] = _decider(runs, index)
-    found['brain'] = _brain(Path(root), runs, index, brain_on_car)
+    found['decider'] = _decider(runs, index, decider)
+    found['brain'] = _brain(Path(root), runs, index, brain_on_car) if brain else None
     _check_plates(runs, found, chosen)
     return found
 
@@ -230,14 +233,22 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) 
             'wet': entry['wet']}
 
 
-def _decider(runs: RunsIndex, index: ModelIndex) -> dict | None:
-    """The applicability network in use, or None when none is chosen (the car then takes every sign)."""
-    active, problem = index.read_active()
-    if problem is not None or active.get('decider') is None:
-        return None
-    entry, why = index.in_use('decider')
-    if entry is None:
-        raise ValueError(why)
+def _decider(runs: RunsIndex, index: ModelIndex, chosen: Any = None) -> dict | None:
+    """The applicability network given (an id of the Models tab), else the one in use, or None when none is chosen
+    (the car then takes every sign)."""
+    if chosen is not None:
+        if role_of(chosen) != 'decider':
+            raise ValueError(f'{chosen!r} is not the id of an applicability network')
+        entry = next((item for item in index.artifacts(('decider',))['decider'] if item['id'] == chosen), None)
+        if entry is None:
+            raise ValueError(f'the applicability network {chosen} is not on this server')
+    else:
+        active, problem = index.read_active()
+        if problem is not None or active.get('decider') is None:
+            return None
+        entry, why = index.in_use('decider')
+        if entry is None:
+            raise ValueError(why)
     if not entry['finished']:
         raise ValueError(f'the applicability network {entry["id"]} has not finished its training')
     run = runs._run_dir(entry['run'])

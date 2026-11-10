@@ -11,8 +11,9 @@ proposals stay as they were, and a drive he has started reviewing is read here a
 Per drive, derived/brain_signs/<route>.jsonl: a first line with what read it (CACHE_VERSION, the three networks with the
 size and time of their weights, the pictures' fingerprint), then one line per picture (frame_key, segment_index,
 decoded_frame_index, output_index, detections as in a report). Read again when one of these networks or the pictures change,
-never otherwise. The signs the car is given (brain_targets.sign_inputs) never come from here: the car has no
-applicability network, and the brain is given what the car reads.
+never otherwise. The networks are those in use, or the three chosen in Train › Brain (sign_networks: reader_setup's
+chosen), the same that read the brain's inputs. Those inputs (brain_targets.sign_inputs) never come from here: the
+brain is given what the car reads, its vision.py and applicability.py on the road video (road_type_signs).
 
 Several drives are read at once, each by a worker of its own on a card of those given, in turn (#36, 10 Nov 2026): one
 worker keeps about 3 cores and 500 MB of a card busy, so one drive at a time left the GPU nearly idle."""
@@ -95,21 +96,21 @@ def _current(root: Path, route: str, stamp: dict, frames: list[dict]) -> bool:
             and head.get('pictures') == pictures_stamp(frames))
 
 
-def stamp_in_use(root: Path) -> dict | None:
-    """networks_stamp of Our networks (preannotate.our_networks), None when they are not whole: a reading by other networks is not used
-    (brain_targets.reviewed_signs)."""
+def stamp_in_use(root: Path, chosen: dict | None = None) -> dict | None:
+    """networks_stamp of Our networks (preannotate.our_networks; chosen: those three instead, sign_networks), None when
+    they are not whole: a reading by other networks is not used (brain_targets.reviewed_signs)."""
     from nnslr_tools.preannotate import PreannotationError, our_networks
     try:
-        return networks_stamp(our_networks(root))
+        return networks_stamp(our_networks(root, chosen))
     except (PreannotationError, OSError):
         return None
 
 
-def unread(root: Path, routes: list[str]) -> int | None:
-    """How many of routes Our networks have not read (never, or by other networks), for Train › Brain before the
-    click; None when Our networks are not whole. Without the pictures' fingerprint: the training reads a drive whose
-    pictures changed again all the same."""
-    stamp = stamp_in_use(root)
+def unread(root: Path, routes: list[str], chosen: dict | None = None) -> int | None:
+    """How many of routes Our networks (chosen: those three) have not read (never, or by other networks), for Train ›
+    Brain before the click; None when they are not whole. Without the pictures' fingerprint: the training reads a drive
+    whose pictures changed again all the same."""
+    stamp = stamp_in_use(root, chosen)
     if stamp is None:
         return None
     count = 0
@@ -123,13 +124,14 @@ def unread(root: Path, routes: list[str]) -> int | None:
     return count
 
 
-def reader_setup(root: Path) -> dict:
-    """The proposer_setup of Our networks, without preview pictures. Raises preannotate.PreannotationError when
-    they cannot run (a part not in use, no GPU environment). The GPU environment is NNSLR_GPU_VENV when set, as for the
-    brain's training (scripts/run_brain.sh)."""
+def reader_setup(root: Path, chosen: dict | None = None) -> dict:
+    """The proposer_setup of Our networks (chosen: these three instead, {part: id}, sign_networks), without preview
+    pictures. Raises preannotate.PreannotationError when they cannot run (a part not in use, no GPU environment). The GPU
+    environment is NNSLR_GPU_VENV when set, as for the brain's training (scripts/run_brain.sh)."""
     from nnslr_tools.preannotate import proposer_setup
     venv = os.environ.get('NNSLR_GPU_VENV')
-    setup = proposer_setup('ours', Path(root), python_executable=str(Path(venv) / 'bin' / 'python') if venv else None)
+    setup = proposer_setup('ours', Path(root), python_executable=str(Path(venv) / 'bin' / 'python') if venv else None,
+                           networks=chosen)
     # Always on a card: a worker without one stops instead of reading on the CPU.
     setup['request'] = {**setup['request'], 'previews': False, 'require_gpu': True}
     return setup

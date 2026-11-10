@@ -9,8 +9,8 @@ const props = defineProps<{choices: BrainChoice; id: string}>();
 type Switch = 'works' | 'road' | 'types';
 const SWITCHES: {key: Switch; label: string; title: string}[] = [
   {key: 'works', label: 'Roadworks', title: 'The brain also learns the roadworks on the road, a head only the training has'},
-  {key: 'road', label: 'Kinds of road', title: 'The brain also learns the kinds of road marked in Speed review'},
-  {key: 'types', label: 'Road types', title: 'The brain also learns the road type, only from the seconds that have one'},
+  {key: 'road', label: 'Road conditions', title: 'The brain also learns the road conditions you mark in Speed review: narrow, country, gravel, potholes…'},
+  {key: 'types', label: 'Road type (map)', title: 'The brain also learns the road type of the map (motorway, rural, town…), corrected in Speed review; only the seconds that have one count'},
 ];
 function flip(key: Switch): void {
   props.choices[key] = props.choices[key] === 'on' ? 'off' : 'on';

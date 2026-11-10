@@ -80,6 +80,11 @@ export interface ActionOptions {
   road?: 'on' | 'off';
   types?: 'on' | 'off';
   pool?: 'mean' | 'grid';
+  /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
+   * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
+  sign_cutter?: string;
+  sign_classifier?: string;
+  sign_decider?: string;
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
   openpilot?: string;
   brains?: string;
@@ -1490,6 +1495,9 @@ export interface BrainModel extends ModelBase {
    * ImageNet). */
   split_sha256?: string | null;
   start?: NetworkStart | null;
+  /** The networks its signs were read with (ids of Models); null for a brain of before 10 Nov 2026, whose signs no
+   * applicability network filtered. */
+  sign_networks?: {cutter: string; classifier: string; decider: string} | null;
   validation: BrainNumbers | null;
   test: BrainNumbers | null;
 }

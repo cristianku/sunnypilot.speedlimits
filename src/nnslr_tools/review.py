@@ -2058,14 +2058,15 @@ def make_handler(app: ReviewApp):
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
                     # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool"}; "driver"
-                    # only "off", from a page of before), the models of a regression ({"openpilot", "brains"}), the route, provider,
+                    # only "off", from a page of before) and the networks that read its signs ({"sign_cutter",
+                    # "sign_classifier", "sign_decider"}), the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
                     # "certified"}), all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool', 'rebuild',
                                                           'openpilot',
-                                                          'brains')
+                                                          'brains', 'sign_cutter', 'sign_classifier', 'sign_decider')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}
                     # [ai-reviewer] - START
                     # Passed as they are, also when not strings: Panel.start refuses them, never drops them (a limit

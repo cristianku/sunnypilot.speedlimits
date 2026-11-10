@@ -234,6 +234,9 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
           <div><dt title="What it reads each second beside the picture; never the map">Inputs</dt><dd>{{ brain.groups?.join(', ') ?? '–' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit with a plate of hours">Hours plates</dt><dd>{{ brain.hours ? 'Reads them and their hours' : brain.plates ? 'Reads them' : 'Does not read them' }}</dd></div>
           <div><dt title="Whether the frames it trained on had a limit valid only on a wet road">Wet plates</dt><dd>{{ brain.wet ? 'Reads them' : 'Does not read them' }}</dd></div>
+          <div><dt title="The cutter, the classifier and the applicability network that read the signs it learnt from">Signs read by</dt><dd>{{
+            brain.sign_networks ? brain.sign_networks.cutter + ', ' + brain.sign_networks.classifier + ', ' + brain.sign_networks.decider
+            : 'Not recorded: no applicability network left out the signs of other roads' }}</dd></div>
           <div><dt>Seed</dt><dd>{{ brain.seed ?? '–' }}</dd></div>
         </dl>
         </details>
