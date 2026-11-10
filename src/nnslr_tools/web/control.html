@@ -1437,6 +1437,18 @@ scrollbar-width:none;cursor:default;background:linear-gradient(to bottom,transpa
 .dr-bar .seg button[aria-checked="true"]{background:rgba(255,255,255,.9);color:#1d1d1f;box-shadow:none}
 .dr-bar #dr-last-change{margin-left:auto}
 @media (max-width:480px){.dr-bar{padding:16px 8px 6px;gap:5px}.dr-stage-note{bottom:50px}}
+/* The picture alone, filling the screen (Models › Drive: a phone on its side, or the button at the end of the bar): over
+the whole page, in black, clear of a phone's notch and rounded corners; the commands only while paused. */
+.dr-stage.filling{position:fixed;inset:0;z-index:50;width:100%;height:100%;min-width:0;aspect-ratio:auto;justify-self:stretch;
+align-self:stretch;border-radius:0;background:#000}
+.dr-stage.filling .dr-hud{top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left))}
+.dr-stage.filling .dr-sharp-tag{top:max(10px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right))}
+.dr-stage.filling .dr-bar{padding-left:max(10px,env(safe-area-inset-left));padding-right:max(10px,env(safe-area-inset-right));
+padding-bottom:max(8px,env(safe-area-inset-bottom));transition:opacity .2s}
+.dr-stage.filling.playing .dr-bar{opacity:0;pointer-events:none}
+/* Always in view at the bar's right end, even where a narrow picture scrolls the bar sideways. */
+.dr-bar #dr-full{position:sticky;right:0;margin-left:2px;background:rgba(0,0,0,.78)}
+html.dr-filling,html.dr-filling body{overflow:hidden}
 .dr-time{grid-area:time;display:flex;flex-direction:column;gap:8px;min-width:0}
 .dr-sync{margin:0;font-size:12.5px;color:var(--muted)}
 .dr-strip{display:block;width:100%;height:26px;cursor:pointer;touch-action:none}

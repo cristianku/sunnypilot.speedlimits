@@ -20,7 +20,8 @@
 // picture of the time shown and not zoomed in), and places the frames of Sign review on the drive with the segments of the
 // logs (event segments, at every reading of the drive). Models › Drive draws the comma's own screen over the picture
 // (slot "picture") and so hides the player's squares of the vision's and the map's limit (limits false); the car's
-// speed stays.
+// speed stays. It also lets the picture fill the screen (fullScreen): a phone on its side, or the button at the end of
+// the bar.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {plural} from '../common/format';
@@ -40,8 +41,8 @@ import {type ControlTab, goTo} from './tabs';
 
 const props = withDefaults(defineProps<{route: string; readOnly: boolean; tab: ControlTab; backLabel: string;
   simpleLanes?: boolean; rates?: readonly number[]; startZoom?: Zoom; sharp?: boolean; carKph?: number | null;
-  pickMap?: boolean; arrows?: boolean; limits?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false, startZoom: 'one',
-  pickMap: false, arrows: true, limits: true});
+  pickMap?: boolean; arrows?: boolean; limits?: boolean; fullScreen?: boolean}>(), {simpleLanes: false, rates: () => [], sharp: false,
+  startZoom: 'one', pickMap: false, arrows: true, limits: true, fullScreen: false});
 const guest = isGuest();
 const emit = defineEmits<{time: [seconds: number, t0Ns: number]; pickMap: [from: number, to: number, kph: number];
   segments: [segments: SyncSegment[]]; index: [index: VideoState['index']];
@@ -61,6 +62,8 @@ const MARKS = {
   pause: 'M7 5h3.2v14H7zM13.8 5H17v14h-3.2z',
   frameBack: 'M6 6h2.2v12H6zM18 6.8v10.4a.8.8 0 0 1-1.25.66L9.6 12.66a.8.8 0 0 1 0-1.32l7.15-5.2A.8.8 0 0 1 18 6.8z',
   frameOn: 'M15.8 6H18v12h-2.2zM6 6.8v10.4a.8.8 0 0 0 1.25.66l7.15-5.2a.8.8 0 0 0 0-1.32L7.25 6.14A.8.8 0 0 0 6 6.8z',
+  grow: 'M4 4h6v2.2H6.2V10H4zM14 4h6v6h-2.2V6.2H14zM4 14h2.2v3.8H10V20H4zM17.8 14H20v6h-6v-2.2h3.8z',
+  shrink: 'M7.8 4H10v6H4V7.8h3.8zM14 4h2.2v3.8H20V10h-6zM4 14h6v6H7.8v-3.8H4zM14 14h6v2.2h-3.8V20H14z',
 } as const;
 
 // -- the drive -----------------------------------------------------------------------------------------------------------
@@ -424,6 +427,12 @@ function onKey(event: KeyboardEvent): void {
     // ← → a frame, ⇧ ← → a second.
     if (event.shiftKey) seek(cursor.value + direction);
     else stepFrame(direction);
+  } else if ((event.key === 'f' || event.key === 'F') && props.fullScreen && !event.shiftKey) {
+    event.preventDefault();
+    toggleFull();
+  } else if (event.key === 'Escape' && filling.value && !fullElement()) {
+    // The browser's own full screen leaves on Escape by itself (onFullChange); the picture filling the window here.
+    toggleFull();
   }
 }
 onMounted(() => window.addEventListener('keydown', onKey));
@@ -432,6 +441,113 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(frame);
   window.clearTimeout(videoTimer);
   window.clearTimeout(scanTimer);
+});
+
+// -- the picture alone, filling the screen ---------------------------------------------------------------------------------
+// Where the page offers it (fullScreen): the picture with all that is drawn on it fills the screen, nothing of the page
+// around it. A phone turned on its side does it by itself (a low touch screen: an iPad keeps the page), and upright again
+// the page comes back; the button at the end of the bar (F) does it on any screen and leaves it. The browser's own full
+// screen is asked on a tap where it has one for a page (Android, an iPad, a computer; iPhone Safari has none: there the
+// picture fills the window), and the button also turns the phone to landscape where the browser lets it. Filling, the
+// commands show only while paused; a tap on the picture plays or pauses as ever.
+const SIDEWAYS = '(orientation: landscape) and (max-height: 500px) and (pointer: coarse)';
+const sideways = ref(false);
+/** Left with the button while on its side: the page, until the phone is upright again. */
+const sidewaysLeft = ref(false);
+/** Asked with the button. */
+const fullAsked = ref(false);
+const filling = computed(() => props.fullScreen && (fullAsked.value || sideways.value && !sidewaysLeft.value));
+type FullElement = HTMLElement & {webkitRequestFullscreen?: () => void};
+type FullDocument = Document & {webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void};
+/** Not in the DOM's types: lock and unlock of the screen's orientation (Chrome on Android, in full screen only). */
+type Turning = {lock?: (orientation: string) => Promise<void>; unlock?: () => void};
+const turning = (): Turning | null => (screen.orientation as unknown as Turning | undefined) ?? null;
+const fullElement = (): Element | null => document.fullscreenElement ?? (document as FullDocument).webkitFullscreenElement ?? null;
+/** The landscape asked with the button, to give back when it is left. */
+let turned = false;
+async function browserFull(turn: boolean): Promise<void> {
+  const element = stage.value as FullElement | null;
+  if (!element || fullElement()) return;
+  try {
+    if (element.requestFullscreen) await element.requestFullscreen({navigationUI: 'hide'});
+    else element.webkitRequestFullscreen?.();
+  } catch {
+    // No full screen for a page here: the picture fills the window all the same.
+    return;
+  }
+  // Not on a phone already on its side: upright again must bring the page back, not stay in landscape.
+  if (!turn) return;
+  try {
+    await turning()?.lock?.('landscape');
+    turned = true;
+  } catch {
+    // Not every browser turns the screen for a page.
+  }
+}
+function leaveBrowserFull(): void {
+  if (turned) {
+    turned = false;
+    try {
+      turning()?.unlock?.();
+    } catch {
+      // Nothing to give back.
+    }
+  }
+  if (!fullElement()) return;
+  if (document.exitFullscreen) void document.exitFullscreen().catch(() => undefined);
+  else (document as FullDocument).webkitExitFullscreen?.();
+}
+function toggleFull(): void {
+  if (filling.value) {
+    fullAsked.value = false;
+    sidewaysLeft.value = sideways.value;
+    leaveBrowserFull();
+  } else {
+    fullAsked.value = true;
+    sidewaysLeft.value = false;
+    void browserFull(true);
+  }
+}
+/** A tap on the picture: play or pause, and filling the window, the browser's own full screen (it needs a tap). */
+function tapPicture(): void {
+  if (filling.value && !fullElement()) void browserFull(false);
+  toggle();
+}
+/** The browser left its full screen by itself (Escape, Android's back): the page comes back. */
+function onFullChange(): void {
+  if (fullElement() || !filling.value) return;
+  fullAsked.value = false;
+  sidewaysLeft.value = sideways.value;
+  leaveBrowserFull();
+}
+let sidewaysQuery: MediaQueryList | null = null;
+function onSideways(): void {
+  const was = sideways.value;
+  sideways.value = sidewaysQuery?.matches ?? false;
+  if (was && !sideways.value) {
+    // Upright again: the page (a landscape held by the button never comes here).
+    sidewaysLeft.value = false;
+    if (!turned) fullAsked.value = false;
+  }
+}
+watch(filling, (on) => {
+  document.documentElement.classList.toggle('dr-filling', on);
+  if (!on) leaveBrowserFull();
+});
+onMounted(() => {
+  if (!props.fullScreen) return;
+  sidewaysQuery = window.matchMedia(SIDEWAYS);
+  sidewaysQuery.addEventListener('change', onSideways);
+  onSideways();
+  document.addEventListener('fullscreenchange', onFullChange);
+  document.addEventListener('webkitfullscreenchange', onFullChange);
+});
+onBeforeUnmount(() => {
+  sidewaysQuery?.removeEventListener('change', onSideways);
+  document.removeEventListener('fullscreenchange', onFullChange);
+  document.removeEventListener('webkitfullscreenchange', onFullChange);
+  document.documentElement.classList.remove('dr-filling');
+  if (filling.value) leaveBrowserFull();
 });
 
 /** How a time of the logs lines up with the video here. */
@@ -719,7 +835,7 @@ watch(() => props.route, () => {
       <p v-if="sending" class="dr-hint">Sending the logs… {{ sending.done }} of {{ sending.total }}</p>
 
       <div class="dr-main">
-        <div ref="stage" class="dr-stage" :class="{empty: !ready}" @click="toggle">
+        <div ref="stage" class="dr-stage" :class="{empty: !ready, filling, playing}" @click="tapPicture">
           <video v-if="ready" ref="player" :src="video!.url" muted playsinline preload="auto" @loadedmetadata="seek(cursor)"
                  @error="onVideoError" @playing="videoProblem = ''" @seeking="stillAt = null" @seeked="onStill" @pause="onStill"
                  @play="stillAt = null"></video>
@@ -760,6 +876,11 @@ watch(() => props.route, () => {
                     :title="change ? 'The vision limit last changed to ' + change.kph + ' at ' + clockOf(change.at) : 'No change of the vision limit before'"
                     @click="change && seek(change.at - 2)">Last change</button>
             <Segmented v-if="RATES.length" v-model="rateKey" :options="RATES" label="Playback speed" class="dr-rate"/>
+            <button v-if="fullScreen" type="button" class="btn small dr-bar-icon" id="dr-full"
+                    :aria-label="filling ? 'Leave full screen' : 'Full screen'"
+                    :title="filling ? 'Back to the page (F)' : 'The picture alone, full screen (F); a phone turned on its side does it by itself'"
+                    @click="toggleFull"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path :d="filling ? MARKS.shrink : MARKS.grow" fill="currentColor"/></svg></button>
           </div>
         </div>
 

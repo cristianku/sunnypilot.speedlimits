@@ -325,7 +325,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
 
 <template>
   <DriveReviewDrive ref="player" :route="route" :read-only="readOnly" tab="drive" back-label="Drive" :rates="RATES"
-                    start-zoom="ten" :limits="false" @time="follow" @scan="onScan">
+                    start-zoom="ten" :limits="false" full-screen @time="follow" @scan="onScan">
     <template #badge><b v-if="certified" class="dv-badge">Certified</b></template>
     <template #picture="{shown}">
       <div ref="overlay" class="dv-overlay" aria-hidden="true">
