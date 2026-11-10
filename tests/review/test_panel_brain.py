@@ -40,8 +40,9 @@ def brain_script(checkout):
     script = checkout / 'scripts' / 'run_brain.sh'
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text('#!/usr/bin/env bash\necho "== Brain =="\necho "run:          $1"\n'
-                      'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_DRIVER $NNSLR_BRAIN_POOL"\n'
-                      'echo "road types: $NNSLR_BRAIN_TYPES"\n')
+                      'echo "choices: $NNSLR_BRAIN_WORKS $NNSLR_BRAIN_ROAD $NNSLR_BRAIN_POOL"\n'
+                      'echo "road types: $NNSLR_BRAIN_TYPES"\n'
+                      'echo "driver: ${NNSLR_BRAIN_DRIVER-unset}"\n')
     script.chmod(0o755)
     return script
 
@@ -128,12 +129,13 @@ def test_the_brain_is_trained_from_the_train_tab_once_a_drive_has_its_logs_read(
     assert first[:2] == ['==', 'scripts/run_brain.sh'] and re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{4}-brain', first[2])
     assert (done['state'], done['run'], done['label']) == ('ok', first[2], 'Train the brain')
     assert _run_of(panel.logs / (job['id'] + '.log'), 'train_brain') == first[2]
-    # The usual choices: the roadworks and the kinds of road on, the driver's inputs off (since 8 Nov 2026), the picture
-    # as a grid.
-    assert 'choices: 1 1 0 grid' in lines and 'road types: 1' in lines
+    # The usual choices: the roadworks and the kinds of road on, the picture as a grid; the driver's inputs are gone
+    # (10 Nov 2026).
+    assert {'choices: 1 1 grid', 'road types: 1', 'driver: unset'} <= set(lines)
 
 
 def test_a_step_of_the_pipeline_takes_every_choice_of_the_brain(root, checkout, monkeypatch):
+    # driver "off": what a page loaded before 10 Nov 2026 still sends.
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
     scanned(root)
@@ -173,10 +175,10 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     monkeypatch.setattr(panel, 'activities', lambda: [])
     job = panel.start('train_brain', {'works': 'off', 'road': 'off', 'types': 'off', 'driver': 'off', 'pool': 'mean'})
     done = finished(panel, job['id'])
-    assert {'choices: 0 0 0 mean', 'road types: 0'} <= set(full_log(panel, job['id']).splitlines())
+    assert {'choices: 0 0 mean', 'road types: 0', 'driver: unset'} <= set(full_log(panel, job['id']).splitlines())
     assert done['state'] == 'ok'
-    # The job's chips, from the settings line of the script: the driver's inputs when a run had them (--driver), and
-    # the runs of before 8 Nov 2026 that left them out (--no-driver) still say so.
+    # The job's chips, from the settings line of the script: the runs of before 10 Nov 2026 that had the driver's inputs
+    # (--driver), and those of before 8 Nov that left them out (--no-driver), still say so.
     log = root / 'brain.log'
     log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool mean --no-works --no-road '
                    '--no-road-types --no-driver\n')
@@ -188,14 +190,23 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     assert _settings_of(log, 'train_brain') == ['40 epochs']
 
 
-def test_the_drivers_inputs_are_only_there_when_asked(root, checkout, monkeypatch):
+def test_the_drivers_inputs_are_refused_and_a_page_of_before_still_starts(root, checkout, monkeypatch):
+    """No brain takes the pedals nor the car's speed since 10 Nov 2026: "on" is refused before any job, alone or in a
+    pipeline; "off", what a page loaded before sends, starts as usual, and the script is not told about them."""
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
     scanned(root)
     monkeypatch.setattr(panel, 'activities', lambda: [])
-    job = panel.start('train_brain', {'driver': 'on'})
+    with pytest.raises(PanelError) as refused:
+        panel.start('train_brain', {'driver': 'on'})
+    assert refused.value.status == 400 and refused.value.reason == 'bad_option'
+    assert 'followed your speed' in refused.value.message
+    with pytest.raises(PanelError) as refused:
+        panel.start_pipeline({'steps': [{'action': 'train_brain', 'options': {'driver': 'on'}}]}, None)
+    assert refused.value.status == 400 and panel.jobs() == []
+    job = panel.start('train_brain', {'driver': 'off'})
     finished(panel, job['id'])
-    assert 'choices: 1 1 1 grid' in full_log(panel, job['id']).splitlines()
+    assert {'choices: 1 1 grid', 'driver: unset'} <= set(full_log(panel, job['id']).splitlines())
 
 
 @pytest.mark.parametrize('options', [{'works': 'x'}, {'road': 'no'}, {'driver': 'maybe'}, {'pool': 'max'}, {'works': ['on']},
@@ -230,7 +241,7 @@ def test_it_is_a_step_of_the_pipeline_with_its_choices(root, checkout, monkeypat
     assert view['steps'][0]['action'] == 'train_brain'
     job = next(item for item in panel.jobs() if item['action'] == 'train_brain')
     finished(panel, job['id'])
-    assert 'choices: 0 1 0 mean' in full_log(panel, job['id']).splitlines()
+    assert 'choices: 0 1 mean' in full_log(panel, job['id']).splitlines()
 
 
 def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_log(root, checkout):
@@ -244,10 +255,16 @@ def test_a_brain_training_started_from_a_terminal_has_the_progress_of_its_run_lo
 
 
 # -- what can go to the car ---------------------------------------------------------------------------------------
-def test_a_brain_can_be_chosen_for_the_car_with_or_without_the_drivers_inputs():
+def test_a_brain_that_takes_the_drivers_inputs_cannot_be_chosen():
+    """With the car's speed in, the brain of 10 Nov 2026 followed his speed: one that takes the pedals or the speed stays
+    in its run, to compare, and cannot be put in use; its groups as names or as [name, size]."""
     usual = {'role': 'brain', 'finished': True, 'groups': ['signs', 'plate', 'hour', 'lead', 'country']}
     assert selectable(usual) == (True, None)
-    assert selectable({**usual, 'groups': [*usual['groups'], 'pedals', 'speed']}) == (True, None)
+    assert selectable({**usual, 'groups': None}) == (True, None)
+    for groups in ([*usual['groups'], 'pedals', 'speed'], [*usual['groups'], 'speed'], [*usual['groups'], 'pedals'],
+                   [[name, 1] for name in [*usual['groups'], 'speed']]):
+        assert selectable({**usual, 'groups': groups}) == (False, 'takes_the_driver'), groups
+    assert selectable({**usual, 'groups': [*usual['groups'], 'engaged', 'motion']}) == (True, None)
     assert selectable({**usual, 'finished': False}) == (False, 'not_finished')
 
 
@@ -267,10 +284,9 @@ def test_road_type_signs_labelled_reads_every_drive_the_brain_learns_from(root, 
 
 
 # -- the command line ---------------------------------------------------------------------------------------------
-@pytest.mark.parametrize('flags,driver', [([], False), (['--driver'], True), (['--no-driver'], False)])
-def test_train_brain_leaves_the_drivers_inputs_out_unless_asked(tmp_path, monkeypatch, capsys, flags, driver):
-    """nnslr train-brain: the driver's inputs out by default since 8 Nov 2026, --driver the comparison, --no-driver (the
-    opt-out of before) still the same. Nothing is trained: brain_train is a stand-in."""
+def test_train_brain_has_no_drivers_inputs(tmp_path, monkeypatch, capsys):
+    """nnslr train-brain: the driver's inputs are gone since 10 Nov 2026, train_brain is not asked about them and
+    --driver, --no-driver are no flags any more. Nothing is trained: brain_train is a stand-in."""
     import types
 
     import nnslr_tools
@@ -285,8 +301,13 @@ def test_train_brain_leaves_the_drivers_inputs_out_unless_asked(tmp_path, monkey
     fake = types.SimpleNamespace(EPOCHS=40, train_brain=train_brain)
     monkeypatch.setitem(sys.modules, 'nnslr_tools.brain_train', fake)
     monkeypatch.setattr(nnslr_tools, 'brain_train', fake, raising=False)
-    cli.main(['train-brain', '--data-root', str(tmp_path / 'data'), '--run-dir', str(tmp_path / 'out'), *flags])
-    assert [kwargs['driver'] for kwargs in asked] == [driver]
+    command = ['train-brain', '--data-root', str(tmp_path / 'data'), '--run-dir', str(tmp_path / 'out')]
+    cli.main(command)
+    assert len(asked) == 1 and 'driver' not in asked[0]
+    for flag in ('--driver', '--no-driver'):
+        with pytest.raises(SystemExit):
+            cli.main([*command, flag])
+    assert len(asked) == 1
 
 
 # -- what the labels give it --------------------------------------------------------------------------------------
@@ -327,7 +348,7 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         assert status == 200, data
         job = json_of(data)['id']
         finished(server.app.panel, job)
-        assert 'choices: 0 0 0 mean' in full_log(server.app.panel, job).splitlines()
+        assert 'choices: 0 0 mean' in full_log(server.app.panel, job).splitlines()
         status, _, data = server.request('GET', '/api/panel/brain-labels')
         assert status == 200 and json_of(data)['to_read'] == 0
         assert json_of(data)['training'] == {'drives': 1, 'hours': 0.01, 'sunnypilot_on': 0}

@@ -19,7 +19,7 @@ INPUTS · 4 times/second
                        Speed to hold                 Next limit + metres
 ```
 
-The visual layout must show **MobileNetV3 before the GRU**, not as two parallel modules. Other inputs join the **visual features before the GRU**; they do not pass through MobileNetV3. Check actual selected groups against the current brain contract instead of hard-coding outdated input claims. Pedals and car speed are **not** default inference inputs (`driver=False`).
+The visual layout must show **MobileNetV3 before the GRU**, not as two parallel modules. Other inputs join the **visual features before the GRU**; they do not pass through MobileNetV3. Check actual selected groups against the current brain contract instead of hard-coding outdated input claims. Pedals and car speed are **never** inputs (`brain_targets.LEFT_OUT`, since 10 Nov 2026: a brain with them followed his speed on the road).
 
 Under the main flow, add one compact **ONLY DURING TRAINING** section:
 

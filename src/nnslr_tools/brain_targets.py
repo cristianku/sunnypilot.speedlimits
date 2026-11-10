@@ -134,12 +134,12 @@ before the frame:
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
 
-pedals and speed are the driver, and they are apart so that a comparison can leave them out (engaged is made but never
-learned, LEFT_OUT): the answer is now the driver's own speed, so with his pedals and the car's speed among the inputs the
-network could learn to follow the car instead of the road, and the car's speed is what the network itself decides on the
-car. The measure says it: the frames with no gas, and the ones with the car's speed far from the answer. The speed input is
-vEgo, as on the car; the measure's own speed is the dashboard's (drive_logs.dashboard_speed: vEgoCluster, or vEgo + 3 km/h on
-a Peugeot log without it), in the units of the answers.
+pedals, speed and engaged are made but never learned (LEFT_OUT): the answer is the driver's own speed, so with his pedals
+and the car's speed among the inputs the network learns to follow the car instead of the road, and the car's speed is what
+the network itself decides on the car. The brain trained with them on 10 Nov 2026 did just that on the road: it followed
+his speed. The measure still reads them (drive['inputs'], never packed): the frames with no gas, and the ones with the car's
+speed far from the answer. The measure's own speed is the dashboard's (drive_logs.dashboard_speed: vEgoCluster, or vEgo +
+3 km/h on a Peugeot log without it), in the units of the answers.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
@@ -266,10 +266,11 @@ BRAIN_INPUTS = _load_brain_inputs(BRAIN_INPUTS_PATH)
 VISION = load_vision(package_path())
 COUNTRIES = BRAIN_INPUTS.COUNTRIES
 INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
-DRIVER_INPUTS = ('pedals', 'speed')
 # Groups the car still makes that no brain learns from: engaged (openpilot on or off, 7 Nov 2026) only confused the
-# network, his call the same night. A brain built before keeps it: its groups are in its checkpoint and contract.
-LEFT_OUT = ('engaged',)
+# network, his call the same night; pedals and speed (the gas, the brake and vEgo, 10 Nov 2026): the brain trained with
+# them followed his speed on the road, his call that day. A brain built before keeps them: its groups are in its checkpoint
+# and contract, and Models no longer lets one that takes the driver be chosen (model_roles.DRIVER_GROUPS).
+LEFT_OUT = ('engaged', 'pedals', 'speed')
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 

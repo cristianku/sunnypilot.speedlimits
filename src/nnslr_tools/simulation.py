@@ -984,10 +984,11 @@ def export_set(root: Path, *, log=print) -> Path:
     """The versions in use on Models exported as Publish exports them (ONNX, contracts, speed_limits.json with the car's
     settings of today), into the release of the set 'in-use'; nothing when it is theirs already, only speed_limits.json
     again when the car's settings alone changed. In the GPU environment: the export is PyTorch's. Each ONNX is checked
-    against PyTorch as Publish checks it, but for the brain's check along a drive."""
+    against PyTorch as Publish checks it, but for the brain's check along a drive. A brain in use that takes the
+    driver's inputs is exported too, which Publish refuses: a replay never reaches the car."""
     from nnslr_tools import car_release, car_settings
 
-    chosen = car_release.choose(root, None)
+    chosen = car_release.choose(root, None, brain_on_car=False)
     source = {role: chosen[role]['id'] for role in ROLES if chosen.get(role)}
     target = Path(root) / SETS_RELATIVE / 'in-use'
     networks = release_networks(target)

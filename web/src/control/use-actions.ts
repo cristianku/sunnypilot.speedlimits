@@ -62,13 +62,12 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
   }
   if (name === 'train_brain') {
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
-    const driver = options?.driver === 'on' ? ' With the driver’s inputs.' : '';
     const mean = options?.pool === 'mean' ? ' With the picture as a mean.' : '';
     return {title: 'Train the brain?', action: 'Start training',
       text: 'First it reads the signs of every drive with sunnypilot off and its logs read as the car does today, and our networks in use '
         + 'read the drives they have not read yet for the next limit (about 40 s a drive), then it trains three seeds on '
         + 'the GPU: about 15 minutes. Three new versions in Models; '
-        + 'nothing goes to the car until you choose one and Publish.' + works + driver + mean};
+        + 'nothing goes to the car until you choose one and Publish.' + works + mean};
   }
   if (name === 'train_decider') {
     return {title: 'Train applicability?', action: 'Start training',

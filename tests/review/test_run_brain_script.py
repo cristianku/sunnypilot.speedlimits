@@ -54,14 +54,14 @@ def test_the_steps_read_the_signs_before_the_three_seeds(tmp_path):
 
 
 def test_the_choices_reach_the_check_and_every_seed(tmp_path):
-    # The driver's inputs are the comparison since 8 Nov 2026: 1 asks for them.
-    process = run_script(tmp_path, env={'NNSLR_BRAIN_WORKS': '0', 'NNSLR_BRAIN_ROAD': '0', 'NNSLR_BRAIN_DRIVER': '1',
+    process = run_script(tmp_path, env={'NNSLR_BRAIN_WORKS': '0', 'NNSLR_BRAIN_ROAD': '0', 'NNSLR_BRAIN_DRIVER': '0',
                                         'NNSLR_BRAIN_POOL': 'mean', 'NNSLR_BRAIN_EPOCHS': '7', 'NNSLR_BRAIN_TYPES': '0'})
     assert process.returncode == 0, process.stderr + process.stdout
     lines = (tmp_path / 'data' / 'runs' / 'n1' / 'brain.log').read_text().splitlines()
     trainings = [line for line in lines if line.startswith('args: train-brain')]
     assert len(trainings) == 4
-    assert all('--epochs 7 --pool mean --no-works --no-road --no-road-types --driver' in line for line in trainings)
+    assert all('--epochs 7 --pool mean --no-works --no-road --no-road-types' in line and '--driver' not in line
+               for line in trainings)
     # The labels' line says what the training takes: without the road types, every second with a speed.
     assert [line for line in lines if line.startswith('args: brain-targets')][0].endswith('--no-road-types')
 
@@ -89,6 +89,10 @@ def test_bad_settings_and_another_kind_of_run_are_refused(tmp_path):
     for env in ({'NNSLR_BRAIN_WORKS': 'x'}, {'NNSLR_BRAIN_ROAD': 'x'}, {'NNSLR_BRAIN_DRIVER': 'x'}, {'NNSLR_BRAIN_POOL': 'x'},
                 {'NNSLR_BRAIN_EPOCHS': 'x'}, {'NNSLR_BRAIN_TYPES': 'x'}):
         assert run_script(tmp_path, env=env).returncode == 2, env
+    # The driver's inputs are gone since 10 Nov 2026: a caller of before that asks for them stops before anything runs.
+    process = run_script(tmp_path, env={'NNSLR_BRAIN_DRIVER': '1'})
+    assert process.returncode == 2 and 'NNSLR_BRAIN_DRIVER is gone' in process.stderr
+    assert not (tmp_path / 'data' / 'runs' / 'n1').exists()
     other = tmp_path / 'data' / 'runs' / 'n2' / 'road-type'
     other.mkdir(parents=True)
     process = run_script(tmp_path, name='n2')

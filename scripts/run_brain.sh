@@ -33,8 +33,6 @@ set -euo pipefail
 # roadworks; 0: not), NNSLR_BRAIN_ROAD (1: it also learns the kinds of road of Speed review; 0: not),
 # NNSLR_BRAIN_TYPES (1: it also learns the road type of the map and of Speed review, and only from the seconds that have
 # one; 0: not, every second),
-# NNSLR_BRAIN_DRIVER (0, the usual since 8 Nov 2026: without the driver's inputs; 1: also the gas, the brake and the
-# car's speed),
 # NNSLR_BRAIN_POOL (grid: the picture's features keep where they are; mean: not), NNSLR_SUNNYPILOT_CLONE
 # (/root/sunnypilot, on the speed-limits branch), NNSLR_ALLOW_BUSY_GPU=1 to share a GPU that already has compute processes.
 
@@ -50,7 +48,6 @@ SIGN_WORKERS="${NNSLR_SIGN_WORKERS:-$SIGN_WORKERS_DEFAULT}"
 WORKS="${NNSLR_BRAIN_WORKS:-1}"
 ROAD="${NNSLR_BRAIN_ROAD:-1}"
 TYPES="${NNSLR_BRAIN_TYPES:-1}"
-DRIVER="${NNSLR_BRAIN_DRIVER:-0}"
 POOL="${NNSLR_BRAIN_POOL:-grid}"
 SEEDS=(0 1 2)
 
@@ -87,8 +84,10 @@ if [[ "$TYPES" != "0" && "$TYPES" != "1" ]]; then
   exit 2
 fi
 
-if [[ "$DRIVER" != "0" && "$DRIVER" != "1" ]]; then
-  echo "error: NNSLR_BRAIN_DRIVER must be 0 or 1: $DRIVER" >&2
+# The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT): with the car's speed in, the brain followed
+# his speed on the road. A caller of before that still asks for them stops here.
+if [[ "${NNSLR_BRAIN_DRIVER:-0}" != "0" ]]; then
+  echo "error: NNSLR_BRAIN_DRIVER is gone: the brain never takes the gas, the brake or the car's speed" >&2
   exit 2
 fi
 
@@ -157,9 +156,6 @@ if [[ "$ROAD" == "0" ]]; then
 fi
 if [[ "$TYPES" == "0" ]]; then
   SETTINGS+=(--no-road-types)
-fi
-if [[ "$DRIVER" == "1" ]]; then
-  SETTINGS+=(--driver)
 fi
 
 echo "== Brain =="

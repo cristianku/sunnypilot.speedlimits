@@ -204,6 +204,39 @@ def test_a_weights_file_outside_its_run_is_not_listed(root, models, tmp_path):
     assert [entry['id'] for entry in roles['cutter']['versions']] == ['cutter:r1/detector']
 
 
+def brain(root: Path, name: str, groups: list[str]) -> Path:
+    """A finished brain run of ``nnslr train-brain`` that learnt from these groups."""
+    run = root / 'runs' / name
+    write(run / 'brain-last.pt', 'weights')
+    write(run / 'result.json', {'groups': groups, 'seed': 1, 'rate_hz': 4, 'ahead': True, 'history': [{}],
+                                'test': {'speed': {'frames': 10, 'right': 0.5, 'mean_error_kph': 3.0}}})
+    return run
+
+
+def test_a_brain_that_takes_the_drivers_inputs_cannot_be_chosen_and_the_one_in_use_says_so(root, models):
+    """With the car's speed among its inputs, the brain of 10 Nov 2026 followed his speed on the road: such a brain stays
+    in its run to compare, cannot be put in use, and while one chosen before is still in use Models › Brain says so."""
+    road = ['signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'plate_wet', 'sign_distance', 'motion']
+    brain(root, 'b1', [*road[:6], 'pedals', 'speed', *road[6:]])
+    brain(root, 'b2', road)
+    with pytest.raises(ModelChoiceError) as refused:
+        models.set_active('brain', 'brain:b1/brain', who='admin', via='sign-in')
+    assert (refused.value.status, refused.value.reason) == (409, 'takes_the_driver')
+    entry = models.set_active('brain', 'brain:b2/brain', who='admin', via='sign-in')
+    roles = by_role(models.index())
+    versions = {version['run']: version for version in roles['brain']['versions']}
+    assert versions['b2']['selectable'] and not versions['b1']['selectable']
+    assert versions['b1']['not_selectable_reason'] == model_roles.NOT_SELECTABLE['takes_the_driver'][0]
+    assert (roles['brain']['old_kind_in_use'], roles['brain']['notice']) == (False, None)
+    # One chosen before 10 Nov 2026: it stays in use until another is chosen, and the page says so.
+    path = root / 'models' / 'active.json'
+    path.write_text(json.dumps({**json.loads(path.read_text()), 'brain': {**entry, 'id': 'brain:b1/brain'}}))
+    roles = by_role(models.index())
+    assert roles['brain']['active']['found'] and roles['brain']['old_kind_in_use']
+    assert roles['brain']['notice'] == model_roles.DRIVER_NOTICE
+    assert (roles['cutter']['old_kind_in_use'], roles['cutter']['notice']) == (False, None)
+
+
 # -- the model in use -------------------------------------------------------------------------------------
 def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     pipeline(root)

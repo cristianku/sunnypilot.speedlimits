@@ -588,7 +588,10 @@ def try_on_comma(root: Path, signnet: Any, *, classifier: Any = None, comma: Com
     dry_run: steps 1 to 3 only, the comma only read: nothing copied, nothing recorded."""
     root = Path(root)
     comma = comma or Comma()
-    chosen = choose(root, signnet, classifier)
+    # The trial copies the two sign networks alone: the comma keeps its build's brain, so the brain in use is neither
+    # refused (one that takes the driver's inputs, Publish's rule) nor exported (its check along a drive needs a GPU,
+    # which this job leaves to the trainings).
+    chosen = {**choose(root, signnet, classifier, brain_on_car=False), 'brain': None}
     say('== 1/5 Check the comma')
     state = check_comma(comma)
     why = 'Show Vision Speed Limit is on' if state['display'] else f'Speed Limit Source is {VISION_POLICIES[state["policy"]]}'

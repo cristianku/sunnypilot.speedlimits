@@ -1,17 +1,16 @@
 <script setup lang="ts">
 // The choices of the brain's training (brain-choices.ts) in one short row, in Train › Brain above its flow (which follows
-// them) and in its step of Train › Pipeline: the three heads only the training has and the driver's inputs as switches that
-// light up when on, the picture's features as Mean or Grid.
+// them) and in its step of Train › Pipeline: the three heads only the training has as switches that light up when on, the
+// picture's features as Mean or Grid.
 import {POOL_OPTIONS, type BrainChoice} from './brain-choices';
 import Segmented from './Segmented.vue';
 
 const props = defineProps<{choices: BrainChoice; id: string}>();
-type Switch = 'works' | 'road' | 'types' | 'driver';
+type Switch = 'works' | 'road' | 'types';
 const SWITCHES: {key: Switch; label: string; title: string}[] = [
   {key: 'works', label: 'Roadworks', title: 'The brain also learns the roadworks on the road, a head only the training has'},
   {key: 'road', label: 'Kinds of road', title: 'The brain also learns the kinds of road marked in Speed review'},
   {key: 'types', label: 'Road types', title: 'The brain also learns the road type, only from the seconds that have one'},
-  {key: 'driver', label: 'Driver’s inputs', title: 'The gas, the brake and the car’s speed as inputs: off by default'},
 ];
 function flip(key: Switch): void {
   props.choices[key] = props.choices[key] === 'on' ? 'off' : 'on';

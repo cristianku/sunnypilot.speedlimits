@@ -30,7 +30,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from nnslr_tools.car_release import CAR_SCRIPT, build_pending, car_missing
+from nnslr_tools.car_release import CAR_SCRIPT, brain_refused, build_pending, car_missing
 from nnslr_tools.comma_trial import TRY_SCRIPT, CommaProbe, read_trial, trial_missing
 from nnslr_tools.job_progress import last_line, progress, with_step_progress
 from nnslr_tools.model_roles import CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError, ModelIndex
@@ -83,14 +83,13 @@ CUTTER_SCRIPT = 'scripts/run_signnet.sh'
 # its own (start() adds <time>-decider).
 DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # The brain, the network that says the speed to hold: its three seeds on runs of their own (start() adds <time>-brain, the
-# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'driver': 'off'|'on', 'pool': 'grid'|'mean'}, the
-# variables of the script, the first of each the usual one (the driver's inputs off since 8 Nov 2026: his speed is the
-# answer).
+# script -s0, -s1, -s2). What it learns: {'works': 'on'|'off', 'road', 'types', 'pool': 'grid'|'mean'}, the variables
+# of the script, the first of each the usual one. The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT):
+# 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
-BRAIN_DRIVER = {'off': '0', 'on': '1'}
 BRAIN_POOLS = ('grid', 'mean')
 # Models › Regression: the models he chose along the certified drives, only those still missing (nnslr_tools.regression).
 REGRESSION_SCRIPT = 'scripts/run_regression.sh'
@@ -295,8 +294,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append(epochs + ' epochs')
     if flags.get('--patience'):
         chips.append('patience ' + flags['--patience'])
-    # The brain's choices (scripts/run_brain.sh), when not the usual ones. The driver's inputs are off by default since
-    # 8 Nov 2026 (--driver turns them on); a run of before that left them out said --no-driver.
+    # The brain's choices (scripts/run_brain.sh), when not the usual ones. The driver's inputs, of the runs of before
+    # 10 Nov 2026 only: --driver turned them on, and a run of before 8 Nov that left them out said --no-driver.
     if '--no-works' in flags:
         chips.append('no roadworks')
     if '--no-road' in flags:
@@ -1382,8 +1381,10 @@ class Panel:
             elif name == 'networks_publish' and not (payload.get('networks', {}).get('account') or {}).get('connected'):
                 reason = 'connect Hugging Face first: Settings, Hugging Face'
             elif name == 'send_to_car':
-                # The SignNet is chosen on the Models tab (start() checks it); the classifier is the one in use.
-                reason = car_missing(self.repo) or self.models_index.in_use('classifier')[1]
+                # The SignNet is chosen on the Models tab (start() checks it); the classifier is the one in use, and
+                # the brain in use never one that takes the driver's inputs.
+                reason = (car_missing(self.repo) or self.models_index.in_use('classifier')[1]
+                          or brain_refused(self.models_index))
             elif name in ('try_on_comma', 'comma_restore'):
                 # Whether the comma answers is known from a probe of a minute ago at most (never an ssh per page);
                 # the job checks the rest on the comma and says why it stops.
@@ -2219,18 +2220,21 @@ class Panel:
         return {'ok': True, 'summary': simulation.summary(self.root, route, self._simulation_sets())}
 
     def _brain_choices(self, options: dict) -> dict:
-        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'driver',
-        'pool'}), the usual ones when not given: the roadworks, the kinds of road and the road types on, the driver's inputs
-        off, the picture as a grid."""
+        """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool'}),
+        the usual ones when not given: the roadworks, the kinds of road and the road types on, the picture as a grid.
+        'driver' is only 'off' (a page loaded before 10 Nov 2026 sends it): the brain never takes his pedals nor the
+        car's speed."""
+        if options.get('driver', 'off') != 'off':
+            raise PanelError(400, 'bad_option', 'The brain no longer takes the driver’s inputs: with the car’s speed in, '
+                                                'it followed your speed. Reload the page.')
         works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
-        driver, pool = options.get('driver', 'off'), options.get('pool', BRAIN_POOLS[0])
-        if not all(isinstance(value, str) for value in (works, road, types, driver, pool)) or works not in BRAIN_WORKS \
-                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or driver not in BRAIN_DRIVER or pool not in BRAIN_POOLS:
-            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types and the driver’s inputs are '
-                                                'on or off, the picture mean or grid.')
+        pool = options.get('pool', BRAIN_POOLS[0])
+        if not all(isinstance(value, str) for value in (works, road, types, pool)) or works not in BRAIN_WORKS \
+                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or pool not in BRAIN_POOLS:
+            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road and the road types are on or off, the '
+                                                'picture mean or grid.')
         return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
-                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_DRIVER': BRAIN_DRIVER[driver],
-                'NNSLR_BRAIN_POOL': pool}
+                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool}
 
     def _network_start(self, action: str, start: object) -> dict:
         """The environment of where the cutter's or the applicability's training starts (one of NETWORK_STARTS):
@@ -2449,8 +2453,10 @@ class Panel:
             script = CAR_SCRIPT if action == 'send_to_car' else TRY_SCRIPT
             if not (self.repo / script).is_file():
                 raise PanelError(403, 'actions_disabled', script + ' is missing in this installation.')
+            # Only Publish puts the brain in use on the car: a trial copies the sign networks alone.
             missing = ((car_missing if action == 'send_to_car' else trial_missing)(self.repo)
-                       or self.models_index.in_use('classifier')[1])
+                       or self.models_index.in_use('classifier')[1]
+                       or (brain_refused(self.models_index) if action == 'send_to_car' else ''))
             if missing:
                 raise PanelError(409, 'not_available', missing[0].upper() + missing[1:] + '.')
             start_args.append('--signnet=' + signnet)

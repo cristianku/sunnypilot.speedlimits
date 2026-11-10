@@ -274,6 +274,27 @@ def test_the_builds_brain_stays_in_use_during_a_trial(comma):
     assert models[car_release.BRAIN_FILE] == b'build brain'
 
 
+def test_a_trial_never_exports_the_brain_in_use_nor_refuses_one_that_takes_the_driver(comma):
+    """The comma keeps its build's brain during a trial: the brain in use is not exported (its check along a drive needs a
+    GPU, which the trial leaves to the trainings), and one with his pedals and the car's speed, which Publish refuses, does
+    not stop a trial of a SignNet."""
+    data = comma['data']
+    write(data / 'runs/b1/brain-last.pt', 'weights')
+    write(data / 'runs/b1/result.json', {'groups': ['signs', 'pedals', 'speed'], 'seed': 1, 'history': [{}], 'test': {}})
+    write(data / 'models/active.json', {**json.loads((data / 'models/active.json').read_text()),
+                                        'brain': {'id': 'brain:b1/brain'}})
+    with pytest.raises(ValueError, match='takes your pedals'):
+        car_release.choose(data, 's1')
+    given = []
+    fake = exporter_of()
+
+    def exporter(chosen, folder):
+        given.append(chosen)
+        return fake(chosen, folder)
+    assert run_trial(comma, exporter=exporter, sleep=compile_all(comma))['outcome'] == 'ready'
+    assert given[0]['brain'] is None and car_release.BRAIN_FILE not in models_state(comma)
+
+
 def test_the_builds_applicability_network_stays_in_use_during_a_trial(comma):
     for name in (car_release.BRAIN_FILE, car_release.DECIDER_FILE):
         (comma['models'] / name).write_bytes(b'build ' + name.encode())

@@ -2045,8 +2045,8 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}, {"rebuild": "on"}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "driver", "pool"}), the models of a
-                    # regression ({"openpilot", "brains"}), the route, provider,
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool"}; "driver"
+                    # only "off", from a page of before), the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
                     # "certified"}), all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',

@@ -74,12 +74,11 @@ export interface ActionOptions {
    * finished version of their role, whose run they go on from (network-start.ts). */
   start?: string;
   /** What the brain learns (train_brain, brain-choices.ts): its roadworks head, its head of the kinds of road of Speed
-   * review, its head of the road type (and only the seconds with one), the driver's inputs (only to measure: the car does
-   * not give them), the picture's features as a mean or as a grid. */
+   * review, its head of the road type (and only the seconds with one), the picture's features as a mean or as a grid. The
+   * driver's inputs are gone since 10 Nov 2026: the server still takes driver "off" from a page loaded before. */
   works?: 'on' | 'off';
   road?: 'on' | 'off';
   types?: 'on' | 'off';
-  driver?: 'on' | 'off';
   pool?: 'mean' | 'grid';
   /** The models of a regression (regression), separated by commas: the driving models' specs, the brains' runs. */
   openpilot?: string;
@@ -1509,7 +1508,8 @@ export interface RoleModels {
   versions: ModelVersion[];
   /** null: nobody picked one yet (there is no default). */
   active: ActiveModel | null;
-  /** The cutter in use is an old Detector (chosen before SignNet could be): a SignNet should be chosen. */
+  /** The cutter in use is an old Detector (chosen before SignNet could be): a SignNet should be chosen. The brain in use
+   * takes the driver's pedals and the car's speed (chosen before 10 Nov 2026): one without them should be. */
   old_kind_in_use?: boolean;
   /** That in one line for the page ("The cutter in use is an old Detector: choose a SignNet."). */
   notice?: string;

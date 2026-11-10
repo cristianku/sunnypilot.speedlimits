@@ -1735,12 +1735,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--no-road-types", action="store_true",
                              help="the comparison: without the road type of the map and Speed review, and with the "
                                   "seconds that have none")
-    # The driver's inputs are out by default since 8 Nov 2026 (his speed is the answer); --no-driver, the opt-out of
-    # before, still says the same.
-    p_brain_net.add_argument("--driver", dest="driver", action="store_true", default=False,
-                             help="the comparison: also the gas, the brake and the car's speed as inputs")
-    p_brain_net.add_argument("--no-driver", dest="driver", action="store_false", default=False,
-                             help="without the driver's inputs: the default")
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
@@ -2801,7 +2795,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
-                                     works=not args.no_works, driver=args.driver, road=not args.no_road,
+                                     works=not args.no_works, road=not args.no_road,
                                      types=not args.no_road_types, device=args.device,
                                      dry_run=args.dry_run, routes=args.route,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed)

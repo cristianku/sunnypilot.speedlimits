@@ -114,8 +114,15 @@ NOT_SELECTABLE = {
     'not_for_the_car': ('Not the comma’s 896 × 288 band at stride 8: it cannot run on the car.',
                         ('This SignNet is not of the comma’s 896 × 288 band at stride 8: the car’s vision.py cannot '
                          'run it, so it cannot be the cutter in use.')),
+    'takes_the_driver': ('Takes your pedals and the car’s speed: it follows your speed. Kept to compare.',
+                         ('This brain takes your pedals and the car’s speed among its inputs: on the road it follows your '
+                          'speed instead of reading it, so it cannot be the brain in use. Train one without them.')),
 }
 OLD_KIND_NOTICE = 'The cutter in use is an old Detector: choose a SignNet.'
+# The groups of the brain that are the driver (brain_targets.LEFT_OUT since 10 Nov 2026): a brain trained with them, kept
+# in its run, can no longer be chosen; the one still in use says so until another is.
+DRIVER_GROUPS = ('pedals', 'speed')
+DRIVER_NOTICE = 'The brain in use takes your pedals and the car’s speed: it follows your speed. Train one without them and choose it.'
 
 
 class ModelChoiceError(Exception):
@@ -463,14 +470,24 @@ def role_of(model_id: Any) -> str | None:
 
 def selectable(entry: dict) -> tuple[bool, str | None]:
     """Whether a version of the index can be the one in use, else the key of NOT_SELECTABLE: the cutter only a
-    SignNet that fits the car (the old Detectors are kept to compare), every role only a finished version."""
+    SignNet that fits the car (the old Detectors are kept to compare), the brain only one that does not take the driver
+    (DRIVER_GROUPS), every role only a finished version."""
     if entry.get('role') == 'cutter' and entry.get('kind') != 'signnet':
         return False, 'compare_only'
     if not entry.get('finished'):
         return False, 'not_finished'
     if entry.get('role') == 'cutter' and not entry.get('fits_the_car'):
         return False, 'not_for_the_car'
+    if entry.get('role') == 'brain' and takes_the_driver(entry):
+        return False, 'takes_the_driver'
     return True, None
+
+
+def takes_the_driver(entry: dict) -> bool:
+    """Whether a brain of the index learnt from the driver's pedals or the car's speed (its groups, as its result.json
+    keeps them: names, or [name, size])."""
+    names = {group[0] if isinstance(group, (list, tuple)) and group else group for group in entry.get('groups') or ()}
+    return any(name in names for name in DRIVER_GROUPS)
 
 
 def _active_entry(role: str, value: Any) -> dict | None:
@@ -972,12 +989,15 @@ class ModelIndex:
             for entry in versions:
                 entry['in_use'] = chosen is not None and entry['id'] == chosen['id']
                 entry['on_car'] = car_ids.get(role) is not None and entry['id'] == car_ids[role]
-            # An old Detector id still in active.json: it keeps working until a SignNet is chosen; the site says so.
+            # An old Detector id still in active.json: it keeps working until a SignNet is chosen; the site says so. The
+            # same for a brain that takes the driver (chosen before 10 Nov 2026): it stays in use until another is chosen.
             old_kind = role == 'cutter' and chosen is not None and not SIGNNET_ID.fullmatch(chosen['id'])
+            driver = role == 'brain' and any(entry['in_use'] and takes_the_driver(entry) for entry in versions)
             roles.append({'role': role, 'label': ROLE_LABELS[role], 'versions': versions,
                           'active': None if chosen is None else {
                               **chosen, 'found': any(entry['in_use'] for entry in versions)},
-                          'old_kind_in_use': old_kind, 'notice': OLD_KIND_NOTICE if old_kind else None})
+                          'old_kind_in_use': old_kind or driver,
+                          'notice': OLD_KIND_NOTICE if old_kind else DRIVER_NOTICE if driver else None})
         self.runs._prune()
         return {'roles': roles, 'active_problem': problem, 'active_file': ACTIVE_FILE,
                 'runs_dir_exists': self.runs.runs_dir.is_dir(), 'cutter_score_threshold': CUTTER_SCORE,
@@ -987,8 +1007,8 @@ class ModelIndex:
 
     def set_active(self, role: Any, model_id: Any, *, who: str | None, via: str) -> dict:
         """POST /api/panel/models/active: the model in use for a role. The id must be an artifact of the index that
-        can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector); the
-        file keeps the other roles as they are."""
+        can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector; for the
+        brain one that does not take the driver's inputs); the file keeps the other roles as they are."""
         if not isinstance(role, str) or role not in ROLES:
             raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider or brain.')
         if not isinstance(model_id, str) or len(model_id) > MAX_ID or MODEL_ID.fullmatch(model_id) is None:

@@ -69,9 +69,9 @@ as those with none: each half of what they weighed before, so the head's share o
 With types (the usual since 8 Nov 2026, his rule) only the seconds with a road type teach anything (brain_targets'
 types): the measure is on those too, so a brain with types and one without measure different frames.
 
-The comparison he asked for is the same training twice, with works and with works=False, on the same split. The driver's
-inputs (brain_targets.DRIVER_INPUTS, his pedals and the car's speed) are out unless driver=True, since 8 Nov 2026: the
-answer is his own speed, and with the car's among the inputs the network learns to say it back, on the car its own.
+The comparison he asked for is the same training twice, with works and with works=False, on the same split. His pedals
+and the car's speed are never inputs (brain_targets.LEFT_OUT, since 10 Nov 2026; off by default since 8 Nov): the answer is
+his own speed, and with the car's among the inputs the network learns to say it back, on the car its own.
 """
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net, outputs
-from nnslr_tools.brain_targets import (BRAIN_INPUTS, DRIVER_INPUTS, INPUT_SIZES, LEFT_OUT, METRES_SCALE, NONE_AHEAD, NO_TYPE, NS, RATE_HZ,
+from nnslr_tools.brain_targets import (BRAIN_INPUTS, INPUT_SIZES, LEFT_OUT, METRES_SCALE, NONE_AHEAD, NO_TYPE, NS, RATE_HZ,
                                        ahead_weights,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
@@ -111,7 +111,6 @@ AFTER_PERCENTILE = 90  # the speed he reaches after the end of works (_site)
 DRY_FRAMES = 12
 DRY_STEPS = 2
 LEARNED_INPUTS = tuple(name for name in INPUT_SIZES if name not in LEFT_OUT)
-ROAD_INPUTS = tuple(name for name in LEARNED_INPUTS if name not in DRIVER_INPUTS)
 
 
 def _piece(drive: dict, first: int, last: int, store: FrameStore, device):
@@ -571,14 +570,14 @@ def _spoken(speeds: list[int]) -> str:
     return f'{len(speeds)} speed{"s" if len(speeds) > 1 else ""}, {speeds[0]}-{speeds[-1]} km/h'
 
 
-def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True, driver: bool = False,
+def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid', works: bool = True,
                 road: bool = True, types: bool = True, epochs: int = EPOCHS, chunk: int = CHUNK, device: str | None = None,
                 dry_run: bool = False, seed: int = 0, routes: list[str] | None = None, log=_print) -> dict:
     """Train on train, keep the last epoch, measure once. Writes routes.json (the drives it takes, ROUTES), brain-last.pt
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
-    would train wrong: brain_targets.check_drives. driver: with his pedals and the car's speed among the inputs, the
-    comparison. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
+    would train wrong: brain_targets.check_drives. It learns from LEARNED_INPUTS, never his pedals nor the car's
+    speed. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
     types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
     the ones still in training_routes; None, every drive of training_routes."""
@@ -588,7 +587,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     rng = random.Random(seed)
     torch.manual_seed(seed)
     device = torch.device(device or ('cpu' if dry_run else 'cuda'))
-    groups = LEARNED_INPUTS if driver else ROAD_INPUTS
+    groups = LEARNED_INPUTS
     # Every dashcam drive, each whole (brain_targets.training_routes): how many and how long, before the dry run keeps
     # only a piece of the first.
     counts = training_counts(root)

@@ -44,6 +44,7 @@ from nnslr_tools.model_roles import (
     decider_weights,
     record_on_car,
     role_of,
+    takes_the_driver,
 )
 from nnslr_tools.runs import RUN_NAME, RunsIndex
 from nnslr_tools.sign_types import class_hours, class_parts
@@ -104,17 +105,31 @@ def car_files(chosen: dict) -> dict[str, str]:
             **({'brain': BRAIN_FILE} if chosen.get('brain') else {})}
 
 
+def brain_refused(index: ModelIndex) -> str:
+    """Why the brain in use cannot go on the car, '' when it can or none is in use: it takes his pedals and the car's
+    speed, and a brain with them followed his speed on the road (10 Nov 2026, model_roles.takes_the_driver). For the
+    panel, before Publish starts; choose() says the same."""
+    entry, _ = index.in_use('brain')
+    return _driver_refused(entry) if entry is not None and takes_the_driver(entry) else ''
+
+
+def _driver_refused(entry: dict) -> str:
+    return (f'the brain in use, {entry["id"]}, takes your pedals and the car’s speed, so it follows your speed: choose '
+            'one without them on the Models tab')
+
+
 def build_pending(root: Path) -> bool:
     """Whether a build of psa-torque-sunny-testing is still owed (sunnypilot moved, the build did not finish)."""
     return (Path(root) / PENDING_FILE).is_file()
 
 
 # -- 1. which networks --------------------------------------------------------------------------------------
-def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
+def choose(root: Path, signnet: Any = None, classifier: Any = None, *, brain_on_car: bool = True) -> dict:
     """The SignNet of a run listed on the Models tab (None: the cutter in use, which must be a SignNet), finished and
     of the car's band and grid, and the classifier: the one given (an id of the Models tab) or the one in use; the
     applicability network (decider) and the brain in use, each None when none is chosen. Each with its id and its
-    weights on this server."""
+    weights on this server. A brain that takes the driver's inputs never goes on the car (brain_refused); brain_on_car
+    False, where the brain in use does not go on the car (Models › Drive's replay, a trial on the comma), takes it too."""
     if signnet is not None and (not isinstance(signnet, str) or not RUN_NAME.fullmatch(signnet)):
         raise ValueError(f'{signnet!r} is not a run name')
     runs = RunsIndex(Path(root))
@@ -160,7 +175,7 @@ def choose(root: Path, signnet: Any = None, classifier: Any = None) -> dict:
             raise ValueError(f'{entry["id"]} has no weights on this server')
         found[network] = {'id': entry['id'], 'run': entry['run'], 'weights': weights}
     found['decider'] = _decider(runs, index)
-    found['brain'] = _brain(Path(root), runs, index)
+    found['brain'] = _brain(Path(root), runs, index, brain_on_car)
     _check_plates(runs, found, chosen)
     return found
 
@@ -196,7 +211,7 @@ def _check_plates(runs: RunsIndex, found: dict, classifier: dict) -> None:
                          'class that says them: choose a classifier that has one, or a brain trained without them')
 
 
-def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
+def _brain(root: Path, runs: RunsIndex, index: ModelIndex, on_car: bool = True) -> dict | None:
     active, problem = index.read_active()
     if problem is not None or active.get('brain') is None:
         return None
@@ -205,6 +220,8 @@ def _brain(root: Path, runs: RunsIndex, index: ModelIndex) -> dict | None:
         raise ValueError(why)
     if not entry['finished']:
         raise ValueError(f'the brain {entry["id"]} has not finished its training')
+    if on_car and takes_the_driver(entry):
+        raise ValueError(_driver_refused(entry))
     run = runs._run_dir(entry['run'])
     weights = None if run is None else runs._file(run, BRAIN_WEIGHTS)
     if weights is None:

@@ -418,20 +418,17 @@ def test_the_hour_of_a_frame_is_the_local_one_from_the_gps_clock():
     assert hour[1][0] == pytest.approx(-.5, abs=.01)  # 14:05 on the circle
 
 
-def test_a_comparison_can_leave_out_the_driver():
+def test_engaged_the_pedals_and_the_speed_are_made_and_never_learned():
+    """openpilot on or off only confused the network (7 Nov 2026), and with his pedals and the car's speed in, the brain
+    followed his speed on the road (10 Nov 2026): the groups are still made as on the car, no brain learns them. A brain of
+    before keeps packing every group it took."""
     numpy = _np()
     targets = _targets()
+    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed') and set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES)
     inputs = {name: numpy.zeros((2, size), dtype=numpy.float32) for name, size in targets.INPUT_SIZES.items()}
-    without = tuple(name for name in targets.INPUT_SIZES if name not in targets.DRIVER_INPUTS)
-    assert targets.pack_inputs(inputs, without).shape == (2, sum(targets.INPUT_SIZES[name] for name in without))
+    learned = tuple(name for name in targets.INPUT_SIZES if name not in targets.LEFT_OUT)
+    assert targets.pack_inputs(inputs, learned).shape == (2, sum(targets.INPUT_SIZES[name] for name in learned))
     assert targets.pack_inputs(inputs, tuple(targets.INPUT_SIZES)).shape == (2, sum(targets.INPUT_SIZES.values()))
-
-
-def test_engaged_is_made_and_never_learned():
-    """openpilot on or off only confused the network (7 Nov 2026): the group is still made as on the car, no brain learns it."""
-    targets = _targets()
-    assert 'engaged' in targets.INPUT_SIZES and targets.LEFT_OUT == ('engaged',)
-    assert 'engaged' not in targets.DRIVER_INPUTS
 
 
 def write_drive(root, route, frames):

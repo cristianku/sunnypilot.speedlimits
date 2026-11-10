@@ -4,15 +4,15 @@
 // memory gives two groups of outputs: the car's three, and those only the training has (by its switches), which teach the
 // shared weights through their losses and are dropped from the car's file. Under each group, the correct labels it is
 // compared with: the map only offline, for the road type. The inputs are the groups of brain-card.ts the training gives (the
-// car's, the driver's only with Driver's inputs on): tests/review/test_brain_card.py keeps them those of the code. A tap on a
-// block opens what it is under the flow.
+// car's; never the driver's pedals nor the car's speed): tests/review/test_brain_card.py keeps them those of the code. A tap
+// on a block opens what it is under the flow.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import type {BrainChoice} from './brain-choices';
 import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} from './brain-card';
 
 const props = defineProps<{choices: BrainChoice}>();
-const learns = computed(() => ({driver: props.choices.driver === 'on', works: props.choices.works === 'on',
-  road: props.choices.road === 'on', types: props.choices.types === 'on'}));
+const learns = computed(() => ({works: props.choices.works === 'on', road: props.choices.road === 'on',
+  types: props.choices.types === 'on'}));
 
 type Kind = 'input' | 'net' | 'car' | 'train';
 interface Block {id: string; title: string; sub: string; kind: Kind; facts: BrainFact[]; note?: string}
@@ -25,7 +25,6 @@ const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_distanc
 const carGroups = BRAIN_GROUPS.filter((group) => group.use === 'car').map((group) => group.name);
 /** The car's groups that are not the signs': hour, car ahead, country, and any group added after them. */
 const placeGroups = carGroups.filter((name) => !SIGN_GROUPS.includes(name));
-const driverGroups = BRAIN_GROUPS.filter((group) => group.use === 'driver').map((group) => group.name);
 
 const camera: Block = {id: 'camera', title: 'Road image', sub: '256 × 144', kind: 'input', facts: [BRAIN_PICTURE[0]!]};
 const features: Block = {id: 'features', title: 'MobileNetV3-small', sub: 'frozen · image → features', kind: 'net',
@@ -34,10 +33,8 @@ const inputs = computed<Block[]>(() => [
   {id: 'signs', title: 'Signs read, plates, sign distance', sub: 'what our sign networks read, mistakes included', kind: 'input',
     facts: facts(SIGN_GROUPS.filter((name) => carGroups.includes(name))),
     note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown.'},
-  {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups)},
-  ...(learns.value.driver ? [{id: 'driver', title: 'Your pedals and speed', sub: 'Driver’s inputs on', kind: 'input' as Kind,
-    facts: facts(driverGroups), note: 'Off by default: the answer is your own speed, so with the car’s speed in, the network '
-      + 'can learn to say it back.'}] : []),
+  {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
+    note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
 ]);
 const memory: Block = {id: 'memory', title: 'GRU memory', sub: 'one step every ¼ s', kind: 'net', facts: [BRAIN_PICTURE[1]!],
   note: 'The image features and every other input go into it at each step; both outputs read its state.'};

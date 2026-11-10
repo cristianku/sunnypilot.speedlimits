@@ -8,7 +8,8 @@ import pytest
 
 NS = 1_000_000_000
 T = 8
-# What a brain learns with the driver's inputs (brain_train.LEARNED_INPUTS, driver=True): every group of the car but engaged.
+# The groups of the tiny brains of these tests: those of a brain of 8 Nov 2026 with the driver's inputs (pedals, speed), which
+# no brain learns since 10 Nov (brain_targets.LEFT_OUT); a brain of before keeps packing what it took.
 GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed', 'plate_wet', 'sign_distance')
 
 
@@ -603,9 +604,8 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
     assert (plain == other).all()
 
 
-def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None, driver=True):
-    """Every epoch's validation scores what scores says: nothing may follow from it. driver: train_brain's, None its
-    default."""
+def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
+    """Every epoch's validation scores what scores says: nothing may follow from it."""
     from nnslr_tools import brain_train
     drive = fake_drive(['train'] * 4 + ['validation'] * 2 + ['test'] * 2)
     change(drive)
@@ -613,7 +613,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'dataset', lambda *_args, **_options: [drive])
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
-    model = tiny(torch, groups=brain_train.LEARNED_INPUTS if driver else brain_train.ROAD_INPUTS)
+    model = tiny(torch, groups=brain_train.LEARNED_INPUTS)
     monkeypatch.setattr(brain_train, 'build_brain_net', lambda *_args, **_options: model)
     real, left = brain_train.measure, list(scores)
 
@@ -625,7 +625,7 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
 
     monkeypatch.setattr(brain_train, 'measure', scripted)
     result = brain_train.train_brain(tmp_path, tmp_path / 'run', None, epochs=len(scores), chunk=4, device='cpu',
-                                     log=lambda _text: None, **({} if driver is None else {'driver': driver}))
+                                     log=lambda _text: None)
     return result, torch.load(tmp_path / 'run' / 'brain-last.pt', weights_only=False), model
 
 
@@ -641,13 +641,11 @@ def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_
     assert result['right_kph'] == 2 and 'in_blocks' in result['test']
 
 
-def test_a_brain_learns_without_the_driver_unless_asked(tmp_path, monkeypatch):
+def test_a_brain_never_learns_the_driver(tmp_path, monkeypatch):
     torch = torch_or_skip()
-    from nnslr_tools.brain_train import LEARNED_INPUTS, ROAD_INPUTS
-    _result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], driver=None)
-    assert tuple(saved['groups']) == ROAD_INPUTS and not {'pedals', 'speed'} & set(saved['groups'])
-    _result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0], driver=True)
-    assert tuple(saved['groups']) == LEARNED_INPUTS
+    from nnslr_tools.brain_train import LEARNED_INPUTS
+    _result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
+    assert tuple(saved['groups']) == LEARNED_INPUTS and not {'pedals', 'speed'} & set(saved['groups'])
 
 
 def test_the_epoch_line_keeps_what_the_site_reads_and_says_the_speeds_in_short(tmp_path, monkeypatch):
@@ -896,10 +894,11 @@ def test_a_brain_of_before_says_its_speeds_in_its_own_table():
     assert numpy.issubdtype(found['kph'].dtype, numpy.integer)
 
 
-def test_no_brain_learns_engaged():
+def test_no_brain_learns_engaged_the_pedals_or_the_speed():
+    import inspect
     from nnslr_tools import brain_train
-    assert 'engaged' not in brain_train.LEARNED_INPUTS + brain_train.ROAD_INPUTS
-    assert set(brain_train.LEARNED_INPUTS) - set(brain_train.ROAD_INPUTS) == {'pedals', 'speed'}
+    assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed'}
+    assert 'driver' not in inspect.signature(brain_train.train_brain).parameters
 
 
 def test_the_log_says_the_dashcam_drives_and_a_train_without_them_says_how_to_get_one(tmp_path, monkeypatch):

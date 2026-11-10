@@ -81,11 +81,13 @@ const roleOptions = computed(() => roles.value.map((role) => ({key: role.role, l
 const inUseOf = (role: RoleModels): ModelVersion | null => role.versions.find((version) => version.in_use) ?? null;
 /** The version drawn under the picked network: the one in use, else the newest. */
 const drawn = computed(() => pickedRole.value ? inUseOf(pickedRole.value) ?? pickedRole.value.versions[0] ?? null : null);
-/** The cutter in use is an old Detector, chosen before SignNet could be (the server says so; an older one: not a SignNet). */
+/** The cutter in use is an old Detector, chosen before SignNet could be, or the brain in use takes the driver's pedals and
+ * the car's speed, chosen before 10 Nov 2026 (the server says so; an older one: a cutter not a SignNet). */
 function oldInUse(role: RoleModels): boolean {
+  if (role.old_kind_in_use !== undefined) return role.old_kind_in_use;
   if (role.role !== 'cutter') return false;
   const used = inUseOf(role);
-  return role.old_kind_in_use ?? (used?.role === 'cutter' && used.kind !== 'signnet');
+  return used?.role === 'cutter' && used.kind !== 'signnet';
 }
 /** The name of a training whatever its seed: the seeds of a brain are runs of their own, NAME-s0, NAME-s1, NAME-s2. */
 const seedsOf = (run: string): string => run.replace(/-s\d+$/, '');

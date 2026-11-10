@@ -351,6 +351,29 @@ def test_a_brain_goes_only_finished_and_its_dry_run_is_not_a_version(tmp_path):
     assert car_release.choose(data, 's1')['brain'] is None
 
 
+def test_a_brain_that_takes_the_drivers_inputs_never_goes_on_the_car(tmp_path):
+    """With his pedals and the car's speed in, the brain followed his speed on the road (10 Nov 2026): one chosen before
+    stays in use on Models, but Publish refuses it; Models › Drive's replay and a trial on the comma still take it."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    model_id = brain_run(data, 'b1', result={'groups': ['signs', 'pedals', 'speed'], 'seed': 1, 'history': [{}],
+                                             'test': {}, 'validation': {}})
+    with pytest.raises(ModelChoiceError):
+        use_brain(data, model_id)
+    write(data / 'models/active.json', {**json.loads((data / 'models/active.json').read_text()),
+                                        'brain': {'id': model_id, 'chosen_at': '2026-11-10T01:49:00+01:00'}})
+    index = ModelIndex(RunsIndex(data))
+    assert car_release.brain_refused(index) == (
+        'the brain in use, brain:b1/brain, takes your pedals and the car’s speed, so it follows your speed: choose one '
+        'without them on the Models tab')
+    with pytest.raises(ValueError, match='takes your pedals and the car’s speed'):
+        car_release.choose(data, 's1')
+    assert car_release.choose(data, 's1', brain_on_car=False)['brain']['id'] == model_id
+    use_brain(data, brain_run(data, 'b2'))
+    assert car_release.brain_refused(index) == ''
+    assert car_release.choose(data, 's1')['brain']['id'] == 'brain:b2/brain'
+
+
 def test_the_brain_part_is_the_brains_alone():
     assert role_of('brain:b1/brain') == 'brain'
     assert role_of('cutter:b1/brain') is None
@@ -685,6 +708,17 @@ def test_send_to_car_says_why_it_cannot_run(root, checkout, tmp_path, monkeypatc
     # No confirmed frame is needed: it sends networks already trained.
     assert panel._action_states(ready_payload(), [])['send_to_car'] == {'label': 'Publish to the car', 'allowed': True, 'reason': ''}
     assert panel.models()['car_build_pending'] is False
+    # A brain in use that takes his pedals and the car's speed (chosen before 10 Nov 2026): said, and refused at start.
+    model_id = brain_run(root, 'b1', result={'groups': ['signs', 'speed'], 'seed': 1, 'history': [{}], 'test': {}})
+    write(root / 'models/active.json', {**json.loads((root / 'models/active.json').read_text()), 'brain': {'id': model_id}})
+    why = car_release.brain_refused(panel.models_index)
+    assert why.startswith('the brain in use, brain:b1/brain, takes your pedals')
+    assert panel._action_states(ready_payload(), [])['send_to_car']['reason'] == why
+    monkeypatch.setattr(panel, 'activities', list)
+    with pytest.raises(PanelError) as refused:
+        panel.start('send_to_car', {'signnet': 's1'})
+    assert (refused.value.status, refused.value.reason, str(refused.value)) == (409, 'not_available', why[0].upper() + why[1:] + '.')
+    assert panel.jobs() == []
 
 
 def test_send_to_car_takes_only_a_finished_signnet_of_the_models_tab(root, checkout, tmp_path, monkeypatch):
