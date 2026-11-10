@@ -22,8 +22,8 @@ export function changed(row: FrameRow): void {
   store();
 }
 
-// The boxes the reviewer moved or resized by hand since a fit last moved them, in this page only: C (every box of
-// the frame) leaves them where they are; the Fit box of their editor still fits them.
+// The boxes the reviewer moved or resized by hand since a fit last moved them, in this page only: the fit that runs
+// by itself after Apply previous leaves them where they are; C and the Fit box of their editor still fit them.
 const placedByHand = new WeakSet<Detection>();
 
 export function markPlacedByHand(detection: Detection, placed: boolean): void {

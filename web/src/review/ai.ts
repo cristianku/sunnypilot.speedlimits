@@ -252,27 +252,31 @@ export function canFitLocally(): boolean {
   return Boolean(report.apiBase) && state.server !== 'stale';
 }
 
-/** Fit box: C fits every box of the frame (after A, after Apply, a box just drawn…) but those the reviewer moved or
- * resized by hand, whatever box is selected; ``selected`` (the button of a box's editor) fits only that box, by hand
- * or not. Each to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all in one request and in a
- * fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with Fit with AI; a box with
- * no better box found (no sign there, or already right), moved less than a pixel, or moved or removed meanwhile, is
- * left as it is. So is a box that holds a plate of hours, even selected: the fit would bring it towards the disc. */
-export async function fitLocal(selected = false): Promise<void> {
+/** Which boxes Fit box fits: ``frame`` (C) every box of the frame, those the reviewer moved or resized by hand too;
+ * ``box`` (the button of a box's editor) only the selected one; ``carried`` (by itself after Apply previous, where
+ * nobody asked for a fit) every box but those placed by hand, which stay where the reviewer put them. */
+export type FitWhich = 'frame' | 'box' | 'carried';
+
+/** Fit box: the boxes of ``which``, each to the sign under it on the server's CPU (…/fit, nnslr_tools.box_fit), all
+ * in one request and in a fraction of a second, with no AI. Each fitted box is an unsaved change to confirm, as with
+ * Fit with AI; a box with no better box found (no sign there, or already right), moved less than a pixel, or moved or
+ * removed meanwhile, is left as it is. So is a box that holds a plate of hours, even selected: the fit would bring it
+ * towards the disc. */
+export async function fitLocal(which: FitWhich = 'frame'): Promise<void> {
   const row = currentRow();
   const apiBase = report.apiBase;
   if (!row || !apiBase || !canFitLocally() || localFitting.key !== null || refuseChange()) return;
   const boxes = workOf(row).detections;
-  const chosen = selected ? boxes[state.selected] : undefined;
-  if (selected && !chosen) return;
+  const chosen = which === 'box' ? boxes[state.selected] : undefined;
+  if (which === 'box' && !chosen) return;
   const free = (chosen ? [chosen] : boxes).filter((detection) => !holdsPlate(detection));
-  const targets = chosen ? free : free.filter((detection) => !isPlacedByHand(detection));
-  const byHand = chosen ? 0 : free.length - targets.length;
+  const targets = which === 'carried' ? free.filter((detection) => !isPlacedByHand(detection)) : free;
+  const byHand = free.length - targets.length;
   const key = row.frame_key;
   if (targets.length === 0) {
     if (byHand) state.notice = {key, error: false, warn: true,
       text: (byHand === 1 ? 'The box was' : 'All ' + byHand + ' boxes were') + ' placed by hand: kept as '
-        + (byHand === 1 ? 'it is' : 'they are') + '. Fit box in its editor fits one anyway.'};
+        + (byHand === 1 ? 'it is' : 'they are') + '. C fits ' + (byHand === 1 ? 'it' : 'them') + ' anyway.'};
     else if (boxes.length > 0) state.notice = {key, text: PLATE_KEPT, error: false};
     return;
   }

@@ -160,6 +160,14 @@ with sync_playwright() as p:
     assert source.inner_text() == 'browser preview', source.inner_text()
     square.mouse.up()
     until(square, "document.querySelector('#netSource').textContent.startsWith('from ')")
+    # C fits every box of the frame, the one just resized by hand too.
+    hand_fits = []
+    square.route('**/fit', lambda route: (hand_fits.append(route.request.post_data_json['boxes']), route.fulfill(json={
+        'ok': True, 'boxes': [], 'ms': 1})))
+    square.keyboard.press('c')
+    until(square, "document.body.innerText.includes(' · 1 ms.')")
+    assert len(hand_fits) == 1 and len(hand_fits[0]) == square.locator('#boxList .box-main').count(), hand_fits
+    assert 'placed by hand' not in square.locator('body').inner_text()
 
     # Car networks: a number with hours says so, and the plain disc of the frame under it does not use up that reading.
     car = open_page(browser, '/route/' + route + '/', 1500)
@@ -204,17 +212,26 @@ with sync_playwright() as p:
     car.locator('#reviewer').fill('Tester')
     car.locator('#confirm').click()
     until(car, "document.body.dataset.lastSaveResult === 'ok'")
-    # Apply previous fits what it carries, as C does.
+    # Apply previous fits what it carries, as C does, but a box this frame has that was resized by hand (sent back
+    # anew, as the server kept it) stays where it was put.
     carried = {'bbox_xyxy': [30, 22, 38, 30], 'family': 'maximum_speed', 'value_kph': 30, 'value_state': 'reviewed',
                'score': None, 'model_label': None, 'class_id': None, 'review_state': 'pending',
                'applicability': 'own_road', 'supplementary_panel': 'unknown', 'detection_id': 'car-1'}
     fits = []
     car.route('**/apply-previous', lambda route: route.fulfill(json={
-        'ok': True, 'detections': [carried], 'to_check': [], 'message': 'Boxes carried.'}))
+        'ok': True, 'detections': route.request.post_data_json['detections'] + [carried], 'to_check': [],
+        'message': 'Boxes carried.'}))
     car.route('**/fit', lambda route: (fits.append(route.request.post_data_json['boxes']), route.fulfill(json={
         'ok': True, 'boxes': [[31, 22, 39, 30]], 'ms': 1})))
     car.keyboard.press('ArrowRight')
     car.wait_for_timeout(400)
+    car.locator('#boxList .box-main').first.click()
+    corner = car.locator('#zoom .handle-hit.nw').bounding_box()
+    car.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
+    car.mouse.down()
+    car.mouse.move(corner['x'] - 10, corner['y'] - 10, steps=4)
+    car.mouse.up()
+    car.wait_for_timeout(200)
     car.keyboard.press('a')
     car.wait_for_timeout(500)
     assert fits == [[carried['bbox_xyxy']]], fits

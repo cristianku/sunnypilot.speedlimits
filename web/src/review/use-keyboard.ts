@@ -249,8 +249,8 @@ export function useKeyboard(): void {
         break;
       case 'c':
       case 'C':
-        // C: every box of the frame but those placed by hand, on this server. Shift+C: the box picked (a click, ↑ ↓),
-        // else every box, with the AI.
+        // C: every box of the frame, those placed by hand too, on this server. Shift+C: the box picked (a click,
+        // ↑ ↓), else every box, with the AI.
         if (report.apiBase) {
           event.preventDefault();
           void (event.shiftKey ? fitBox() : fitLocal());

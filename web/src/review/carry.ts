@@ -6,7 +6,7 @@ import {fitLocal} from './ai';
 import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
-import {changed} from './edits';
+import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
 import {revealEditor} from './scroll';
 import {call} from './server';
@@ -66,11 +66,14 @@ export async function applyPrevious(): Promise<void> {
   }
   const key = row.frame_key;
   const work = workOf(row);
+  const byHand = new Set(work.detections.filter(isPlacedByHand).map((d) => JSON.stringify(d.bbox_xyxy)));
   try {
     const answer = await call<CarryAnswer>('POST', apiBase + '/frame/' + key + '/apply-previous',
       {run_id: report.runId, detections: work.detections});
     // The reviewer may have moved on while the server answered.
     if (state.currentKey !== key) return;
+    // Every box comes back anew: one placed by hand that the carry kept where it was is still placed by hand.
+    for (const d of answer.detections) if (byHand.has(JSON.stringify(d.bbox_xyxy))) markPlacedByHand(d, true);
     work.detections = answer.detections;
     const first = uncheckedIndices(work)[0];
     state.selected = first === undefined ? -1 : first;
@@ -80,8 +83,9 @@ export async function applyPrevious(): Promise<void> {
     if (first !== undefined) void nextTick(revealEditor);
     const carried = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
     state.notice = carried;
-    // The carried boxes go straight onto their signs, as C does; its message after the one of the carry.
-    await fitLocal();
+    // The carried boxes go straight onto their signs, as C does, but those placed by hand stay where they were put;
+    // its message after the one of the carry.
+    await fitLocal('carried');
     const fit = state.notice;
     if (fit && fit !== carried && fit.key === key) {
       state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};

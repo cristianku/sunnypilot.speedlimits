@@ -162,7 +162,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <!-- This rough box made tight on the server, in a fraction of a second; C fits every box of the frame. -->
         <button v-if="canFitHere" type="button" class="chip fit" id="fitLocal" :disabled="localFitting.key !== null"
                 title="This box; C fits every box of the frame"
-                @click="fitLocal(true); releaseFocus($event)">{{ fittingHere ? 'Fitting…' : 'Fit box' }}</button>
+                @click="fitLocal('box'); releaseFocus($event)">{{ fittingHere ? 'Fitting…' : 'Fit box' }}</button>
         <!-- The same by the AI, shown only the picture around it (Shift+C): slower, for the boxes Fit box misses. -->
         <button v-if="canFit" type="button" class="chip fit ai" id="fitBox" :disabled="fitting.key !== null"
                 @click="fitBox(true); releaseFocus($event)">{{ fittingThis ? 'Fitting…' : 'Fit with AI' }}<kbd>⇧C</kbd></button>
