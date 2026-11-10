@@ -144,6 +144,8 @@ def test_along_a_drive_the_step_of_a_brain_of_before_says_its_own_km_h(tmp_path)
     assert heard[0] == 'brain check along r: 5 frames, one at a time as on the car'
     assert heard[1:] == [f'brain check: {n} of 5 frames' for n in range(1, 5)]
     assert torch.get_num_threads() == threads
+    # Wherever PyTorch ran the drive, the network is back on the CPU for the step's other checks.
+    assert next(model.parameters()).device.type == 'cpu'
 
 
 def test_the_checks_onnxruntime_runs_on_one_thread_not_spinning(tmp_path):

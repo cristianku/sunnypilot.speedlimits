@@ -230,24 +230,46 @@ def _decider(runs: RunsIndex, index: ModelIndex) -> dict | None:
     return {'id': entry['id'], 'run': entry['run'], 'weights': weights}
 
 
-def export_brain(chosen: dict, folder: Path) -> None:
-    """The brain's step to ONNX in folder, checked against PyTorch and along a real drive (it raises when it differs)."""
+CHECK_DEVICE_ENV = 'NNSLR_CHECK_DEVICE'
+
+
+def check_device() -> str:
+    """Where PyTorch runs the brain along a drive for Publish's check: the GPU. Without one it stops and says so, it
+    never moves to the CPU on its own (NNSLR_CHECK_DEVICE=cpu: the tests, a machine with no card)."""
+    asked = os.environ.get(CHECK_DEVICE_ENV)
+    if asked:
+        return asked
+    import torch
+    if not torch.cuda.is_available():
+        raise ValueError('no GPU for the brain\'s check along a drive: the cards are hidden or taken. Free one and '
+                         'publish again: the check never moves to the CPU')
+    return 'cuda'
+
+
+def export_brain(chosen: dict, folder: Path, drive_check: bool = True) -> None:
+    """The brain's step to ONNX in folder, checked against PyTorch and along a real drive (it raises when it differs).
+    drive_check False: against PyTorch on its own inputs only, for an export that does not go to the car (the set a
+    drive is replayed with, simulation.export_set)."""
     if chosen.get('brain'):
         from nnslr_tools.brain_export import export_brain_onnx
+
+        if not drive_check:
+            export_brain_onnx(chosen['brain']['weights'], folder / BRAIN_FILE)
+            return
         from nnslr_tools.drive_review import DriveReviewStore
 
         root = chosen['brain']['root']
         store = DriveReviewStore(root)
         export_brain_onnx(chosen['brain']['weights'], folder / BRAIN_FILE, data_root=root,
                           merged_of=lambda route: store.merged(route, keep=False),
-                          log=lambda text: print(text, flush=True))
+                          log=lambda text: print(text, flush=True), device=check_device())
 
 
 # -- 2. the export ------------------------------------------------------------------------------------------
-def export(chosen: dict, folder: Path) -> dict:
+def export(chosen: dict, folder: Path, drive_check: bool = True) -> dict:
     """Both sign networks to ONNX in folder (signnet.onnx, classifier.onnx and their contracts), each checked against
     PyTorch with onnxruntime (they raise when it differs), the applicability network as the car runs it and the brain's
-    step when one is in use; each contract names its checkpoint by its id."""
+    step when one is in use; each contract names its checkpoint by its id. drive_check: export_brain's."""
     from nnslr_tools.exporting import export_decider_car_onnx, export_reader_onnx
     from nnslr_tools.signnet import export_signnet_onnx
 
@@ -256,7 +278,7 @@ def export(chosen: dict, folder: Path) -> dict:
         exporters[network](chosen[network]['weights'], folder / name, verify=True)
     if chosen.get('decider'):
         export_decider_car_onnx(chosen['decider']['weights'], folder / DECIDER_FILE, verify=True)
-    export_brain(chosen, folder)
+    export_brain(chosen, folder, drive_check)
     return finish_contracts(chosen, folder)
 
 

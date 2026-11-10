@@ -17,6 +17,7 @@ INPUT OR A RULE OF THE VISION SIDE.** OpenStreetMap may only make training label
 - Lavorare su `main`, preservando le modifiche esistenti. Non creare branch o worktree senza richiesta esplicita. Commit e push richiedono autorizzazione.
 - La revisione autorizza le annotazioni richieste, non modifiche al codice del servizio, installazioni, riavvii, importazioni nel dataset, addestramenti o deployment.
 - Gli aggiornamenti e le installazioni sul comma li esegue Cristian: non modificare o riavviare il dispositivo senza richiesta esplicita per quella specifica operazione.
+- **Always the GPUs.** Every heavy job runs on the V100s of this server: a training, the checks of an export (Publish), the simulation or replay of a drive, an evaluation, a read of the videos. When the cards are busy, tell Cristian in chat and he frees them. Never move a job to the CPU, and never write code that hides the cards (`CUDA_VISIBLE_DEVICES=""`) or falls back to the CPU on its own: a job that finds no card stops and says so.
 - Non accendere mai `serverone-ai`, nemmeno indirettamente. Non usare Bonsai o worker RX6800; non contattare il worker V100 finché Cristian non ne comunica nuovamente la disponibilità.
 - Non inserire token, cookie o credenziali nei file versionati, nei resoconti o nei log condivisi.
 - Mai GitHub Actions: build, test e pubblicazione solo sul server. Non creare, ripristinare o riattivare niente in `.github/workflows/` e non trattare un push come qualcosa che avvia una build.

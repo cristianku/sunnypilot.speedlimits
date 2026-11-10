@@ -749,3 +749,26 @@ def test_the_progress_follows_the_five_steps():
     running = progress('send_to_car', 'running', log)
     assert [step['state'] for step in running['steps']] == ['done', 'done', 'done', 'current', 'todo']
     assert running['percent'] == 17.0  # export 10, publish 5, record 2 of 100
+
+
+def test_the_brains_check_runs_on_the_gpu_and_never_moves_to_the_cpu_by_itself(monkeypatch):
+    import sys
+    import types
+
+    from nnslr_tools import car_release
+    monkeypatch.delenv(car_release.CHECK_DEVICE_ENV, raising=False)
+    torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: True))
+    monkeypatch.setitem(sys.modules, 'torch', torch)
+    assert car_release.check_device() == 'cuda'
+    torch.cuda.is_available = lambda: False
+    with pytest.raises(ValueError, match='never moves to the CPU'):
+        car_release.check_device()
+    # Asked for by name (the tests, a machine with no card): then the CPU.
+    monkeypatch.setenv(car_release.CHECK_DEVICE_ENV, 'cpu')
+    assert car_release.check_device() == 'cpu'
+
+
+def test_publish_gives_the_export_a_card_and_does_not_hide_them():
+    script = (Path(__file__).resolve().parents[2] / 'scripts' / 'send_to_car.sh').read_text(encoding='utf-8')
+    assert 'CUDA_VISIBLE_DEVICES=""' not in script
+    assert 'CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}"' in script

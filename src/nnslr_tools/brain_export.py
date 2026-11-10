@@ -97,7 +97,10 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
     The frames go one at a time, so PyTorch runs on one thread meanwhile: its pool waited on onnxruntime's at every
     frame, 67 ms a frame instead of 2 (a drive of 11040 frames at 4 Hz: 12 minutes instead of 22 seconds)."""
     torch = _torch()
-    expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
+    try:
+        expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
+    finally:
+        model.to('cpu')  # the step exported and its other checks are the CPU's
     table = table_of(model)
     hidden = np.zeros((1, model.gru.hidden_size), dtype=np.float32)
     said = np.zeros(len(expected['kph']), dtype=np.int64)
@@ -170,9 +173,10 @@ def check_session(onnxruntime, path: Path):
 
 
 def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None = None, merged_of=None,
-                      route: str | None = None, log=None) -> dict:
+                      route: str | None = None, log=None, device: str = 'cpu') -> dict:
     """The step and its contract, checked: raises when it differs from PyTorch or when the car's file of the inputs is not the
-    one the network was trained with. data_root and merged_of add the check along a real drive; log hears its progress."""
+    one the network was trained with. data_root and merged_of add the check along a real drive; log hears its progress;
+    device: where PyTorch runs that drive (Publish: the GPU, car_release.check_device)."""
     torch = _torch()
     import onnx
     import onnxruntime
@@ -209,8 +213,8 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     if not passed:
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
-        drive, store = rollout_drive(Path(data_root), merged_of, groups, route, rate=rate)
-        verification['rollout'] = drive_rollout(model, run, drive, store, log=log)
+        drive, store = rollout_drive(Path(data_root), merged_of, groups, route, device=device, rate=rate)
+        verification['rollout'] = drive_rollout(model, run, drive, store, device=device, log=log)
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
     shapes = {'image': [1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH], 'extra': [1, width], 'hidden': [1, hidden]}

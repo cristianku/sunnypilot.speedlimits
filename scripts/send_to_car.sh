@@ -7,8 +7,9 @@
 #   scripts/send_to_car.sh --signnet=<run> [--classifier=<id>] [--rebuild] [--dry-run]
 #
 #   1/5 Export   the SignNet of <run> and the classifier in use (models/active.json; --classifier: another id of the
-#                Models tab) to ONNX on the CPU with the GPU venv, each checked against PyTorch with onnxruntime;
-#                the brain in use, when one is chosen, is exported here too (its ONNX step, checked along a drive).
+#                Models tab) to ONNX with the GPU venv, each checked against PyTorch with onnxruntime;
+#                the brain in use, when one is chosen, is exported here too (its ONNX step, checked along a drive,
+#                PyTorch on a V100: never on the CPU, without a card it stops).
 #   2/5 Publish  them in the clone of cristianku/speed-limits-models: the ONNX, their contracts and speed_limits.json
 #                (format 2, version = the day, .2 .3 ... for another one the same day), one commit pushed to main.
 #                Nothing when every ONNX is the published one already (the export is the same byte for byte).
@@ -110,8 +111,10 @@ read -r ahead behind <<< "$counts"
 models_before="$(git -C "$MODELS" rev-parse HEAD)"
 output="$(mktemp)"
 trap 'rm -f "$output"' EXIT
-# Steps 1 to 3 (nnslr_tools.car_release). On the CPU: the GPU is left to the trainings.
-CUDA_VISIBLE_DEVICES="" PYTHONUNBUFFERED=1 "$VENV/bin/nnslr" "${cli[@]}" 2>&1 | tee "$output"
+# Steps 1 to 3 (nnslr_tools.car_release). The brain's check along a drive runs PyTorch on a V100 (NNSLR_GPU_INDEX,
+# default 0: about 1 GB of it for some seconds, beside whatever else holds the card), never on the CPU: without a
+# card it stops and says so.
+CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}" PYTHONUNBUFFERED=1 "$VENV/bin/nnslr" "${cli[@]}" 2>&1 | tee "$output"
 models_commit="$(git -C "$MODELS" rev-parse HEAD)"
 published=0
 [ "$models_commit" = "$models_before" ] || published=1
