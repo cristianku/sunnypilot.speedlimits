@@ -90,23 +90,36 @@ def table_of(model) -> list[int]:
     return [int(round(value)) for value in model.class_kph.detach().cpu().tolist()]
 
 
-def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu') -> dict:
+def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu', log=None) -> dict:
     """A whole drive by step_run(image, extra, hidden) -> the step's outputs (speed logits first, hidden_out last), numpy,
     against brain_train.predict: the frames and how many of them say another speed, or another limit ahead. The memory
-    starts again where the car's does (drive['cuts'])."""
+    starts again where the car's does (drive['cuts']). log, when given, hears the drive and every tenth of it.
+    The frames go one at a time, so PyTorch runs on one thread meanwhile: its pool waited on onnxruntime's at every
+    frame, 67 ms a frame instead of 2 (a drive of 11040 frames at 4 Hz: 12 minutes instead of 22 seconds)."""
+    torch = _torch()
     expected = predict(model.to(device), drive, store, chunk=CHUNK, device=device)
     table = table_of(model)
     hidden = np.zeros((1, model.gru.hidden_size), dtype=np.float32)
     said = np.zeros(len(expected['kph']), dtype=np.int64)
     ahead = np.zeros(len(expected['kph']), dtype=np.int64)
-    for frame in range(len(said)):
-        if frame in drive['cuts']:
-            hidden = np.zeros_like(hidden)
-        image = store.batch([(drive['route'], [frame])])[0].cpu().numpy()
-        outputs = step_run(image, drive['extra'][frame:frame + 1], hidden)
-        hidden = outputs[-1]
-        said[frame] = table[int(np.argmax(outputs[0]))]
-        ahead[frame] = int(np.argmax(outputs[1])) if 'next' in expected else 0
+    tenth = max(1, len(said) // 10)
+    if log:
+        log(f"brain check along {drive['route']}: {len(said)} frames, one at a time as on the car")
+    threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        for frame in range(len(said)):
+            if frame in drive['cuts']:
+                hidden = np.zeros_like(hidden)
+            image = store.batch([(drive['route'], [frame])])[0].cpu().numpy()
+            outputs = step_run(image, drive['extra'][frame:frame + 1], hidden)
+            hidden = outputs[-1]
+            said[frame] = table[int(np.argmax(outputs[0]))]
+            ahead[frame] = int(np.argmax(outputs[1])) if 'next' in expected else 0
+            if log and (frame + 1) % tenth == 0 and frame + 1 < len(said):
+                log(f'brain check: {frame + 1} of {len(said)} frames')
+    finally:
+        torch.set_num_threads(threads)
     found = {'route': drive['route'], 'frames': len(said), 'other_speed': int((said != expected['kph']).sum()),
              'said': sorted({int(v) for v in said})}
     if 'next' in expected:
@@ -147,10 +160,19 @@ def _export(step, example: tuple, output: Path, names: list[str] = OUTPUT_NAMES)
                           opset_version=17)
 
 
+def check_session(onnxruntime, path: Path):
+    """onnxruntime for the checks: one thread, not spinning. The step is small and goes one frame at a time between
+    PyTorch's operations; a pool of a thread per core spinning after each run only takes the cores from PyTorch."""
+    options = onnxruntime.SessionOptions()
+    options.intra_op_num_threads = options.inter_op_num_threads = 1
+    options.add_session_config_entry('session.intra_op.allow_spinning', '0')
+    return onnxruntime.InferenceSession(str(path), options, providers=['CPUExecutionProvider'])
+
+
 def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None = None, merged_of=None,
-                      route: str | None = None) -> dict:
+                      route: str | None = None, log=None) -> dict:
     """The step and its contract, checked: raises when it differs from PyTorch or when the car's file of the inputs is not the
-    one the network was trained with. data_root and merged_of add the check along a real drive."""
+    one the network was trained with. data_root and merged_of add the check along a real drive; log hears its progress."""
     torch = _torch()
     import onnx
     import onnxruntime
@@ -170,7 +192,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
     output.parent.mkdir(parents=True, exist_ok=True)
     _export(step, _random_inputs(torch, width, hidden, torch.Generator().manual_seed(1)), output, names)
     onnx.checker.check_model(onnx.load(str(output)))
-    session = onnxruntime.InferenceSession(str(output), providers=['CPUExecutionProvider'])
+    session = check_session(onnxruntime, output)
 
     def run(image, extra, memory):
         return session.run(None, {'image': image, 'extra': extra, 'hidden': memory})
@@ -188,7 +210,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:
         drive, store = rollout_drive(Path(data_root), merged_of, groups, route, rate=rate)
-        verification['rollout'] = drive_rollout(model, run, drive, store)
+        verification['rollout'] = drive_rollout(model, run, drive, store, log=log)
         if verification['rollout']['other_speed'] or verification['rollout'].get('other_ahead'):
             raise ValueError(f'brain ONNX says another speed than PyTorch along a drive: {verification["rollout"]}')
     shapes = {'image': [1, 3, data.FRAME_HEIGHT, data.FRAME_WIDTH], 'extra': [1, width], 'hidden': [1, hidden]}

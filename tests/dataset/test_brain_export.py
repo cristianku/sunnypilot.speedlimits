@@ -135,9 +135,26 @@ def test_along_a_drive_the_step_of_a_brain_of_before_says_its_own_km_h(tmp_path)
         with torch.no_grad():
             return [value.numpy() for value in step(*(torch.from_numpy(value) for value in (image, extra, memory)))]
 
-    found = brain_export.drive_rollout(model, run, drive, FrameStore({'r': pictures}, 'cpu'))
+    import torch
+    threads, heard = torch.get_num_threads(), []
+    found = brain_export.drive_rollout(model, run, drive, FrameStore({'r': pictures}, 'cpu'), log=heard.append)
     assert found['other_speed'] == 0 and found['other_ahead'] == 0 and found['frames'] == frames
     assert found['said'] and all(kph % 5 == 0 for kph in found['said'])
+    # The log hears the drive and its progress; PyTorch has its threads back.
+    assert heard[0] == 'brain check along r: 5 frames, one at a time as on the car'
+    assert heard[1:] == [f'brain check: {n} of 5 frames' for n in range(1, 5)]
+    assert torch.get_num_threads() == threads
+
+
+def test_the_checks_onnxruntime_runs_on_one_thread_not_spinning(tmp_path):
+    import onnxruntime
+    path = tmp_path / 'brain-last.pt'
+    saved_brain(path)
+    brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    session = brain_export.check_session(onnxruntime, tmp_path / 'brain.onnx')
+    options = session.get_session_options()
+    assert options.intra_op_num_threads == 1 and options.inter_op_num_threads == 1
+    assert options.get_session_config_entry('session.intra_op.allow_spinning') == '0'
 
 
 def test_a_network_of_an_earlier_file_with_the_same_groups_exports_with_its_own_hash(tmp_path, monkeypatch):

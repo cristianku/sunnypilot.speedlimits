@@ -239,7 +239,8 @@ def export_brain(chosen: dict, folder: Path) -> None:
         root = chosen['brain']['root']
         store = DriveReviewStore(root)
         export_brain_onnx(chosen['brain']['weights'], folder / BRAIN_FILE, data_root=root,
-                          merged_of=lambda route: store.merged(route, keep=False))
+                          merged_of=lambda route: store.merged(route, keep=False),
+                          log=lambda text: print(text, flush=True))
 
 
 # -- 2. the export ------------------------------------------------------------------------------------------
