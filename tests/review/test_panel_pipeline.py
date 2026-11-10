@@ -124,6 +124,30 @@ def test_the_pipeline_waits_for_a_busy_gpu_and_goes_on_after_a_restart(panel, ro
     assert done['state'] == 'done' and [step['state'] for step in done['steps']] == ['ok', 'ok']
 
 
+def test_with_two_gpus_the_pipeline_waits_only_while_both_are_busy(panel, monkeypatch):
+    monkeypatch.setenv('FAKE_SIGNNET_SLEEP', '0.5')
+    panel.start_pipeline({'steps': [{'action': 'train_cutter'}, {'action': 'train_decider'}]}, None)
+    card = {'name': 'Tesla V100-PCIE-32GB', 'memory_used_mb': 9000, 'memory_total_mb': 32768}
+    # Programs the server cannot name on both cards (issue #29): the next one waits.
+    monkeypatch.setattr(panel, 'system', lambda: {'gpus': [{**card, 'index': 0, 'processes': 1},
+                                                           {**card, 'index': 1, 'processes': 1}]})
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and panel.pipeline_view()['steps'][0]['state'] == 'running':
+        time.sleep(0.05)
+    time.sleep(0.2)
+    view = panel.pipeline_view()
+    assert view['state'] == 'running'
+    assert view['reason'] == 'Waiting: Both GPUs are busy with a program the server cannot name.'
+    assert view['steps'][1]['job'] is None
+    # GPU 1 free again, GPU 0 still in use: the next one starts on GPU 1.
+    monkeypatch.setattr(panel, 'system', lambda: {'gpus': [{**card, 'index': 0, 'processes': 1},
+                                                           {**card, 'index': 1, 'processes': 0}]})
+    panel.advance_pipeline()
+    done = ended(panel)
+    assert done['state'] == 'done' and [step['state'] for step in done['steps']] == ['ok', 'ok']
+    assert json.loads((panel.logs / (done['steps'][1]['job'] + '.json')).read_text())['gpus'] == [1]
+
+
 def test_the_classifier_alone_uses_the_cutter_in_use(panel, root):
     with pytest.raises(PanelError) as error:
         panel.start_pipeline({'steps': [{'action': 'train_classifier'}]}, None)

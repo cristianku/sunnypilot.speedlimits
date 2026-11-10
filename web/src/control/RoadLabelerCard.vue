@@ -7,9 +7,10 @@
 // beside the map's, each head's precision and recall, and whether it writes into Speed review or why not. A run with its
 // checkpoint prepares Speed review ("road_labeler_predict"): every head that passed its gate writes (the marks of the kinds
 // of road and of the roadworks, the layer of road types), replacing what an older run wrote; per run, what its last
-// Prepare wrote (prepared) and which run Speed review shows (current). A real
-// run is refused while another process has the GPU (the server and the helper check it); a dry run is not. Hidden on a
-// server without the actions, and the runs left out when the endpoint is not there yet.
+// Prepare wrote (prepared) and which run Speed review shows (current). The buttons
+// follow the server's action states (allowed, and its reason when not); a real run also needs a free GPU, one of the two
+// (jobs.ts noFreeCard: the server and the helper check it), a dry run does not. Hidden on a server without the actions,
+// and the runs left out when the endpoint is not there yet.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api} from '../common/api';
 import {isoWhen, plural, sentence} from '../common/format';
@@ -17,7 +18,7 @@ import type {ActionName, ActionOptions, ActionState, Job, LabelerHead, LabelerPa
 import Icon from '../components/Icon.vue';
 import {pct} from './evaluate';
 import JobProgress from './JobProgress.vue';
-import {JOB_STATE, jobOf, startedWhen, terminalActivities} from './jobs';
+import {gpusBusyText, JOB_STATE, jobOf, noFreeCard, startedWhen, terminalActivities, twoGpusTip} from './jobs';
 import TerminalActivity from './TerminalActivity.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
@@ -33,8 +34,8 @@ const job = computed(() => jobOf(props.status, ACTIONS));
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 const activities = computed(() => terminalActivities(props.status, ['train']).filter((activity) => activity.label === 'road labeler'));
 const idle = computed(() => !bigJob.value && !activities.value.length);
-/** Another process on the GPU: only a dry run can start (start() refuses the others). */
-const gpuBusy = computed(() => (props.status?.system?.gpu?.processes ?? 0) > 0);
+/** No GPU free (each card held by a job or another program): only a dry run can start (start() refuses the others). */
+const gpuBusy = computed(() => noFreeCard(props.status?.system));
 
 const payload = shallowRef<LabelerPayload | null>(null);
 async function load(): Promise<void> {
@@ -120,12 +121,12 @@ const runFacts = (run: LabelerRun): string => [isoWhen(run.finished), plural(run
       <div class="rl-buttons">
         <button type="button" class="btn" id="labeler-dry" :disabled="!trainState?.allowed" @click="train(true)">Dry run</button>
         <button type="button" class="btn primary" id="labeler-train" :disabled="!trainState?.allowed || gpuBusy"
-                @click="train(false)">Train</button>
+                :title="twoGpusTip(status?.system)" @click="train(false)">Train</button>
       </div>
     </div>
     <p v-if="idle && trainState && !trainState.allowed" class="import-why">{{ sentence(trainState.reason) }}</p>
-    <p v-else-if="idle && gpuBusy" class="import-why warn" id="labeler-gpu">The GPU is busy with another process: only a dry run
-      on the CPU can start now.</p>
+    <p v-else-if="idle && gpuBusy" class="import-why warn" id="labeler-gpu">{{ gpusBusyText(status?.system) }}. Only a dry
+      run on the CPU can start now.</p>
     <p v-if="job && !bigJob" class="import-last">Last {{ job.action === 'road_labeler_train' ? 'training' : 'preparation' }}
       {{ job.run ? job.run + ', ' : '' }}{{ startedWhen(job) }} ·
       {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·

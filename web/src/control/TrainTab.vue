@@ -23,7 +23,7 @@ import ClassifierChoices from './ClassifierChoices.vue';
 import {useCutterChoices} from './cutter-choices';
 import JobProgress from './JobProgress.vue';
 import MapillaryChoices from './MapillaryChoices.vue';
-import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities} from './jobs';
+import {CHARTED_ACTIONS, JOB_STATE, jobOf, PIPELINE_ACTIONS, startedWhen, terminalActivities, twoGpusTip} from './jobs';
 import {pct} from './evaluate';
 import {sizeText, useModels} from './models';
 import {useNetworkStart} from './network-start';
@@ -169,6 +169,8 @@ const cutterActions = computed(() => {
 /** The speed signs of the windows (every family but the other signs). */
 const windowSigns = computed(() => Object.values(cutterChoices.mapillaryState?.boxes_by_family ?? {})
   .reduce((total, count) => total + count, 0));
+/** With two GPUs, the line more in the tooltip of each training's button (two at once, one per card). */
+const gpuTip = computed(() => twoGpusTip(props.status?.system));
 /** The classifier's training, in its card. */
 /** The decider's training, in its card: experiment B, its three variants. */
 const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
@@ -301,7 +303,7 @@ const numbers = computed(() => {
                           note-id="train-cutter-mapillary-note"
                           @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
         <NetworkStartPicker :start="starts.cutter" id="train-cutter-start"/>
-        <ActionList :items="CUTTER_ACTIONS" :actions="cutterActions"
+        <ActionList :items="CUTTER_ACTIONS" :actions="cutterActions" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, {families: cutterFamilies, ...starts.cutter.option,
                       ...cutterChoices.options})"/>
         <JobProgress v-if="cutterChoices.cutJob?.state === 'running'" :job="cutterChoices.cutJob" @details="emit('details', $event)"
@@ -333,7 +335,7 @@ const numbers = computed(() => {
       <template v-else-if="section === 'classifier'">
         <ClassifierChoices :choices="choices" :status="status"
                            @locate="status && emit('run', 'mapillary_locations', status.actions.mapillary_locations)"/>
-        <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions"
+        <ActionList :items="CLASSIFIER_ACTIONS" :actions="classifierActions" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, choices.options)"/>
         <p class="latest-none" id="train-classifier-cutter"><template v-if="cutterInUse">Cutter: the one in use,
           <strong>{{ cutterInUse.label }}</strong> · {{ cutterInUse.trained_at ? isoWhen(cutterInUse.trained_at) : cutterInUse.run }}.<template
@@ -356,12 +358,12 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'decider'">
         <NetworkStartPicker :start="starts.decider" id="train-decider-start"/>
-        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null"
+        <ActionList :items="DECIDER_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, starts.decider.option)"/>
         <p class="latest-none" id="train-decider-note">The one in use (Models) sets OURS or another on the speed signs Our networks propose.</p>
       </template>
       <template v-else-if="section === 'brain'">
-        <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null"
+        <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, brainChoices.option)"/>
         <p v-if="brainLabels?.training" class="latest-none" id="train-brain-marked">It learns every dashcam drive, each whole:
           <strong>{{ plural(brainLabels.training.drives, 'drive') }}</strong>,

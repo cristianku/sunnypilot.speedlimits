@@ -355,6 +355,9 @@ export interface Job {
   /** Bytes of the log so far. */
   size: number;
   progress: JobProgress;
+  /** The cards it holds, by nvidia-smi's index: [] none (no GPU, or a dry run), null a GPU job whose card the server
+   * cannot tell (it holds every card); absent from a server from before two cards. */
+  gpus?: number[] | null;
 }
 
 export interface Activity {
@@ -363,6 +366,11 @@ export interface Activity {
   pid: number;
   /** A training started from a terminal: its progress, read from data/logs/train-<run>.log. */
   progress?: JobProgress;
+  /** The cards it holds, as a job's gpus; absent from a server from before two cards. */
+  gpus?: number[] | null;
+  /** The panel job whose process session it belongs to (the site's own work), null for work from a terminal; absent
+   * from a server from before two cards. */
+  job?: string | null;
 }
 
 export interface GpuProcess {
@@ -381,10 +389,27 @@ export interface Gpu {
   /** How many processes use the GPU. */
   processes: number;
   process_list: GpuProcess[];
+  /** nvidia-smi's index (the one NNSLR_GPU_INDEX takes) and its PCI bus ("81:00.0"): on each card of gpus, not on the
+   * legacy gpu. */
+  index?: number;
+  bus_id?: string;
+  /** No compute process and nothing of ours holds it (a server from before part B of #29 does not say). */
+  free?: boolean;
+  /** What holds it: a panel job (its id) or work the server names ("A cutter training", "openpilot.distill training",
+   * "A program the server cannot name"). */
+  holders?: GpuHolder[];
+}
+
+export interface GpuHolder {
+  job: string | null;
+  label: string;
 }
 
 export interface SystemInfo {
+  /** The first card's numbers and the processes of every card, as before there were two. */
   gpu: Gpu | null;
+  /** Each card on its own, in nvidia-smi's order; absent from a server from before two cards. */
+  gpus?: Gpu[];
   disk: {free_gb: number; total_gb: number} | null;
   cpus: number | null;
   load: number | null;

@@ -4,15 +4,16 @@
 // second (derived/sign_tracks/<route>.json). Find them (helpers/sign_tracks.sh, the panel action "sign_tracks") on every
 // drive or on the drives chosen, a dry run on the CPU first if wanted (a few frames of one drive, checked against Sign
 // review, apart); its job while it runs; then the drives from GET /api/panel/sign-tracks: read by the networks in use, by
-// older ones, stopped half way, or not yet. A real run is refused while another process has the GPU (the server and the
-// helper check it); a dry run is not. Hidden on a server without the action.
+// older ones, stopped half way, or not yet. The buttons follow the server's action state (allowed, and its reason when
+// not); a real run also needs a free GPU, one of the two (jobs.ts noFreeCard: the server and the helper check it), a dry
+// run does not. Hidden on a server without the action.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
 import {api} from '../common/api';
 import {isoWhen, plural, sentence} from '../common/format';
 import type {ActionOptions, ActionName, ActionState, Job, PanelStatus, SignTracksDrive, SignTracksPayload} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import JobProgress from './JobProgress.vue';
-import {JOB_STATE, jobOf, startedWhen, terminalActivities} from './jobs';
+import {gpusBusyText, JOB_STATE, jobOf, noFreeCard, startedWhen, terminalActivities} from './jobs';
 import TerminalActivity from './TerminalActivity.vue';
 
 const props = defineProps<{status: PanelStatus | null}>();
@@ -26,8 +27,8 @@ const job = computed(() => jobOf(props.status, ['sign_tracks']));
 const bigJob = computed(() => job.value && (job.value.state === 'running' || job.value.state === 'failed') ? job.value : null);
 const activities = computed(() => terminalActivities(props.status, ['train']).filter((activity) => activity.label === 'sign tracks'));
 const idle = computed(() => !bigJob.value && !activities.value.length);
-/** Another process on the GPU: only a dry run can start (start() refuses the others). */
-const gpuBusy = computed(() => (props.status?.system?.gpu?.processes ?? 0) > 0);
+/** No GPU free (each card held by a job or another program): only a dry run can start (start() refuses the others). */
+const gpuBusy = computed(() => noFreeCard(props.status?.system));
 
 const payload = shallowRef<SignTracksPayload | null>(null);
 async function load(): Promise<void> {
@@ -99,7 +100,7 @@ const networksText = computed(() => {
       </div>
     </div>
     <p v-if="idle && state && !state.allowed" class="import-why">{{ sentence(state.reason) }}</p>
-    <p v-else-if="idle && gpuBusy" class="import-why warn" id="sign-tracks-gpu">The GPU is busy with another process: only a dry
+    <p v-else-if="idle && gpuBusy" class="import-why warn" id="sign-tracks-gpu">{{ gpusBusyText(status?.system) }}. Only a dry
       run on the CPU can start now.</p>
     <p v-if="job && !bigJob" class="import-last">Last run {{ startedWhen(job) }} ·
       {{ job.state === 'interrupted' ? 'stopped' : JOB_STATE[job.state][0] }} ·

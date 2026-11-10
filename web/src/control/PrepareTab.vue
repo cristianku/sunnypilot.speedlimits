@@ -12,6 +12,7 @@ import Segmented from './Segmented.vue';
 import ActionList from './ActionList.vue';
 import JobProgress from './JobProgress.vue';
 import {activityTab, JOB_STATE, jobOf, PREPARE_ACTIONS, startedWhen, terminalActivities} from './jobs';
+import {cardLabel, cardMemoryText, freestCard, gpuCards} from './machine-history';
 import PrepRoutes from './PrepRoutes.vue';
 import {networksText, PROPOSER_LABELS, proposerText} from './proposer-words';
 import {reviewSummary} from './review-routes';
@@ -76,11 +77,20 @@ function measureText(key: Proposer): string {
     + ' of them right, at ' + report.seconds_per_frame.toFixed(1) + ' s a picture.'
     + (measures.value.best === key ? ' The best so far.' : '');
 }
-/** The GPU memory in use ("31.5 of 32 GB") when more than half is taken: Qwen3-VL needs about 17 GB to load. */
+/** When more than half of the memory is taken on the GPU with the most room (Qwen3-VL needs about 17 GB to load), how much
+ * ("31.5 of 32 GB"), in a sentence; '' when it fits. */
 const gpuTaken = computed(() => {
-  const gpu = props.status?.system.gpu;
+  const system = props.status?.system;
+  const gpu = freestCard(system);
   if (!gpu || gpu.memory_used_mb === null || !gpu.memory_total_mb || gpu.memory_used_mb < gpu.memory_total_mb / 2) return '';
-  return (gpu.memory_used_mb / 1024).toFixed(1) + ' of ' + Math.round(gpu.memory_total_mb / 1024) + ' GB';
+  const cards = gpuCards(system);
+  if (cards.length < 2) {
+    return 'The GPU is taken now: ' + cardMemoryText(gpu) + ' of its memory are in use by another program. Install tries'
+      + ' Qwen3-VL on the GPU: free it first.';
+  }
+  return (cards.length === 2 ? 'Both GPUs are' : 'Every GPU is') + ' taken now: the one with the most room, '
+    + cardLabel(gpu, cards.indexOf(gpu), cards.length) + ', has ' + cardMemoryText(gpu) + ' in use by other programs.'
+    + ' Install tries Qwen3-VL on a GPU: free one first.';
 });
 /** Why the chosen proposer cannot run here, if it cannot. */
 const unavailable = computed(() => proposer.value === 'qwen' ? props.status?.proposers?.qwen ?? null : null);
@@ -177,8 +187,7 @@ function openComma(): void {
       <template v-if="unavailable">
         <p class="figure-note proposer-missing" :title="unavailable">{{ unavailable.includes('not checked yet')
           ? 'Qwen3-VL is copied here but not checked yet.' : 'Qwen3-VL is not installed on this server yet.' }}</p>
-        <p v-if="gpuTaken" class="figure-note proposer-missing">The GPU is taken now: {{ gpuTaken }} of its memory are in use by
-          another program. Install tries Qwen3-VL on the GPU: free it first.</p>
+        <p v-if="gpuTaken" class="figure-note proposer-missing">{{ gpuTaken }}</p>
         <ActionList :items="INSTALL_ACTIONS" :actions="status?.actions ?? null" @run="(name, state) => emit('run', name, state)"/>
       </template>
     </div>

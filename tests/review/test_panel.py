@@ -25,9 +25,12 @@ FAKE_FETCH = '#!/usr/bin/env bash\necho "fetch $*"\necho "python $COMMA_FETCH_PY
 @pytest.fixture(autouse=True)
 def only_this_checkout(monkeypatch):
     """A download or a training really running on this machine must not make these tests busy: here every
-    group counts only from the test checkout."""
+    group counts only from the test checkout. Nor its GPUs (each job takes a card, issue #29): no nvidia-smi and no
+    holder of openpilot.distill's GPU lock, as on a machine without them."""
     import nnslr_tools.panel as panel_module
     monkeypatch.setattr(panel_module, 'OWN_GROUPS', ('fetch', 'prepare', 'train', 'update', 'ai', 'other'))
+    monkeypatch.setattr(panel_module, '_nvidia', lambda arguments: None)
+    monkeypatch.setattr(panel_module, '_gpu_lock_holders', lambda path=None: [])
 
 
 @pytest.fixture
@@ -124,7 +127,8 @@ def test_a_waiting_action_names_the_job_that_runs_and_the_pages_see_it(root, che
             panel.start('train')
         assert busy.value.message == 'An import of the reviews is running: wait for it to finish.'
         running = panel.running()
-        assert running['jobs'] == [{'id': job['id'], 'action': 'dataset', 'label': 'Import sign reviews', 'state': 'running'}]
+        assert running['jobs'] == [{'id': job['id'], 'action': 'dataset', 'label': 'Import sign reviews', 'state': 'running',
+                                    'gpus': []}]
         assert [item['label'] for item in running['activities']] == ['dataset and training']
     finally:
         panel.stop(job['id'])

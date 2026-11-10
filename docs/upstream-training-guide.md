@@ -534,10 +534,13 @@ hash-verified `splits/latest.json` pointer. Model-reviewed data is isolated:
 nnslr train --dry-run --dataset-kind training-candidate
 ```
 
-Before the first V100 run, explicitly verify the CUDA environment:
+Before the first V100 run, explicitly verify the CUDA environment, on each card
+(the server has two V100s: `0` on bus 81:00.0, `1` on C1:00.0, as nvidia-smi
+numbers them; `CUDA_DEVICE_ORDER=PCI_BUS_ID` makes CUDA count them the same way):
 
 ```sh
-nnslr env --gpu-smoke --gpu-device 0
+CUDA_DEVICE_ORDER=PCI_BUS_ID nnslr env --gpu-smoke --gpu-device 0
+CUDA_DEVICE_ORDER=PCI_BUS_ID nnslr env --gpu-smoke --gpu-device 1
 ```
 
 Unlike plain `nnslr env`, `--gpu-smoke` intentionally imports PyTorch,
@@ -620,9 +623,9 @@ each on test and validation and prints the comparison, saved as
 (`NNSLR_DETECTOR_ANCHOR_MIN_RATIO`), its share of frames without signs `0.1`
 (`NNSLR_DETECTOR_NEGATIVE_FRACTION`), and the best epoch follows the validation
 recall; its boxes are the families `NNSLR_CUTTER_FAMILIES` (`all` by default, or
-`speed`). It refuses a busy GPU unless `NNSLR_ALLOW_BUSY_GPU=1`, like the
-baseline pipeline, and finishes an interrupted comparison when run again with
-the same name.
+`speed`). It refuses a busy GPU (the card of `NNSLR_GPU_INDEX`) unless
+`NNSLR_ALLOW_BUSY_GPU=1`, like the baseline pipeline, and finishes an
+interrupted comparison when run again with the same name.
 
 ### The cutter: SignNet (since 30 October 2026)
 
@@ -663,6 +666,7 @@ in the script for the speed signs only).
 ```sh
 CUDA_VISIBLE_DEVICES= .venv-gpu/bin/nnslr train-signnet --run-dir /tmp/signnet-dry --dry-run  # the plan only
 bash scripts/run_signnet.sh <YYYY-MM-DD_HHMM-cutter>
+CUDA_DEVICE_ORDER=PCI_BUS_ID NNSLR_GPU_INDEX=1 bash scripts/run_signnet.sh <YYYY-MM-DD_HHMM-cutter>  # on the second card
 ```
 
 The dry run prints one JSON line: `counts_by_split`, `boxes_by_split`,
@@ -789,11 +793,14 @@ the Train tab) does all of it on the GPU into `data/runs/NAME/`: checks, mining
 with the cutter in use (the SignNet in use: the car's best 5 boxes a frame, from score 0.1), training from ImageNet, the classifier alone on test and
 validation, the chain on test and validation, the chain on test with the old
 reader (`NNSLR_OLD_READER_RUN`, default `2026-10-24_1452`) and a comparison
-saved as `comparison.txt`. It refuses a busy GPU unless
-`NNSLR_ALLOW_BUSY_GPU=1` and finishes an interrupted run when run again with the
-same name.
+saved as `comparison.txt`. It refuses a busy GPU (the card of
+`NNSLR_GPU_INDEX`; from the panel a free one) unless `NNSLR_ALLOW_BUSY_GPU=1`
+and finishes an interrupted run when run again with the same name.
 
-For the complete guarded pipeline on the training host:
+For the complete guarded pipeline on the training host (`NNSLR_GPU_INDEX` is
+nvidia-smi's number of the card, `0` or `1`; the script exports
+`CUDA_DEVICE_ORDER=PCI_BUS_ID`, so CUDA counts the cards the same way, and the
+panel gives each run a free card):
 
 ```sh
 export NNSLR_GPU_INDEX=0

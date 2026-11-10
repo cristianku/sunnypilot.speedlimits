@@ -184,8 +184,11 @@ def test_the_classifier_training_follows_the_rules_of_a_training_and_needs_a_cut
     assert panel._action_states(few, [])['train_classifier']['reason'] == '3 reviewed drives are needed, now 2'
     none = {**ready_payload(), 'routes': [{'state': 'revisionare', 'confirmed': 0}]}
     assert panel._action_states(none, [])['train_classifier']['reason'] == 'no confirmed frame'
+    # Two classifiers may train at once, each on a card of its own: one from a terminal on a card not known holds
+    # every card, the one GPU here.
     busy = [{'group': 'train', 'label': 'classifier training', 'pid': 1}]
-    assert panel._action_states(ready_payload(), busy)['train_classifier']['reason'] == 'A classifier training is running'
+    assert panel._action_states(ready_payload(), busy)['train_classifier']['reason'] == (
+        'the GPU is busy with a classifier training')
     (run / 'signnet-best.pt').unlink()
     assert panel._action_states(ready_payload(), [])['train_classifier']['reason'] == (
         'the cutter in use is no longer on this server: choose another one on the Models tab')

@@ -2,11 +2,12 @@
 // One running job in one row (the Overview): its name, how far it is, what it does now and about how long is left,
 // with a thin bar, and Stop beside it; a tap opens its sheet (LogSheet.vue: the steps, the log). A job that failed is
 // the same row in red with what went wrong. Work started from a terminal has no sheet: the row only says what it is.
+// With two GPUs in the machine, the card each holds opens its line ("GPU 1").
 import {computed} from 'vue';
 import Icon from '../components/Icon.vue';
 import type {Activity, Job} from '../common/panel-types';
 import {useNow} from '../composables/now';
-import {etaText, failedStep, stepText} from './jobs';
+import {etaText, failedStep, GPU_CHIP_STYLE, gpuChipText, stepText} from './jobs';
 
 const props = defineProps<{job?: Job | null; activity?: Activity | null}>();
 defineEmits<{open: [job: Job]; stop: [job: Job]}>();
@@ -35,6 +36,9 @@ const line = computed(() => {
   }
   return parts.join(' · ') || 'running';
 });
+/** The card it holds, as a chip at the start of its line (none once it ended). */
+const gpu = computed(() => gpuChipText(props.job ?? props.activity ?? {}));
+const CHIP_STYLE = {...GPU_CHIP_STYLE, marginLeft: '0', marginRight: '6px'};
 </script>
 
 <template>
@@ -44,7 +48,7 @@ const line = computed(() => {
     <span class="run-icon" aria-hidden="true"><span v-if="!failed" class="spinner"></span><template v-else>!</template></span>
     <span class="run-main">
       <strong class="run-name">{{ label }}</strong>
-      <span class="run-line">{{ line }}</span>
+      <span class="run-line"><span v-if="gpu" :style="CHIP_STYLE">{{ gpu }}</span>{{ line }}</span>
       <span v-if="!failed" class="run-bar" :class="{indeterminate: percent === null}" aria-hidden="true"><span
         :style="percent === null ? undefined : {width: percent + '%'}"></span></span>
     </span>

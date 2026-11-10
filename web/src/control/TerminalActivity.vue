@@ -3,6 +3,7 @@
 // A preparation shows how far it is, from what it already wrote; anything else a moving bar.
 import {computed} from 'vue';
 import type {Activity, Preparation} from '../common/panel-types';
+import {GPU_CHIP_STYLE, gpuChipText} from './jobs';
 import JobSteps from './JobSteps.vue';
 import PrepRoutes from './PrepRoutes.vue';
 
@@ -12,6 +13,8 @@ const prep = computed(() => props.activity.group === 'prepare' ? props.preparati
 const progress = computed(() => props.activity.progress ?? null);
 const percent = computed(() => prep.value?.percent ?? progress.value?.percent ?? null);
 const where = computed(() => props.activity.group === 'other' ? 'another program on the server' : 'started from a terminal');
+/** The card it holds, with two in the machine ("GPU 1"), as a chip after where it comes from. */
+const gpu = computed(() => gpuChipText(props.activity));
 </script>
 
 <template>
@@ -20,7 +23,7 @@ const where = computed(() => props.activity.group === 'other' ? 'another program
       <span class="jp-icon run" aria-hidden="true"><span class="spinner"></span></span>
       <div class="jp-title">
         <h3>{{ activity.label.charAt(0).toUpperCase() + activity.label.slice(1) }}</h3>
-        <span class="jp-when">{{ where }} · pid {{ activity.pid }}</span>
+        <span class="jp-when">{{ where }} · pid {{ activity.pid }}<span v-if="gpu" :style="GPU_CHIP_STYLE">{{ gpu }}</span></span>
       </div>
       <span class="pill run">running</span>
     </header>

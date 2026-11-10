@@ -1,9 +1,11 @@
 """How far a long command is, for the panel of the review site.
 
-A command reports ``report(task, done, total, text)`` while it works; the last report is written to
-``<data root>/logs/progress.json`` (the data root of NNSLR_DATA_ROOT, as for every nnslr command), at most
-once a second and always at the end. The panel (nnslr_tools.panel) shows it as the progress of the step
-of the running job that the task belongs to. Reporting never fails a command: a write error is ignored.
+A command reports ``report(task, done, total, text)`` while it works; the last report is written to the file of
+NNSLR_PROGRESS_FILE, which the panel gives each of its jobs (``<data root>/logs/progress-<job id>.json``: two jobs at
+once, one on each GPU, never read each other's), else to ``<data root>/logs/progress.json`` (the data root of
+NNSLR_DATA_ROOT, as for every nnslr command), at most once a second and always at the end. The panel
+(nnslr_tools.panel) shows it as the progress of the step of the running job that the task belongs to. Reporting never
+fails a command: a write error is ignored.
 """
 from __future__ import annotations
 
@@ -19,6 +21,10 @@ _last = {'time': 0.0}
 
 
 def progress_path() -> Path:
+    """The file of the reports: the job's own (NNSLR_PROGRESS_FILE, set by the panel), else the data root's."""
+    own = os.environ.get('NNSLR_PROGRESS_FILE')
+    if own:
+        return Path(own).expanduser()
     root = Path(os.environ.get('NNSLR_DATA_ROOT') or DEFAULT_DATA_ROOT).expanduser()
     return root / 'logs' / 'progress.json'
 

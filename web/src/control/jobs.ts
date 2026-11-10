@@ -1,8 +1,9 @@
 // The jobs of the control pages: their state in words, their times, which job a tab shows, the work started
-// from a terminal.
+// from a terminal, the GPUs they hold.
 import {shortWhen} from '../common/format';
-import type {ActionName, Activity, Job, JobState, PanelStatus} from '../common/panel-types';
+import type {ActionName, Activity, Gpu, Job, JobState, PanelStatus, SystemInfo} from '../common/panel-types';
 import type {IconName} from '../components/icons/shapes';
+import {cardLabel, gpuCards, machineNow} from './machine-history';
 
 /** State of a job: label and pill class. */
 export const JOB_STATE: Record<JobState, [label: string, kind: string]> = {
@@ -137,7 +138,9 @@ export function jobOf(status: PanelStatus | null, actions: ActionName[]): Job | 
   return jobs.find((job) => job.state === 'running') ?? jobs[0] ?? null;
 }
 
-/** The work started from a terminal (or by another program) that is not a job of the site. */
+/** The work started from a terminal (or by another program) that is not a job of the site. A server that ties each
+ * work to the panel job whose process session it is in says so (job: its id, null from a terminal), so a training from
+ * a terminal shows beside a training of the site; an older one is read by the group of the site's running jobs. */
 export function terminalActivities(status: PanelStatus | null, groups?: string[]): Activity[] {
   if (status === null) return [];
   const fromSite = new Set(status.jobs.filter((job) => job.state === 'running').map((job) => ACTION_GROUP[job.action]));
@@ -146,31 +149,111 @@ export function terminalActivities(status: PanelStatus | null, groups?: string[]
   return status.activities.filter((activity) => {
     if (pids.has(activity.pid)) return false;
     pids.add(activity.pid);
-    return !fromSite.has(activity.group) && (groups === undefined || groups.includes(activity.group));
+    const ours = activity.job === undefined ? fromSite.has(activity.group) : activity.job !== null;
+    return !ours && (groups === undefined || groups.includes(activity.group));
   });
 }
 
-/** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings). */
+/** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings, the
+ * road labeler and the signs on every frame but for their dry runs). */
 const GPU_ACTIONS: ActionName[] = ['prepare', 'prepare_again', 'measure_proposer', 'setup_vlm', 'train', 'train_continue',
-  'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain', 'regression'];
+  'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain', 'regression', 'road_labeler_train',
+  'road_labeler_predict', 'sign_tracks'];
 /** The same for work started from a terminal, by group ("other": the driving model of openpilot.distill). */
 const GPU_GROUPS = ['prepare', 'train', 'other'];
 
+/** Whether a running job or a work from a terminal may be on a card (its nvidia-smi index; undefined: the one card of
+ * an older server): by the cards the server says it holds ([] none, null every card), else by its kind (usual). */
+function mayBeOn(item: Pick<Job, 'gpus'>, index: number | undefined, usual: boolean): boolean {
+  if (item.gpus === undefined) return usual;
+  if (item.gpus === null) return true;
+  return index === undefined ? item.gpus.length > 0 : item.gpus.includes(index);
+}
+
 /**
- * The name of each process on the GPU (system.gpu.process_list). In this container nvidia-smi cannot name the host's
- * processes ("[Not Found]"), the site's own jobs included: when one process has no name and one job of the site, or
- * one work from a terminal, uses the GPU, the row is that one; otherwise "A program the server cannot name".
+ * The name of each process on a GPU (card.process_list; no card: system.gpu, the processes of every card). In this
+ * container nvidia-smi cannot name the host's processes ("[Not Found]"), the site's own jobs included: when one process
+ * of the card has no name and one job of the site, or one work from a terminal, may be on it, the row is that one;
+ * otherwise "A program the server cannot name". A job whose card the server does not say may be on any card: it names
+ * a process only when no other card has one without a name.
  */
-export function gpuProcessNames(status: PanelStatus | null): string[] {
-  const list = status?.system.gpu?.process_list ?? [];
+export function gpuProcessNames(status: PanelStatus | null, card?: Gpu | null): string[] {
+  const list = (card ?? status?.system.gpu)?.process_list ?? [];
   const unnamed = (name: string): boolean => !name || name.startsWith('[');
+  const index = card?.index;
+  const label = (activity: Activity): string => (activity.label.startsWith('openpilot') ? activity.label
+    : activity.label.charAt(0).toUpperCase() + activity.label.slice(1)) + ', from a terminal';
   const known = [
-    ...(status?.jobs ?? []).filter((job) => job.state === 'running' && GPU_ACTIONS.includes(job.action)).map((job) => job.label),
-    ...terminalActivities(status, GPU_GROUPS).map((activity) => (activity.label.startsWith('openpilot') ? activity.label
-      : activity.label.charAt(0).toUpperCase() + activity.label.slice(1)) + ', from a terminal'),
+    ...(status?.jobs ?? []).filter((job) => job.state === 'running' && mayBeOn(job, index, GPU_ACTIONS.includes(job.action)))
+      .map((job) => ({name: job.label, placed: Array.isArray(job.gpus)})),
+    ...terminalActivities(status, GPU_GROUPS).filter((activity) => mayBeOn(activity, index, true))
+      .map((activity) => ({name: label(activity), placed: Array.isArray(activity.gpus)})),
   ];
-  const guess = known.length === 1 && list.filter((process) => unnamed(process.name)).length === 1 ? known[0] : undefined;
+  const here = list.filter((process) => unnamed(process.name)).length;
+  const everywhere = card ? gpuCards(status?.system).reduce((total, item) => total
+    + item.process_list.filter((process) => unnamed(process.name)).length, 0) : here;
+  const only = known.length === 1 ? known[0] : undefined;
+  const guess = only && here === 1 && (only.placed || everywhere === 1) ? only.name : undefined;
   return list.map((process) => (unnamed(process.name) ? guess ?? 'A program the server cannot name' : process.name));
+}
+
+/** The cards a running job or a work from a terminal holds, for the chip beside it: "GPU 0", "GPU 0 + 1"; '' for none,
+ * for a GPU job whose card the server cannot tell (it holds every card), for an ended job, and on a machine with one
+ * card, where it says nothing. */
+export function gpuChipText(item: Pick<Job, 'gpus'> & {state?: JobState}): string {
+  if (item.state !== undefined && item.state !== 'running') return '';
+  if (!item.gpus?.length || gpuCards(machineNow.value).length < 2) return '';
+  return 'GPU ' + [...item.gpus].sort((a, b) => a - b).join(' + ');
+}
+/** The chip of gpuChipText: a small grey capsule after the line it sits in (the page's stylesheets are not the
+ * components': the style comes with it). */
+export const GPU_CHIP_STYLE = {display: 'inline-block', marginLeft: '6px', padding: '0 7px', borderRadius: '999px',
+  background: 'var(--surface-2)', color: 'var(--muted)', fontSize: '11.5px', fontWeight: '600', lineHeight: '18px',
+  letterSpacing: '0', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', verticalAlign: '1px'} as const;
+
+/** A holder's label inside a sentence: "a cutter training" for "A cutter training"; a name stays as it is. */
+const inSentence = (label: string): string => /^(A|An|The) /.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
+
+/** Whether no GPU can take a real run of the road labeler or of the signs on every frame now: every card held, by the
+ * server's word (each card's free); an older server: any process on the GPU, as its start() refuses then. A machine
+ * without nvidia-smi: never (the helpers check for themselves). */
+export function noFreeCard(system: SystemInfo | null | undefined): boolean {
+  const cards = gpuCards(system);
+  if (cards.some((card) => card.free !== undefined)) return !cards.some((card) => card.free === true);
+  return (system?.gpu?.processes ?? 0) > 0;
+}
+
+/** What the server calls a card's holder it cannot tell (panel.py UNNAMED). */
+const UNNAMED = 'a program the server cannot name';
+
+/** What holds the GPUs, in the words of the server's reasons (panel.py _gpu_busy): "Both GPUs are busy: a cutter
+ * training on GPU 0, a program the server cannot name on GPU 1", "Both GPUs are busy with a cutter training" (one
+ * holder on both), "The GPU is busy with a cutter training"; one card that only an unnamed program holds, and an older
+ * server, which does not say who: "The GPU is busy with another process". */
+export function gpusBusyText(system: SystemInfo | null | undefined): string {
+  const cards = gpuCards(system);
+  const holders = (card: Gpu): string => card.holders?.length
+    ? [...new Set(card.holders.map((holder) => inSentence(holder.label)))].join(' and ') : UNNAMED;
+  if (!cards.some((card) => card.holders !== undefined)) return 'The GPU is busy with another process';
+  const [first, second] = cards;
+  if (cards.length === 1 && first) {
+    return holders(first) === UNNAMED ? 'The GPU is busy with another process' : 'The GPU is busy with ' + holders(first);
+  }
+  if (cards.length === 2 && first && second && holders(first) === holders(second)) {
+    return 'Both GPUs are busy with ' + holders(first);
+  }
+  return (cards.length === 2 ? 'Both GPUs are busy: ' : `All ${cards.length} GPUs are busy: `) + cards
+    .filter((card) => card.free !== true)
+    .map((card) => holders(card) + ' on ' + cardLabel(card, cards.indexOf(card), cards.length)).join(', ');
+}
+
+/** The tooltip where trainings start, on a machine with two GPUs or more from a server that gives each its own job (it
+ * says which cards are free); undefined otherwise (no tooltip): a server from before only reads both cards, one training
+ * at a time. */
+export function twoGpusTip(system: SystemInfo | null | undefined): string | undefined {
+  const cards = gpuCards(system);
+  return cards.length > 1 && cards.some((card) => card.free !== undefined)
+    ? 'Two GPUs: two trainings can run at once, one per card. The brain uses one card for now.' : undefined;
 }
 
 /** About how long a running job has left: the server's time when it sends one (Propose again), else from the time so

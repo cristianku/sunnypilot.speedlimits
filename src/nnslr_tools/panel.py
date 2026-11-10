@@ -508,7 +508,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'networks on the comma': 'a copy onto the comma',
                   'AI reviewer measure': 'an AI reviewer measurement', 'map reading': 'a reading of the map',
                   'Mapillary positions': 'a search for the Mapillary positions',
-                  'Mapillary windows': 'the cut of the Mapillary windows'}
+                  'Mapillary windows': 'the cut of the Mapillary windows',
+                  'openpilot.distill training': 'openpilot.distill training'}
 # Groups that never run together with a group, besides itself. The download and the preparation
 # both write the links of data/raw/routes; the update rewrites the helpers under a running bash
 # and restarts this server; a preparation replaces the report an AI review is working on. The search for the
@@ -518,6 +519,43 @@ CONFLICTS = {'fetch': ('prepare', 'update'), 'prepare': ('fetch', 'update', 'ai'
              'update': ('fetch', 'prepare', 'train', 'ai', 'publish', 'mapillary', 'review_box', 'box_fit'),
              'ai': ('prepare', 'update'), 'publish': ('update',), 'mapillary': ('update',), 'review_box': ('update',),
              'box_fit': ('update',)}
+# The two V100s (issue #29): one GPU job per card, so two trainings can run at once. The groups whose actions may run
+# side by side, pair by pair (_pair_apart), instead of one at a time.
+PAIRED_GROUPS = ('train',)
+# Never beside any other action of the train group, either way: the import and the whole pipeline rewrite the dataset
+# and the split the others read, and the install of Qwen3-VL tests it on the GPU.
+TRAIN_ALONE = ('dataset', 'train', 'train_continue', 'train_resume', 'setup_vlm')
+# Never two of the same: each writes files of its own kind that a second one would write too (the brain's labels, the
+# regression's results, the road labeler's marks, the sign tracks, the proposers' measures).
+TRAIN_ONCE = ('train_brain', 'regression', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks', 'measure_proposer')
+# Never together: the regression runs the brains along the drives the brain learns from, and the road labeler's run
+# writes the labels of Speed review the brain, the regression and a new road labeler read.
+TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain', 'road_labeler_predict')),
+               frozenset(('regression', 'road_labeler_predict')),
+               frozenset(('road_labeler_train', 'road_labeler_predict')))
+# The work of the train group started from a terminal, by its label (ACTIVITIES), as the action it is for these rules.
+TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain',
+                  'classifier training': 'train_classifier', 'regression': 'regression',
+                  'road labeler': 'road_labeler_train', 'sign tracks': 'sign_tracks',
+                  'dataset and training': 'train', 'GPU training': 'train'}
+# The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
+EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
+                 'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
+                 'road_labeler_predict', 'sign_tracks')
+# Of those, the ones whose dry run ({'dry': 'on'}, --dry-run) runs on the CPU and takes no card.
+DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'sign_tracks')
+# The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
+# most free memory, shared with what else runs there.
+GPU_PROPOSERS = ('vietnam', 'ours', 'qwen')
+# The lock of openpilot.distill's GPU work (its helpers and its training take it): its holder is on a card too.
+GPU_LOCK = '/run/lock/v100-gpu.lock'
+# A card used by a program that is neither a job of the panel nor work it knows from a terminal (another container,
+# llama.cpp): nvidia-smi shows its compute processes with the pids of the host only.
+UNNAMED = 'a program the server cannot name'
+# How long a search of a job's cards through its open files holds when it found none (the job not yet on the GPU), and
+# when it found them.
+SCAN_UNKNOWN_SECONDS = 10
+SCAN_FOUND_SECONDS = 600
 # The fetch reads the comma logs (trip length; reverse gear in Distill) with openpilot's LogReader; the
 # .venv of this repository has it only with the [log-reader] extra and the schema checkouts.
 FETCH_PYTHON_ENV = 'COMMA_FETCH_PYTHON'
@@ -543,6 +581,14 @@ class Panel:
         # Reentrant: start() holds it while _running_groups() takes it again.
         self._lock = threading.RLock()
         self._processes = {}
+        # The run names handed out by new_run_name, so two starts in the same minute never get the same one.
+        self._reserved_runs: set[str] = set()
+        # The pid each job wrote when it started (<job id>.pid), read once: by job id.
+        self._pid_files: dict[str, int] = {}
+        # The cards found through the open files of a job or of work from a terminal: by key, (when, cards).
+        self._scanned: dict[tuple, tuple[float, list[int] | None]] = {}
+        # The activities and GPU holders of the status being read in this thread, read once for it (_read_status).
+        self._reading = threading.local()
         self._status_module = None
         # Progress of each job, by job id: (log size, progress), so a log is read again only when it grew.
         self._progress: dict[str, tuple[int, str, dict]] = {}
@@ -595,8 +641,13 @@ class Panel:
 
     # -- what is running -----------------------------------------------------------------------
     def activities(self) -> list[dict]:
-        """Helpers and nnslr steps running on this machine, also those started from a terminal."""
-        found = {}
+        """Helpers and nnslr steps running on this machine, also those started from a terminal: one for each label and
+        process session, 'pid' the first of its processes. 'job': the job of the panel whose session it is (the job's
+        wrapper leads it), else None. 'gpus': the cards it holds, as for a job (jobs()): for work of the train group or
+        the openpilot.distill training started from a terminal the cards its processes have open, None when none is
+        found (it holds every card then); [] for the rest."""
+        found: dict[tuple, dict] = {}
+        matched: dict[tuple, list[int]] = {}
         proc = Path('/proc')
         if not proc.is_dir():
             return []
@@ -608,10 +659,174 @@ class Panel:
                 command = (entry / 'cmdline').read_bytes().replace(b'\0', b' ').decode('utf-8', 'replace')
             except OSError:
                 continue
+            session = None
             for group, label, fragment in ACTIVITIES:
-                if fragment in command and label not in found and self._ours(entry, group):
-                    found[label] = {'group': group, 'label': label, 'pid': int(entry.name)}
+                if fragment in command and self._ours(entry, group):
+                    if session is None:
+                        session = _session_of(int(entry.name))
+                    if session is None:
+                        # Gone between its command line and its stat (a DataLoader worker of a job, re-made each
+                        # epoch): no session to tie it to a job, and no card files, so it would hold every card.
+                        break
+                    key = (label, session)
+                    found.setdefault(key, {'group': group, 'label': label, 'pid': int(entry.name)})
+                    matched.setdefault(key, []).append(int(entry.name))
+        if not found:
+            return []
+        jobs = self._jobs_now()
+        by_session = {info['pid']: job_id for job_id, info in jobs.items()}
+        for key, item in found.items():
+            job = by_session.get(key[1]) if key[1] is not None else None
+            item['job'] = job
+            if job is not None:
+                item['gpus'] = jobs[job]['gpus']
+            elif item['group'] in ('train', 'other'):
+                item['gpus'] = self._scan_cards(('session',) + key, matched[key])
+            else:
+                item['gpus'] = []
         return list(found.values())
+
+    def _jobs_now(self) -> dict[str, dict]:
+        """The jobs of the panel running now, by id: {'action', 'pid' (its wrapper, the leader of its session), 'gpus'
+        (_job_gpus)}. Also those started before a restart of this server (their wrapper still alive, _group); when a pid
+        was used again, by the newest. Read once for the status being read in this thread."""
+        cached = getattr(self._reading, 'jobs', None)
+        if cached is not None:
+            return cached
+        alive = {}
+        with self._lock:
+            for job_id, process in self._processes.items():
+                if process.poll() is None:
+                    alive[job_id] = process.pid
+        if self.logs.is_dir():
+            for path in self.logs.glob('*.pid'):
+                job_id = path.stem
+                if job_id in alive or not JOB_ID.fullmatch(job_id) or job_id.split('-', 2)[2] not in ACTIONS:
+                    continue
+                pid = self._pid_files.get(job_id)
+                if pid is None:
+                    try:
+                        pid = int(path.read_text().strip())
+                    except (OSError, ValueError):
+                        continue
+                    self._pid_files[job_id] = pid
+                if os.path.exists(f'/proc/{pid}') and self._group(job_id) == pid:
+                    alive[job_id] = pid
+        newest = {pid: job_id for job_id, pid in sorted(alive.items())}
+        jobs = {job_id: {'action': job_id.split('-', 2)[2], 'pid': pid,
+                         'gpus': self._job_gpus(job_id, running=True, pid=pid)}
+                for pid, job_id in newest.items()}
+        if getattr(self._reading, 'active', False):
+            self._reading.jobs = jobs
+        return jobs
+
+    def _job_gpus(self, job_id: str, *, running: bool, pid: int | None = None) -> list[int] | None:
+        """The cards of a job, by nvidia-smi's index: those start() gave it (<job id>.json, 'gpus'); for a job started
+        before that, [] when it uses no GPU, else the cards its processes have open while it runs; None when they are
+        not known (it holds every card)."""
+        record = _read_json(self.logs / (job_id + '.json')) or {}
+        if 'gpus' in record:
+            gpus = record['gpus']
+            return gpus if gpus is None or (isinstance(gpus, list) and all(isinstance(i, int) for i in gpus)) else None
+        if not self._uses_gpu(job_id):
+            return []
+        if not running or pid is None:
+            return None
+        return self._scan_cards(('job', job_id), [pid])
+
+    def _uses_gpu(self, job_id: str) -> bool:
+        """Whether a job uses the GPU, from its action, the first line of its log (a dry run on the CPU) and its
+        proposer."""
+        action = job_id.split('-', 2)[2]
+        path = self.logs / (job_id + '.log')
+        if action in DRY_ON_CPU:
+            try:
+                with path.open('rb') as log:
+                    first = log.readline(4096).decode('utf-8', 'replace')
+            except OSError:
+                first = ''
+            return '--dry-run' not in first.split()
+        if action in PREPARING:
+            # None: the helpers' default proposer, on the GPU.
+            proposer = _proposer_of(path)
+            return proposer is None or proposer in GPU_PROPOSERS
+        return action in EXCLUSIVE_GPU
+
+    def _scan_cards(self, key: tuple, pids: list[int]) -> list[int] | None:
+        """_tree_cards of the processes, kept a while by key: SCAN_FOUND_SECONDS when some cards are found,
+        SCAN_UNKNOWN_SECONDS when none or every one is (the job may not be on its card yet, only checking it)."""
+        now = time.monotonic()
+        cached = self._scanned.get(key)
+        if cached is not None and now - cached[0] < cached[2]:
+            return cached[1]
+        cards = _tree_cards(pids)
+        some = cards is not None and not set(_card_indexes().values()) <= set(cards)
+        if len(self._scanned) > 256:
+            self._scanned.clear()
+        self._scanned[key] = (now, cards, SCAN_FOUND_SECONDS if some else SCAN_UNKNOWN_SECONDS)
+        return cards
+
+    def _gpu_holders(self, activities: list[dict]) -> list[dict]:
+        """What holds the GPUs now: [{'job': id or None, 'name': "a cutter training", 'label': "A cutter training",
+        'gpus': the cards (None: every card), 'action': the action, or the kind of work from a terminal}]. The jobs of
+        the panel that use a GPU, the work of the train group and the openpilot.distill training from a terminal, and
+        the holder of openpilot.distill's GPU lock when it is none of those. Read once for the status being read in
+        this thread."""
+        cached = getattr(self._reading, 'holders', None)
+        if cached is not None and cached[0] is activities:
+            return cached[1]
+        jobs = self._jobs_now()
+        holders = []
+        for job_id, info in sorted(jobs.items()):
+            if info['gpus'] != []:
+                holders.append({'job': job_id, 'name': RUNNING_NAMES.get(info['action'], 'a job of the panel'),
+                                'gpus': info['gpus'], 'action': info['action']})
+        sessions = {info['pid'] for info in jobs.values()}
+        for item in activities:
+            if item.get('job') is not None or item['group'] not in ('train', 'other'):
+                continue
+            sessions.add(_session_of(item['pid']))
+            gpus = item.get('gpus')
+            if gpus == []:
+                continue
+            holders.append({'job': None, 'name': ACTIVITY_NAMES.get(item['label'], GROUP_NAMES.get(item['group'], UNNAMED)),
+                            'gpus': gpus, 'action': TERMINAL_KINDS.get(item['label'], 'train')
+                            if item['group'] == 'train' else None})
+        for pid in _gpu_lock_holders():
+            session = _session_of(pid)
+            if session is None or session in sessions:
+                continue
+            sessions.add(session)
+            holders.append({'job': None, 'name': ACTIVITY_NAMES['openpilot.distill training'],
+                            'gpus': self._scan_cards(('lock', session, pid), [pid]), 'action': None})
+        for holder in holders:
+            name = holder['name']
+            holder['label'] = name if name.startswith('openpilot') else name[0].upper() + name[1:]
+        if getattr(self._reading, 'activities', None) is activities:
+            self._reading.holders = (activities, holders)
+        return holders
+
+    def _gpu_states(self, system: dict, activities: list[dict]) -> tuple[list[dict], list[dict]]:
+        """The cards of a system() reading with their holders and whether each is free (_card_states), and the
+        holders."""
+        holders = self._gpu_holders(activities)
+        return _card_states(_cards_of(system), holders), holders
+
+    def _train_clash(self, action: str, activities: list[dict]) -> str:
+        """Why an action of the train group cannot run beside the ones running now (_pair_apart), in words: "A cutter
+        training is running"; '' when it can."""
+        jobs = self._jobs_now()
+        for job_id, info in sorted(jobs.items()):
+            if ACTIONS[info['action']]['group'] == 'train' and _pair_apart(action, info['action']):
+                name = RUNNING_NAMES.get(info['action'], GROUP_NAMES['train'])
+                return name[0].upper() + name[1:] + ' is running'
+        for item in activities:
+            if item['group'] != 'train' or item.get('job') is not None:
+                continue
+            if _pair_apart(action, TERMINAL_KINDS.get(item['label'], 'train')):
+                name = ACTIVITY_NAMES.get(item['label'], GROUP_NAMES['train'])
+                return name[0].upper() + name[1:] + ' is running'
+        return ''
 
     def _ours(self, process: Path, group: str) -> bool:
         """The helpers of this checkout run from it (the panel starts them there, the guide says so for a
@@ -651,9 +866,9 @@ class Panel:
 
     def running(self) -> dict:
         """What runs now, for the dots of the busy tabs on the pages outside the panel (GET /api/panel/system): the
-        running jobs of the site (id, action, label, state) and the work started from a terminal."""
+        running jobs of the site (id, action, label, state, gpus) and the work started from a terminal."""
         activities = self.activities()
-        jobs = [{key: job[key] for key in ('id', 'action', 'label', 'state')}
+        jobs = [{key: job[key] for key in ('id', 'action', 'label', 'state', 'gpus')}
                 for job in self.jobs(activities) if job['state'] == 'running']
         return {'jobs': jobs, 'activities': activities}
 
@@ -665,6 +880,7 @@ class Panel:
             return []
         busy = {item['group'] for item in activities}
         names = sorted((p for p in self.logs.glob('*.log') if JOB_ID.fullmatch(p.stem)), reverse=True)
+        now = self._jobs_now()
         result = []
         for path in names[:HISTORY]:
             job_id = path.stem
@@ -709,7 +925,11 @@ class Panel:
                            else datetime.fromtimestamp(info.st_mtime).astimezone().isoformat(timespec='seconds'),
                            'state': state, 'code': code,
                            'stoppable': state == 'running' and self._group(job_id) is not None,
-                           'size': info.st_size})
+                           'size': info.st_size,
+                           # The cards it holds (nvidia-smi's index): [] without a GPU, None when not known (every
+                           # card).
+                           'gpus': now[job_id]['gpus'] if job_id in now
+                           else self._job_gpus(job_id, running=state == 'running', pid=self._group(job_id))})
         return result
 
     # -- the machine ---------------------------------------------------------------------------
@@ -757,7 +977,9 @@ class Panel:
         """The machine, for the Stato page (as distill-web's Status): each GPU, CPU per core, RAM, disk.
 
         'gpus': each card on its own (_gpu_cards), by nvidia-smi's index. 'gpu': what the pages read before there were
-        two cards, kept for a page loaded before an update: the first card's numbers and the processes of all of them."""
+        two cards, kept for a page loaded before an update: the first card's numbers and the processes of all of them.
+        Each card also says whether it is 'free' and its 'holders': [{'job': the job of the panel or None, 'label': "A
+        cutter training", "openpilot.distill training", "A program the server cannot name"}] (_gpu_holders)."""
         info = {'gpu': None, 'gpus': [], 'disk': None, 'cpus': os.cpu_count(), 'load': None, 'loads': None,
                 'cpu': _cpu_usage(), 'memory': _memory()}
         try:
@@ -774,6 +996,11 @@ class Panel:
         cards = _gpu_cards()
         info['gpus'] = cards
         if cards:
+            activities = getattr(self._reading, 'activities', None)
+            states = _card_states(cards, self._gpu_holders(self.activities() if activities is None else activities))
+            info['gpus'] = [{**card, 'free': state['free'],
+                             'holders': [{'job': holder['job'], 'label': holder['label']} for holder in state['holders']]}
+                            for card, state in zip(cards, states)]
             every = [process for card in cards for process in card['process_list']]
             # 'processes' stays a count: the training actions refuse a busy GPU with it.
             info['gpu'] = {**{key: cards[0][key] for key in ('name', 'utilization', 'memory_used_mb', 'memory_total_mb',
@@ -826,7 +1053,17 @@ class Panel:
             return payload
 
     def _read_status(self) -> dict:
+        # The running jobs, the activities and the holders of the GPUs read once for this status (_jobs_now,
+        # _gpu_holders), however many parts of it ask.
+        self._reading.active = True
+        try:
+            return self._read_status_once()
+        finally:
+            self._reading.__dict__.clear()
+
+    def _read_status_once(self) -> dict:
         activities = self.activities()
+        self._reading.activities = activities
         system = self.system()
         payload = {'available': self.available(), 'actions_enabled': self.actions_enabled and self.available(),
                    'routes': [], 'next_step': '', 'next_action': None, 'reviewed_routes': 0, 'min_routes': 3,
@@ -850,7 +1087,9 @@ class Panel:
         # qwen: why it is not installed; qwen_gpu: why it cannot load on the GPU now (start() refuses it then); ours:
         # why Our networks are not whole yet; chosen: the choice kept on the Prepare tab (None before one: then the
         # best measured, proposers()); networks: what Our networks run, the parts in use.
-        payload['proposers'] = {'qwen': vlm_missing(self.root), 'qwen_gpu': _qwen_gpu_reason(system['gpu']) or None,
+        # The card with the most free memory: the one a preparation would take.
+        payload['proposers'] = {'qwen': vlm_missing(self.root),
+                                'qwen_gpu': _qwen_gpu_reason(_best_card(_cards_of(system))) or None,
                                 'ours': ours_missing(self.root), 'chosen': self._kept_proposer(),
                                 'networks': _active_parts(self.root)}
         # The packages of our networks prepared here, newest first, and where they are published (Models tab).
@@ -896,12 +1135,15 @@ class Panel:
         (scripts/run_signnet.sh) from the newest data/runs/<run>/signnet.log, or the train.log of a SignNet trained by
         hand (a run with signnet-best.pt); the old detector's (scripts/run_detector_sizes.sh) from the newest
         data/runs/<run>/detector-sizes/<size>.log, which holds the training of a size alone. The cutter's logs are read
-        as its training step (its epochs: the checks before it are over)."""
-        from_panel = any(job['state'] == 'running' and ACTIONS[job['action']]['group'] == 'train'
-                         for job in payload['jobs'])
-        trainings = [item for item in payload['activities'] if item['group'] == 'train']
-        if from_panel or not trainings:
+        as its training step (its epochs: the checks before it are over).
+
+        Each activity on its own, also while a training of the panel runs beside it (one on each card): the activities
+        of the panel's jobs have their job's progress, and the logs of the runs of the running jobs are not theirs."""
+        trainings = [item for item in payload['activities'] if item['group'] == 'train' and item.get('job') is None]
+        if not trainings:
             return
+        # The runs of the panel's trainings at work: their logs (runs/<run>/..., logs/train-<run>.log) are theirs.
+        taken = {job['run'] for job in payload['jobs'] if job['state'] == 'running' and job.get('run')}
         # The road labeler and the signs on every frame started from a terminal have no log of their own to read: no
         # progress, and not the whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
@@ -914,6 +1156,7 @@ class Panel:
             found = [path for pattern in globs for path in self.root.glob(pattern) if items]
             # A train.log of a run is a SignNet's only next to its weights.
             found = [path for path in found if path.name != 'train.log' or (path.parent / 'signnet-best.pt').is_file()]
+            found = [path for path in found if not _log_of_runs(self.root, path, taken)]
             logs = sorted(found, key=lambda path: path.stat().st_mtime)
             if not logs:
                 continue
@@ -941,7 +1184,7 @@ class Panel:
             self._progress[job['id']] = (key[0], key[1], result)
         # The progress inside the current step changes without the log growing: never from the cache.
         if job['state'] == 'running':
-            result = self._with_step_progress(result, job['action'], job['started_at'])
+            result = self._with_step_progress(result, job)
         return result
 
     def _read_progress(self, job: dict, preparation: dict | None) -> dict:
@@ -953,12 +1196,16 @@ class Panel:
             text = ''
         return progress(job['action'], job['state'], text, preparation if job['action'] in PREPARING else None)
 
-    def _with_step_progress(self, result: dict, action: str, started_at: str) -> dict:
-        """The progress inside the current step: the last report of a command (logs/progress.json, written
-        by nnslr_tools.progress) if it came after the job started, or what the GPU setup is doing."""
-        record = _read_json(self.root / 'logs' / 'progress.json')
+    def _with_step_progress(self, result: dict, job: dict) -> dict:
+        """The progress inside the current step: the last report of a command (written by nnslr_tools.progress) if it
+        came after the job started, or what the GPU setup is doing. Each job has its file, logs/progress-<job id>.json
+        (NNSLR_PROGRESS_FILE, so two jobs at once never read each other's); a job started before that (its record
+        without 'own_progress') the shared logs/progress.json."""
+        action = job['action']
+        own = (_read_json(self.logs / (job['id'] + '.json')) or {}).get('own_progress')
+        record = _read_json(self.root / 'logs' / (f'progress-{job["id"]}.json' if own else 'progress.json'))
         try:
-            started = datetime.fromisoformat(started_at).timestamp()
+            started = datetime.fromisoformat(job['started_at']).timestamp()
         except ValueError:
             started = 0.0
         if record is not None and not (isinstance(record.get('at'), (int, float)) and record['at'] >= started):
@@ -1005,7 +1252,11 @@ class Panel:
     def _action_states(self, payload: dict, activities: list[dict], *, ai_providers: int = 0) -> dict:
         running = self._running_groups(activities)
         rows = payload['routes']
-        gpu = payload['system']['gpu']
+        # Each card with what holds it: an action that takes a card waits while none is free (gpu_reason says what
+        # holds them); the install of Qwen3-VL reads the card with the most free memory.
+        cards, holders = self._gpu_states(payload['system'], activities)
+        gpu_reason = _gpu_busy(cards, holders)
+        best = _best_card(cards)
         to_prepare = sum(1 for row in rows if row['state'] in ('collegare', 'estrarre', 'preannotare'))
         confirmed = sum(row['confirmed'] for row in rows)
         states = {}
@@ -1016,6 +1267,8 @@ class Panel:
                 reason = 'the panel is read-only'
             elif conflict is not None:
                 reason = self._busy_reason(conflict, activities)
+            elif action['group'] in PAIRED_GROUPS and (clash := self._train_clash(name, activities)):
+                reason = clash
             elif name == 'update' and not (self.repo / 'helpers/update.sh').is_file():
                 reason = 'helpers/update.sh is missing in this installation'
             elif name == 'update':
@@ -1055,8 +1308,8 @@ class Panel:
                 reason = BRAIN_SCRIPT + ' is missing in this installation'
             elif name == 'train_brain' and (missing := self._brain_drives_missing()):
                 reason = missing
-            elif name == 'train_brain' and gpu is not None and gpu['processes']:
-                reason = 'the GPU is busy with another process'
+            elif name == 'train_brain' and gpu_reason:
+                reason = gpu_reason
             elif name == 'train_brain':
                 # Its labels are his own speed on every dashcam drive with its logs read, each whole (the blocks of
                 # Speed review correct it): no frame needs a confirmation; the next limit is our networks' reading, his
@@ -1066,8 +1319,8 @@ class Panel:
                 reason = missing
             elif name in ROAD_LABELER_ACTIONS:
                 # Its answers are the corrections of Speed review and the map: it needs no confirmed sign. The GPU is
-                # checked when it starts (start() and the helper), so a dry run on the CPU stays possible while another
-                # process has the GPU.
+                # checked when it starts (start() and the helper), so a dry run on the CPU stays possible while every
+                # card is busy.
                 pass
             elif name == 'sign_tracks' and (missing := self._sign_tracks_missing()):
                 reason = missing
@@ -1083,8 +1336,8 @@ class Panel:
                 pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
-            elif name == 'regression' and gpu is not None and gpu['processes']:
-                reason = 'the GPU is busy with another process'
+            elif name == 'regression' and gpu_reason:
+                reason = gpu_reason
             elif name == 'regression':
                 # What it needs (a certified drive, a model chosen) is checked by Models › Regression and by start().
                 pass
@@ -1127,10 +1380,13 @@ class Panel:
             elif name.startswith('train') and payload['reviewed_routes'] < payload['min_routes']:
                 reason = (f'{payload["min_routes"]} reviewed drives are needed, '
                           f'now {payload["reviewed_routes"]}')
-            elif name.startswith('train') and gpu is not None and gpu['processes']:
-                reason = 'the GPU is busy with another process'
-            elif (name == 'setup_vlm' and gpu is not None and gpu.get('memory_used_mb') and gpu.get('memory_total_mb')
-                  and gpu['memory_used_mb'] > gpu['memory_total_mb'] / 2):
+            elif name.startswith('train') and gpu_reason:
+                reason = gpu_reason
+            elif name in ('measure_proposer', 'setup_vlm') and gpu_reason:
+                # Each takes a card of its own, as a training.
+                reason = gpu_reason
+            elif (name == 'setup_vlm' and best is not None and best.get('memory_used_mb') and best.get('memory_total_mb')
+                  and best['memory_used_mb'] > best['memory_total_mb'] / 2):
                 # Its last step loads Qwen3-VL on the GPU (about 17 GB): it would only run out of memory.
                 reason = 'the GPU memory is taken by another program: free it first'
             elif name == 'train_classifier':
@@ -1161,8 +1417,8 @@ class Panel:
     def _road_labeler_arguments(self, action: str, options: dict) -> list[str]:
         """The arguments of helpers/road_labeler.sh from the options (strings, checked by start()): --dry-run, and
         for Prepare Speed review the run (--run-dir), every drive (--all) and --no-marks (nothing written into Speed
-        review). A real run, not a dry one, is refused while another process has the GPU (the helper checks it again,
-        with its memory)."""
+        review). A real run, not a dry one, is refused while no card is free (the helper checks its card again, with its
+        memory)."""
         dry = options.get('dry')
         if dry not in (None, 'on'):
             raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
@@ -1179,11 +1435,17 @@ class Panel:
             if marks == 'off':
                 arguments.append('--no-marks')
         if not dry:
-            gpu = self.system().get('gpu')
-            if gpu is not None and gpu.get('processes'):
-                raise PanelError(409, 'gpu_taken', 'The GPU is busy with another process: wait for it to finish, or '
-                                 'start a dry run on the CPU.')
+            self._refuse_busy_gpu()
         return arguments
+
+    def _refuse_busy_gpu(self) -> None:
+        """A real run of the road labeler or of the signs on every frame, refused while no card is free: "The GPU is
+        busy with another process: wait for it to finish, or start a dry run on the CPU." """
+        cards, holders = self._gpu_states(self.system(), self.activities())
+        reason = _gpu_busy(cards, holders)
+        if reason:
+            raise PanelError(409, 'gpu_taken', reason[0].upper() + reason[1:] + ': wait for it to finish, or start a '
+                             'dry run on the CPU.')
 
     def _box_fit_arguments(self, options: dict) -> list[str]:
         """The arguments of scripts/train_box_fit.sh from the options (strings, checked by start()): --dry-run, and
@@ -1270,7 +1532,7 @@ class Panel:
     def _sign_tracks_arguments(self, options: dict) -> list[str]:
         """The arguments of helpers/sign_tracks.sh from the options (strings, checked by start()): --dry-run, and
         --route for each drive of {'routes': 'R1,R2'} (each with its video; none: every drive, the helper's --all). A
-        real run, not a dry one, is refused while another process has the GPU (the helper checks it again, with its
+        real run, not a dry one, is refused while no card is free (the helper checks its card again, with its
         memory)."""
         from nnslr_tools import drive_video
         dry = options.get('dry')
@@ -1283,10 +1545,7 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Unknown drive, or a drive without its video: ' + route[:40] + '.')
             arguments.append('--route=' + route)
         if not dry:
-            gpu = self.system().get('gpu')
-            if gpu is not None and gpu.get('processes'):
-                raise PanelError(409, 'gpu_taken', 'The GPU is busy with another process: wait for it to finish, or '
-                                 'start a dry run on the CPU.')
+            self._refuse_busy_gpu()
         return arguments
 
     def _locations_missing(self) -> str:
@@ -1978,8 +2237,9 @@ class Panel:
                 if missing:
                     raise PanelError(409, 'not_available', missing + '.')
                 # Qwen3-VL needs about 17.5 GB of the GPU: refused, not run out of memory, when they are taken
-                # (another Qwen job, a training, llama.cpp in another container).
-                taken = _qwen_gpu_reason(self.system().get('gpu'))
+                # (another Qwen job, a training, llama.cpp in another container) on the card with the most free memory,
+                # the one it would take.
+                taken = _qwen_gpu_reason(_best_card(_cards_of(self.system())))
                 if taken:
                     raise PanelError(409, 'gpu_taken', taken + '.')
             start_env['NNSLR_PROPOSER'] = proposer
@@ -2152,11 +2412,21 @@ class Panel:
                 raise PanelError(409, 'no_cutter', why[0].upper() + why[1:] + '.')
         if check_only:
             return None
+        # The card: a training (EXCLUSIVE_GPU, not a dry run on the CPU) takes a free one of its own, a preparation on
+        # the GPU the one with the most free memory. nvidia-smi is read now, outside the lock (it can take a second);
+        # the card is chosen and recorded under it, so two starts never take the same one.
+        dry = action in DRY_ON_CPU and '--dry-run' in start_args
+        takes_card = (action in EXCLUSIVE_GPU and not dry) or (
+            action in PREPARING and (proposer is None or proposer in GPU_PROPOSERS))
+        cards = _cards_of(self.system()) if takes_card else []
         with self._lock:
             activities = self.activities()
             conflict = _conflicting_group(group, self._running_groups(activities))
             if conflict is not None:
                 raise PanelError(409, 'busy', self._busy_reason(conflict, activities) + ': wait for it to finish.')
+            if group in PAIRED_GROUPS and (clash := self._train_clash(action, activities)):
+                raise PanelError(409, 'busy', clash + ': wait for it to finish.')
+            gpus = self._take_card(action, proposer, cards, activities) if takes_card else []
             self.logs.mkdir(parents=True, exist_ok=True)
             job_id = datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + action
             path = self.logs / (job_id + '.log')
@@ -2181,11 +2451,21 @@ class Panel:
             environment = dict(os.environ, NNSLR_DATA_ROOT=str(self.root), TMPDIR=str(temporary), **start_env)
             if fetch_python:
                 environment[FETCH_PYTHON_ENV] = fetch_python
+            # Its own progress file (nnslr_tools.progress): two jobs at once never read each other's.
+            environment['NNSLR_PROGRESS_FILE'] = str(self.root / 'logs' / f'progress-{job_id}.json')
+            if gpus:
+                # Its card, by nvidia-smi's index: the helpers and scripts check that one (NNSLR_GPU_INDEX), CUDA
+                # counts the cards in the same order (by PCI bus) and sees only it.
+                environment.update(CUDA_DEVICE_ORDER='PCI_BUS_ID', NNSLR_GPU_INDEX=str(gpus[0]),
+                                   CUDA_VISIBLE_DEVICES=str(gpus[0]))
+            # The record of the job (<job id>.json): its cards (what holds which, _job_gpus), that it has its own
+            # progress file, and who proposes, for the page (the running job's choice) and Try again: the log does
+            # not always say. Our networks: the parts in use now, by name (the Models tab can change them while it
+            # runs).
+            kept = {**(_read_json(path.with_suffix('.json')) or {}), 'gpus': gpus, 'own_progress': True}
             if proposer is not None:
-                # Who proposes, for the page (the running job's choice) and Try again: the log does not always say.
-                # Our networks: the parts in use now, by name (the Models tab can change them while it runs).
-                kept = {'proposer': proposer, **({'networks': _active_parts(self.root)} if proposer == 'ours' else {})}
-                path.with_suffix('.json').write_text(json.dumps(kept) + '\n', encoding='utf-8')
+                kept.update({'proposer': proposer, **({'networks': _active_parts(self.root)} if proposer == 'ours' else {})})
+            path.with_suffix('.json').write_text(json.dumps(kept) + '\n', encoding='utf-8')
             with path.open('wb') as log:
                 log.write(('== ' + ' '.join(command) + '\n').encode())
                 log.flush()
@@ -2200,7 +2480,42 @@ class Panel:
             path.with_suffix('.pid').write_text(str(process.pid) + '\n')
         # Reaps the process as soon as it ends, so it never stays a zombie, and starts the next training of a pipeline.
         threading.Thread(target=self._reap, args=(process,), daemon=True).start()
+        self._prune_progress()
         return {'id': job_id, 'action': action, 'label': ACTIONS[action]['label']}
+
+    def _take_card(self, action: str, proposer: str | None, cards: list[dict], activities: list[dict]) -> list[int] | None:
+        """The card a job starts on (called under the lock): a preparation the one with the most free memory (Qwen3-VL
+        refused there without QWEN_GPU_MB free), shared with what else runs; any other the free one of lowest index,
+        refused 'busy' with what holds them when none is free. Without nvidia-smi the cards are not known: None (no card
+        is named to the job), refused while a training holds the GPU."""
+        holders = self._gpu_holders(activities)
+        states = _card_states(cards, holders)
+        if action in PREPARING:
+            best = _best_card(states)
+            if best is None:
+                return None
+            taken = _qwen_gpu_reason(best) if proposer == 'qwen' else ''
+            if taken:
+                raise PanelError(409, 'gpu_taken', taken + '.')
+            return [best['index']]
+        reason = _gpu_busy(states, holders)
+        if reason:
+            raise PanelError(409, 'busy', reason[0].upper() + reason[1:] + ': wait for it to finish.')
+        free = [card for card in states if card['free']]
+        return [free[0]['index']] if free else None
+
+    def _prune_progress(self) -> None:
+        """The progress files of the jobs that left the history (the newest HISTORY logs) and no longer run are
+        removed: nothing reads them any more."""
+        names = sorted((path.stem for path in self.logs.glob('*.log') if JOB_ID.fullmatch(path.stem)), reverse=True)
+        kept = set(names[:HISTORY]) | set(self._jobs_now())
+        for path in (self.root / 'logs').glob('progress-*.json'):
+            job_id = path.stem[len('progress-'):]
+            if JOB_ID.fullmatch(job_id) and job_id not in kept:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
 
     def train_settings(self) -> dict:
         """The settings of the trainings of Train (nnslr_tools.train_settings), and whether this panel can change
@@ -2281,7 +2596,7 @@ class Panel:
 
     def advance_pipeline(self) -> None:
         """Starts the next training of the running pipeline when the one at work ended well; a training that failed
-        or was stopped ends the pipeline. While the train group or the GPU is busy with something else it waits (the
+        or was stopped ends the pipeline. While the train group or every GPU is busy with something else it waits (the
         reason says so) and tries again later."""
         with self._lock:
             plan = _read_json(self.logs / PIPELINE_FILE)
@@ -2309,10 +2624,8 @@ class Panel:
             if following['action'] == 'train_classifier' and cutter is not None:
                 run = _run_of(self.logs / (cutter['job'] + '.log'), 'train_cutter')
                 options['cutter'] = f'cutter:{run}/{SIGNNET_PART}' if run else ''
-            gpu = self.system().get('gpu') if following['action'] != 'dataset' else None
             try:
-                if gpu is not None and gpu.get('processes'):
-                    raise PanelError(409, 'busy', 'The GPU is busy with another process')
+                # A busy GPU (no card free) is start()'s 'busy', as a busy train group: the pipeline waits for it.
                 job = self.start(following['action'], options or None)
             except PanelError as error:
                 if error.reason == 'busy':
@@ -2390,12 +2703,16 @@ class Panel:
 
     def new_run_name(self, kind: str) -> str:
         """The run of a new classifier or cutter training: the time it starts and what it is,
-        2026-10-24_1730-classifier, 2026-10-24_1730-cutter; -2, -3... when a run of that name is already there."""
+        2026-10-24_1730-classifier, 2026-10-24_1730-cutter; -2, -3... when a run of that name is already there, or was
+        handed out already (two trainings started in the same minute, before the first made its run)."""
         base = datetime.now().strftime('%Y-%m-%d_%H%M') + '-' + kind
         name, number = base, 1
-        while (self.root / 'runs' / name).exists() or (self.root / 'runs' / name).is_symlink():
-            number += 1
-            name = f'{base}-{number}'
+        with self._lock:
+            while (self.root / 'runs' / name).exists() or (self.root / 'runs' / name).is_symlink() or (
+                    name in self._reserved_runs):
+                number += 1
+                name = f'{base}-{number}'
+            self._reserved_runs.add(name)
         return name
 
     def _group(self, job_id: str) -> int | None:
@@ -2453,12 +2770,24 @@ class Panel:
 def _conflicting_group(group: str, running: set[str]) -> str | None:
     """The running group that keeps an action of `group` from starting, or None.
 
-    One action per group at a time, and never together with the groups of CONFLICTS.
+    One action per group at a time, and never together with the groups of CONFLICTS. The actions of PAIRED_GROUPS run
+    side by side by their pair rules instead (_pair_apart, Panel._train_clash), each on a card of its own.
     """
-    for other in (group, *CONFLICTS.get(group, ())):
+    for other in ((() if group in PAIRED_GROUPS else (group,)) + tuple(CONFLICTS.get(group, ()))):
         if other in running:
             return other
     return None
+
+
+def _log_of_runs(root: Path, path: Path, runs: set[str]) -> bool:
+    """Whether a log is one of these runs': under runs/<run>/, or the logs/train-<run>.log of helpers/3_train.sh."""
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        return False
+    return (len(parts) > 2 and parts[0] == 'runs' and parts[1] in runs) or (
+        len(parts) == 2 and parts[0] == 'logs' and parts[1].startswith('train-') and parts[1][len('train-'):-len('.log')]
+        in runs)
 
 
 def _line_count(path: Path) -> int:
@@ -2743,7 +3072,218 @@ def _gpu_cards() -> list[dict]:
                       'utilization': _number(fields[3]), 'memory_used_mb': _number(fields[4]),
                       'memory_total_mb': _number(fields[5]), 'temperature': _number(fields[6]),
                       'power_w': _number(fields[7]), 'processes': len(found), 'process_list': found})
+    if cards:
+        # Kept for _card_indexes: the card of a /dev/nvidia<minor> a process has open, by its bus.
+        _CARD_INDEX.clear()
+        _CARD_INDEX.update({card['bus_id']: card['index'] for card in cards})
     return cards
+
+
+# nvidia-smi's index of each card by its PCI bus, from its last answer (_gpu_cards).
+_CARD_INDEX: dict[str, int] = {}
+# A card's device file, as a process has it open: /dev/nvidia0, /dev/nvidia1 (not nvidiactl, nvidia-uvm...).
+NVIDIA_DEVICE = re.compile(r'/dev/nvidia(\d+)')
+
+
+def _card_indexes() -> dict[str, int]:
+    """nvidia-smi's index of each card by its bus: from its last answer, asked now when there was none."""
+    if not _CARD_INDEX:
+        _gpu_cards()
+    return _CARD_INDEX
+
+
+def _session_of(pid: int) -> int | None:
+    """The session of a process (the fourth field after its name in /proc/<pid>/stat), None when it is gone."""
+    try:
+        text = Path('/proc', str(pid), 'stat').read_text()
+        return int(text[text.rindex(')') + 1:].split()[3])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _children(pid: int) -> list[int]:
+    """The children of a process, of each of its threads (/proc/<pid>/task/<tid>/children)."""
+    found = []
+    try:
+        tasks = list(Path('/proc', str(pid), 'task').iterdir())
+    except OSError:
+        return found
+    for task in tasks:
+        try:
+            found += [int(value) for value in (task / 'children').read_text().split()]
+        except (OSError, ValueError):
+            continue
+    return found
+
+
+def _process_tree(pids) -> list[int]:
+    """The processes and all their descendants."""
+    seen: dict[int, None] = {}
+    waiting = list(pids)
+    while waiting:
+        pid = waiting.pop()
+        if pid in seen:
+            continue
+        seen[pid] = None
+        waiting += _children(pid)
+    return list(seen)
+
+
+def _command_name(pid: int) -> str:
+    """The name of a process's program (/proc/<pid>/comm), '' when it is gone."""
+    try:
+        return Path('/proc', str(pid), 'comm').read_text().strip()
+    except OSError:
+        return ''
+
+
+def _nvidia_minors(pid: int, proc: str = '/proc') -> set[int]:
+    """The minors of the cards a process has open (/dev/nvidia<minor> among its open files, <proc>/<pid>/fd)."""
+    found = set()
+    try:
+        handles = list(Path(proc, str(pid), 'fd').iterdir())
+    except OSError:
+        return found
+    for handle in handles:
+        try:
+            match = NVIDIA_DEVICE.fullmatch(os.readlink(handle))
+        except OSError:
+            continue
+        if match:
+            found.add(int(match.group(1)))
+    return found
+
+
+def _gpu_minor_buses(gpus: str = '/proc/driver/nvidia/gpus') -> dict[int, str]:
+    """The bus of each card by the minor of its device file, as the driver writes them
+    (/proc/driver/nvidia/gpus/<bus>/information: "Device Minor", "Bus Location")."""
+    found = {}
+    for info in Path(gpus).glob('*/information'):
+        try:
+            text = info.read_text()
+        except OSError:
+            continue
+        minor = re.search(r'^Device Minor:\s*(\d+)', text, re.M)
+        bus = re.search(r'^Bus Location:\s*(\S+)', text, re.M)
+        if minor:
+            found[int(minor.group(1))] = _bus(bus.group(1) if bus else info.parent.name)
+    return found
+
+
+def _gpu_lock_holders(path: str | None = None) -> list[int]:
+    """The processes that hold openpilot.distill's GPU lock, from /proc/locks by the lock's device and inode: the lock
+    is only read, never opened nor taken. A lock taken by bash with the flock program (exec 9>>lock; flock 9) names
+    the flock program that has gone, so /proc/locks leaves it out: that holder is not seen here."""
+    try:
+        info = os.stat(path or GPU_LOCK)
+        lines = Path('/proc/locks').read_text().splitlines()
+    except OSError:
+        return []
+    wanted = (os.major(info.st_dev), os.minor(info.st_dev), info.st_ino)
+    found = []
+    for line in lines:
+        fields = line.split()
+        # "5: FLOCK  ADVISORY  WRITE 585 00:4e:1969 0 EOF"; a waiter has "->" after its number.
+        if len(fields) < 6 or fields[1] == '->':
+            continue
+        try:
+            major, minor, inode = fields[5].split(':')
+            where = (int(major, 16), int(minor, 16), int(inode))
+            pid = int(fields[4])
+        except ValueError:
+            continue
+        if where == wanted and pid > 0 and pid not in found:
+            found.append(pid)
+    return found
+
+
+def _tree_cards(pids) -> list[int] | None:
+    """nvidia-smi's index of each card the processes and their descendants have open, None when none is open or one
+    is not known (they hold every card then). A program that watches the cards opens the files of all of them,
+    whichever card the job runs on (nvidia-smi, which the scripts run to check theirs; the system monitor of wandb):
+    nvidia-smi is left out, and when some processes have only some cards open (CUDA with CUDA_VISIBLE_DEVICES opens
+    only its own), those are the job's cards."""
+    opened = []
+    for pid in _process_tree(pids):
+        if _command_name(pid) != 'nvidia-smi':
+            minors = _nvidia_minors(pid)
+            if minors:
+                opened.append(minors)
+    if not opened:
+        return None
+    buses = _gpu_minor_buses()
+    some = [minors for minors in opened if not set(buses) <= minors]
+    minors = set().union(*(some or opened))
+    indexes = _card_indexes()
+    cards = [indexes.get(buses.get(minor, '')) for minor in minors]
+    if any(card is None for card in cards):
+        return None
+    return sorted(set(cards))
+
+
+def _cards_of(system: dict) -> list[dict]:
+    """The cards of a system() reading by index: 'gpus', or the one card of 'gpu' (a reading of before two cards)."""
+    if 'gpus' in system:
+        return sorted(system.get('gpus') or [], key=lambda card: card['index'])
+    gpu = system.get('gpu')
+    if gpu is None:
+        return []
+    return [{**gpu, 'index': 0, 'processes': gpu.get('processes') or 0}]
+
+
+def _free_mb(card: dict) -> float:
+    used, total = card.get('memory_used_mb'), card.get('memory_total_mb')
+    return total - used if isinstance(used, (int, float)) and isinstance(total, (int, float)) else -1
+
+
+def _best_card(states: list[dict]) -> dict | None:
+    """The card with the most free memory (then the fewest holders, then the lowest index), None without cards."""
+    if not states:
+        return None
+    return min(states, key=lambda card: (-_free_mb(card), len(card.get('holders') or []), card['index']))
+
+
+def _card_states(cards: list[dict], holders: list[dict]) -> list[dict]:
+    """Each card with its holders (those on it, and those of unknown card: on every card) and whether it is free. A card
+    with a compute process and no holder known is held by a program the server cannot name."""
+    states = []
+    for card in cards:
+        on = [holder for holder in holders if holder['gpus'] is None or card['index'] in holder['gpus']]
+        if not on and card.get('processes'):
+            on = [{'job': None, 'name': UNNAMED, 'label': UNNAMED[0].upper() + UNNAMED[1:], 'gpus': [card['index']],
+                   'action': None}]
+        states.append({**card, 'holders': on, 'free': not on})
+    return states
+
+
+def _gpu_busy(states: list[dict], holders: list[dict]) -> str:
+    """Why no card can be taken now, in words, '' when one is free: "the GPU is busy with a cutter training" (one card),
+    "both GPUs are busy: a cutter training on GPU 0, a program the server cannot name on GPU 1". Without nvidia-smi the
+    cards are not known: busy while a job or work from a terminal other than a preparation holds the GPU."""
+    if not states:
+        names = list(dict.fromkeys(holder['name'] for holder in holders if holder['action'] not in PREPARING))
+        return 'the GPU is busy with ' + ' and '.join(names) if names else ''
+    if any(card['free'] for card in states):
+        return ''
+
+    def named(card: dict) -> str:
+        return ' and '.join(dict.fromkeys(holder['name'] for holder in card['holders']))
+
+    if len(states) == 1:
+        # Today's words when nothing known holds it.
+        return 'the GPU is busy with another process' if named(states[0]) == UNNAMED else (
+            'the GPU is busy with ' + named(states[0]))
+    if len(states) == 2:
+        if named(states[0]) == named(states[1]):
+            return 'both GPUs are busy with ' + named(states[0])
+        return 'both GPUs are busy: ' + ', '.join(f'{named(card)} on GPU {card["index"]}' for card in states)
+    return f'all {len(states)} GPUs are busy: ' + ', '.join(f'{named(card)} on GPU {card["index"]}' for card in states)
+
+
+def _pair_apart(action: str, other: str) -> bool:
+    """Whether two actions of the train group never run together (TRAIN_ALONE, TRAIN_ONCE, TRAIN_APART)."""
+    return (action in TRAIN_ALONE or other in TRAIN_ALONE or (action == other and action in TRAIN_ONCE)
+            or frozenset((action, other)) in TRAIN_APART)
 
 
 def _bus(text: str) -> str:

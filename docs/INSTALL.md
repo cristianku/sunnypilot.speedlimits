@@ -91,10 +91,11 @@ Without the network, the maps already there are used: the drives outside them st
 ```sh
 bash scripts/setup_v100_training_env.sh
 .venv-gpu/bin/wandb login          # once; without it training logs to wandb offline
-.venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 0
+CUDA_DEVICE_ORDER=PCI_BUS_ID .venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 0
+CUDA_DEVICE_ORDER=PCI_BUS_ID .venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 1   # the second card, on a server with two
 ```
 
-Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime` and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead.
+Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime` and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead. `--gpu-device` is nvidia-smi's number of the card (here `0` = bus 81:00.0, `1` = C1:00.0); `CUDA_DEVICE_ORDER=PCI_BUS_ID` makes CUDA count the cards the same way, as the training scripts do.
 
 ### A model that sees images: Qwen3-VL-8B (optional)
 
@@ -102,7 +103,7 @@ Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the
 scripts/setup_vlm.sh               # again: only what is missing; --no-test while the GPU is busy
 ```
 
-Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no installed package changes version) and downloads [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (Apache-2.0, about 17.5 GB) at a pinned revision into `data/models/vlm/Qwen3-VL-8B-Instruct`. It then loads it on the GPU in float16 (the V100 has no bfloat16, about 17 GB of memory) and asks it about one frame.
+Adds `transformers`, `accelerate` and `qwen-vl-utils` to `.venv-gpu` (no installed package changes version) and downloads [Qwen/Qwen3-VL-8B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct) (Apache-2.0, about 17.5 GB) at a pinned revision into `data/models/vlm/Qwen3-VL-8B-Instruct`. It then loads it on the GPU of `NNSLR_GPU_INDEX` (0; from the panel a free card) in float16 (the V100 has no bfloat16, about 17 GB of memory) and asks it about one frame.
 
 On a slow line, download the four weight files elsewhere (`model-00001-of-00004.safetensors` … `model-00004-of-00004.safetensors` of that revision, 17.5 GB together) and copy them into `data/models/vlm/Qwen3-VL-8B-Instruct/`; then run the script: it checks the sha256 of each file, keeps the right ones and downloads only what is missing or wrong.
 
@@ -234,4 +235,4 @@ Then **Data › Reviewers** shows the machine, its drives and the last copy. Hal
 
 ## Reference machine
 
-The maintainer's setup, for comparison: Debian 13 LXC on Proxmox with one Tesla V100 32 GB (NVIDIA driver 580.178.04), `ffmpeg` 7.1.5, `zstd` 1.5.7, `jq` 1.7, `uv`, and a `.venv` on Python 3.13 with the `preannotate` extra and `pytest`.
+The maintainer's setup, for comparison: Debian 13 LXC on Proxmox with two Tesla V100 32 GB (GPU 0 on bus 81:00.0, GPU 1 on C1:00.0; NVIDIA driver 580.178.04), `ffmpeg` 7.1.5, `zstd` 1.5.7, `jq` 1.7, `uv`, and a `.venv` on Python 3.13 with the `preannotate` extra and `pytest`.

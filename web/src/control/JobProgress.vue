@@ -1,15 +1,17 @@
 <script setup lang="ts">
 // A job, live: name and state, the big percent (or "running" with a moving bar when the server does not
 // know it), the steps, what it is doing, the time it has been running (ticking) and, when the percent is
-// known, about how long is left; Stop and Details (the log in the sheet); while it runs, the machine in small
-// under the buttons. A finished job shows how it ended; a failed one what went wrong in a sentence when the server
-// knows (the log, with its paths and exit code, is in Details) and Try again when it simply runs again.
+// known, about how long is left; the GPU it holds, when the machine has two; Stop and Details (the log in the
+// sheet); while it runs, the machine in small under the buttons. A finished job shows how it ended; a failed one
+// what went wrong in a sentence when the server knows (the log, with its paths and exit code, is in Details) and
+// Try again when it simply runs again.
 import {computed, inject} from 'vue';
 import type {Job} from '../common/panel-types';
 import Icon from '../components/Icon.vue';
 import {useNow} from '../composables/now';
 import JobSteps from './JobSteps.vue';
-import {elapsedText, etaText, failedStep, JOB_STATE, PIPELINE_ACTIONS, startedAt, startedWhen} from './jobs';
+import {elapsedText, etaText, failedStep, GPU_CHIP_STYLE, gpuChipText, JOB_STATE, PIPELINE_ACTIONS, startedAt,
+  startedWhen} from './jobs';
 import {RESUME_JOB, RETRY_JOB} from './use-actions';
 
 const props = defineProps<{job: Job; heading?: string | undefined}>();
@@ -54,6 +56,8 @@ const ended = computed((): string => {
 });
 const stoppedAt = computed(() => props.job.state === 'failed' ? failedStep(props.job) : '');
 const steps = computed(() => props.job.progress.steps.length > 1 ? props.job.progress.steps : []);
+/** The card it runs on, as a chip after its times ("GPU 1"), with two cards in the machine. */
+const gpu = computed(() => gpuChipText(props.job));
 const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', running: ''})[props.job.state]);
 </script>
 
@@ -67,7 +71,7 @@ const barKind = computed(() => ({ok: 'ok', failed: 'bad', interrupted: 'warn', r
       <div class="jp-title">
         <span v-if="heading" class="jp-kicker">{{ heading }}</span>
         <h3>{{ job.label }}</h3>
-        <span class="jp-when">{{ when }}</span>
+        <span class="jp-when">{{ when }}<span v-if="gpu" :style="GPU_CHIP_STYLE">{{ gpu }}</span></span>
       </div>
       <span class="pill" :class="state[1]">{{ state[0] }}</span>
     </header>
