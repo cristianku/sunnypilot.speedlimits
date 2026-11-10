@@ -246,6 +246,9 @@ fi
 exec > >(tee -a "$RUN_ROOT/signnet.log") 2>&1
 
 export NNSLR_DATA_ROOT="$DATA_ROOT"
+# The index is nvidia-smi's, the card checked above: CUDA counts the cards in the same order, by PCI bus (its
+# default order, fastest first, leaves two identical V100s in no stated order).
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export CUDA_VISIBLE_DEVICES="$GPU_INDEX"
 # Python writes each line as it comes, not when its 8 KB buffer fills: the epochs reach signnet.log through tee
 # while it trains (nnslr train-signnet flushes them too).
