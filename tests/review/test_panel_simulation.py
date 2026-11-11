@@ -399,7 +399,7 @@ def test_a_drive_is_read_with_the_set_asked_on_the_clock_of_its_logs(site, root)
     assert view['series']['vis_raw_seen'] == [[10.0, False], [10.4, True], [10.8, False]]
     assert view['series']['vis_raw_value'] == [[10.0, 0.0], [10.4, 80.0], [10.8, 0.0]]
     assert view['events'] == [[10.6, 'sign', 80.0]]
-    assert view['signs'] == [[10.4, [[600.0, 300.0, 640.0, 340.0, 'maximum_speed:80', 0.97, 'own_road']]]]
+    assert view['signs'] == [[10.4, [[600.0, 300.0, 640.0, 340.0, 'maximum_speed:80', 0.97, 'own_road']], 0, 208]]
     # The set when not said is the one in use; a set never replayed on the drive is no error.
     assert json_of(site.request('GET', f'/api/simulation/drives/{ROUTE}')[2])['view']['set'] == 'in-use'
     for missing in ('car', 'certified'):

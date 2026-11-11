@@ -430,7 +430,8 @@ def _steps(times: list[float], values: list, gap: float = HOLE_SECONDS) -> list[
 
 def view(record: dict, t0_ns: int) -> dict:
     """A result as the page draws it: the series of the squares (seconds from t0_ns, the start of the drive's logs, as
-    the timeline's), the readings that pulse (events, as the timeline's 'sign') and SignNet's boxes by frame read."""
+    the timeline's), the readings that pulse (events, as the timeline's 'sign') and SignNet's boxes by frame read:
+    [time, boxes, minute, frame k of the minute]."""
     times = [_seconds(t_ns, t0_ns) for t_ns in record['frames']['t_ns']]
     out = record['out']
     series = {}
@@ -439,7 +440,11 @@ def view(record: dict, t0_ns: int) -> dict:
         series[name] = _steps(times, [round(value * scale, decimals) for value in column] if scale else column)
     kph = series_values(out['speedLimit'])
     events = [[times[row], 'sign', kph[row]] for row, read in enumerate(out['signRead']) if read]
-    signs = [[times[int(row)], [[*box[:4], box[5], box[6], box[7]] for box in boxes]]
+    # Each frame read with its minute and its frame k of that minute's fcamera.hevc: the page draws its boxes on that very
+    # frame of the video, not on the frame of a time (a sign close by moves 25-30 px a frame).
+    segments = record['frames'].get('segment') or [None] * len(times)
+    indexes = record['frames'].get('frame') or [None] * len(times)
+    signs = [[times[int(row)], [[*box[:4], box[5], box[6], box[7]] for box in boxes], segments[int(row)], indexes[int(row)]]
              for row, boxes in sorted(record.get('signs', {}).items(), key=lambda item: int(item[0]))]
     if record.get('brain_type'):
         # The road type the brain names (its type_head, for the training only: the car does not show it), held from

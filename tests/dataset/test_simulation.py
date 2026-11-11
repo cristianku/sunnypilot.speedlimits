@@ -44,7 +44,8 @@ def test_the_page_reads_the_squares_as_the_timelines_series():
     assert view['series']['vis_raw_class'] == [[1.0, ''], [1.2, 'maximum_speed:50']]
     assert view['series']['vis_raw_seen'] == [[1.0, False], [1.2, True], [1.4, False]]
     assert view['events'] == [[1.2, 'sign', 50.0]]
-    assert view['signs'] == [[1.2, [[600.0, 200.0, 640.0, 240.0, 'maximum_speed:50', 0.97, 'own_road']]]]
+    # On frame 4 of minute 0: the page draws the boxes on that frame of the video.
+    assert view['signs'] == [[1.2, [[600.0, 200.0, 640.0, 240.0, 'maximum_speed:50', 0.97, 'own_road']], 0, 4]]
     assert (view['set'], view['label'], view['frames'], view['frame']) == ('in-use', 'In use', 3, [1344, 760])
 
 
