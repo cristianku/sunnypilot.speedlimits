@@ -243,9 +243,17 @@ def _compare_one(case):
             'rankers': iou(rankers, case['truth']), 'refiner': iou(refined, case['truth'])}
 
 
+def _use_refiner(path: str) -> None:
+    """A worker of compare: Fit box with the refiner at this path (the parent's refiner.MODEL)."""
+    refiner.MODEL = Path(path)
+    refiner._session = None
+
+
 def compare(cases, workers: int) -> dict:
     """Mean IoU and share >= 0.8 of the rough box, the rankers and the refiner, in all, by size and by kind."""
-    with get_context('fork').Pool(workers) as pool:
+    # Spawned, not forked: after the training the parent holds the threads of CUDA and torch, and a worker forked from it
+    # can wait forever on a lock one of them held (11 Nov 2026, #65: the measure stood still for over an hour).
+    with get_context('spawn').Pool(workers, initializer=_use_refiner, initargs=(str(refiner.MODEL),)) as pool:
         rows = [r for r in pool.map(_compare_one, cases, chunksize=16) if r]
     groups = collections.defaultdict(list)
     for r in rows:
