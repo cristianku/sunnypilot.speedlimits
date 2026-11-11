@@ -1,7 +1,7 @@
 // Changes to the frame on screen: type, value, road and details of the selected box, boxes added (drawn or
 // taken from the second reading) and removed, drawing mode and second reading on or off.
 import {nextTick, toRaw} from 'vue';
-import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue, signStyleOf} from './catalog';
+import {ON_VEHICLE, dropStaleKind, familyForHint, familyHasValue, holdsPlate, signStyleOf} from './catalog';
 import {writeLocal} from './dom';
 import {countryOf, currentRow, selectedDetection, workOf} from './frames';
 import {isBox} from './geometry';
@@ -176,6 +176,11 @@ export function squareSelected(): void {
   const row = currentRow();
   const d = selectedDetection();
   if (!row || !d || refuseChange()) return;
+  // A box of a sign and its plate is taller on purpose.
+  if (holdsPlate(d)) {
+    state.notice = {key: row.frame_key, text: 'The box takes the disc and the plate: kept as it is.', error: false, warn: true};
+    return;
+  }
   const [x1, y1, x2, y2] = d.bbox_xyxy;
   const side = Math.min((x2 - x1 + y2 - y1) / 2, row.width, row.height);
   const cx = Math.min(Math.max((x1 + x2) / 2, side / 2), row.width - side / 2);

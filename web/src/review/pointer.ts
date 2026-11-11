@@ -2,6 +2,7 @@
 // corners of the selected one or drag the whole box; Shift held makes the box drawn or resized a square. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
 // pointer is the SVG's own math.
 import {nextTick} from 'vue';
+import {holdsPlate} from './catalog';
 import {datasetOf} from './dom';
 import {addManualBox, changed, markPlacedByHand} from './edits';
 import {currentRow, selectedDetection} from './frames';
@@ -112,9 +113,9 @@ export function onPointerMove(event: PointerEvent, surface: Surface): void {
     if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
     return;
   }
-  // Shift: a square on the opposite corner.
+  // Shift: a square on the opposite corner (never a box of a sign and its plate, taller on purpose).
   const anchor = OPPOSITE[drag.corner](d.bbox_xyxy);
-  const q = squared(anchor, p, row, event.shiftKey);
+  const q = squared(anchor, p, row, event.shiftKey && !holdsPlate(d));
   const b: Box = [anchor[0], anchor[1], q[0], q[1]];
   const x1 = Math.min(b[0], b[2]);
   const x2 = Math.max(b[0], b[2]);
