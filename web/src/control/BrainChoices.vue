@@ -24,6 +24,6 @@ function flip(key: Switch): void {
     <span class="bc-pick" :title="choices.note"><span>Picture</span>
       <Segmented v-model="choices.pool" :options="POOL_OPTIONS" label="The picture’s features: Grid keeps where things are, Mean only what is in it"/></span>
     <span class="bc-pick" :title="choices.seedsNote"><span>Seeds</span>
-      <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: three to compare in Models, or seed 0 alone"/></span>
+      <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: seed 0 alone, or three to compare in Models"/></span>
   </div>
 </template>
