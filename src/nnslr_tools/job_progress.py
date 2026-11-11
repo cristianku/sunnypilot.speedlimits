@@ -126,7 +126,7 @@ ROAD_LABELER_TRAIN_STEPS = (('checks', 'Check the GPU', 2), ('features', 'Read t
                             ('road_labeler', 'Train and measure', 40))
 ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Prepare Speed review drive by drive', 97))
 # scripts/train_box_fit.sh: "1/3 The boxes drawn by people (dry run)", "2/3 Measure on routes left out, then train on
-# every box (...)" (about 15 minutes), "3/3 The box refiner: ..." (about an hour, its epochs "epoch 3/40 loss ..."); with
+# every box (...)" (the trees and MLPs on the GPU), "3/3 The box refiner: ..." (on the GPU, its epochs "epoch 3/40 loss ..."); with
 # --no-refiner the first two out of 2; a dry run counts the boxes only (its command line says --dry-run).
 BOX_FIT_STEPS = (('boxes', 'Count the boxes drawn by people', 2), ('rankers', 'Measure and train the two rankers', 20),
                  ('refiner', 'Train and measure the box refiner', 78))

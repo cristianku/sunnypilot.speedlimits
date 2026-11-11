@@ -1923,7 +1923,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_remeasure.add_argument("--data-root", default=None)
     p_remeasure.set_defaults(func=_cmd_remeasure_signnet)
     p_box_fit = sub.add_parser("train-box-fit", help="train the review page's local box fit (Fit box, key C) on the "
-                                                     "boxes people drew: the colour trees and the edge MLPs (CPU). "
+                                                     "boxes people drew: the colour trees and the edge MLPs (GPU, "
+                                                     "with the PyTorch of .venv-gpu). "
                                                      "Measures it first on routes left out (--folds), then writes "
                                                      "colour.npz and edges.npz trained on every box")
     p_box_fit.add_argument("--out", default=None,
@@ -1936,6 +1937,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_box_fit.add_argument("--seed", type=int, default=0, help="seed of the trees and the MLPs (default 0)")
     p_box_fit.add_argument("--workers", type=int, default=None,
                            help="processes extracting the candidates (default: half the cores, at most 8)")
+    p_box_fit.add_argument("--device", default="cuda",
+                           help="the card the trees and the MLPs train on (default cuda: the one CUDA_VISIBLE_DEVICES "
+                                "shows); never the CPU")
     p_box_fit.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_box_fit.add_argument("--dry-run", action="store_true",
                            help="only count the boxes, cases and route groups: one JSON line, nothing written")
@@ -3277,7 +3281,8 @@ def _cmd_train_box_fit(args: argparse.Namespace) -> int:
         raise ValueError("--workers must be at least 1 and --folds between 0 and 20")
     summary = run(root, Path(args.out) if args.out else box_fit_dir,
                   objects=Path(args.dataset) if args.dataset else None, seed=args.seed, workers=workers,
-                  folds=args.folds, dry_run=args.dry_run, log=lambda line: print(line, file=sys.stderr, flush=True))
+                  folds=args.folds, dry_run=args.dry_run, device=args.device,
+                  log=lambda line: print(line, file=sys.stderr, flush=True))
     print(json.dumps(summary, sort_keys=True), flush=True)
     return 0
 

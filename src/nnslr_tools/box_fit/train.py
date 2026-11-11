@@ -16,7 +16,9 @@ rough box are extracted once (in ``workers`` processes) and labelled with their 
 ``folds`` > 1 first measures the whole fit on routes left out: the routes are split into that many groups, and the
 boxes of each group are fitted by models trained on the other groups only (the weights are held out; the two blend
 constants of :mod:`nnslr_tools.box_fit`, chosen once on the benchmark, are not). The models written to ``colour.npz`` and
-``edges.npz`` are then trained on every box. CPU only, numpy and OpenCV; the same data and seed give the same files.
+``edges.npz`` are then trained on every box. The candidates are extracted on the CPU (OpenCV, ``workers`` processes);
+the trees and the MLPs train on the GPU (:mod:`.gpu`, PyTorch: the environment of .venv-gpu), never on the CPU. The
+runtime reads the files with numpy alone.
 """
 from __future__ import annotations
 
@@ -32,7 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import box_fit
-from nnslr_tools.box_fit import colour, edges, gbdt
+from nnslr_tools.box_fit import colour, edges, gbdt, gpu
 
 CASE_SEED = 20261030      # the rough boxes of each person's box (the benchmark's)
 KINDS = ('loose', 'shifted', 'tight')
@@ -163,15 +165,15 @@ def extract_all(cases: list[dict], workers: int) -> list[dict]:
     return [row for row in rows if row is not None]
 
 
-def train_colour(rows: list[dict], seed: int) -> dict:
+def train_colour(rows: list[dict], seed: int, dev) -> dict:
     X = np.concatenate([row['colour_rows'] for row in rows])
     y = np.concatenate([row['colour_y'] for row in rows])
-    return gbdt.pack(gbdt.train(X, y, n_trees=COLOUR_TREES, depth=COLOUR_DEPTH, seed=seed))
+    return gbdt.pack(gpu.train_trees(X, y, n_trees=COLOUR_TREES, depth=COLOUR_DEPTH, seed=seed, dev=dev))
 
 
-def train_edges(rows: list[dict], seed: int) -> list:
+def train_edges(rows: list[dict], seed: int, dev) -> list:
     cases = [(row['edges_features'], row['edges_y']) for row in rows]
-    return [edges.train_ranker(cases, seed=seed + s) for s in range(edges.ENSEMBLE)]
+    return gpu.train_rankers(cases, [seed + s for s in range(edges.ENSEMBLE)], dev=dev)
 
 
 def fit_row(row: dict, colour_model, edges_model) -> list[float] | None:
@@ -204,7 +206,7 @@ def _by(rows, boxes, key) -> dict:
     return {name: measures([rows[i] for i in idx], [boxes[i] for i in idx]) for name, idx in sorted(groups.items())}
 
 
-def cross_validate(rows: list[dict], folds: dict, seed: int, log=print) -> dict:
+def cross_validate(rows: list[dict], folds: dict, seed: int, dev, log=print) -> dict:
     """Each fold's boxes fitted by models trained on the other folds only; the measures over all folds."""
     boxes = [None] * len(rows)
     per_fold = {}
@@ -212,7 +214,7 @@ def cross_validate(rows: list[dict], folds: dict, seed: int, log=print) -> dict:
         train = [row for row in rows if folds[row['route']] != fold]
         test = [i for i, row in enumerate(rows) if folds[row['route']] == fold]
         t = time.time()
-        colour_model, edges_model = train_colour(train, seed), train_edges(train, seed)
+        colour_model, edges_model = train_colour(train, seed, dev), train_edges(train, seed, dev)
         for i in test:
             boxes[i] = fit_row(rows[i], colour_model, edges_model)
         per_fold[str(fold)] = {'routes': sorted(r for r, f in folds.items() if f == fold),
@@ -221,6 +223,11 @@ def cross_validate(rows: list[dict], folds: dict, seed: int, log=print) -> dict:
             f'(rough {per_fold[str(fold)]["rough_mean_iou"]}), trained in {time.time() - t:.0f} s')
     return {'folds': per_fold, 'overall': measures(rows, boxes), 'by_kind': _by(rows, boxes, 'kind'),
             'by_size': _by(rows, boxes, 'size'), 'by_family': _by(rows, boxes, 'family')}
+
+
+def _card_name(dev) -> str:
+    import torch
+    return torch.cuda.get_device_name(dev)
 
 
 def save(out_dir: Path, colour_model: dict, edges_model: list) -> dict:
@@ -243,7 +250,8 @@ def save(out_dir: Path, colour_model: dict, edges_model: list) -> dict:
 
 
 def run(data_root: Path, out_dir: Path, *, objects: Path | None = None, seed: int = 0,
-        workers: int = DEFAULT_WORKERS, folds: int = 4, dry_run: bool = False, log=print) -> dict:
+        workers: int = DEFAULT_WORKERS, folds: int = 4, dry_run: bool = False, device: str = 'cuda',
+        log=print) -> dict:
     """Select the boxes, measure with ``folds`` route groups (when > 1), train on every box and save the models."""
     items = human_boxes(objects or data_root / 'annotations' / 'objects.jsonl', data_root)
     groups = route_folds(items, folds) if folds > 1 else {}
@@ -257,6 +265,9 @@ def run(data_root: Path, out_dir: Path, *, objects: Path | None = None, seed: in
         return {'dry_run': True, **summary}
     if len(items) < MIN_BOXES:
         raise ValueError(f'only {len(items)} boxes drawn by people: too few to train the box fit')
+    # The card first: no card, no extraction of half an hour for nothing.
+    dev = gpu.device(device)
+    log(f'training on {dev} ({_card_name(dev)})')
     t = time.time()
     rows = extract_all(make_cases(items), workers)
     ms = [row['ms'] for row in rows]
@@ -264,9 +275,9 @@ def run(data_root: Path, out_dir: Path, *, objects: Path | None = None, seed: in
     summary['extract_ms_median'] = round(statistics.median(ms), 1)
     log(f'{len(rows)} cases extracted in {time.time() - t:.0f} s')
     if groups:
-        summary['cross_validation'] = cross_validate(rows, groups, seed, log=log)
+        summary['cross_validation'] = cross_validate(rows, groups, seed, dev, log=log)
     t = time.time()
-    colour_model, edges_model = train_colour(rows, seed), train_edges(rows, seed)
+    colour_model, edges_model = train_colour(rows, seed, dev), train_edges(rows, seed, dev)
     log(f'trained on every box in {time.time() - t:.0f} s')
     summary['in_sample'] = measures(rows, [fit_row(row, colour_model, edges_model) for row in rows])
     summary['written'] = save(out_dir, colour_model, edges_model)

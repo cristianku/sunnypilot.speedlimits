@@ -4,7 +4,8 @@
 // beat them. Train them again on the boxes people drew (scripts/train_box_fit.sh, the panel action "box_fit_train"), the
 // refiner too or not, a dry run first if wanted (it only counts the boxes); its job while it runs; then the last summary
 // of each part from GET /api/panel/box-fit: the mean IoU with the person's box on drives left out, of the rough box, the
-// rankers and the refiner, and whether refiner.onnx was written. The CPU only: a training on the GPU does not stop it.
+// rankers and the refiner, and whether refiner.onnx was written. Trained on a V100 (#65), the candidates cut on the CPU
+// first; its dry run takes no card.
 // The site loads the new models at its next restart. Hidden on a server without the action, and the summaries left out
 // when the endpoint is not there yet.
 import {computed, onMounted, ref, shallowRef, watch} from 'vue';
@@ -103,7 +104,7 @@ const writtenText = computed(() => {
       <div class="import-what">
         <strong>{{ rankers ? 'Last trained on ' + (rankers.boxes !== null ? plural(rankers.boxes, 'box', 'boxes') : 'the boxes')
           : 'Not trained here yet' }}</strong>
-        <span>On the CPU, the GPU is not used: about 15 minutes for the rankers{{ withoutRefiner ? '' : ', an hour more for the refiner' }}.</span>
+        <span>On a V100: the candidates cut on the CPU (about 2 minutes), then the rankers{{ withoutRefiner ? '' : ' and the refiner' }} trained on the GPU.</span>
       </div>
       <div class="rl-buttons">
         <button type="button" class="btn" id="box-fit-dry" :disabled="!state?.allowed" @click="start(true)">Dry run</button>

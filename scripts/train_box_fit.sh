@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The review page's Fit box (key C, nnslr_tools.box_fit) trained again on the boxes people drew so far: the colour
-# trees and the edge MLPs, on the CPU (numpy and OpenCV, no GPU, no network), about 15 minutes with 12 processes;
-# then the box refiner (a small CNN, nnslr_tools.box_fit.refiner_train) on the CPU with the PyTorch of .venv-gpu,
-# about an hour, written only when it beats the two rankers on routes left out.
+# The review page's Fit box (key C, nnslr_tools.box_fit) trained again on the boxes people drew so far: the
+# candidates extracted on the CPU (OpenCV, a few minutes with 12 processes), the colour trees and the edge MLPs trained
+# on the GPU (nnslr_tools.box_fit.gpu); then the box refiner (a small CNN, nnslr_tools.box_fit.refiner_train) on the
+# GPU, written only when it beats the two rankers on routes left out. Both with the PyTorch of .venv-gpu, on the card
+# the panel gives (CUDA_VISIBLE_DEVICES): without a card the script stops, it never trains on the CPU.
 #
 # usage: scripts/train_box_fit.sh [--dry-run] [--no-refiner] [any other option of nnslr train-box-fit]
 #
@@ -24,7 +25,7 @@ set -euo pipefail
 # the panel's restart). Nothing is imported, committed or published.
 #
 # Environment: NNSLR_DATA_ROOT, NNSLR_NUM_WORKERS (processes extracting the candidates; default half the cores, 4 to
-# 12).
+# 12), CUDA_VISIBLE_DEVICES (the card; the panel sets it).
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_ROOT="${NNSLR_DATA_ROOT:-$ROOT_DIR/data}"
@@ -64,24 +65,24 @@ if ! echo "$dry" | "$PYTHON" -c 'import json, sys; s = json.loads(sys.stdin.read
   exit 1
 fi
 
-echo "2/$STEPS Measure on routes left out, then train on every box ($WORKERS processes)"
+if ! "$GPU_PYTHON" -c 'import sys, torch, onnx, cv2; sys.exit(not torch.cuda.is_available())' 2>/dev/null; then
+  echo "No V100 visible to the PyTorch of .venv-gpu (CUDA_VISIBLE_DEVICES, nvidia-smi; scripts/setup_v100_training_env.sh): Fit box trains on the GPU only. Nothing changed." >&2
+  exit 1
+fi
+echo "2/$STEPS Measure on routes left out, then train on every box (candidates: $WORKERS processes; trees and MLPs: the GPU)"
 mkdir -p "$DATA_ROOT/evaluations/box_fit"
 summary="$DATA_ROOT/evaluations/box_fit/$(date -u +%Y%m%dT%H%M%SZ).json"
 refined="$DATA_ROOT/evaluations/box_fit/refiner-$(date -u +%Y%m%dT%H%M%SZ).json"
 trap 'rm -f "$summary.tmp" "$refined.tmp"' EXIT
-"$NNSLR" train-box-fit --data-root "$DATA_ROOT" --workers "$WORKERS" "$@" > "$summary.tmp"
+"$GPU_PYTHON" -m nnslr_tools.cli train-box-fit --data-root "$DATA_ROOT" --workers "$WORKERS" --device cuda "$@" > "$summary.tmp"
 mv "$summary.tmp" "$summary"
 cat "$summary"
 echo "Summary in $summary."
 
 if [ "$REFINER" = 1 ]; then
-  echo "3/$STEPS The box refiner: train on the CPU, measure against the rankers on routes left out ($WORKERS threads)"
-  if ! "$GPU_PYTHON" -c 'import torch, onnx, cv2' 2>/dev/null; then
-    echo "The PyTorch environment (.venv-gpu with torch, onnx and opencv) is missing: run scripts/setup_v100_training_env.sh. The refiner is unchanged." >&2
-    exit 1
-  fi
-  CUDA_VISIBLE_DEVICES='' "$GPU_PYTHON" -m nnslr_tools.box_fit.refiner_train --data-root "$DATA_ROOT" \
-    --workers "$WORKERS" > "$refined.tmp"
+  echo "3/$STEPS The box refiner: train on the GPU, measure against the rankers on routes left out ($WORKERS processes reading the crops)"
+  "$GPU_PYTHON" -m nnslr_tools.box_fit.refiner_train --data-root "$DATA_ROOT" \
+    --workers "$WORKERS" --device cuda > "$refined.tmp"
   mv "$refined.tmp" "$refined"
   cat "$refined"
   echo "Summary in $refined."

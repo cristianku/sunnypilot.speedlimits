@@ -560,7 +560,7 @@ TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_br
 # The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
 EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
                  'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
-                 'road_labeler_predict')
+                 'road_labeler_predict', 'box_fit_train')
 # The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
 # replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
 SHARED_GPU = {'simulate': 2 * 1024}
@@ -568,9 +568,11 @@ SHARED_GPU = {'simulate': 2 * 1024}
 # trainings of this list and the replays (issue #41): a V100 holds several, each about 1 GB today (the cutter at batch
 # 16, the classifier on its crops), the memory each may take at most (MB) reserved on its card while it starts.
 # Their pair rules stay (_pair_apart); the others keep a card of their own.
-SHARED_TRAINING_MB = {'train_classifier': 4 * 1024, 'train_cutter': 4 * 1024, 'train_decider': 4 * 1024}
+# Fit box (#65): its trees, MLPs and small refiner take well under 2 GB.
+SHARED_TRAINING_MB = {'train_classifier': 4 * 1024, 'train_cutter': 4 * 1024, 'train_decider': 4 * 1024,
+                      'box_fit_train': 2 * 1024}
 # Of those, the ones whose dry run ({'dry': 'on'}, --dry-run) runs on the CPU and takes no card.
-DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict')
+DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'box_fit_train')
 # The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
 # most free memory, shared with what else runs there.
 GPU_PROPOSERS = ('vietnam', 'ours', 'qwen')
@@ -1397,8 +1399,10 @@ class Panel:
             elif name == 'box_fit_train' and not (self.repo / BOX_FIT_SCRIPT).is_file():
                 reason = BOX_FIT_SCRIPT + ' is missing in this installation'
             elif name == 'box_fit_train':
-                # The CPU only, beside a training on the GPU; the script counts the boxes people drew and stops when
-                # they are too few, and start() refuses the refiner without .venv-gpu.
+                # On a V100 (#65): a free card, or one shared with the other trainings of SHARED_TRAINING_MB, checked
+                # when it starts (start()), so a dry run on the CPU stays possible while every card is busy; the
+                # candidates are cut on the CPU first. The script counts the boxes people drew and stops when they are
+                # too few, and start() refuses a real run without .venv-gpu.
                 pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
@@ -1527,7 +1531,7 @@ class Panel:
 
     def _box_fit_arguments(self, options: dict) -> list[str]:
         """The arguments of scripts/train_box_fit.sh from the options (strings, checked by start()): --dry-run, and
-        --no-refiner for {'refiner': 'off'}. The refiner (its dry run too) needs the Python of .venv-gpu."""
+        --no-refiner for {'refiner': 'off'}. A real run trains on the GPU with the Python of .venv-gpu (#65)."""
         dry = options.get('dry')
         if dry not in (None, 'on'):
             raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
@@ -1537,9 +1541,9 @@ class Panel:
         arguments = ['--dry-run'] if dry else []
         if refiner == 'off':
             arguments.append('--no-refiner')
-        elif not (self.repo / BOX_FIT_PYTHON).is_file():
-            raise PanelError(409, 'not_available', 'No .venv-gpu for the box refiner: install it with '
-                             'scripts/setup_v100_training_env.sh, or train without the refiner.')
+        if not dry and not (self.repo / BOX_FIT_PYTHON).is_file():
+            raise PanelError(409, 'not_available', 'No .venv-gpu: Fit box trains on the GPU with it; install it with '
+                             'scripts/setup_v100_training_env.sh.')
         return arguments
 
     def box_fit(self) -> dict:

@@ -1,5 +1,5 @@
 """Train Fit box in the panel (scripts/train_box_fit.sh) on Models: its options (a dry run, without the refiner), its
-refusals, its group of its own (the CPU, beside a training on the GPU, never two at once), its progress read from the log
+refusals, its group of its own (a card of its own or shared, beside the other trainings, never two at once), its progress read from the log
 and the last summaries the card shows (GET /api/panel/box-fit). Nothing is trained: the script is a stand-in that prints
 its arguments."""
 from __future__ import annotations
@@ -17,6 +17,14 @@ from nnslr_tools.job_progress import progress  # noqa: E402
 from nnslr_tools.panel import ACTION_OPTIONS, ACTIONS, CONFLICTS, Panel, PanelError, _conflicting_group  # noqa: E402
 from review_helpers import RunningServer, json_of  # noqa: E402
 from test_panel import checkout, finished, full_log, root  # noqa: E402,F401  (fixtures and helpers)
+
+
+@pytest.fixture(autouse=True)
+def no_cards_of_this_server(monkeypatch):
+    """Not the server's own cards (a real run takes one, #65): no nvidia-smi and no holder of the GPU lock."""
+    import nnslr_tools.panel as panel_module
+    monkeypatch.setattr(panel_module, '_nvidia', lambda arguments: None)
+    monkeypatch.setattr(panel_module, '_gpu_lock_holders', lambda path=None: [])
 
 
 def ready_payload(gpu_processes=0):
@@ -65,7 +73,8 @@ def test_it_says_why_it_cannot_start(root, checkout):
     reason = lambda **kw: panel._action_states(ready_payload(**kw), [])['box_fit_train']  # noqa: E731
     assert reason()['reason'] == 'scripts/train_box_fit.sh is missing in this installation'
     box_fit_script(checkout)
-    # No confirmed frame nor reviewed drives asked (the script counts the boxes), and a busy GPU leaves it allowed.
+    # No confirmed frame nor reviewed drives asked (the script counts the boxes), and a busy GPU leaves it allowed: the
+    # card is taken when it starts, so a dry run on the CPU stays possible.
     assert reason()['allowed'] is True
     assert reason(gpu_processes=2)['allowed'] is True
     # Another training of Fit box from a terminal: it waits for it.
@@ -82,7 +91,7 @@ def ready(root, checkout, monkeypatch):
     panel = Panel(root, repo=checkout)
     box_fit_script(checkout)
     monkeypatch.setattr(panel, 'activities', lambda: [])
-    monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 2}})
+    monkeypatch.setattr(panel, 'system', lambda: {'gpu': {'processes': 0}})
     return panel
 
 
@@ -103,7 +112,16 @@ def arguments(panel, job):
     return next(line for line in full_log(panel, job['id']).splitlines() if line.startswith('arguments:'))
 
 
-def test_the_options_reach_the_script_even_with_the_gpu_busy(ready):
+def test_a_dry_run_starts_with_the_gpu_busy_a_real_run_waits(ready, monkeypatch):
+    # The dry run counts the boxes on the CPU; a real run trains on a card (#65).
+    monkeypatch.setattr(ready, 'system', lambda: {'gpu': {'processes': 2}})
+    assert arguments(ready, start(ready, 'box_fit_train', {'dry': 'on'})) == 'arguments: --dry-run'
+    with pytest.raises(PanelError) as refused:
+        ready.start('box_fit_train', {'refiner': 'off'})
+    assert (refused.value.status, refused.value.reason) == (409, 'busy')
+
+
+def test_the_options_reach_the_script(ready):
     assert arguments(ready, start(ready, 'box_fit_train')) == 'arguments: '
     assert arguments(ready, start(ready, 'box_fit_train', {'refiner': 'on'})) == 'arguments: '
     assert arguments(ready, start(ready, 'box_fit_train', {'refiner': 'off'})) == 'arguments: --no-refiner'
@@ -142,16 +160,17 @@ def test_no_other_action_takes_the_refiner(ready):
         assert refused.value.reason == 'bad_option'
 
 
-def test_the_refiner_needs_venv_gpu_but_the_rankers_alone_do_not(root, checkout, monkeypatch):
+def test_a_real_run_needs_venv_gpu_but_a_dry_run_does_not(root, checkout, monkeypatch):
+    # The trees, the MLPs and the refiner train on the GPU with the PyTorch of .venv-gpu (#65); the dry run only counts.
     panel = Panel(root, repo=checkout)
     box_fit_script(checkout, venv=False)
     monkeypatch.setattr(panel, 'activities', lambda: [])
-    for options in (None, {'dry': 'on'}, {'refiner': 'on'}):
+    for options in (None, {'refiner': 'on'}, {'refiner': 'off'}):
         with pytest.raises(PanelError) as refused:
             panel.start('box_fit_train', options)
         assert (refused.value.status, refused.value.reason) == (409, 'not_available')
     assert panel.jobs() == []
-    assert arguments(panel, start(panel, 'box_fit_train', {'refiner': 'off'})) == 'arguments: --no-refiner'
+    assert arguments(panel, start(panel, 'box_fit_train', {'dry': 'on'})) == 'arguments: --dry-run'
 
 
 def test_a_second_one_waits_for_the_first(root, checkout, monkeypatch):

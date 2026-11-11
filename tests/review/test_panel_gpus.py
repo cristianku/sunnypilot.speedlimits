@@ -779,11 +779,11 @@ def test_the_driver_files_and_the_open_files_of_a_process_as_ct_131_writes_them(
 def test_the_actions_that_take_a_card_of_their_own():
     assert set(panel_module.EXCLUSIVE_GPU) == {
         'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain',
-        'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict'}
+        'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict', 'box_fit_train'}
     # The replay of a drive (Models › Drive) shares the card with the most free memory: about 1 GB of a V100.
     assert panel_module.SHARED_GPU == {'simulate': 2048}
     # Nor among those with a dry run: it has no run on the CPU.
-    assert set(panel_module.DRY_ON_CPU) == {'road_labeler_train', 'road_labeler_predict'}
+    assert set(panel_module.DRY_ON_CPU) == {'road_labeler_train', 'road_labeler_predict', 'box_fit_train'}
 
 
 @pytest.mark.parametrize('action, options', [
@@ -807,13 +807,23 @@ def test_each_gpu_action_takes_a_card(panel, root, checkout, monkeypatch, action
     assert record(panel, job)['gpus'] == [0]
 
 
-def test_fit_box_runs_on_the_cpu_and_takes_no_card(panel, checkout, monkeypatch):  # noqa: F811
+def test_fit_box_trains_on_a_card_and_counts_on_the_cpu(panel, checkout, monkeypatch):  # noqa: F811
+    # #65: its trees, MLPs and refiner on a V100; its dry run (the boxes counted) takes no card.
     monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(FREE, ''))
     script = checkout / panel_module.BOX_FIT_SCRIPT
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(GPU_SCRIPT)
     script.chmod(0o755)
+    python = checkout / panel_module.BOX_FIT_PYTHON
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text('#!/bin/sh\n')
+    python.chmod(0o755)
     job = panel.start('box_fit_train', {'refiner': 'off'})
+    assert finished(panel, job['id'])['state'] == 'ok'
+    assert said(panel, job, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
+    assert record(panel, job)['gpus'] == [0]
+    time.sleep(1.1)     # a job's id is its second
+    job = panel.start('box_fit_train', {'dry': 'on'})
     assert finished(panel, job['id'])['state'] == 'ok'
     assert said(panel, job, 'gpu=') == 'gpu=none cuda=none order=none'
     assert record(panel, job) == {'gpus': [], 'own_progress': True}

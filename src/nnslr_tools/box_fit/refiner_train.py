@@ -1,5 +1,5 @@
-"""Training of the box refiner (:mod:`.refiner`) on the boxes people confirmed, on the CPU (PyTorch of .venv-gpu with
-no GPU), then the comparison with the colour and edge rankers on routes left out, and ``refiner.onnx`` written only
+"""Training of the box refiner (:mod:`.refiner`) on the boxes people confirmed, on the GPU (PyTorch of .venv-gpu, the
+card CUDA_VISIBLE_DEVICES gives; without one it stops, never the CPU), then the comparison with the colour and edge rankers on routes left out, and ``refiner.onnx`` written only
 when the refiner wins there.
 
 The boxes: every sign box of the frames a person confirmed in the review (``annotations/review.sqlite``, a reviewer
@@ -187,7 +187,7 @@ def network():
 
         def forward(self, x):            # x: N x 3 x S x S, BGR / 255; out: the box in crop units, the rough box's IoU
             out = self.head(self.body(x - 0.45))
-            return torch.cat([out[:, :4] + torch.tensor([0.25, 0.25, 0.75, 0.75]), torch.sigmoid(out[:, 4:])], 1)
+            return torch.cat([out[:, :4] + out.new_tensor([0.25, 0.25, 0.75, 0.75]), torch.sigmoid(out[:, 4:])], 1)
     return Refiner()
 
 
@@ -210,7 +210,7 @@ def _predict(model, crops):
     import torch
     with torch.no_grad():
         x = torch.from_numpy(np.stack(crops).transpose(0, 3, 1, 2).astype(np.float32) / 255.0)
-        return model(x).numpy()
+        return model(x.to(next(model.parameters()).device)).cpu().numpy()
 
 
 def validate(model, val) -> float:
@@ -256,7 +256,8 @@ def compare(cases, workers: int) -> dict:
             for g, rs in sorted(groups.items())}
 
 
-def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: bool = False, log=print) -> dict:
+def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: bool = False, log=print,
+        device: str = 'cuda') -> dict:
     import torch
     import torch.nn.functional as F
 
@@ -300,17 +301,19 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
             return (torch.from_numpy(crop.transpose(2, 0, 1).astype(np.float32) / 255.0),
                     torch.tensor([*target, iou(rough, truth)], dtype=torch.float32))
 
-    model = network()
+    model = network().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     total_steps = epochs * math.ceil(len(regions) * PER_BOX / BATCH)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=LR, total_steps=total_steps, pct_start=0.1)
     best, best_state, scores = -1.0, None, []
     for epoch in range(epochs):
-        loader = torch.utils.data.DataLoader(Boxes(epoch), batch_size=BATCH, shuffle=True, num_workers=min(6, workers),
+        loader = torch.utils.data.DataLoader(Boxes(epoch), batch_size=BATCH, shuffle=True, num_workers=min(12, workers),
+                                             pin_memory=True,
                                              multiprocessing_context='fork',
                                              generator=torch.Generator().manual_seed(SEED + epoch))
         t, total, n = time.time(), 0.0, 0
         for x, y in loader:
+            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             p = model(x)
             box, right = p[:, :4], y[:, :4]
             loss = F.smooth_l1_loss(box, right, beta=0.02) * 10 + giou_loss(box, right) + F.l1_loss(p[:, 4], y[:, 4]) * 2
@@ -325,7 +328,7 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
         if score > best:
             best, best_state = score, {k: v.clone() for k, v in model.state_dict().items()}
     model.load_state_dict(best_state)
-    model.eval()
+    model = model.cpu().eval()
     summary['epoch_scores'] = scores
     summary['best_epoch'] = scores.index(max(scores)) + 1
 
@@ -380,7 +383,6 @@ def export(model, path: Path) -> None:
 
 
 def main(argv=None) -> int:
-    os.environ['CUDA_VISIBLE_DEVICES'] = ''     # the CPU only, whatever the GPU is doing
     from nnslr_tools.preannotate import resolve_data_root
     parser = argparse.ArgumentParser(prog='python -m nnslr_tools.box_fit.refiner_train',
                                      description='train the box refiner of Fit box on the boxes people confirmed')
@@ -388,10 +390,18 @@ def main(argv=None) -> int:
     parser.add_argument('--out', default=None, help='folder of refiner.onnx (default: the package, which the site loads)')
     parser.add_argument('--epochs', type=int, default=40)
     parser.add_argument('--workers', type=int, default=max(1, min(12, (os.cpu_count() or 2) // 2)))
+    parser.add_argument('--device', default='cuda',
+                        help='the card (default cuda, the one CUDA_VISIBLE_DEVICES gives); never the CPU')
     parser.add_argument('--dry-run', action='store_true', help='only count the boxes and the routes left out')
     args = parser.parse_args(argv)
+    if not args.dry_run:
+        import torch
+        if not args.device.startswith('cuda') or not torch.cuda.is_available():
+            print(f'No CUDA card for {args.device!r} (CUDA_VISIBLE_DEVICES, nvidia-smi): the refiner trains on the GPU '
+                  'only. Nothing changed.', file=sys.stderr)
+            return 1
     summary = run(resolve_data_root(args.data_root), Path(args.out) if args.out else refiner.HERE,
-                  epochs=args.epochs, workers=args.workers, dry_run=args.dry_run,
+                  epochs=args.epochs, workers=args.workers, dry_run=args.dry_run, device=args.device,
                   log=lambda line: print(line, file=sys.stderr, flush=True))
     print(json.dumps(summary))
     return 0
