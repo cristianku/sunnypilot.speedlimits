@@ -14,6 +14,19 @@ if ! command -v "$PYTHON" >/dev/null 2>&1; then
   exit 2
 fi
 
+# Triton (inside torch) compiles a small C helper with gcc the first time it runs a kernel of its own: torch 2.14
+# sends some eager ops to it (the backward of the Fit box rankers' einsum), and that helper needs this Python's
+# headers (Python.h). Debian ships them apart, in python3.X-dev.
+include="$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["include"])')"
+if [ ! -f "$include/Python.h" ]; then
+  if [ "$(id -u)" = 0 ] && command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y "python$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])')-dev"
+  else
+    echo "error: $include/Python.h missing: install the headers of $PYTHON (Debian: apt-get install python3.X-dev)" >&2
+    exit 2
+  fi
+fi
+
 # A venv left half made by a failed run (no pip inside) is made again.
 if [ -d "$VENV" ] && [ ! -x "$VENV/bin/pip" ]; then
   echo "rifaccio $VENV: creato a metà da un tentativo fallito"

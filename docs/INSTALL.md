@@ -8,7 +8,7 @@ Tested on Debian 13 (trixie) and macOS. Ubuntu 24.04 works the same way with `ap
 
 ```sh
 apt update
-apt install -y git curl rsync openssh-client python3 python3-venv ffmpeg zstd jq
+apt install -y git curl rsync openssh-client python3 python3-venv ffmpeg zstd jq gcc
 curl -LsSf https://astral.sh/uv/install.sh | sh     # uv: fast venvs and pip (optional, recommended)
 ```
 
@@ -21,6 +21,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh     # uv: fast venvs and pip (op
 | `curl` | `scripts/publish_model.sh` (downloads the model catalog) |
 | `jq` | inspecting the JSON/JSONL reports by hand |
 | `git` | cloning and updating |
+| `gcc` | GPU training: triton, inside torch, compiles a small C helper (with `python3.X-dev`, which `scripts/setup_v100_training_env.sh` installs) |
 
 On macOS: `brew install ffmpeg zstd jq uv`.
 
@@ -95,7 +96,7 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID .venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 0
 CUDA_DEVICE_ORDER=PCI_BUS_ID .venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 1   # the second card, on a server with two
 ```
 
-Installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime` and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead. `--gpu-device` is nvidia-smi's number of the card (here `0` = bus 81:00.0, `1` = C1:00.0); `CUDA_DEVICE_ORDER=PCI_BUS_ID` makes CUDA count the cards the same way, as the training scripts do.
+First it installs, with `apt-get` as root, the headers of the Python it uses (`python3.X-dev`, here `python3.13-dev`) when they are missing: triton, inside torch, compiles a small C helper with `gcc` and `Python.h` the first time it runs a kernel of its own (torch 2.14 sends some ops to it, such as the backward of the Fit box rankers), and without them that training stops with `fatal error: Python.h: No such file or directory`. Not root, it stops and says what to install. Then it installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime` and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead. `--gpu-device` is nvidia-smi's number of the card (here `0` = bus 81:00.0, `1` = C1:00.0); `CUDA_DEVICE_ORDER=PCI_BUS_ID` makes CUDA count the cards the same way, as the training scripts do.
 
 ### A model that sees images: Qwen3-VL-8B (optional)
 
