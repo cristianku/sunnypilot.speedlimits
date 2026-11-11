@@ -368,8 +368,11 @@ def test_the_list_has_the_sets_and_every_drive_with_its_replays(site, root, no_c
     row = answer['drives'][0]
     # A row of Speed review's list, with what the drive has here.
     assert {'title', 'when', 'day', 'minutes', 'dashcam'} <= set(row)
-    assert row['sets'] == {'in-use': {'made_at': '2026-11-10T10:00:00+00:00', 'name': 'networks of the test', 'frames': 5,
-                                      'current': False}}
+    made = row['sets']['in-use']
+    assert {key: made[key] for key in ('made_at', 'name', 'frames', 'current')} == {
+        'made_at': '2026-11-10T10:00:00+00:00', 'name': 'networks of the test', 'frames': 5, 'current': False}
+    # what changed since: the versions in use it waits to export
+    assert made['changed'] and all(set(one) == {'what', 'was', 'now'} for one in made['changed'])
     assert (row['certified'], row['regression']) == (None, {})
     # The export of the versions in use is theirs: the set is ready, and the replay made with it is today's.
     release(root / simulation.SETS_RELATIVE / 'in-use', source={'finder': CUTTER})

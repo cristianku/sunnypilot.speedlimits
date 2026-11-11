@@ -168,7 +168,10 @@ const place = computed(() => screenPlace(stage.value, frame.value));
 /** The frame of the video the player presents (its minute and frame k): the boxes go on it. */
 const presented = shallowRef<VideoFrame | null>(null);
 const boxes = computed(() => showBoxes.value && view.value ? boxesAt(view.value.signs, presented.value) : []);
-const tagOf = (box: SignBox): string => (readText(box[4], undefined) || 'sign') + ' ' + Math.round(box[5] * 100) + '%';
+/** Whose road the applicability network gave a box to, as its tag ends; '' for a box it does not judge. */
+const ROAD_OF: Record<string, string> = {own_road: 'OURS', other_road: 'other road', unresolved: 'road unsure'};
+const tagOf = (box: SignBox): string => [(readText(box[4], undefined) || 'sign') + ' ' + Math.round(box[5] * 100) + '%',
+  ROAD_OF[box[6]] ?? ''].filter(Boolean).join(' · ');
 
 // -- at the time shown ------------------------------------------------------------------------------------------------------
 const now = computed(() => {

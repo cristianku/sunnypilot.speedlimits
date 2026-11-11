@@ -207,6 +207,11 @@ export interface Screen {
   rawClass: string;
   rawValue: number;
   confidence: number;
+  /** The last limit read, which the reading square shows: a road sign read leaves it there and goes under it
+   * (sign_reading.square_and_road); '' and 0 before the first. */
+  limitClass: string;
+  limitValue: number;
+  limitConfidence: number;
   /** That sign is in view. */
   seen: boolean;
   /** Metres to the sign ahead; 0: none. */
@@ -253,13 +258,27 @@ export function readTimes(events: readonly (readonly [number, string, unknown])[
  * as written and whether the sign is in view (rawSignValue, rawSignSeen) gives its speed in km/h and a sign with a size
  * on the camera instead. Where the frames stop (null) the squares are empty, as without speedvisiond. */
 export function screenAt(series: Record<string, Series>, reads: readonly number[], s: number): Screen {
-  const at = (name: string): Value | undefined => valueAt(series[name], s);
+  const valueOf = (name: string, time: number): Value | undefined => valueAt(series[name], time);
+  const at = (name: string): Value | undefined => valueOf(name, s);
   const kph = pyRound(numberOf(at('vis_limit')));
+  const rawClass = textOf(at('vis_raw_class'));
+  const valueName = series['vis_raw_value'] ? 'vis_raw_value' : 'vis_raw_speed';
+  // After a road sign read, the limit read before it: as it was just before the step of the class that ended it.
+  let limitAt = s;
+  if (rawClass in ROAD_SIGNS) {
+    const classes = series['vis_raw_class'] ?? [];
+    let index = lastAt(classes.length, (i) => classes[i]![0], s);
+    while (index >= 0 && textOf(classes[index]![1]) in ROAD_SIGNS) index -= 1;
+    limitAt = index < 0 || !textOf(classes[index]![1]) ? -Infinity : classes[index + 1]![0] - 1e-6;
+  }
   return {
     limitKph: kph > 0 ? kph : 0,
-    rawClass: textOf(at('vis_raw_class')),
-    rawValue: numberOf(series['vis_raw_value'] ? at('vis_raw_value') : at('vis_raw_speed')),
+    rawClass,
+    rawValue: numberOf(at(valueName)),
     confidence: numberOf(at('vis_raw_conf')),
+    limitClass: limitAt === -Infinity ? '' : textOf(valueOf('vis_raw_class', limitAt)),
+    limitValue: limitAt === -Infinity ? 0 : numberOf(valueOf(valueName, limitAt)),
+    limitConfidence: limitAt === -Infinity ? 0 : numberOf(valueOf('vis_raw_conf', limitAt)),
     seen: series['vis_raw_seen'] ? at('vis_raw_seen') === true : numberOf(at('vis_sign_size')) > 0,
     distance: numberOf(at('vis_sign_dist')),
     road: textOf(at('vis_road')),
@@ -273,6 +292,8 @@ const ROAD_SIGNS: Record<string, [text: string, crossed: boolean]> = {
   'other_sign:expressway_start': ['EXP', false], 'other_sign:expressway_end': ['EXP', true],
   'other_sign:town_entry': ['TOWN', false], 'other_sign:town_exit': ['TOWN', true],
 };
+/** A road sign read: it goes under the reading square, not in it. */
+export const isRoadSign = (signClass: string): boolean => signClass in ROAD_SIGNS;
 /** What the reading square says of a sign read (sign_reading.reading_text): the number as written, END for the end of
  * a limit, a road sign's short name, crossed out at its end; '' before the first sign. */
 export function readingText(signClass: string, value: number): {text: string; crossed: boolean} {

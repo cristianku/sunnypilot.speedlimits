@@ -3,17 +3,18 @@
 // screen as the comma draws them (sunnypilot's selfdrive/ui/sunnypilot/mici/onroad: vision_speed_limit.py,
 // sign_reading.py), in the comma's own pixels, 476 × 240, and scaled as a whole (scale). On top the vision square: the
 // speed to hold in fuchsia under an eye, dark with a dash without one. Under it the reading square: the classifier's
-// confidence, the last sign read as written (END, a road sign's short name, crossed out at its end) and the metres to
-// the sign; its border is red while the sign is in view, and a white pulse grows under it when a sign is read. Left of
+// confidence, the last limit read as written (END) and the metres to the sign; its border is red while the sign is in
+// view, and a white pulse grows under it when a sign is read. A road sign read (its short name, crossed out at its end)
+// goes in a small box under the square, red while in view, until the next sign, and leaves the limit in it. Left of
 // it the kind of road the network sees. The page gives what the car's message had at the time shown and the pulse of
 // that time (0 to 1): nothing here moves by itself, so a paused video is a still screen. The page places it (right,
 // top); its colours and the comma's own font, CommaInter, are control.html's (.cms-…).
 import {computed, ref} from 'vue';
 import {EYE_ICON} from './drive-review';
-import {pyRound, readingText, SCREEN} from './simulation';
+import {isRoadSign, pyRound, readingText, SCREEN} from './simulation';
 
-const props = defineProps<{limitKph: number; rawClass: string; rawValue: number; confidence: number; seen: boolean;
-  distance: number; road: string; pulse: number; scale: number}>();
+const props = defineProps<{limitKph: number; rawClass: string; rawValue: number; confidence: number; limitClass: string;
+  limitValue: number; limitConfidence: number; seen: boolean; distance: number; road: string; pulse: number; scale: number}>();
 
 // The comma's numbers (vision_speed_limit.py): two squares in the top right corner, the reading under the vision.
 const SIZE = 72;
@@ -56,6 +57,11 @@ const ROAD = 20 * FONT_SCALE;
 const ROAD_BASELINE = READING_TOP + (SIZE - ROAD) / 2 + ASCENT * ROAD;
 /** A sign read: the square grows by this share of its side and back. */
 const PULSE_GROW = 0.18;
+/** A road sign read: a box under the reading square, as wide (sign_reading ROAD_GAP, ROAD_HEIGHT, ROAD_FONT_SIZE). */
+const ROAD_GAP = 4;
+const ROAD_HEIGHT = 24;
+const ROAD_TOP = READING_TOP + SIZE + ROAD_GAP;
+const ROAD_SIGN = 18 * FONT_SCALE;
 
 /** The width of a bold text whose line is h px, as raylib's MeasureTextEx gives it, by which the comma shrinks the sign
  * read to the room of its square. raylib loads the font at 200 px (application.py _load_fonts) and keeps each letter's
@@ -112,24 +118,34 @@ const vision = computed(() => {
   return {text, size: h * EM, y: top + (VISION_TOP + SIZE - top - h) / 2 + ASCENT * h};
 });
 
-const reading = computed(() => {
-  void fontLoaded.value;
-  const {text, crossed} = readingText(props.rawClass, props.rawValue);
-  const shown = text || '-';
-  const full = (TEXT_SIZES[shown.length] ?? 22) * FONT_SCALE;
-  const wide = textWidth(shown, full);
+/** A line of text centred at the square's middle, its capitals' middle at middle (from the screen's top), shrunk to
+ * the room between the borders; with the line through it when crossed, from 2 px before its first letter, a third of
+ * its line under the middle of its capitals, to 2 px after its last, a third above (sign_reading._draw_line). */
+function line(text: string, full: number, middle: number, crossed: boolean) {
+  const wide = textWidth(text, full);
   const h = wide > TEXT_WIDTH ? full * TEXT_WIDTH / wide : full;
   const half = Math.min(wide, TEXT_WIDTH) / 2;
-  const middle = READING_TOP + TEXT_MIDDLE;
+  return {text, size: h * EM, y: middle + (ASCENT - CAP_MIDDLE) * h,
+    cross: crossed ? {x1: MIDDLE - half - 2, y1: middle + h / 3, x2: MIDDLE + half + 2, y2: middle - h / 3} : null};
+}
+
+const reading = computed(() => {
+  void fontLoaded.value;
+  const {text, crossed} = readingText(props.limitClass, props.limitValue);
+  const shown = text || '-';
   const metres = pyRound(props.distance);
   return {
-    text: shown, known: text !== '', size: h * EM, y: readingBaseline(TEXT_MIDDLE, h),
-    // The line through a road sign's end, from 2 px before its first letter, a third of its line under the middle of
-    // its capitals, to 2 px after its last, a third above (sign_reading._render).
-    cross: crossed ? {x1: MIDDLE - half - 2, y1: middle + h / 3, x2: MIDDLE + half + 2, y2: middle - h / 3} : null,
-    confidence: text ? pyRound(props.confidence * 100) + '%' : '',
+    ...line(shown, (TEXT_SIZES[shown.length] ?? 22) * FONT_SCALE, READING_TOP + TEXT_MIDDLE, crossed), known: text !== '',
+    confidence: text ? pyRound(props.limitConfidence * 100) + '%' : '',
     distance: metres > 0 ? metres + ' m' : '',
   };
+});
+/** The road sign read, in its box under the square; null after any other reading. */
+const roadSign = computed(() => {
+  void fontLoaded.value;
+  if (!isRoadSign(props.rawClass)) return null;
+  const {text, crossed} = readingText(props.rawClass, props.rawValue);
+  return line(text, ROAD_SIGN, ROAD_TOP + ROAD_HEIGHT / 2, crossed);
 });
 
 /** The pulse: the reading square's outline grown and white, drawn under it; its alphas whole steps of 255, as the
@@ -153,12 +169,21 @@ const halo = computed(() => {
             :rx="0.15 * halo.side + OUT_ROUND" :stroke-opacity="halo.line"/>
     </g>
     <rect class="cms-reading" :x="LEFT" :y="READING_TOP" :width="SIZE" :height="SIZE" :rx="RADIUS"/>
-    <rect class="cms-line cms-reading-line" :class="{seen}" :x="LEFT - OUT" :y="READING_TOP - OUT" :width="SIZE + 2 * OUT"
+    <rect class="cms-line cms-reading-line" :class="{seen: seen && !roadSign}" :x="LEFT - OUT" :y="READING_TOP - OUT" :width="SIZE + 2 * OUT"
           :height="SIZE + 2 * OUT" :rx="RADIUS + OUT_ROUND"/>
     <g class="cms-text" :class="{none: !reading.known}">
       <text v-if="reading.confidence" :x="MIDDLE" :y="readingBaseline(CONFIDENCE_MIDDLE, SMALL)" :font-size="SMALL * EM">{{ reading.confidence }}</text>
       <text :x="MIDDLE" :y="reading.y" :font-size="reading.size">{{ reading.text }}</text>
       <line v-if="reading.cross" class="cms-cross" v-bind="reading.cross"/>
+    </g>
+    <g v-if="roadSign">
+      <rect class="cms-reading" :x="LEFT" :y="ROAD_TOP" :width="SIZE" :height="ROAD_HEIGHT" :rx="0.15 * ROAD_HEIGHT"/>
+      <rect class="cms-line cms-reading-line" :class="{seen}" :x="LEFT - OUT" :y="ROAD_TOP - OUT" :width="SIZE + 2 * OUT"
+            :height="ROAD_HEIGHT + 2 * OUT" :rx="0.15 * ROAD_HEIGHT + OUT_ROUND"/>
+      <g class="cms-text">
+        <text :x="MIDDLE" :y="roadSign.y" :font-size="roadSign.size">{{ roadSign.text }}</text>
+        <line v-if="roadSign.cross" class="cms-cross" v-bind="roadSign.cross"/>
+      </g>
     </g>
     <text v-if="reading.distance" class="cms-text" :x="MIDDLE" :y="readingBaseline(DISTANCE_MIDDLE, SMALL)" :font-size="SMALL * EM">{{ reading.distance }}</text>
 
