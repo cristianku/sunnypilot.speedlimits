@@ -240,11 +240,12 @@ EARLY = re.compile(r'^(detector|reader|classifier|pretrain) stops early after ep
 # val_sign_accuracy, the sign crops read right, and val_rejection, the "not a sign" crops it rejects: their mean,
 # the balanced accuracy, chooses its best epoch; SignNet val_recall and val_false_per_frame in the 5 best boxes of a frame, as the car keeps them, and
 # in its Mapillary stage val_speed_recall, the speed signs found, which chooses that stage's best epoch; experiment B
-# val_ownership_macro_f1, whose sign it is, and val_other_road_recall, a "-" when it has no case; the brain
+# val_ownership_macro_f1, whose sign it is, val_other_road_recall and val_other_road_f1, a "-" when it has no case, and
+# since #72 val_selection_score, the measure that chose its best epoch; the brain
 # val_error_kph, how far its speed is from the labels, and val_accuracy, the frames it says right).
 METRIC = re.compile(r'\b(train_loss|val_loss|train_accuracy|val_accuracy|val_recall|val_speed_recall|val_sign_accuracy|'
                     r'val_rejection|val_balanced_accuracy|val_false_per_frame|'
-                    r'val_ownership_macro_f1|val_other_road_recall|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
+                    r'val_ownership_macro_f1|val_other_road_recall|val_other_road_f1|val_selection_score|val_error_kph|val_types|val_on_person) (-?[0-9.]+(?:e-?[0-9]+)?)\b')
 # The brain's road type named right on validation on each type ("val_type_motorway 0.9500", brain_train._types_words).
 TYPE_METRIC = re.compile(r'\bval_type_([a-z0-9_]+) (-?[0-9.]+)\b')
 SECONDS = re.compile(r'\b([0-9]+)s$')
@@ -353,7 +354,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     _inside_step) or None, 'curves': {'detector'|'reader'|'classifier'|'signnet'|'signnet_pretrain': {'epochs': total,
     ('stopped_early': epoch,) 'points': [{'epoch', 'train_loss', 'val_loss', ('train_accuracy', 'val_accuracy',)
     ('val_recall',) ('val_false_per_frame', 'val_speed_recall',) ('val_sign_accuracy', 'val_rejection',
-    'val_balanced_accuracy',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_selection_score',) 'seconds'}]}}}
+    'val_balanced_accuracy',) ('val_ownership_macro_f1', 'val_other_road_recall', 'val_other_road_f1',
+    'val_selection_score',) 'seconds'}]}}}
     (also experiment B's variants and the brain's seeds, by the names of their epoch lines) for an
     action in state running, ok, failed or interrupted; with 'seconds_left' (the server's time left, None while
     unknown) for Propose again running, 'signnet' (is_signnet) for the cutter's training and 'failure' (failure_text,
@@ -434,9 +436,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             if 'val_sign_accuracy' in point and 'val_rejection' in point and 'val_balanced_accuracy' not in point:
                 # The measure that chooses the classifier's best epoch: the mean of the two.
                 point['val_balanced_accuracy'] = (point['val_sign_accuracy'] + point['val_rejection']) / 2
-            if epoch[0].startswith('experiment_b') and 'val_accuracy' in point:
-                # The measure that chooses experiment B's best epoch (context_experiment.selection_score): the mean of the
-                # reading accuracy and the ownership macro F1, a missing one ("-") counting 0.
+            if epoch[0].startswith('experiment_b') and 'val_accuracy' in point and 'val_selection_score' not in point:
+                # A line written before #72 has no val_selection_score: its epoch was chosen on the mean of the reading
+                # accuracy and the ownership macro F1, a missing one ("-") counting 0.
                 point['val_selection_score'] = (point['val_accuracy'] + point.get('val_ownership_macro_f1', 0.0)) / 2
             seconds = SECONDS.search(line)
             if seconds:

@@ -8,8 +8,8 @@
 // below 0.3: those numbers come once it is measured, on the run's SignNet card), its false boxes per frame among those
 // 5, and its train loss (before it, in two stages, its stage on the Mapillary windows alone: the speed signs of our
 // validation it finds, which choose that stage's best epoch); for applicability (experiment B), its variants in the same two charts, one
-// line each: the mean of its reading accuracy and ownership macro F1 (which chooses its best epoch), and its validation
-// loss; for the brain, its three seeds in the same way: how far its speed is from the labels on validation, the frames it says
+// line each: the mean of its reading accuracy and the F1 of the signs of another road (which chooses its best epoch; before
+// #72 the ownership macro F1 in its place), and its validation loss; for the brain, its three seeds in the same way: how far its speed is from the labels on validation, the frames it says
 // right, and its train loss. Data: progress.curves of the job, one point per finished epoch.
 import {computed} from 'vue';
 import type {BrainNet, CurveNet, DeciderNet, EpochPoint, JobProgress, TrainingCurve} from '../common/panel-types';
@@ -157,7 +157,7 @@ const pretrainBestLoss = computed(() => hasPoints(pretrain.value) ? best(pretrai
 
 type Best = (EpochPoint & {value: number}) | null;
 interface NetCard {net: Net; curve: TrainingCurve | null; best: Best; lowest: Best; validation: ChartSeries[]; scored: boolean}
-/** Applicability's variants: the mean of the signs read right and the ownership macro F1 chooses the best epoch. */
+/** Applicability's variants: the mean of the signs read right and the other-road F1 chooses the best epoch (#72). */
 const deciderCards = computed((): NetCard[] => nets.value.filter(isDecider).map((net) => {
   const curve = curves.value[net];
   if (!hasPoints(curve)) return {net, curve: null, best: null, lowest: null, validation: [], scored: false};
@@ -307,8 +307,9 @@ const tables = computed(() => nets.value.flatMap((net) => {
           <span class="tile-label">Best on validation</span>
           <span class="tile-value">{{ percent(card.best.value * 100) }}</span>
           <span class="tile-note">{{ NET_NAME[card.net] }}, epoch {{ card.best.epoch }}<template v-if="card.best.val_accuracy !== undefined">:
-            read right {{ percent(card.best.val_accuracy * 100) }}, whose sign {{ card.best.val_ownership_macro_f1 === undefined ? '–'
-            : percent(card.best.val_ownership_macro_f1 * 100) }}</template></span>
+            read right {{ percent(card.best.val_accuracy * 100) }}, <template v-if="card.best.val_other_road_f1 !== undefined">another
+            road {{ percent(card.best.val_other_road_f1 * 100) }}</template><template v-else>whose sign {{ card.best.val_ownership_macro_f1 === undefined ? '–'
+            : percent(card.best.val_ownership_macro_f1 * 100) }}</template></template></span>
         </div>
         <template v-for="card in brainCards" :key="'kept-' + card.net">
           <div v-if="card.best" class="tile" :id="card.net + '-kept'">
@@ -446,9 +447,10 @@ const tables = computed(() => nets.value.flatMap((net) => {
         </div>
         <p v-else class="net-wait">{{ running ? 'The curves appear at the end of the first variant’s first epoch.'
           : 'No variant reached its first epoch.' }}</p>
-        <p class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the macro F1 of whose sign it
-          is (our road, another road, abstain); it chooses the epoch whose weights each variant keeps. The two apart are in the
-          tiles above and in the values per epoch.</p>
+        <p class="note" id="decider-score-note">Chosen measure: the mean of the signs read right and the F1 of the signs of
+          another road; it chooses the epoch whose weights each variant keeps. Abstain (unclear) is measured, out of the choice.
+          The two apart are in the tiles above and in the values per epoch. A training of before 11 Nov 2026 chose on the macro
+          F1 of whose sign it is (our road, another road, abstain) in place of the other-road F1.</p>
       </div>
 
       <div v-if="brainCards.length" class="net" id="brain-curves">
@@ -481,8 +483,9 @@ const tables = computed(() => nets.value.flatMap((net) => {
                 <template v-if="brainTypes"><th class="num" title="The road type named right, on all types">Road type</th>
                   <th v-for="kind in brainTypeKinds" :key="kind" class="num" :title="'Road type right on ' + (ROAD_TYPE_LABELS[kind]?.label ?? kind)">{{
                     ROAD_TYPE_LABELS[kind]?.short ?? kind }}</th></template></template>
-              <template v-if="isDecider(table.net)"><th class="num">Whose sign</th><th class="num" title="The signs of another road found">Other road</th>
-                <th class="num">Chosen</th></template>
+              <template v-if="isDecider(table.net)"><th class="num" title="Macro F1 of our road, another road and abstain">Whose sign</th><th
+                class="num" title="The signs of another road found">Other road</th><th class="num" title="F1 of the signs of another road">Other
+                F1</th><th class="num">Chosen</th></template>
               <th v-if="table.net === 'detector' && detectorRecall" class="num">Val recall</th>
               <template v-if="isSignnet(table.net)"><th class="num" title="Its 5 best boxes of each frame, at any score">Best 5, any score</th><th
                 v-if="table.net === 'signnet_pretrain' && pretrainSpeed" class="num" title="The speed signs among them">Speed signs</th><th
@@ -513,6 +516,7 @@ const tables = computed(() => nets.value.flatMap((net) => {
                 <template v-if="isDecider(table.net)">
                   <td class="num">{{ cell(point.val_ownership_macro_f1, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_other_road_recall, (value) => percent(value * 100)) }}</td>
+                  <td class="num">{{ cell(point.val_other_road_f1, (value) => percent(value * 100)) }}</td>
                   <td class="num">{{ cell(point.val_selection_score, (value) => percent(value * 100)) }}</td>
                 </template>
                 <template v-if="table.net === 'classifier' && withRejection">

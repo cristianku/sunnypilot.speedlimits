@@ -460,13 +460,17 @@ def test_the_experiment_b_curves_have_the_measure_that_chooses_their_best_epoch(
            'experiment_b_crop epoch 1/20 train_loss 2.2182 val_loss 2.6399 train_accuracy 0.6028 val_accuracy 0.5800 '
            'val_ownership_macro_f1 0.379 val_other_road_recall 1.000 55s\n'
            'experiment_b_crop epoch 2/20 train_loss 0.9910 val_loss 2.3751 train_accuracy 0.7798 val_accuracy 0.6252 '
-           'val_ownership_macro_f1 - val_other_road_recall - 20s\n')
+           'val_ownership_macro_f1 - val_other_road_recall - 20s\n'
+           'experiment_b_crop epoch 3/20 train_loss 0.8000 val_loss 2.2000 train_accuracy 0.8000 val_accuracy 0.7000 '
+           'val_ownership_macro_f1 0.500 val_other_road_recall 0.750 val_other_road_f1 0.857 val_selection_score 0.7786 30s\n')
     result = progress('train_decider', 'running', log)
-    first, second = result['curves']['experiment_b_crop']['points']
+    first, second, third = result['curves']['experiment_b_crop']['points']
     assert first == {'epoch': 1, 'train_loss': 2.2182, 'val_loss': 2.6399, 'train_accuracy': 0.6028, 'val_accuracy': 0.58,
                      'val_ownership_macro_f1': 0.379, 'val_other_road_recall': 1.0,
                      'val_selection_score': (0.58 + 0.379) / 2, 'seconds': 55}
     # "-": no measure; the score counts its macro F1 as 0, as context_experiment.selection_score does.
     assert 'val_ownership_macro_f1' not in second and 'val_other_road_recall' not in second
     assert second['val_selection_score'] == 0.6252 / 2 and second['seconds'] == 20
-    assert result['detail'] == 'The crop alone · epoch 2 of 20'
+    # Since #72 the line says the measure that chose the epoch (the reading and the other-road F1): it is taken as it is.
+    assert third['val_other_road_f1'] == 0.857 and third['val_selection_score'] == 0.7786
+    assert result['detail'] == 'The crop alone · epoch 3 of 20'

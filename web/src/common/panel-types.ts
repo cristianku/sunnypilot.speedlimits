@@ -267,10 +267,12 @@ export interface EpochPoint {
   val_sign_accuracy?: number;
   val_rejection?: number;
   val_balanced_accuracy?: number;
-  /** Experiment B (applicability): whose sign it is (macro F1), the other-road signs found, and the mean of the reading
-   * accuracy and that macro F1, which chooses its best epoch. */
+  /** Experiment B (applicability): whose sign it is (macro F1), the other-road signs found and their F1, and the measure
+   * that chooses its best epoch: since #72 the mean of the reading accuracy and that other-road F1 (before, of the
+   * reading accuracy and the macro F1). */
   val_ownership_macro_f1?: number;
   val_other_road_recall?: number;
+  val_other_road_f1?: number;
   val_selection_score?: number;
   /** The brain: how far its speed is from the labels, in km/h (val_accuracy: the frames it says right). */
   val_error_kph?: number;

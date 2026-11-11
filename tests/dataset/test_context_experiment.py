@@ -25,6 +25,7 @@ from nnslr_tools.context_experiment import (
     ownership_class_weights,
     ownership_metrics,
     ownership_target,
+    selection_score,
 )
 from test_annotations import invoke, reviewed, write
 
@@ -157,6 +158,27 @@ def test_ownership_metrics_precision_recall_abstain_and_macro_f1():
     assert metrics["macro_f1"] == pytest.approx(sum(f1) / 3)
     empty = ownership_metrics([])
     assert empty["sample_count"] == 0 and empty["macro_f1"] is None and empty["other_road"]["recall"] is None
+
+
+def test_the_epoch_is_chosen_on_the_reading_and_the_other_road_f1_not_on_unresolved():
+    """#72: one unresolved box on validation must not choose the epoch over the signs of another road found."""
+    def sample(truth, predicted):
+        return {"ownership_truth": truth, "ownership_predicted": predicted, "ownership_confidence": .9}
+
+    ours = [sample("own_road", "own_road")] * 10
+    # A gets the one unresolved box right and finds 1 of 4 signs of another road; B misses it and finds 3 of 4.
+    a = ownership_metrics(ours + [sample("other_road", "other_road")] + [sample("other_road", "own_road")] * 3
+                          + [sample("unresolved", "unresolved")])
+    b = ownership_metrics(ours + [sample("other_road", "other_road")] * 3 + [sample("other_road", "own_road")]
+                          + [sample("unresolved", "own_road")])
+    assert a["macro_f1"] > b["macro_f1"]
+    score_a = selection_score({"reading": {"accuracy": .9}, "ownership": a})
+    score_b = selection_score({"reading": {"accuracy": .9}, "ownership": b})
+    assert score_a == pytest.approx((.9 + 2 * 1 / (4 + 1)) / 2) and score_b == pytest.approx((.9 + 2 * 3 / (4 + 3)) / 2)
+    assert score_b > score_a
+    # No sign of another road, true or predicted: its F1 counts 0.
+    none = ownership_metrics(ours)
+    assert none["other_road"]["f1"] is None and selection_score({"reading": {"accuracy": .9}, "ownership": none}) == .45
 
 
 def test_calibration_class_weights_and_geometry():

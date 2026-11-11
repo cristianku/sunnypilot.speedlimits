@@ -20,9 +20,10 @@ Every variant has the same small fusion MLP with two heads on it:
 A box a person marked "not a sign, on a vehicle" (a truck's top-speed sticker) is read as not_a_sign and
 taught as other_road: it is no sign for our road, and the scene shows the vehicle it is on.
 
-The best epoch is chosen on validation; validation and test are then measured, and again on the rows
-a person confirmed (provenance.label_basis human_review). Train, validation and test are the only
-partitions read: buffer and the partitions of older split policies are ignored.
+The best epoch is chosen on validation (SELECTION_METRIC: the reading and the F1 of another road); validation
+and test are then measured, and again on the rows a person confirmed (provenance.label_basis human_review).
+Train, validation and test are the only partitions read: buffer and the partitions of older split policies
+are ignored.
 
 Like nnslr_tools.training, this module imports torch, torchvision and Pillow only when a run starts:
 prepare_experiment_b and the metrics are stdlib-only, so ``nnslr experiment-b --dry-run`` needs
@@ -107,7 +108,10 @@ GEOMETRY_FEATURES = ("x1", "y1", "x2", "y2", "width", "height", "center_x", "cen
                      "speed", "speed_missing")
 CALIBRATION_BINS = 15
 IGNORE_INDEX = -100
-SELECTION_METRIC = "mean of validation reading accuracy and validation ownership macro-F1"
+# Each variant keeps the epoch with the best mean of the reading accuracy and the F1 of the signs of another road, on
+# validation (since 11 Nov 2026, #72; before, the ownership macro-F1, where unresolved, one box on validation, weighed
+# a third). Unresolved and the macro-F1 are still measured, out of the choice.
+SELECTION_METRIC = "mean of validation reading accuracy and validation other_road F1"
 # Rows of the comparison table printed by scripts/run_experiment_b.sh: test, and its human-reviewed
 # boxes; validation too, since it chose the epoch (optimistic) but may hold the only other_road cases.
 COMPARISON_SCOPES = (
@@ -525,8 +529,8 @@ def partition_report(samples: list[dict[str, Any]], classes: list[str]) -> dict[
 
 
 def selection_score(metrics: dict[str, Any]) -> float:
-    """SELECTION_METRIC of experiment_metrics on validation (a missing macro-F1 counts 0)."""
-    return (metrics["reading"]["accuracy"] + (metrics["ownership"]["macro_f1"] or 0.0)) / 2
+    """SELECTION_METRIC of experiment_metrics on validation (a missing other_road F1 counts 0)."""
+    return (metrics["reading"]["accuracy"] + (metrics["ownership"]["other_road"]["f1"] or 0.0)) / 2
 
 
 def _number(value: Any) -> str:
@@ -1071,6 +1075,7 @@ def train_experiment_b(
                 "validation_ownership_macro_f1": validation["ownership"]["macro_f1"],
                 "validation_other_road_precision": other_road["precision"],
                 "validation_other_road_recall": other_road["recall"],
+                "validation_other_road_f1": other_road["f1"],
                 "validation_selection_score": score,
             }
             history.append(epoch_result)
@@ -1117,6 +1122,7 @@ def train_experiment_b(
                     "validation/ownership_macro_f1": epoch_result["validation_ownership_macro_f1"],
                     "validation/other_road_precision": other_road["precision"],
                     "validation/other_road_recall": other_road["recall"],
+                    "validation/other_road_f1": other_road["f1"],
                     "validation/abstain_rate": validation["ownership"]["abstain_rate"],
                     "validation/selection_score": score,
                     "validation/best_selection_score": best_score,
@@ -1129,6 +1135,8 @@ def train_experiment_b(
                   f"val_accuracy {epoch_result['validation_accuracy']:.4f} "
                   f"val_ownership_macro_f1 {_number(epoch_result['validation_ownership_macro_f1'])} "
                   f"val_other_road_recall {_number(other_road['recall'])} "
+                  f"val_other_road_f1 {_number(other_road['f1'])} "
+                  f"val_selection_score {score:.4f} "
                   f"{time.perf_counter() - epoch_start:.0f}s", flush=True)
 
         # The measure is the best validation epoch, reloaded from its checkpoint.
