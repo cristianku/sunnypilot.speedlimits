@@ -364,3 +364,36 @@ def test_a_frame_of_any_second_of_the_video_is_saved(drive):
     pictures.write_text(kept[0] + '\n')
     for second in (0, 1, 2):
         assert server.post_frame(ROUTE, f'0/{1000 + second * 20 + 5}', body([BOX]))[0] == 200
+
+
+def test_no_more_than_max_decodes_ffmpeg_at_once(drive, monkeypatch):
+    # Each decode at full size takes hundreds of MB: a page asking for many GOPs at once waits for a free slot (#60).
+    root, _video, _rows, _server = drive
+    import threading
+    monkeypatch.setattr(video_frames, '_decode_slots', threading.BoundedSemaphore(1))
+    real = video_frames.subprocess.Popen
+    running, most, guard = [0], [0], threading.Lock()
+
+    class Counted(real):
+        def __init__(self, command, **kwargs):
+            super().__init__(command, **kwargs)
+            self.counted = 'ffmpeg' in command
+            if self.counted:
+                with guard:
+                    running[0] += 1
+                    most[0] = max(most[0], running[0])
+
+        def communicate(self, *args, **kwargs):
+            try:
+                return super().communicate(*args, **kwargs)
+            finally:
+                if self.counted:
+                    with guard:
+                        running[0] -= 1
+    monkeypatch.setattr(video_frames.subprocess, 'Popen', Counted)
+    threads = [threading.Thread(target=video_frames.preview, args=(root, ROUTE, 0, frame)) for frame in (5, 25, 45)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert video_frames.settle() and most[0] == 1 and cached(root) == list(range(0, 60))

@@ -50,6 +50,12 @@ AHEAD_NICE = 5
 AHEAD_KEPT = 4
 # ffmpeg's JPEG quality (2 best .. 31): about the quality 92 of the report's previews.
 JPEG_QUALITY = '3'
+# ffmpeg processes decoding at once, and the threads of each: one decode of a GOP at 2688 x 1520 takes about 700 MB with
+# ffmpeg's own threads (one per core), 450 MB with 4, as fast. Without a limit a page playing or scrubbing started 55 at
+# once and the container ran out of memory (#60).
+MAX_DECODES = 4
+DECODE_THREADS = '4'
+_decode_slots = threading.BoundedSemaphore(MAX_DECODES)
 # The parameter sets of fcamera.hevc are at its start, before the first slice: never more than this.
 HEADER_BYTES = 1 << 16
 
@@ -301,36 +307,40 @@ def _decode(root: Path, video: Path, folder: Path, first: int, last: int, wanted
         job = _decodes[key] = _Decode(folder, first, last)
     try:
         data = gop_bytes(video, first, last)
-        # Written in the folder (not a path in the pattern, which may hold a %): <first>.jpg, <first + 1>.jpg...
-        process = subprocess.Popen([*(['nice', '-n', str(AHEAD_NICE)] if ahead else []), 'ffmpeg', '-v', 'error', '-y',
-                                    '-f', 'hevc', '-i', '-', '-vsync', '0', '-q:v', JPEG_QUALITY, '-atomic_writing', '1',
-                                    '-start_number', str(first), '%d.jpg'], cwd=folder, stdin=subprocess.PIPE,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     except (OSError, VideoFrameError) as exc:
         job.error = f'GOP {first}..{last} not decoded: {exc}'
         with _locks_guard:
             _decodes.pop(key, None)
         job.done.set()
         return job
-    threading.Thread(target=_finish, args=(root, key, job, process, data), name='video-gop', daemon=True).start()
+    threading.Thread(target=_finish, args=(root, key, job, data, ahead), name='video-gop', daemon=True).start()
     return job
 
 
-def _finish(root: Path, key: tuple[str, int], job: _Decode, process: subprocess.Popen, data: bytes) -> None:
-    """Feeds ffmpeg its GOP and waits for it: every frame of the GOP written, or the decode failed (its frames half
-    written removed, the next request tries again). Then the cache is pruned if the frames made it too big."""
-    try:
-        _out, errors = process.communicate(data)
-        message = errors.decode(errors='replace').strip()
-    except OSError as exc:
-        message = str(exc)
+def _finish(root: Path, key: tuple[str, int], job: _Decode, data: bytes, ahead: bool) -> None:
+    """Feeds ffmpeg its GOP once one of the MAX_DECODES slots is free and waits for it: every frame of the GOP
+    written, or the decode failed (its frames half written removed, the next request tries again). Then the cache is
+    pruned if the frames made it too big."""
+    with _decode_slots:
+        try:
+            # Written in the folder (not a path in the pattern, which may hold a %): <first>.jpg, <first + 1>.jpg...
+            process = subprocess.Popen([*(['nice', '-n', str(AHEAD_NICE)] if ahead else []), 'ffmpeg', '-v', 'error',
+                                        '-y', '-threads', DECODE_THREADS, '-f', 'hevc', '-i', '-', '-vsync', '0',
+                                        '-q:v', JPEG_QUALITY, '-atomic_writing', '1', '-start_number', str(job.first),
+                                        '%d.jpg'], cwd=job.folder, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.PIPE)
+            _out, errors = process.communicate(data)
+            message = errors.decode(errors='replace').strip()
+        except OSError as exc:
+            process = None
+            message = str(exc)
     sizes = []
     for number in range(job.first, job.last + 1):
         try:
             sizes.append((job.folder / f'{number}.jpg').stat().st_size)
         except OSError:
             pass
-    if process.returncode != 0 or len(sizes) != job.last - job.first + 1:
+    if process is None or process.returncode != 0 or len(sizes) != job.last - job.first + 1:
         job.error = f'GOP {job.first}..{job.last} not decoded: ' + message[:200]
         for number in range(job.first, job.last + 1):
             (job.folder / f'{number}.jpg.tmp').unlink(missing_ok=True)
