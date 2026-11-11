@@ -280,6 +280,10 @@ FAILURES = (
     (re.compile(r'CUDA out of memory|CUDA error: out of memory|OutOfMemoryError|OOM on device'),
      'The GPU ran out of memory: another job or program was using it. Free the GPU, then try again.'),
     (re.compile(r'No space left on device'), 'The disk is full: free some space, then try again.'),
+    # Killed by a signal 9 (bash: "Killed", the wrapper: code 137): on this server the kernel's OOM killer, when the
+    # container ran out of memory (#60).
+    (re.compile(r'^\S+: line \d+: \d+ Killed |^== (?:finished with code|finito con codice) 137\s*$', re.M),
+     'Stopped by the system: the server ran out of memory (or the job was killed). Start it again.'),
     (re.compile(r'creazione di \.venv-gpu fallita|\.venv-gpu.*failed'),
      'Setting up the GPU programs failed. Details has the log.'),
     (re.compile(r'servono almeno \d+ route|at least \d+ (?:independent )?(?:reviewed )?(?:routes|drives)'),

@@ -420,6 +420,9 @@ def test_a_known_failure_is_one_plain_sentence():
     assert failed['failure'].startswith('The GPU ran out of memory') and 'request.json' in failed['last_line']
     assert failure_text('ERROR: per dividere il dataset servono almeno 5 route (o luoghi) indipendenti\n').startswith('More reviewed')
     assert failure_text('ssh: connect to host comma port 22: Connection refused\n').startswith('The comma did not answer')
+    killed = ('scripts/run_experiment_b.sh: line 159: 335787 Killed                  "$NN" experiment-b\n'
+              '     335788 Done                    | tee "$RUN_ROOT/$variant.log"\n\n== finished with code 137\n')
+    assert failure_text(killed).startswith('Stopped by the system: the server ran out of memory')
     assert failure_text('Traceback\nValueError: something new\n') == ''
     assert 'failure' not in progress('measure_proposer', 'running', oom)
 
