@@ -873,6 +873,26 @@ class ReviewService:
         if source_key is None or snapshot.by_key[source_key]['segment_index'] < row['segment_index'] - 1:
             raise ReviewRejected(409, 'no_previous_frame', 'This frame has no frame just before it.')
         source = snapshot.reviews.get(source_key)
+        before_row = snapshot.by_key[source_key]
+        previous = body.get('previous')
+        if previous is not None:
+            # The frame before confirmed on the page and still on its way here (Confirm goes on at once): its boxes
+            # come with the request. It is the frame before as the server has it, or a frame of the video after it.
+            if not isinstance(previous, dict) or not isinstance(previous.get('frame_key'), str) \
+                    or not isinstance(previous.get('detections'), list) \
+                    or len(previous['detections']) > MAX_DETECTIONS_PER_FRAME \
+                    or not all(isinstance(item, dict) for item in previous['detections']):
+                raise ReviewRejected(400, 'invalid_schema',
+                                     'previous is {frame_key, detections}: the boxes confirmed on the frame before.')
+            previous_key = frame_key_of(previous['frame_key'])
+            previous_row = snapshot.by_key.get(previous_key) or self.video_stand_in(snapshot, previous_key)
+            if not frame_order(before_row) <= frame_order(previous_row) < frame_order(row):
+                raise ReviewRejected(409, 'no_previous_frame',
+                                     f'{previous_key} is not the frame just before this one.')
+            kept = snapshot.reviews.get(previous_key)
+            source_key, before_row = previous_key, previous_row
+            source = {'payload': {'detections': previous['detections']}, 'confirmed': True,
+                      'revision': kept['revision'] if kept is not None else 0, 'reviewer_kind': 'human'}
         if source is None or not source['confirmed']:
             raise ReviewRejected(409, 'previous_not_confirmed',
                                  f'The previous frame ({source_key}) is not confirmed: confirm it first.')
@@ -895,7 +915,7 @@ class ReviewService:
             untouched = untouched + [item for item in review['payload'].get('detections', []) if isinstance(item, dict)]
         result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
                             height=row.get('height') or 0, source_key=source_key, proposals=untouched,
-                            follow=self._follower(snapshot, snapshot.by_key[source_key], row))
+                            follow=self._follower(snapshot, before_row, row))
         to_check = unchecked_boxes(result['detections'])
         return {
             'route_id': snapshot.route,

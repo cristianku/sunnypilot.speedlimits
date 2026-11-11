@@ -58,23 +58,9 @@ export function reviewerName(): string {
   return state.reviewer.trim();
 }
 
-// The saves on their way: Confirm goes on at once, Apply previous waits for them (saved()).
-const sending = new Set<Promise<boolean>>();
-
-/** Once every save on its way has its answer. */
-export async function saved(): Promise<void> {
-  while (sending.size > 0) await Promise.allSettled([...sending]);
-}
-
-// POST one confirmed frame. True when the server stored it.
-export function send(key: string): Promise<boolean> {
-  const promise = sendNow(key);
-  sending.add(promise);
-  void promise.finally(() => sending.delete(promise));
-  return promise;
-}
-
-async function sendNow(key: string): Promise<boolean> {
+// POST one confirmed frame. True when the server stored it. Confirm goes on at once, without waiting for it
+// (confirm.ts), and Apply previous sends the boxes of a frame still on its way (carry.ts).
+export async function send(key: string): Promise<boolean> {
   const s = state.edits[key];
   const apiBase = report.apiBase;
   if (!apiBase || !s || state.inFlight.has(key)) return false;
@@ -88,6 +74,11 @@ async function sendNow(key: string): Promise<boolean> {
   let conflict = false;
   // A frame edited before the kind was dropped with the family (it would be refused at every retry).
   s.detections.forEach(dropStaleKind);
+  // A frame of the video between the seconds is a picture of the report from now on, as it will be once saved
+  // (review_service.video_frame_row): the frame after it has it as the frame before (carry.ts previousRow), and the
+  // walk of Confirm goes on from it (seconds.ts nextInVideo).
+  const added = isVirtual(key) ? rowOf(key) : null;
+  if (added !== null) insertRow(added);
   try {
     const result = await call<SaveAnswer>('POST', apiBase + '/frame/' + key, {
       run_id: report.runId,
@@ -109,10 +100,6 @@ async function sendNow(key: string): Promise<boolean> {
       s.base = clone(result.review);
     }
     takeSuspicious(result);
-    // A frame of the video between the seconds: saved with its box, it is a picture of the report now
-    // (review_service.video_frame_row).
-    const added = isVirtual(key) ? rowOf(key) : null;
-    if (added !== null) insertRow(added);
     ok = true;
   } catch (error) {
     if (report.runId !== runId) return false;

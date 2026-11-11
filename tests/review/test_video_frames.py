@@ -376,6 +376,30 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     assert status == 200 and json_of(data)['videos'] == {'0': 60}
 
 
+def test_apply_previous_takes_the_boxes_of_a_frame_before_still_on_its_way(drive):
+    """Confirm goes on before its save comes back: A on the next frame sends the boxes of the frame before with the
+    request, and the server carries them from there, a frame of the video it has not saved yet included. Only a frame
+    between the server's frame before and this one is taken."""
+    root, video, rows, server = drive
+    assert server.post_frame(ROUTE, '0/1', body([BOX]))[0] == 200
+
+    def apply(key, previous):
+        status, _response, data = server.request('POST', f'/api/route/{ROUTE}/frame/{key}/apply-previous',
+                                                 body={'run_id': RUN_ID, 'detections': [], 'previous': previous})
+        return status, json_of(data)
+
+    moved = dict(BOX, value_kph=60)
+    status, answer = apply('0/1026', {'frame_key': '0/1025', 'detections': [moved]})
+    assert status == 200, answer
+    assert answer['source_frame_key'] == '0/1025' and answer['detections'][0]['value_kph'] == 60
+    # Not between the server's frame before (0/1) and this one.
+    assert apply('0/1026', {'frame_key': '0/1030', 'detections': [moved]})[0] == 409
+    assert apply('0/1026', {'frame_key': '0/0', 'detections': [moved]})[0] == 409
+    assert apply('0/1026', {'frame_key': '0/1025', 'detections': 'boxes'})[0] == 400
+    manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
+    assert not manifest.exists()
+
+
 def test_a_frame_of_any_second_of_the_video_is_saved(drive):
     """The whole drive is in Sign review: a frame of the video between the seconds is saved in every second of its
     segment, a second whose picture at 1 a second is missing too."""

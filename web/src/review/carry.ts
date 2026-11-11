@@ -13,7 +13,7 @@ import {messageOf} from '../common/api';
 import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
 import {revealEditor} from './scroll';
-import {call, saved} from './server';
+import {call} from './server';
 import {anchorIndex, indexOf, isVirtual, report, state} from './store';
 import type {CarryAnswer, FrameEdit, FrameRow} from './types';
 
@@ -40,13 +40,9 @@ export const carried = ref<string | null>(null);
 export function carryState(row: FrameRow): CarryState {
   if (!report.apiBase) return {shown: false, enabled: false, title: ''};
   if (state.inFlight.has(row.frame_key)) return {shown: true, enabled: false, title: 'Saving…'};
-  // The frame before still on its way to the server: A waits for it (applyPrevious).
-  if (state.inFlight.size > 0) {
-    return {shown: true, enabled: true, title: 'The signs of the frame before, carried onto this frame once it is saved (A)'};
-  }
   const before = previousRow(row);
   if (before === null) return {shown: true, enabled: false, title: 'No frame just before this one.'};
-  if (!isConfirmed(before.frame_key)) {
+  if (!isConfirmed(before.frame_key) && !savingConfirmed(before.frame_key)) {
     return {shown: true, enabled: false, title: 'The previous frame (' + before.frame_key + ') is not confirmed yet.'};
   }
   return {
@@ -56,6 +52,15 @@ export function carryState(row: FrameRow): CarryState {
       : 'The signs confirmed on ' + before.frame_key + ', carried onto this frame and fitted; A again saves and goes on (A)',
   };
 }
+
+/** Confirmed on this page and still on its way to the server: Apply previous sends its boxes along (applyPrevious). */
+function savingConfirmed(key: string): boolean {
+  return state.inFlight.has(key) && state.edits[key]?.review_state === 'reviewed';
+}
+
+// The frame whose boxes Apply previous is carrying, and A pressed again meanwhile: it saves once they are there.
+let carrying: string | null = null;
+let saveAfterCarry = false;
 
 /** The boxes waiting for the reviewer to check their position, by index. */
 export function uncheckedIndices(work: FrameEdit): number[] {
@@ -67,16 +72,15 @@ export function uncheckedIndices(work: FrameEdit): number[] {
 }
 
 export async function applyPrevious(): Promise<void> {
-  let row = currentRow();
+  const row = currentRow();
   const apiBase = report.apiBase;
-  if (!row || !apiBase || refuseChange()) return;
-  // Confirm went on before the frame before was saved: the server carries from it once it has it.
-  if (state.inFlight.size > 0 && !state.inFlight.has(row.frame_key)) {
-    const waiting = row.frame_key;
-    await saved();
-    row = currentRow();
-    if (!row || row.frame_key !== waiting) return;
+  if (!row || !apiBase) return;
+  // A, A pressed quickly: the second one saves once the boxes are carried.
+  if (carrying === row.frame_key) {
+    saveAfterCarry = true;
+    return;
   }
+  if (refuseChange()) return;
   const carry = carryState(row);
   if (!carry.enabled) {
     // Why not, said where it is seen (a tooltip never shows on a touch screen).
@@ -91,9 +95,15 @@ export async function applyPrevious(): Promise<void> {
   }
   const work = workOf(row);
   const byHand = new Set(work.detections.filter(isPlacedByHand).map((d) => JSON.stringify(d.bbox_xyxy)));
+  // The frame before, confirmed and still on its way to the server: its boxes go with the request, nothing waits.
+  const before = previousRow(row);
+  const previous = before !== null && savingConfirmed(before.frame_key)
+    ? {frame_key: before.frame_key, detections: workOf(before).detections} : undefined;
+  carrying = key;
+  saveAfterCarry = false;
   try {
     const answer = await call<CarryAnswer>('POST', apiBase + '/frame/' + key + '/apply-previous',
-      {run_id: report.runId, detections: work.detections});
+      {run_id: report.runId, detections: work.detections, previous});
     // The reviewer may have moved on while the server answered.
     if (state.currentKey !== key) return;
     // Every box comes back anew: one placed by hand that the carry kept where it was is still placed by hand.
@@ -122,8 +132,16 @@ export async function applyPrevious(): Promise<void> {
     if (state.selected < 0 || state.selected >= work.detections.length) state.selected = work.detections.length > 0 ? 0 : -1;
     state.notice = null;
     carried.value = key;
+    if (saveAfterCarry) {
+      carrying = null;
+      carried.value = null;
+      await confirmFrame();
+    }
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
+  } finally {
+    if (carrying === key) carrying = null;
+    saveAfterCarry = false;
   }
 }
 
