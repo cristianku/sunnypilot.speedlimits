@@ -18,7 +18,7 @@ import JobProgress from './JobProgress.vue';
 import {jobOf, terminalActivities} from './jobs';
 import SectionHead from './SectionHead.vue';
 import Segmented from './Segmented.vue';
-import {chosenSet, identical, networksOf, regressionShort, regressionText, SET_KEYS, SET_LABEL, type SimulationList,
+import {changeLines, changeName, chosenSet, identical, networksOf, regressionShort, regressionText, SET_KEYS, SET_LABEL, type SimulationList,
   type SimulationRow} from './simulation';
 import {tabDrive} from './tabs';
 import TerminalActivity from './TerminalActivity.vue';
@@ -65,14 +65,17 @@ const startOf = (drive: SimulationRow): string => (drive.day ?? '') + (drive.whe
 const drives = computed(() => [...(payload.value?.drives ?? [])].sort((a, b) => startOf(b).localeCompare(startOf(a))));
 const hrefOf = (drive: SimulationRow): string => '/drive?drive=' + encodeURIComponent(drive.route);
 /** What a drive has for the set chosen: its replay next to the certified one, or only that it was replayed. */
-function hasOf(drive: SimulationRow): {text: string; tone: string; title: string} | null {
+function hasOf(drive: SimulationRow): {text: string; tone: string; title: string; stale: string; staleTitle: string} | null {
   const result = drive.sets[chosenSet.value];
   if (!result) return null;
   const found = drive.certified ? drive.regression[chosenSet.value] : undefined;
-  const old = result.current ? '' : ' · out of date';
-  const oldTitle = result.current ? '' : ' Replayed with other networks, car code or car settings than today’s: Compute, in the drive, replays it.';
-  if (!found) return {text: 'Replayed' + old, tone: 'dr-muted', title: oldTitle.trim()};
-  return {text: regressionShort(found) + old, tone: identical(found) ? 'dr-ok' : 'dr-bad', title: regressionText(found) + oldTitle};
+  // Out of date: an orange badge naming what changed since the replay, the versions in its tooltip.
+  const names = [...new Set((result.changed ?? []).map(changeName))];
+  const stale = result.current ? '' : 'Out of date' + (names.length ? ': ' + names.join(', ') : '');
+  const staleTitle = result.current ? '' : ['Replayed before these changes; Compute, in the drive, replays it.',
+    ...changeLines(result.changed)].join('\n');
+  if (!found) return {text: 'Replayed', tone: 'dr-muted', title: '', stale, staleTitle};
+  return {text: regressionShort(found), tone: identical(found) ? 'dr-ok' : 'dr-bad', title: regressionText(found), stale, staleTitle};
 }
 const rows = computed(() => drives.value.map((drive) => ({drive, has: hasOf(drive)})));
 
@@ -175,6 +178,7 @@ function replay(): void {
               <span v-if="drive.certified || has" class="dv-state">
                 <b v-if="drive.certified" class="dv-badge">Certified</b>
                 <span v-if="has" :class="has.tone" :title="has.title || undefined">{{ has.text }}</span>
+                <b v-if="has?.stale" class="dv-badge dv-stale-badge" :title="has.staleTitle">{{ has.stale }}</b>
               </span>
             </p>
             <span class="data-chev rt-go" aria-hidden="true">›</span>

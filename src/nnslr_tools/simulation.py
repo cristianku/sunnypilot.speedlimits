@@ -409,6 +409,32 @@ def is_current(record: dict, networks: list[dict] | None, code: dict[str, str], 
         (type_head is None or record.get('brain_type_head') == type_head)
 
 
+
+def changes(record: dict, state: dict, code: dict[str, str]) -> list[dict]:
+    """What a result was made with that is not today's, for the page to say why it is out of date: [{what, was, now}],
+    what being a role of ROLES (was/now its versions: 'version unknown' for a version not kept, '' for a network not
+    there), 'code', 'settings' or 'type_head'. Today's networks are those of the set when it is ready, else the
+    versions in use it waits to export (state 'wanted'); with neither, the networks are not compared."""
+    mine = {one['role']: one for one in record.get('networks') or []}
+    today = {one['role']: one for one in state.get('networks') or []} if state.get('ready') else {}
+    wanted = {} if today else state.get('wanted') or {}
+    found = []
+    for role in ROLES:
+        was, now = mine.get(role), today.get(role)
+        if today:
+            if (was or {}).get('sha256') != (now or {}).get('sha256'):
+                found.append({'what': role, 'was': (was or {}).get('id', ''), 'now': (now or {}).get('id', '')})
+        elif wanted and (was or {}).get('id', '') != wanted.get(role, ''):
+            found.append({'what': role, 'was': (was or {}).get('id', ''), 'now': wanted.get(role, '')})
+    if record.get('code') != code:
+        found.append({'what': 'code', 'was': '', 'now': ''})
+    if state.get('ready') and (record.get('settings') or {}) != (state.get('settings') or {}):
+        found.append({'what': 'settings', 'was': '', 'now': ''})
+    if state.get('ready') and state.get('type_head') is not None and record.get('brain_type_head') != state['type_head']:
+        found.append({'what': 'type_head', 'was': '', 'now': ''})
+    return found
+
+
 # -- the page ------------------------------------------------------------------------------------------------------------
 def _seconds(t_ns: int, t0_ns: int) -> float:
     return round((t_ns - t0_ns) / 1e9, 3)
@@ -719,7 +745,8 @@ def regression_counts(root: Path, route: str, set_key: str, entry: dict, meta: d
 
 
 def summary(root: Path, route: str, states: dict[str, dict] | None = None, code: dict[str, str] | None = None) -> dict:
-    """What a drive has, for the list and the drive's page: its results by set ({made_at, name, frames, current}), its
+    """What a drive has, for the list and the drive's page: its results by set ({made_at, name, frames, current, changed:
+    what of it is not today's}), its
     certification and, for each result, how it stands next to the certified one (regression_counts)."""
     states = states if states is not None else set_states(root)
     code = code if code is not None else code_hashes()
@@ -731,7 +758,8 @@ def summary(root: Path, route: str, states: dict[str, dict] | None = None, code:
             continue
         sets[key] = {'made_at': meta.get('made_at'), 'name': meta.get('name') or '', 'frames': meta.get('frames', 0),
                      'current': is_current(meta, states[key]['networks'] if states[key]['ready'] else None, code,
-                                           states[key].get('settings'), states[key].get('type_head'))}
+                                           states[key].get('settings'), states[key].get('type_head')),
+                     'changed': changes(meta, states[key], code)}
         counts = regression_counts(root, route, key, entry, meta) if entry else None
         if counts is not None:
             regression[key] = counts

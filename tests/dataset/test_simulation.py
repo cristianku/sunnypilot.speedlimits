@@ -298,6 +298,21 @@ def test_a_result_is_current_with_the_same_networks_code_and_settings():
     assert not simulation.is_current(made, made['networks'], made['code'], {'min_confidence': 0.5})
 
 
+
+def test_an_out_of_date_result_says_what_changed():
+    made = record([50])
+    first = made['networks'][0]
+    ready = {'ready': True, 'networks': made['networks'], 'settings': {}, 'type_head': None}
+    assert simulation.changes(made, ready, made['code']) == []
+    newer = {**first, 'id': first['id'] + '-new', 'sha256': 'e' * 64}
+    assert simulation.changes(made, {**ready, 'networks': [newer, *made['networks'][1:]]}, made['code']) == \
+        [{'what': first['role'], 'was': first['id'], 'now': first['id'] + '-new'}]
+    assert [one['what'] for one in simulation.changes(made, {**ready, 'settings': {'min_confidence': 0.5}},
+                                                      {'pipeline.py': 'd' * 64})] == ['code', 'settings']
+    # not exported yet: the versions in use it waits for
+    waiting = {'ready': False, 'networks': made['networks'], 'wanted': {first['role']: 'other'}}
+    assert simulation.changes(made, waiting, made['code'])[0] == {'what': first['role'], 'was': first['id'], 'now': 'other'}
+
 def test_a_replay_without_the_road_type_of_its_brain_is_not_current_once_the_head_is_there():
     made = record([50])
     head = 'a' * 64

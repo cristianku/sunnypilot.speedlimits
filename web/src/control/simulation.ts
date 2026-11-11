@@ -36,12 +36,20 @@ export interface SetState {
 }
 export type SetStates = Partial<Record<SetKey, SetState>>;
 
-/** A drive's replay with a set. current false: made with other networks, car code or settings than today's. */
+/** What a replay was made with that is not today's (simulation.changes): a network (its role, the version it was made
+ * with, the one of today: '' none), or the car's code, its settings, the road type of its brain. */
+export interface Change {
+  what: string;
+  was: string;
+  now: string;
+}
+/** A drive's replay with a set. current false: made with other networks, car code or settings than today's (changed). */
 export interface SetResult {
   made_at: string | null;
   name: string;
   frames: number;
   current: boolean;
+  changed?: Change[];
 }
 /** A certified drive: who certified which replay, and when. */
 export interface Certified {
@@ -165,6 +173,18 @@ export function networksOf(state: SetState | undefined): {label: string; id: str
   const list: [string, string][] = state.ready || !wanted.length ? state.networks.map((one) => [one.role, one.id]) : wanted;
   return list.sort((a, b) => ROLE_ORDER.indexOf(a[0]) - ROLE_ORDER.indexOf(b[0]))
     .map(([role, id]) => ({label: ROLE_LABEL[role] ?? role, id: id || 'version unknown'}));
+}
+
+/** A version of Models as its run's name: 'brain:2026-11-10_2051-brain-s2/brain' → '2026-11-10_2051-brain-s2'. */
+export const runOf = (id: string): string => id.replace(/^[^:/]*:/, '').split('/')[0] || id;
+const CHANGE_LABEL: Record<string, string> = {code: 'Car code', settings: 'Car settings', type_head: 'Brain road type'};
+/** What changed since a replay, short: 'Brain', 'SignNet', 'Car code'. */
+export const changeName = (change: Change): string => ROLE_LABEL[change.what] ?? CHANGE_LABEL[change.what] ?? change.what;
+/** What changed since a replay, a line each: 'Brain 2026-11-10_0111-brain-s1 → 2026-11-10_2051-brain-s2'. */
+export function changeLines(changed: Change[] | undefined): string[] {
+  return (changed ?? []).map((change) => change.what in ROLE_LABEL
+    ? changeName(change) + ' ' + (change.was ? runOf(change.was) : 'none') + ' → ' + (change.now ? runOf(change.now) : 'none')
+    : changeName(change) + ' changed');
 }
 
 // -- the comma's screen at a time -----------------------------------------------------------------------------------------

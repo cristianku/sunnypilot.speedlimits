@@ -30,7 +30,7 @@ import JobProgress from './JobProgress.vue';
 import {jobOf, terminalActivities} from './jobs';
 import Segmented from './Segmented.vue';
 import {ROAD_TYPE_LABELS, roadTypeLabel} from './speed-review';
-import {boxesAt, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
+import {boxesAt, changeLines, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
   regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
   type Source, type Summary, type VideoFrame} from './simulation';
 
@@ -138,8 +138,13 @@ const made = computed((): string => {
   const shown = view.value;
   if (!shown) return '';
   const when = isoWhen(shown.made_at);
-  return [shown.name || shown.label, when ? 'made ' + when : '',
-    result.value && !result.value.current ? 'with other networks, car code or settings than today’s' : ''].filter(Boolean).join(' · ');
+  return [shown.name || shown.label, when ? 'made ' + when : ''].filter(Boolean).join(' · ');
+});
+/** The replay shown is not the one today's set would give: what it was made with that changed since, a line each. */
+const outOfDate = computed((): string[] | null => {
+  if (!set.value || !result.value || result.value.current) return null;
+  const lines = changeLines(result.value.changed);
+  return lines.length ? lines : ['Other networks, car code or settings than today’s'];
 });
 
 // -- on the picture ---------------------------------------------------------------------------------------------------------
@@ -397,6 +402,10 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
         <p v-if="source !== 'comma' && error" class="dr-hint" id="dv-error">{{ error }}</p>
         <p v-else-if="source !== 'comma' && !answer" class="dr-hint">Loading…</p>
         <template v-else>
+          <div v-if="outOfDate" class="dr-banner dr-todo dv-stale" id="dv-stale" role="status">
+            <p><strong>Out of date</strong>: replayed before these changes. {{ running ? 'Replaying it now.' : 'Compute replays it.' }}</p>
+            <ul><li v-for="line in outOfDate" :key="line">{{ line }}</li></ul>
+          </div>
           <p v-if="made" class="dr-hint" id="dv-made">{{ made }}</p>
           <dl v-if="now" class="dv-now">
             <dt>Speed to hold</dt><dd>{{ now.hold }}</dd>
