@@ -834,8 +834,9 @@ class ReviewService:
         where the sign should be has ``check_position: true`` and no save accepts it until that is gone.
         A box keeps its labels only when the reviewer changed it on screen: one as the model proposed it, or as
         this frame was confirmed before (a drive reviewed again), takes those of the previous frame. A frame of the
-        video between the seconds not saved yet (video_stand_in) works too: it has no proposals, every box carried
-        there is to check (Fit box or "Here").
+        video between the seconds not saved yet (video_stand_in) works too: it has no proposals. A sign found on no
+        box of this frame is followed from the picture before onto this one (nnslr_tools.carry_track): found, its box
+        is there with no check (``followed``); not found, it is to check (Fit box or "Here").
         """
         key = frame_key_of(frame_key)
         if body is None:
@@ -880,7 +881,8 @@ class ReviewService:
         if review is not None and review['confirmed']:
             untouched = untouched + [item for item in review['payload'].get('detections', []) if isinstance(item, dict)]
         result = carry_over(source['payload'].get('detections', []), current, width=row.get('width') or 0,
-                            height=row.get('height') or 0, source_key=source_key, proposals=untouched)
+                            height=row.get('height') or 0, source_key=source_key, proposals=untouched,
+                            follow=self._follower(snapshot, snapshot.by_key[source_key], row))
         to_check = unchecked_boxes(result['detections'])
         return {
             'route_id': snapshot.route,
@@ -892,6 +894,7 @@ class ReviewService:
             'detections': result['detections'],
             'matched': result['matched'],
             'estimated': result['estimated'],
+            'followed': result['followed'],
             'dropped': result['dropped'],
             'kept': result['kept'],
             'duplicates': result['duplicates'],
@@ -899,6 +902,43 @@ class ReviewService:
             'message': _carry_message(source_key, result),
             'save': {'run_id': snapshot.run_id, 'base_revision': review['revision'] if review else 0},
         }
+
+    def _follower(self, snapshot: RouteSnapshot, before_row: dict, row: dict):
+        """carry_over's ``follow`` from the picture of ``before_row`` to that of ``row`` (carry_track.follow), both
+        read at the size of ``row`` on the first box to follow; a picture that cannot be read follows nothing."""
+        pictures = []
+
+        def follow(old, guess):
+            from nnslr_tools import carry_track
+            if not pictures:
+                pictures.append((self._picture(snapshot, before_row, row), self._picture(snapshot, row, row)))
+            before, now = pictures[0]
+            return None if before is None or now is None else carry_track.follow(before, now, old, guess)
+        return follow
+
+    def _picture(self, snapshot: RouteSnapshot, frame: dict, size: dict):
+        """The picture of a frame (its original PNG, else its preview; a frame of the video not saved: the video
+        cache's) as BGR at the size of ``size``, or None."""
+        import cv2
+        from nnslr_tools import box_fit
+        key = frame['frame_key']
+        try:
+            if key in snapshot.position:
+                try:
+                    path = self.image_file(snapshot.route, key, 'original')[0]
+                except (ReviewRejected, OSError):
+                    path = self.image_file(snapshot.route, key, 'preview')[0]
+            else:
+                path = video_frames.preview(self.root, snapshot.route, frame['segment_index'],
+                                            frame['decoded_frame_index'])
+            img = box_fit.read_image(path)
+        except (ReviewRejected, video_frames.VideoFrameError, OSError):
+            return None
+        width, height = size.get('width'), size.get('height')
+        if type(width) is not int or type(height) is not int or width < 1 or height < 1:
+            return None
+        return img if img.shape[:2] == (height, width) else cv2.resize(img, (width, height),
+                                                                        interpolation=cv2.INTER_AREA)
 
     # ---------- saving ----------
 
@@ -953,6 +993,8 @@ def _carry_message(source_key: str, result: dict) -> str:
                      f"labelled as there")
     if result['kept']:
         parts.append(f"{result['kept']} already changed here, left as {'it is' if result['kept'] == 1 else 'they are'}")
+    if result.get('followed'):
+        parts.append(f"{result['followed']} followed from there onto {'its sign' if result['followed'] == 1 else 'their signs'}")
     if result['estimated']:
         parts.append(f"{result['estimated']} placed where {'it' if result['estimated'] == 1 else 'they'} should be: "
                      f"check {'it' if result['estimated'] == 1 else 'each'} (move it onto the sign, or remove it "

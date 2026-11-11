@@ -94,11 +94,11 @@ export async function applyPrevious(): Promise<void> {
       state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};
     }
     // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it),
-    // and the frame is saved as Enter does, but stays on screen: a wrong box is moved and saved again with Enter.
-    const shown = state.notice;
-    if (state.currentKey !== key || shown?.error) return;
+    // and the frame is saved as Enter does, but stays on screen with no message: a wrong box is moved and saved again
+    // with Enter.
+    if (state.currentKey !== key || state.notice?.error) return;
     for (const d of work.detections) delete d.check_position;
-    await confirmAndStay(shown?.key === key ? shown.text : '');
+    await confirmAndStay();
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   }

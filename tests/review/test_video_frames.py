@@ -309,7 +309,8 @@ def test_a_later_read_of_the_same_frame_keeps_one_row(drive):
 
 def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive):
     """A frame between the seconds not saved yet: Apply previous carries the boxes of the frame of the report just
-    before it, each to check (it has no proposals), and Fit box fits on its picture. Neither saves anything."""
+    before it (it has no proposals), each followed onto its sign in its picture (carry_track), and Fit box fits on its
+    picture. Neither saves anything."""
     root, video, rows, server = drive
     manifest = root / 'derived/frames' / ROUTE / '0' / video_frames.VIDEO_MANIFEST
 
@@ -325,8 +326,9 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     assert status == 200, answer
     assert answer['source_frame_key'] == '0/1' and answer['save'] == {'run_id': RUN_ID, 'base_revision': 0}
     carried = answer['detections']
-    assert [box['bbox_xyxy'] for box in carried] == [BOX['bbox_xyxy']] and carried[0]['value_kph'] == 50
-    assert carried[0]['check_position'] is True and answer['to_check']
+    assert len(carried) == 1 and carried[0]['value_kph'] == 50 and answer['followed'] == 1
+    assert all(abs(a - b) < 1 for a, b in zip(carried[0]['bbox_xyxy'], BOX['bbox_xyxy']))
+    assert 'check_position' not in carried[0] and not answer['to_check']
     # The frame before is the one of the report before it in time: the next second starts at its own picture.
     status, answer = apply('0/1041')
     assert status == 409 and answer['error'] == 'previous_not_confirmed' and '0/2' in answer['message']
@@ -343,7 +345,8 @@ def test_apply_previous_and_fit_box_work_on_a_frame_of_the_video_not_saved(drive
     status, _response, data = server.request('GET', f'/api/route/{ROUTE}/page')
     assert status == 200 and json_of(data)['videos'] == {'0': None}
     # A box still to check is refused, as on any frame; checked ("Here", or Fit box on its sign) it is saved.
-    assert server.post_frame(ROUTE, '0/1025', body(carried))[0] == 400 and not manifest.exists()
+    assert server.post_frame(ROUTE, '0/1025', body([dict(carried[0], check_position=True)]))[0] == 400
+    assert not manifest.exists()
     checked = [{name: value for name, value in box.items() if name != 'check_position'} for box in carried]
     assert server.post_frame(ROUTE, '0/1025', body(checked))[0] == 200
     status, answer = apply('0/1026')

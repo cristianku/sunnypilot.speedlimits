@@ -225,13 +225,15 @@ def match_boxes(olds: list, news: list, *, width: float, height: float) -> dict:
 
 
 def carry_over(previous: list, current: list, *, width: float, height: float, source_key: str,
-               proposals: list | None = None) -> dict:
+               proposals: list | None = None, follow=None) -> dict:
     """The boxes of this frame after "Apply previous", and what happened to each previous box.
 
     ``previous``: the confirmed boxes of the previous frame. ``current``: the boxes of this frame as
     they are now (the model proposals, or the reviewer's working copy). ``proposals``: the model
-    proposals of this frame, to tell boxes the reviewer changed (kept as they are) from the others.
-    Returns {'detections', 'matched', 'estimated', 'dropped', 'kept'}; a carried box has
+    proposals of this frame, to tell boxes the reviewer changed (kept as they are) from the others. ``follow``:
+    ``follow(old box, expected box)`` gives where a sign found on no box of this frame is in its picture, or None
+    (:func:`nnslr_tools.carry_track.follow` on the two pictures); a box placed there needs no check.
+    Returns {'detections', 'matched', 'estimated', 'followed', 'dropped', 'kept'}; a carried box has
     ``carried_from`` (the previous frame key) and, when its position is a guess, ``check_position``.
     """
     unit = width / 1344 if width else 1.0
@@ -246,6 +248,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
 
     matched = 0
     estimated = 0
+    followed = 0
     kept = 0
     for i, (j, scale, shift) in taken_old.items():
         target = result[j]
@@ -266,7 +269,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
         # truck's sticker) is placed like a sign: the truck ahead is still there.
         if i in taken_old or (old.get('family') == 'not_a_sign' and old.get('sign_type') != 'on_vehicle'):
             continue
-        box = _box(old)
+        box = box_before = _box(old)
         if taken_old:
             # Moved like the nearest sign that was found (same gantry, same distance: same move).
             center = _center(box)
@@ -295,6 +298,10 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
             else:
                 estimated = estimated + 1
             continue
+        # Its own pixels from the frame before, found in this picture: the sign is there.
+        found = follow(box_before, clipped) if follow is not None else None
+        if found is not None:
+            clipped = found
         item = {'bbox_xyxy': [round(value, 1) for value in clipped], 'score': None, 'model_label': None,
                 'class_id': None, 'review_state': 'pending', 'visibility': 'unknown', 'occlusion': 'unknown'}
         for key in CARRIED_KEYS:
@@ -303,9 +310,12 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
         item['value_state'] = 'unknown' if item.get('value_kph') is None else 'reviewed'
         item['detection_id'] = _new_id(ids, source_key)
         item[FROM_FIELD] = source_key
-        item[CHECK_FIELD] = True
         result.append(item)
-        estimated = estimated + 1
+        if found is not None:
+            followed = followed + 1
+        else:
+            item[CHECK_FIELD] = True
+            estimated = estimated + 1
 
     # A model box left over on a sign that already has its carried box is the same sign twice: the
     # reviewer would delete it (a proposal left out is recorded as rejected).
@@ -319,8 +329,8 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
                 break
     for j in reversed(duplicates):
         del result[j]
-    return {'detections': result, 'matched': matched, 'estimated': estimated, 'dropped': dropped, 'kept': kept,
-            'duplicates': len(duplicates)}
+    return {'detections': result, 'matched': matched, 'estimated': estimated, 'followed': followed, 'dropped': dropped,
+            'kept': kept, 'duplicates': len(duplicates)}
 
 
 def _carry(target: dict, old: dict, source_key: str, height: float) -> bool:

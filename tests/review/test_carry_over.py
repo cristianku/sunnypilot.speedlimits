@@ -413,3 +413,49 @@ def test_a_tall_box_with_another_panel_still_matches_a_square_one():
     disc = proposal(disc_of(tall_closer(tall, 1.2)), 'p', 'maximum_speed', 30)
     result = carry_over([old], [disc], width=W, height=H, source_key='1/2', proposals=[disc])
     assert result['matched'] == 1 and result['detections'][0]['bbox_xyxy'] == disc['bbox_xyxy']
+
+
+# ---------- followed from the picture before (nnslr_tools.carry_track) ----------
+
+def iou(a, b):
+    w = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    h = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    return w * h / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - w * h)
+
+
+def _road(sign_at=None, side=40.0):
+    """A grey road picture with noise, and a sign drawn at ``sign_at`` (its top left) of ``side`` pixels."""
+    import cv2
+    import numpy as np
+    picture = np.random.default_rng(3).integers(90, 110, (H, W, 3)).astype(np.uint8)
+    if sign_at is not None:
+        x, y = sign_at
+        centre, radius = (round(x + side / 2), round(y + side / 2)), round(side / 2)
+        cv2.circle(picture, centre, radius, (0, 0, 220), -1)
+        cv2.circle(picture, centre, round(radius * 0.7), (255, 255, 255), -1)
+        cv2.putText(picture, '50', (round(x + side * 0.22), round(y + side * 0.65)), cv2.FONT_HERSHEY_SIMPLEX,
+                    side / 60, (0, 0, 0), 2)
+    return picture
+
+
+def test_a_sign_is_followed_onto_the_next_picture():
+    from nnslr_tools.carry_track import follow
+    before, now = _road((600, 300), 40), _road((609, 296), 44)
+    found = follow(before, now, [600, 300, 640, 340], [600, 300, 640, 340])
+    assert found is not None and iou(found, [609, 296, 653, 340]) > 0.85
+    # No sign there any more, or a flat picture: nothing is followed.
+    assert follow(before, _road(None), [600, 300, 640, 340], [600, 300, 640, 340]) is None
+    flat = _road(None) * 0 + 100
+    assert follow(flat, flat, [600, 300, 640, 340], [600, 300, 640, 340]) is None
+
+
+def test_carry_over_places_a_followed_box_with_no_check():
+    sign = box_at(600, 330, 30)
+    moved = [sign[0] + 6, sign[1] - 3, sign[2] + 8, sign[3] - 1]
+    result = carry_over([confirmed(sign)], [], width=W, height=H, source_key='1/1',
+                        follow=lambda old, guess: moved)
+    item = result['detections'][0]
+    assert result['followed'] == 1 and result['estimated'] == 0
+    assert item['bbox_xyxy'] == moved and 'check_position' not in item and item['carried_from'] == '1/1'
+    result = carry_over([confirmed(sign)], [], width=W, height=H, source_key='1/1', follow=lambda old, guess: None)
+    assert result['followed'] == 0 and result['estimated'] == 1 and result['detections'][0]['check_position'] is True
