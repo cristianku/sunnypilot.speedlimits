@@ -8,6 +8,7 @@
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carAskOf, carDetection, carSignLeft} from './car';
+import {carried} from './carry';
 import {selectedBox} from './current';
 import {coarsePointer} from './dom';
 import {drawAi, drawCar, drawStage, sceneScale, WET_TAG} from './overlay';
@@ -142,6 +143,8 @@ const inset = computed(() => {
     </svg>
     <ZoomInset v-if="inset && selectedBox" :style="inset" :row="row" :detection="selectedBox"/>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
+    <!-- After A: the boxes carried, not saved yet; A again saves and goes on (carry.ts). -->
+    <div class="stage-hint carry-hint" id="carryHint" :hidden="state.drawing || carried !== row.frame_key"><span>Press A to confirm</span></div>
   </div>
   <PhotoGrip :row="row" :size="size"/>
 </template>
