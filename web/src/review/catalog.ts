@@ -24,7 +24,7 @@ export const FAMILIES: readonly Family[] = [
   {id: 'other_sign', label: 'Other sign', hasValue: false, minor: true},
   {id: 'not_a_sign', label: 'Not a sign', hasValue: false, minor: true},
 ];
-export const QUICK_VALUES: readonly number[] = [10, 20, 30, 40, 50, 60, 70, 80, 100, 120];
+export const QUICK_VALUES: readonly number[] = [10, 15, 20, 30, 40, 50, 60, 70, 80, 100, 120];
 /** The limits of a US speed sign (MUTCD R2-1), in mph: every 5 from 15 to 80. */
 export const US_VALUES: readonly number[] = [15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80];
 

@@ -29,9 +29,12 @@ function keyAt(segment: number, decoded: number): string {
 }
 
 /** The walk of Confirm reaches the frame: a row of the report, or a frame of the video right after one confirmed, with a
- * box or with no sign (the video is walked frame by frame, never a second at a time). */
+ * box or with no sign (the video is walked frame by frame, never a second at a time). Confirm goes on before the save
+ * has come back (confirm.ts): a frame still saving counts as confirmed, else the walk would jump to the next second. */
 function walked(segment: number, decoded: number): boolean {
-  return byFrame.value.has(segment + '/' + decoded) || (decoded > 0 && frameStatus(keyAt(segment, decoded - 1)) === 'done');
+  if (byFrame.value.has(segment + '/' + decoded)) return true;
+  const status = decoded > 0 ? frameStatus(keyAt(segment, decoded - 1)) : 'todo';
+  return status === 'done' || status === 'saving';
 }
 
 /** The frames of the video in the cell of a picture at 1 a second, [first, end) in its segment's video; null: the cell
