@@ -1,9 +1,11 @@
 <script setup lang="ts">
 // Train › Pipeline: our networks trained one after the other, each with the choices of its own section (its signs, where
 // it starts...), each a job of
-// its own (POST /api/panel/pipeline; the server starts the next one when one ends well). A classifier after the
-// cutter learns the mistakes of that new cutter. While it runs: the queue, the training at work, "Stop after this
-// one". Below, folded: the first pipeline of all, the detector and the reader (helpers/3_train.sh).
+// its own (POST /api/panel/pipeline; the server starts the next one when one ends well). Each step after another on
+// the networks the pipeline has just trained: a classifier learns the mistakes of the new cutter, the brain reads its
+// signs with the new cutter, classifier and applicability network (#71); once all ended well, every network trained
+// goes in use (Models). While it runs: the queue, the training at work, "Stop after this one". Below, folded: the
+// first pipeline of all, the detector and the reader (helpers/3_train.sh).
 import {computed, ref} from 'vue';
 import {isoWhen, sentence} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, CutterFamilies, Job, PanelStatus, PipelineAction,
@@ -17,7 +19,7 @@ import type {NetworkStartChoice, StartRole} from './network-start';
 import NetworkStartPicker from './NetworkStartPicker.vue';
 import type {BrainChoice} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
-import type {SignNetworksChoice} from './sign-networks';
+import {SIGN_PARTS, type SignNetworksChoice, type SignPart} from './sign-networks';
 import SignNetworksPicker from './SignNetworksPicker.vue';
 import Segmented from './Segmented.vue';
 import TrainStart from './TrainStart.vue';
@@ -34,7 +36,7 @@ const STEPS: {action: PipelineAction; label: string; text: string}[] = [
   {action: 'train_cutter', label: 'Cutter', text: 'A new SignNet. About 80 minutes.'},
   {action: 'train_classifier', label: 'Classifier', text: 'Learns the signs and the cutter’s mistakes. A few hours.'},
   {action: 'train_decider', label: 'Applicability', text: 'Three versions, compared. About 15 minutes.'},
-  {action: 'train_brain', label: 'Brain', text: 'One seed, or three, from your speed on every drive with sunnypilot off and its logs read, the next limit from the signs the networks chosen below read, those of another road left out. About 5 minutes (15 for three), and about 40 s for each drive they have not read yet.'},
+  {action: 'train_brain', label: 'Brain', text: 'One seed, or three, from your speed on every drive with sunnypilot off and its logs read, the next limit from the signs read by the networks trained before it or chosen below, those of another road left out. About 5 minutes (15 for three), and about 40 s for each drive they have not read yet.'},
 ];
 const LABEL = Object.fromEntries(STEPS.map((step) => [step.action, step.label])) as Record<PipelineAction, string>;
 
@@ -46,12 +48,15 @@ function toggle(action: PipelineAction, value: boolean): void {
 }
 const chosen = computed(() => STEPS.filter((step) => on(step.action)));
 const withCutter = computed(() => on('train_cutter'));
+/** The networks that read the brain's signs which the pipeline trains before it: those, not a choice (#71). */
+const TRAINS: Record<SignPart, PipelineAction> = {cutter: 'train_cutter', classifier: 'train_classifier', decider: 'train_decider'};
+const trained = computed((): SignPart[] => SIGN_PARTS.map(({part}) => part).filter((part) => on(TRAINS[part])));
 
 function optionsOf(action: PipelineAction): ActionOptions {
   if (action === 'train_cutter') return {families: families.value, ...props.starts.cutter.option, ...props.cutterChoices.options};
   if (action === 'train_classifier') return props.choices.options;
   if (action === 'train_decider') return props.starts.decider.option;
-  if (action === 'train_brain') return {...props.brainChoices.option, ...props.starts.brain.option, ...props.signNetworks.option};
+  if (action === 'train_brain') return {...props.brainChoices.option, ...props.starts.brain.option, ...props.signNetworks.optionOf(trained.value)};
   return {};
 }
 /** Why it cannot start now ('' when it can): the reason of a training chosen (the classifier after a new cutter needs
@@ -67,8 +72,8 @@ const reason = computed(() => {
   }
   if (on('train_cutter') && props.cutterChoices.invalid) return sentence('Cutter: ' + props.cutterChoices.invalid);
   if (on('train_classifier') && props.choices.invalid) return sentence('Classifier: ' + props.choices.invalid);
-  if (on('train_brain') && props.signNetworks.missing.length)
-    return sentence('Brain: no ' + props.signNetworks.missing.join(', no ') + ' to read its signs with');
+  const missing = props.signNetworks.missingOf(trained.value);
+  if (on('train_brain') && missing.length) return sentence('Brain: no ' + missing.join(', no ') + ' to read its signs with');
   return '';
 });
 const startLabel = computed(() => chosen.value.length === 1 ? 'Train ' + chosen.value[0]!.label.toLowerCase()
@@ -81,10 +86,11 @@ function start(): void {
       + props.cutterChoices.words + ')'
     : step.action === 'train_classifier' ? 'the classifier' + props.choices.words + (withCutter.value ? ', on that new cutter' : '')
       : step.action === 'dataset' ? 'the import of the reviews'
-        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words + props.starts.brain.words + props.signNetworks.words
+        : step.action === 'train_brain' ? 'the brain' + props.brainChoices.words + props.starts.brain.words + props.signNetworks.wordsOf(trained.value)
           : LABEL[step.action].toLowerCase() + props.starts.decider.words);
   emit('pipeline', steps, 'One after the other on the GPU, each a training of its own: ' + words.join(', then ')
-    + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts.');
+    + '. The next one starts when one ends well; a failed one stops the pipeline. Each run is a new one, named by the time it starts. '
+    + 'Once all ended well, every network trained goes in use (Models; the car changes only when sent to it).');
 }
 
 /** The last pipeline (status.pipeline): the queue while it runs, a line once it ended. */
@@ -152,7 +158,7 @@ const ENDED: Record<string, string> = {done: 'done', failed: 'failed', stopped: 
         <div v-else-if="on(step.action) && step.action === 'train_brain'" class="pl-choices">
           <NetworkStartPicker :start="starts.brain" id="pipeline-brain-start"/>
           <BrainChoices :choices="brainChoices" id="pipeline-brain"/>
-          <SignNetworksPicker :choice="signNetworks" id="pipeline-brain"/>
+          <SignNetworksPicker :choice="signNetworks" :trained="trained" id="pipeline-brain"/>
         </div>
       </li>
     </ol>

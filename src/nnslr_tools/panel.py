@@ -156,15 +156,26 @@ RUN_LINES = {
     'try_on_comma': (re.compile(r'^== Try on the comma: SignNet ([^\s,]+)', re.MULTILINE),),
 }
 # Train › Pipeline: our networks trained one after the other, in this order, each a job of its own with the choices of
-# its own button (start()); the next one starts when one ends well (advance_pipeline), the classifier on the SignNet the
-# pipeline has just trained. The plan and how far it is: PIPELINE_FILE in the panel's logs.
+# its own button (start()); the next one starts when one ends well (advance_pipeline), each on the networks the pipeline
+# has just trained: the classifier on its SignNet, the brain's signs read with its cutter, classifier and applicability
+# network (#71). Once all ended well, every network it trained is put in use (_put_in_use). The plan and how far it is:
+# PIPELINE_FILE in the panel's logs.
 PIPELINE_ORDER = ('dataset', 'train_cutter', 'train_classifier', 'train_decider', 'train_brain')
 PIPELINE_FILE = 'pipeline.json'
 # How often the pipeline looks whether its training ended, besides the moment its process ends (also after a restart
 # of this server, which loses that process).
 PIPELINE_WATCH_SECONDS = 20
-# The classifier's cutter while a pipeline is only checked: the SignNet it trains before, unknown until then.
-PIPELINE_CUTTER = 'pipeline'
+# A network a pipeline trains before the step that uses it, while the pipeline is only checked: unknown until then (the
+# classifier's cutter, the networks that read the brain's signs).
+PIPELINE_NETWORK = 'pipeline'
+# The role of the network each training of a pipeline makes.
+PIPELINE_ROLES = {'train_cutter': 'cutter', 'train_classifier': 'classifier', 'train_decider': 'decider',
+                  'train_brain': 'brain'}
+# The applicability network a pipeline takes of the three versions its training makes: the variant of the one in use,
+# this one when none is.
+PIPELINE_DECIDER_VARIANT = 'full'
+# Each network in the line of a pipeline that put it in use.
+PIPELINE_WORDS = {'cutter': 'cutter', 'classifier': 'classifier', 'decider': 'applicability', 'brain': 'brain'}
 # The actions that take a SignNet of the Models tab ({'signnet': run}).
 SIGNNET_ACTIONS = ('send_to_car', 'try_on_comma')
 # The cutter's training (scripts/run_signnet.sh NAME): the car's band, always, and the boxes it learns to find
@@ -2254,7 +2265,7 @@ class Panel:
             simulation.uncertify(self.root, route)
         return {'ok': True, 'summary': simulation.summary(self.root, route, self._simulation_sets())}
 
-    def _brain_choices(self, options: dict) -> dict:
+    def _brain_choices(self, options: dict, check_only: bool = False) -> dict:
         """The variables of scripts/run_brain.sh from the options of Train › Brain ({'works', 'road', 'types', 'pool',
         'seeds'}), the usual ones when not given: the roadworks, the kinds of road and the road types on, the picture as a
         grid, the three seeds.
@@ -2271,18 +2282,22 @@ class Panel:
                                                 'picture mean or grid, the seeds all or one.')
         return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
                 'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
-                'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], **self._brain_sign_networks(options)}
+                'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], **self._brain_sign_networks(options, check_only)}
 
-    def _brain_sign_networks(self, options: dict) -> dict:
+    def _brain_sign_networks(self, options: dict, check_only: bool = False) -> dict:
         """The variables of the networks that read the brain's signs (BRAIN_SIGN_NETWORKS): a finished version of
         Models for each one chosen (a SignNet the comma runs, a classifier, an applicability network that is not a smoke
         run), nothing for one not chosen (scripts/run_brain.sh takes the one in use). Refused when no applicability
-        network is in use nor chosen: the brain would learn from the signs of other roads, which the car leaves out."""
+        network is in use nor chosen: the brain would learn from the signs of other roads, which the car leaves out.
+        check_only: a pipeline only checked, whose trainings before the brain make some of them (PIPELINE_NETWORK)."""
         from nnslr_tools.preannotate import networks_in_use
         found = {}
         for key, (role, variable) in BRAIN_SIGN_NETWORKS.items():
             chosen = options.get(key)
             if chosen is None:
+                continue
+            if check_only and chosen == PIPELINE_NETWORK:
+                found[variable] = chosen
                 continue
             entry = next((entry for entry in self.models_index.artifacts((role,))[role] if entry['id'] == chosen), None)
             if entry is None:
@@ -2464,7 +2479,7 @@ class Panel:
             if (options or {}).get(key) is not None and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':
-            start_env.update(self._brain_choices(options or {}))
+            start_env.update(self._brain_choices(options or {}, check_only))
         for key in ('openpilot', 'brains'):
             if (options or {}).get(key) is not None and action != 'regression':
                 raise PanelError(400, 'bad_option', 'Only "Run the regression" takes ' + key + '.')
@@ -2473,7 +2488,7 @@ class Panel:
         cutter_choice = (options or {}).get('cutter')
         if cutter_choice is not None and action != 'train_classifier':
             raise PanelError(400, 'bad_option', 'Only "Train the classifier" takes a cutter.')
-        if cutter_choice is not None and not (check_only and cutter_choice == PIPELINE_CUTTER):
+        if cutter_choice is not None and not (check_only and cutter_choice == PIPELINE_NETWORK):
             start_env['NNSLR_CUTTER'] = self._classifier_cutter(cutter_choice)
         # The settings of the training changed in Train (nnslr_tools.train_settings): the variables its script reads.
         from nnslr_tools import train_settings
@@ -2777,7 +2792,15 @@ class Panel:
         for step in chosen:
             options = dict(step['options'])
             if step['action'] == 'train_classifier' and 'train_cutter' in actions:
-                options['cutter'] = PIPELINE_CUTTER
+                options['cutter'] = PIPELINE_NETWORK
+            if step['action'] == 'train_brain':
+                # Its signs read with the networks the pipeline trains before it (advance_pipeline names them then).
+                made = {key for key, (role, _) in BRAIN_SIGN_NETWORKS.items()
+                        if any(PIPELINE_ROLES.get(action) == role for action in actions)}
+                if made & set(options):
+                    raise PanelError(400, 'bad_option', 'In a pipeline the brain reads its signs with the networks '
+                                     'trained before it: reload the page.')
+                options.update(dict.fromkeys(made, PIPELINE_NETWORK))
             # Now, not hours later: a Mapillary not prepared, a start that is gone...
             self.start(step['action'], options, check_only=True)
         with self._lock:
@@ -2827,7 +2850,7 @@ class Panel:
                     return
             following = next((step for step in steps if not step.get('job')), None)
             if following is None:
-                plan.update(state='done', ended_at=_now(), reason='')
+                plan.update(state='done', ended_at=_now(), reason=self._put_in_use(plan))
                 self._write_pipeline(plan)
                 return
             options = dict(following['options'])
@@ -2835,6 +2858,14 @@ class Panel:
             if following['action'] == 'train_classifier' and cutter is not None:
                 run = _run_of(self.logs / (cutter['job'] + '.log'), 'train_cutter')
                 options['cutter'] = f'cutter:{run}/{SIGNNET_PART}' if run else ''
+            if following['action'] == 'train_brain':
+                trained = self._pipeline_trained(steps)
+                for key, (role, _) in BRAIN_SIGN_NETWORKS.items():
+                    if any(PIPELINE_ROLES.get(step['action']) == role for step in steps):
+                        # A training of the pipeline whose run cannot be told: refused by start(), never the one in use.
+                        options[key] = trained.get(role, '')
+                # Kept in the plan: the applicability network put in use at the end is the one it read with.
+                following['options'] = options
             try:
                 # A busy GPU (no card free) is start()'s 'busy', as a busy train group: the pipeline waits for it.
                 job = self.start(following['action'], options or None)
@@ -2849,6 +2880,60 @@ class Panel:
             following['job'] = job['id']
             plan['reason'] = ''
             self._write_pipeline(plan)
+
+    def _pipeline_trained(self, steps: list[dict]) -> dict[str, str]:
+        """The networks a pipeline's trainings that ended well have made, by role, as Models names them (#71): the
+        cutter's SignNet, the classifier, the applicability network the brain read its signs with, else of the variant in
+        use (PIPELINE_DECIDER_VARIANT when none is), the brain of its one seed or, of three, the one with the smallest
+        mean speed error on validation."""
+        from nnslr_tools.preannotate import networks_in_use
+        from nnslr_tools.runs import EXPERIMENT_DIR
+        found = {}
+        for step in steps:
+            role = PIPELINE_ROLES.get(step['action'])
+            if role is None or not step.get('job') or self._job_state(step['job']) != 'ok':
+                continue
+            run = _run_of(self.logs / (step['job'] + '.log'), step['action'])
+            if run is None:
+                continue
+            if role == 'cutter':
+                found[role] = f'cutter:{run}/{SIGNNET_PART}'
+            elif role == 'classifier':
+                found[role] = f'classifier:{run}/classifier'
+            elif role == 'decider':
+                read = next((item['options'].get('sign_decider') for item in steps
+                             if item['action'] == 'train_brain' and item.get('job')), None)
+                in_use = networks_in_use(self.root).get('decider', '')
+                variant = in_use.rsplit('/', 1)[-1] if in_use.startswith('decider:') else PIPELINE_DECIDER_VARIANT
+                found[role] = read if isinstance(read, str) and read.startswith(f'decider:{run}/') \
+                    else f'decider:{run}/{EXPERIMENT_DIR}/{variant}'
+            else:
+                seeds = [entry for entry in self.models_index.artifacts(('brain',))['brain']
+                         if entry['finished'] and re.fullmatch(re.escape(run) + r'-s[0-9]', entry['run'])]
+                error = lambda entry: (entry.get('validation') or {}).get('mean_error_kph')  # noqa: E731
+                best = min(seeds, key=lambda entry: (error(entry) is None, error(entry) or 0.0, entry['run']),
+                           default=None)
+                if best is not None:
+                    found[role] = best['id']
+        return found
+
+    def _put_in_use(self, plan: dict) -> str:
+        """A pipeline whose trainings all ended well puts every network they made in use (models/active.json, as
+        Models › Use this one; not the car), #71. Its last line: which went in use, and which could not and why."""
+        done, refused = [], []
+        for role, model_id in self._pipeline_trained(plan['steps']).items():
+            name = PIPELINE_WORDS[role] + ' ' + model_id.split(':', 1)[1].split('/', 1)[0] \
+                + (' (' + model_id.rsplit('/', 1)[-1] + ')' if role == 'decider' else '')
+            try:
+                self.models_index.set_active(role, model_id, who=plan.get('by'), via='local')
+            except ModelChoiceError as error:
+                refused.append(name + ', ' + error.message[0].lower() + error.message[1:].rstrip('.'))
+                continue
+            done.append(name)
+        if done:
+            print(f'Panel: the pipeline put in use {", ".join(done)}', flush=True)
+        return ' '.join((['Put in use: ' + ', '.join(done) + '.'] if done else [])
+                        + (['Not put in use: ' + '; '.join(refused) + '.'] if refused else []))
 
     def pipeline_view(self) -> dict | None:
         """The last pipeline for the page: {'state': running|done|failed|stopped, 'started_at', 'ended_at', 'by',

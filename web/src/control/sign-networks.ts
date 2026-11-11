@@ -14,6 +14,9 @@ export const SIGN_PARTS: {part: SignPart; label: string; option: 'sign_cutter' |
   {part: 'classifier', label: 'Classifier', option: 'sign_classifier'},
   {part: 'decider', label: 'Applicability', option: 'sign_decider'},
 ];
+const WORD: Record<SignPart, string> = {cutter: 'cutter', classifier: 'classifier', decider: 'applicability network'};
+/** "a", "a and b", "a, b and c". */
+const listed = (items: string[]): string => items.length > 1 ? items.slice(0, -1).join(', ') + ' and ' + items.at(-1) : items[0] ?? '';
 
 export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelVersion[] | undefined) {
   /** A finished version that can read the signs as the comma does: a SignNet of its band and grid, a classifier with
@@ -46,29 +49,42 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
     decider: computed({get: () => keyOf('decider'), set: (value: string) => { picked.value = {...picked.value, decider: value}; }}),
   });
   const versionOf = (part: SignPart): ModelVersion | null => versions(part).find((version) => version.id === keys[part]) ?? null;
+  /** In a pipeline, the parts it trains before the brain (#71): those read its signs, not a choice made here; [] in
+   * Train › Brain. */
+  const own = (trained: readonly SignPart[]) => SIGN_PARTS.filter(({part}) => !trained.includes(part));
   /** The parts with none to choose, once Models answered (none while it loads): the training is refused without them
    * (no applicability, no brain). */
-  const missing = computed(() => SIGN_PARTS.some(({part}) => versionsOf(part) === undefined) ? []
-    : SIGN_PARTS.filter(({part}) => versionOf(part) === null).map(({label}) => label.toLowerCase()));
-  /** The options of its training, all three named (a network put in use meanwhile changes nothing). */
-  const option = computed((): ActionOptions => Object.fromEntries(SIGN_PARTS.flatMap(({part, option: key}) => {
+  const missingOf = (trained: readonly SignPart[] = []): string[] => SIGN_PARTS.some(({part}) => versionsOf(part) === undefined) ? []
+    : own(trained).filter(({part}) => versionOf(part) === null).map(({label}) => label.toLowerCase());
+  /** The options of its training, all those chosen here named (a network put in use meanwhile changes nothing). */
+  const optionOf = (trained: readonly SignPart[] = []): ActionOptions => Object.fromEntries(own(trained).flatMap(({part, option: key}) => {
     const version = versionOf(part);
     return version ? [[key, version.id]] : [];
-  })));
-  /** The choice in words, after the training's own: ", its signs read with SignNet 896 × 288 29 Oct 14:02 (in use), ...". */
-  const words = computed(() => {
-    const named = SIGN_PARTS.flatMap(({part}) => {
+  }));
+  /** The choice in words, after the training's own: ", its signs read with SignNet 896 × 288 29 Oct 14:02 (in use), ...";
+   * in a pipeline "the cutter and the classifier trained just before" first. */
+  const wordsOf = (trained: readonly SignPart[] = []): string => {
+    const before = SIGN_PARTS.filter(({part}) => trained.includes(part)).map(({part}) => 'the ' + WORD[part]);
+    const named = [...before.length ? [listed(before) + ' trained just before'] : [], ...own(trained).flatMap(({part}) => {
       const version = versionOf(part);
       return version ? [titleOf(version) + (version.in_use ? ' (in use)' : '')] : [];
-    });
+    })];
     return named.length ? ', its signs read with ' + named.join(', ') : '';
-  });
+  };
   /** The line under the choice. */
-  const note = computed((): {text: string; warn: boolean} => missing.value.length
-    ? {text: 'No ' + missing.value.join(', no ') + ' to read the signs with: train one, or the brain cannot start.', warn: true}
-    : {text: 'The signs the brain learns from are read as the car reads them: the applicability network leaves out those of '
+  const noteOf = (trained: readonly SignPart[] = []): {text: string; warn: boolean} => {
+    const missed = missingOf(trained);
+    if (missed.length) return {text: 'No ' + missed.join(', no ') + ' to read the signs with: train one, or the brain cannot start.', warn: true};
+    const before = SIGN_PARTS.filter(({part}) => trained.includes(part)).map(({part}) => WORD[part]);
+    return {text: (before.length ? 'Its signs are read with the ' + listed(before) + ' trained just before. ' : '')
+      + 'The signs the brain learns from are read as the car reads them: the applicability network leaves out those of '
       + 'another road (an exit, a side road). The same three for its inputs and for the next limit; a drive not read by '
-      + 'these three is read again first.', warn: false});
-  return reactive({options, keys, missing, option, words, note});
+      + 'these three is read again first.', warn: false};
+  };
+  const missing = computed(() => missingOf());
+  const option = computed(() => optionOf());
+  const words = computed(() => wordsOf());
+  const note = computed(() => noteOf());
+  return reactive({options, keys, missing, option, words, note, missingOf, optionOf, wordsOf, noteOf});
 }
 export type SignNetworksChoice = ReturnType<typeof useSignNetworks>;
