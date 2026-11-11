@@ -94,10 +94,18 @@ export function useNetworkStart(role: StartRole, status: Ref<PanelStatus | null>
     if (split === 'same') return {text: what + ', learnt on today’s split: the test stays fair.', warn: false};
     return {text: what + '. If that run was tested on other drives, Models says the new one’s test is not fair.', warn: false};
   });
+  /** A brain's picture chosen in Picture: a start that sees it otherwise cannot go on (its memory takes other features),
+   * so the start becomes a brain that sees it so (the one in use, else the newest), else ImageNet. */
+  const followPool = (wanted: string): void => {
+    const current = version.value;
+    if (current?.role !== 'brain' || !current.pool || current.pool === wanted) return;
+    picked.value = starts.value.find(({version: item}) => item.role === 'brain' && item.pool === wanted)?.version.id
+      ?? FRESH_START;
+  };
   /** The option of its training (ActionOptions.start). */
   const option = computed((): ActionOptions => ({start: version.value?.id ?? FRESH_START}));
   /** What it starts from, in words, after the training's own: "", or ", going on from SignNet 896 × 288 29 Oct 14:02". */
   const words = computed(() => version.value ? ', going on from ' + titleOf(version.value) : '');
-  return reactive({options, key, version, note, option, words});
+  return reactive({options, key, version, note, option, words, followPool});
 }
 export type NetworkStartChoice = ReturnType<typeof useNetworkStart>;

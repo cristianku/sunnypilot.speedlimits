@@ -181,12 +181,13 @@ const DECIDER_ACTIONS = computed((): [ActionName, string][] => [
     + 'the scene' + starts.decider.words + '. About 15 minutes on the GPU.'],
 ]);
 /** What the brain learns (brain-choices.ts), the same in its section and in the pipeline; the picture as the brain it
- * goes on from sees it, once that one is chosen. */
+ * goes on from sees it, once that one is chosen, and the other picture chosen moves the start to a brain that sees it so. */
 const brainChoices = useBrainChoices();
 watch(() => starts.brain.version?.id, () => {
   const version = starts.brain.version;
   if (version?.role === 'brain' && version.pool) brainChoices.pool = version.pool;
 }, {immediate: true});
+watch(() => brainChoices.pool, (pool) => starts.brain.followPool(pool));
 /** The networks that read its signs (sign-networks.ts), the same in its section and in the pipeline. */
 const signNetworks = useSignNetworks(versionsOf);
 /** The brain's training, in its card: three seeds, to choose one in Models, or seed 0 alone. */
