@@ -117,13 +117,8 @@ ROAD_LABELER_SCRIPT = 'helpers/road_labeler.sh'
 ROAD_LABELER_NNSLR = '.venv-gpu/bin/nnslr'
 ROAD_LABELER_ACTIONS = ('road_labeler_train', 'road_labeler_predict')
 ROAD_LABELER_OPTIONS = ('dry', 'labeler', 'marks')
-# The signs on every frame of a drive's video for Speed review (nnslr_tools.sign_tracks): the cutter and the classifier
-# in use run on every decoded frame with the GPU of .venv-gpu (Models, the Signs on every frame card). Its options:
-# {'dry': 'on'} a dry run on the CPU (a few frames of one drive, apart); {'routes': 'R1,R2'} the drives, else every drive
-# with its video.
-SIGN_TRACKS_SCRIPT = 'helpers/sign_tracks.sh'
-SIGN_TRACKS_OPTIONS = ('routes',)
-SIGN_TRACKS_ROUTE = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
+# A drive's id.
+ROUTE_ID = re.compile(r'^[0-9a-f]{8}--[0-9a-f]{10}$')
 # Fit box of the review page (key C, nnslr_tools.box_fit) trained again on the boxes people drew (Models, the Fit box
 # card): the two rankers (colour trees, edge MLPs), then the box refiner, a small CNN with the PyTorch of .venv-gpu, all on
 # the CPU; refiner.onnx is replaced only when it beats the rankers on routes left out. Its options: {'dry': 'on'} only
@@ -194,7 +189,6 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
-                  'sign_tracks': ('dry', 'routes'),
                   'box_fit_train': ('dry', 'refiner'),
                   'train_classifier': ('mapillary', 'region', 'share', 'start', 'cutter'),
                   'prepare': ('proposer',), 'prepare_again': ('proposer', 'route'),
@@ -421,9 +415,6 @@ ACTIONS = {
     'road_labeler_train': {'label': 'Train the road labeler', 'group': 'train', 'command': [ROAD_LABELER_SCRIPT, 'train']},
     'road_labeler_predict': {'label': 'Prepare Speed review', 'group': 'train',
                              'command': [ROAD_LABELER_SCRIPT, 'predict']},
-    # The signs on every frame (SIGN_TRACKS_SCRIPT): the networks in use along every frame of the drives, for the boxes
-    # of Speed review. In the train group: the GPU.
-    'sign_tracks': {'label': 'Find the signs on every frame', 'group': 'train', 'command': [SIGN_TRACKS_SCRIPT]},
     # Fit box trained again (BOX_FIT_SCRIPT): the CPU only, about an hour and a quarter with the refiner. A group of its
     # own: never two at once, but beside a training on the GPU.
     'box_fit_train': {'label': 'Train Fit box', 'group': 'box_fit', 'command': [BOX_FIT_SCRIPT]},
@@ -482,8 +473,6 @@ ACTIVITIES = (
     ('train', 'road labeler', ROAD_LABELER_SCRIPT),
     ('train', 'road labeler', 'nnslr road-labeler-train'),
     ('train', 'road labeler', 'nnslr road-labeler-predict'),
-    ('train', 'sign tracks', SIGN_TRACKS_SCRIPT),
-    ('train', 'sign tracks', 'nnslr sign-tracks'),
     ('box_fit', 'Fit box training', BOX_FIT_SCRIPT),
     ('box_fit', 'Fit box training', 'nnslr train-box-fit'),
     ('box_fit', 'Fit box training', 'nnslr_tools.box_fit.refiner_train'),
@@ -514,7 +503,6 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'train_brain': 'a brain training', 'regression': 'a regression run',
                  'simulate': 'a replay of a drive',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
-                 'sign_tracks': 'a search of the signs on every frame',
                  'box_fit_train': 'a training of Fit box',
                  'update': 'a code update', 'review_box': 'a copy with the review machine',
                  'networks_prepare': 'the preparation of a package', 'networks_publish': 'a publication',
@@ -530,7 +518,7 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
                   'brain training': 'a brain training', 'regression': 'a regression run',
                   'drive replay': 'a replay of a drive',
-                  'road labeler': 'a road labeler run', 'sign tracks': 'a search of the signs on every frame',
+                  'road labeler': 'a road labeler run',
                   'Fit box training': 'a training of Fit box',
                   'code update': 'a code update', 'AI review': 'an AI review',
                   'package of the networks': 'a package of the networks', 'publish to the car': 'a publication to the car',
@@ -556,9 +544,8 @@ PAIRED_GROUPS = ('train',)
 TRAIN_ALONE = ('dataset', 'train', 'train_continue', 'train_resume', 'setup_vlm')
 # Never two of the same: each writes files of its own kind that a second one would write too (the brain's labels, the
 # regression's results, the replays of the drives and the export of the versions in use, the road labeler's marks, the
-# sign tracks, the proposers' measures).
-TRAIN_ONCE = ('train_brain', 'regression', 'simulate', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks',
-              'measure_proposer')
+# proposers' measures).
+TRAIN_ONCE = ('train_brain', 'regression', 'simulate', 'road_labeler_train', 'road_labeler_predict', 'measure_proposer')
 # Never together: the regression runs the brains along the drives the brain learns from, and the road labeler's run
 # writes the labels of Speed review the brain, the regression and a new road labeler read.
 TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain', 'road_labeler_predict')),
@@ -568,12 +555,12 @@ TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain
 TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain',
                   'classifier training': 'train_classifier', 'regression': 'regression',
                   'drive replay': 'simulate',
-                  'road labeler': 'road_labeler_train', 'sign tracks': 'sign_tracks',
+                  'road labeler': 'road_labeler_train',
                   'dataset and training': 'train', 'GPU training': 'train'}
 # The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
 EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
                  'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
-                 'road_labeler_predict', 'sign_tracks')
+                 'road_labeler_predict')
 # The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
 # replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
 SHARED_GPU = {'simulate': 2 * 1024}
@@ -583,7 +570,7 @@ SHARED_GPU = {'simulate': 2 * 1024}
 # Their pair rules stay (_pair_apart); the others keep a card of their own.
 SHARED_TRAINING_MB = {'train_classifier': 4 * 1024, 'train_cutter': 4 * 1024, 'train_decider': 4 * 1024}
 # Of those, the ones whose dry run ({'dry': 'on'}, --dry-run) runs on the CPU and takes no card.
-DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'sign_tracks')
+DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict')
 # The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
 # most free memory, shared with what else runs there.
 GPU_PROPOSERS = ('vietnam', 'ours', 'qwen')
@@ -1228,10 +1215,10 @@ class Panel:
             return
         # The runs of the panel's trainings at work: their logs (runs/<run>/..., logs/train-<run>.log) are theirs.
         taken = {job['run'] for job in payload['jobs'] if job['state'] == 'running' and job.get('run')}
-        # The road labeler, the signs on every frame and the replay of a drive started from a terminal have no log of
+        # The road labeler and the replay of a drive started from a terminal have no log of
         # their own to read: no progress, and not the whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'brain training': 'train_brain', 'road labeler': 'road_labeler', 'sign tracks': 'sign_tracks',
+                    'brain training': 'train_brain', 'road labeler': 'road_labeler',
                     'drive replay': 'simulate'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
@@ -1407,12 +1394,6 @@ class Panel:
                 # checked when it starts (start() and the helper), so a dry run on the CPU stays possible while every
                 # card is busy.
                 pass
-            elif name == 'sign_tracks' and (missing := self._sign_tracks_missing()):
-                reason = missing
-            elif name == 'sign_tracks':
-                # The networks in use on the drives' videos: no confirmed sign needed; the GPU is checked when it
-                # starts, as for the road labeler.
-                pass
             elif name == 'box_fit_train' and not (self.repo / BOX_FIT_SCRIPT).is_file():
                 reason = BOX_FIT_SCRIPT + ' is missing in this installation'
             elif name == 'box_fit_train':
@@ -1536,7 +1517,7 @@ class Panel:
         return arguments
 
     def _refuse_busy_gpu(self) -> None:
-        """A real run of the road labeler or of the signs on every frame, refused while no card is free: "The GPU is
+        """A real run of the road labeler, refused while no card is free: "The GPU is
         busy with another process: wait for it to finish, or start a dry run on the CPU." """
         cards, holders = self._gpu_states(self.system(), self.activities())
         reason = _gpu_busy(cards, holders)
@@ -1614,36 +1595,6 @@ class Panel:
                        'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written'))}
         return {'rankers': rankers, 'refiner': refiner, 'folder': str(BOX_FIT_SUMMARIES),
                 'refiner_model': (self.repo / 'src' / 'nnslr_tools' / 'box_fit' / 'refiner.onnx').is_file()}
-
-    def _sign_tracks_missing(self) -> str:
-        """Why the signs on every frame cannot be found now, or '': its helper and .venv-gpu, a drive with its video."""
-        if not (self.repo / SIGN_TRACKS_SCRIPT).is_file():
-            return SIGN_TRACKS_SCRIPT + ' is missing in this installation'
-        if not (self.repo / ROAD_LABELER_NNSLR).is_file():
-            return 'no .venv-gpu: install it with scripts/setup_v100_training_env.sh'
-        from nnslr_tools import sign_tracks
-        if not sign_tracks.video_routes(self.root):
-            return 'no drive with its video yet (Drive view makes it)'
-        return ''
-
-    def _sign_tracks_arguments(self, options: dict) -> list[str]:
-        """The arguments of helpers/sign_tracks.sh from the options (strings, checked by start()): --dry-run, and
-        --route for each drive of {'routes': 'R1,R2'} (each with its video; none: every drive, the helper's --all). A
-        real run, not a dry one, is refused while no card is free (the helper checks its card again, with its
-        memory)."""
-        from nnslr_tools import drive_video
-        dry = options.get('dry')
-        if dry not in (None, 'on'):
-            raise PanelError(400, 'bad_option', 'A dry run is "on", or none.')
-        arguments = ['--dry-run'] if dry else []
-        routes = [route.strip() for route in (options.get('routes') or '').split(',') if route.strip()]
-        for route in dict.fromkeys(routes):
-            if not SIGN_TRACKS_ROUTE.match(route) or drive_video.index(self.root, route) is None:
-                raise PanelError(400, 'bad_option', 'Unknown drive, or a drive without its video: ' + route[:40] + '.')
-            arguments.append('--route=' + route)
-        if not dry:
-            self._refuse_busy_gpu()
-        return arguments
 
     def _locations_missing(self) -> str:
         """Why the Mapillary positions cannot be fetched now, or ''."""
@@ -2219,7 +2170,7 @@ class Panel:
             raise PanelError(400, 'bad_option', 'Propose again of a drive takes its id.')
         known = {route for route, _directory in list_reports(self.root)}
         for route in routes:
-            if not SIGN_TRACKS_ROUTE.match(route) or route not in known:
+            if not ROUTE_ID.match(route) or route not in known:
                 raise PanelError(400, 'bad_option', 'No proposals to redo for this drive: ' + route[:40] + '.')
         return routes
 
@@ -2242,7 +2193,7 @@ class Panel:
             if not simulation.certified(self.root):
                 raise PanelError(409, 'not_available', 'Certify a drive first.')
             return ['--set=' + chosen, '--certified']
-        if not SIGN_TRACKS_ROUTE.match(route) or route not in drive_review.all_routes(self.root):
+        if not ROUTE_ID.match(route) or route not in drive_review.all_routes(self.root):
             raise PanelError(400, 'bad_option', 'Unknown drive: ' + route[:40] + '.')
         return ['--set=' + chosen, '--route=' + route]
 
@@ -2426,16 +2377,6 @@ class Panel:
             if not (self.repo / ROAD_LABELER_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', ROAD_LABELER_SCRIPT + ' is missing in this installation.')
             start_args += self._road_labeler_arguments(action, options or {})
-        for key in SIGN_TRACKS_OPTIONS:
-            value = (options or {}).get(key)
-            if value is not None and key not in ACTION_OPTIONS.get(action, ()):
-                raise PanelError(400, 'bad_option', '"' + ACTIONS[action]['label'] + '" does not take ' + key + '.')
-            if value is not None and not isinstance(value, str):
-                raise PanelError(400, 'bad_option', 'The ' + key + ' is a string.')
-        if action == 'sign_tracks':
-            if not (self.repo / SIGN_TRACKS_SCRIPT).is_file():
-                raise PanelError(403, 'actions_disabled', SIGN_TRACKS_SCRIPT + ' is missing in this installation.')
-            start_args += self._sign_tracks_arguments(options or {})
         if action == 'box_fit_train':
             if not (self.repo / BOX_FIT_SCRIPT).is_file():
                 raise PanelError(403, 'actions_disabled', BOX_FIT_SCRIPT + ' is missing in this installation.')

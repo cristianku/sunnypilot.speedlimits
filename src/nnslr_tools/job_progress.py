@@ -125,9 +125,6 @@ UPDATE_STEPS = (('update', 'Update the code and restart the site', 100),)
 ROAD_LABELER_TRAIN_STEPS = (('checks', 'Check the GPU', 2), ('features', 'Read the drives and their pictures', 58),
                             ('road_labeler', 'Train and measure', 40))
 ROAD_LABELER_PREDICT_STEPS = (('checks', 'Check the GPU', 3), ('predict', 'Prepare Speed review drive by drive', 97))
-# helpers/sign_tracks.sh: "== 1/2 Check the GPU ==", "== 2/2 Find the signs on every frame ==", then nnslr sign-tracks:
-# "drives: N" and one "drive i/N <route>: ..." a drive (done, done already or failed).
-SIGN_TRACKS_STEPS = (('checks', 'Check the GPU', 2), ('frames', 'Find the signs drive by drive', 98))
 # scripts/train_box_fit.sh: "1/3 The boxes drawn by people (dry run)", "2/3 Measure on routes left out, then train on
 # every box (...)" (about 15 minutes), "3/3 The box refiner: ..." (about an hour, its epochs "epoch 3/40 loss ..."); with
 # --no-refiner the first two out of 2; a dry run counts the boxes only (its command line says --dry-run).
@@ -155,12 +152,12 @@ STEPS = {'fetch': FETCH_STEPS, 'prepare': PREPARE_STEPS, 'dataset': DATASET_STEP
          'networks_publish': NETWORKS_PUBLISH_STEPS, 'road_types': ROAD_TYPES_STEPS, 'send_to_car': CAR_STEPS,
          'try_on_comma': TRY_STEPS, 'comma_restore': RESTORE_STEPS,
          'road_labeler_train': ROAD_LABELER_TRAIN_STEPS, 'road_labeler_predict': ROAD_LABELER_PREDICT_STEPS,
-         'sign_tracks': SIGN_TRACKS_STEPS, 'box_fit_train': BOX_FIT_STEPS}
+         'box_fit_train': BOX_FIT_STEPS}
 # The actions whose percent is the weighted sum of their steps (the AI's: its frames done, from its reports).
 WEIGHTED = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
             'train_brain', 'regression', 'simulate', 'dataset', 'ai_review',
             'measure_ai_reviewer', 'networks_prepare', 'networks_publish', 'road_types', 'send_to_car',
-            'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks',
+            'try_on_comma', 'comma_restore', 'road_labeler_train', 'road_labeler_predict',
             'box_fit_train')
 
 # The sub-steps of scripts/run_v100_baseline.sh ("== 4/10 ...") and the step they belong to.
@@ -188,8 +185,7 @@ SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None,
             'try_on_comma': (5, {1: 'check', 2: 'export', 3: 'verify', 4: 'copy', 5: 'prepare'}),
             'comma_restore': (2, {1: 'check', 2: 'restore'}),
             'road_labeler_train': (2, {1: 'checks', 2: 'features'}),
-            'road_labeler_predict': (2, {1: 'checks', 2: 'predict'}),
-            'sign_tracks': (2, {1: 'checks', 2: 'frames'})}
+            'road_labeler_predict': (2, {1: 'checks', 2: 'predict'})}
 TITLES = {'train_cutter': CUTTER_TITLES}
 # scripts/run_signnet.sh ("== 3/3 Train SignNet ==") and the lines that close its training.
 SIGNNET_PIPELINE = {1: 'checks', 2: 'checks', 3: 'signnet'}
@@ -215,21 +211,19 @@ MARKERS = (
     (re.compile(r'^road_labeler epoch \d'), 'road_labeler', ()),
 )
 # helpers/road_labeler.sh: how many drives it goes through ("drives:       12"), the step that goes through them, and
-# the line of each drive done (its features, or left out; for predict, its summary). helpers/sign_tracks.sh and
-# helpers/simulate_drive.sh the same.
+# the line of each drive done (its features, or left out; for predict, its summary). helpers/simulate_drive.sh
+# the same.
 LABELER_DRIVES = re.compile(r'^drives:\s+(\d+)\s*$')
-LABELER_DRIVE_STEP = {'road_labeler_train': 'features', 'road_labeler_predict': 'predict', 'sign_tracks': 'frames',
-                      'simulate': 'replay'}
+LABELER_DRIVE_STEP = {'road_labeler_train': 'features', 'road_labeler_predict': 'predict', 'simulate': 'replay'}
 LABELER_DRIVE_LINE = {
     'road_labeler_train': re.compile(r'^\S+: (?:features of \d+ steps|no finished scan or no frames, left out|'
                                      r'no scan, left out)'),
     'road_labeler_predict': re.compile(r'^(?:\{"route_id": |\S+: no scan, left out)'),
-    'sign_tracks': re.compile(r'^drive \d+/\d+ \S+: '),
     'simulate': re.compile(r'^drive \d+/\d+ \S+: '),
 }
-# nnslr sign-tracks and nnslr simulate: "minute j/M: ..." as each minute of the drive being read is done (before its
+# nnslr simulate: "minute j/M: ..." as each minute of the drive being read is done (before its
 # "drive i/N" line).
-LABELER_MINUTE = {'sign_tracks': re.compile(r'^minute (\d+)/(\d+):'), 'simulate': re.compile(r'^minute (\d+)/(\d+):')}
+LABELER_MINUTE = {'simulate': re.compile(r'^minute (\d+)/(\d+):')}
 # scripts/run_brain.sh, step 3: the segments read as the car does ("road-type signs: 125/400 segments", nnslr
 # road-type-signs), then the drives our networks read ("brain signs 3/12 <route>: ...", nnslr brain-signs), half each.
 BRAIN_SEGMENTS = re.compile(r'^road-type signs: (\d+)/(\d+) segments$')
@@ -293,10 +287,10 @@ FAILURES = (
     (re.compile(r'Connection refused|Connection timed out|No route to host|Could not resolve hostname|'
                 r'Permission denied \(publickey'),
      'The comma did not answer, or refused this server: is it on, and on the same network?'),
-    # helpers/road_labeler.sh and helpers/sign_tracks.sh refuse a real run on a busy GPU, or without one.
-    (re.compile(r'^helpers/(?:road_labeler|sign_tracks)\.sh: the GPU \d+ is busy', re.M),
+    # helpers/road_labeler.sh refuses a real run on a busy GPU, or without one.
+    (re.compile(r'^helpers/road_labeler\.sh: the GPU \d+ is busy', re.M),
      'The GPU was busy with another job: wait for it to finish, or start a dry run on the CPU.'),
-    (re.compile(r'^helpers/(?:road_labeler|sign_tracks)\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
+    (re.compile(r'^helpers/road_labeler\.sh: (?:no nvidia-smi|the GPU \d+ does not answer)', re.M),
      'No GPU answered: a dry run runs on the CPU.'),
     # helpers/simulate_drive.sh and nnslr simulate: the replay is always on a V100, never on the CPU.
     (re.compile(r'^helpers/simulate_drive\.sh: GPU \d+ has only', re.M),
@@ -394,7 +388,7 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     # The road labeler: the drives it goes through, and those done.
     labeler_drives: int | None = None
     labeler_done = 0
-    # The share of the drive being read that is done (its minutes, for sign_tracks and simulate), and those minutes: the
+    # The share of the drive being read that is done (its minutes, for simulate), and those minutes: the
     # last one done and how many it has.
     labeler_share = 0.0
     labeler_minute: tuple[int, int] | None = None

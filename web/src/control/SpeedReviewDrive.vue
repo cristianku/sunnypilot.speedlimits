@@ -25,8 +25,7 @@
 // where the map's limit changes, the ends of the other blocks and the time shown, and the block is moved in one write.
 // Every command has its key, listed under the card on a screen with a keyboard.
 // The signs of Sign review are on it too (sign-frames.ts): on the picture the boxes of the very frame the video presents,
-// 20 a second (sign-track.ts: the networks' boxes on every frame, a frame of Sign review confirmed winning on its own frame;
-// without them Sign review's frames only, one a second), solid where the frame is confirmed, dashed the proposals; a lane of the confirmed speed signs, a tap on
+// on Sign review's own frames, one a second (frame-boxes.ts), solid where the frame is confirmed, dashed the proposals; a lane of the confirmed speed signs, a tap on
 // one going there; and at the top of the side a switch Speed | Signs that changes only the side. Signs is Sign review's
 // editor (review/embed.ts): paused on a frame, its boxes are moved, resized, drawn and deleted on the picture, its chips
 // and Confirm are at the side, saved as on the page of Sign review, and its keys are Sign review's (← → a frame, ⇧ ← → a
@@ -58,7 +57,7 @@ import DriveReviewDrive from './DriveReviewDrive.vue';
 import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
 import {isOtherRoad, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns} from './sign-frames';
-import {boxesAt, type Drawn, exactFrames, reviewedFrames, type SignTrack, trackFrames, type VideoFrame, type VideoIndex} from './sign-track';
+import {boxesAt, type Drawn, exactFrames, type VideoFrame, type VideoIndex} from './frame-boxes';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
   roadTypeAt, roadTypeLabel, type RoadTypeSource, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, typeSource, type Works, worksAt, type WorksTap} from './speed-review';
 
@@ -481,35 +480,13 @@ async function readSigns(): Promise<void> {
   }
 }
 const onVisible = (): void => { if (document.visibilityState === 'visible') void readSigns(); };
-// The signs on every frame of the video (sign-track.ts, nnslr sign-tracks): read once per drive, behind the same gate as
-// Sign review's. A drive without them (404) draws boxes only on Sign review's own frames, one a second.
-const track = shallowRef<SignTrack | null>(null);
-const trackMissing = ref(false);
-const trackError = ref('');
-const NO_TRACK = 'This drive has no signs on every frame yet.';
-async function readTrack(): Promise<void> {
-  if (!showSigns) return;
-  try {
-    const answer = await api<SignTrack>(address() + '/sign-track');
-    if (!answer || !Array.isArray(answer.segments) || !Array.isArray(answer.labels)) throw new Error('The server sent a track this page cannot read.');
-    track.value = answer;
-    trackMissing.value = false;
-    trackError.value = '';
-  } catch (problem) {
-    // None made yet, or a server without them ("Not found."): the 1 Hz boxes, and a line that says so.
-    trackMissing.value = problem instanceof ApiError && problem.status === 404 && (problem.message === NO_TRACK || problem.message === 'Not found.');
-    trackError.value = trackMissing.value ? '' : messageOf(problem);
-  }
-}
-/** The video's encode index, from the player: which minutes of the track are the video's. */
+/** The video's encode index, from the player. */
 const videoIndex = shallowRef<VideoIndex | null>(null);
-const trackBoxes = computed(() => track.value && videoIndex.value ? trackFrames(track.value, videoIndex.value) : null);
-const reviewed = computed(() => reviewedFrames(signs.value?.frames ?? []));
 const ownFrames = computed(() => exactFrames(signs.value?.frames ?? []));
 /** The frame the video presents, playing or still (the player's `frame`). */
 const presented = shallowRef<VideoFrame | null>(null);
 /** Its boxes: of that very frame, never of a time near it, since the car moves the sign within a fraction of a second. */
-const frameBoxes = computed(() => boxesAt(presented.value, track.value, trackBoxes.value, reviewed.value, ownFrames.value));
+const frameBoxes = computed(() => boxesAt(presented.value, ownFrames.value));
 /** The boxes on the picture: those of the frame presented; before the player names one, Sign review's frame on the time
  * shown, as before. */
 const pictureBoxes = computed((): Drawn | null => {
@@ -518,18 +495,6 @@ const pictureBoxes = computed((): Drawn | null => {
   return frame && frame.width && frame.height ? {boxes: frame.boxes, width: frame.width, height: frame.height,
     confirmed: frame.confirmed, needsPerson: !!frame.needs_person, frame} : null;
 });
-/** Whether the drive's boxes are on every frame, in a line of the Signs side. */
-const trackLine = computed(() => {
-  if (track.value) return 'Boxes on every frame of the video (networks ' + trackNetworks.value + ')'
-    + (track.value.current === false ? ' · older networks, or minutes changed since.' : '.');
-  if (trackMissing.value) return 'This drive is not read frame by frame yet: boxes only on the frames to review, one a second'
-    + ' (Models › Find the signs on every frame).';
-  return trackError.value ? 'The boxes on every frame did not load: ' + trackError.value : '';
-});
-/** The boxes drawn come from the track: the side lists them. */
-const drawnTrack = computed(() => !!frameBoxes.value && !frameBoxes.value.frame);
-/** The networks that made the track, in a few words (the cutter's run). */
-const trackNetworks = computed(() => (track.value?.networks['cutter']?.id ?? '').replace(/^cutter:/, '').replace(/\/signnet$/, ''));
 /** The segments of the drive's logs, from the player: what places a frame of Sign review on the drive. */
 const segments = shallowRef<SyncSegment[]>([]);
 // A frame of Sign review at the time of its very frame of the video (frame 20N of its minute), else of its second.
@@ -768,7 +733,6 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisible);
   void read();
   void readSigns();
-  void readTrack();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey);
@@ -1041,7 +1005,6 @@ function worksIn(from: number, to: number) {
           <p v-else-if="player?.playing" class="dr-hint" id="sr-editor-playing">Playing. Pause on a frame (Space) to edit its
             signs; ← → then go frame by frame.</p>
           <p v-else class="dr-hint" id="sr-editor-none">No frame to review at this moment of the drive.</p>
-          <p v-if="trackLine" class="dr-hint sr-track-line">{{ trackLine }}</p>
         </template>
         <template v-else-if="panel === 'signs'">
           <h3 id="sr-card-title">The signs at {{ clockOf(seconds) }}</h3>
@@ -1049,18 +1012,7 @@ function worksIn(from: number, to: number) {
           <p v-if="signsError" class="dr-hint" id="sr-signs-missing">{{ signsError }}</p>
           <p v-else-if="!signs" class="dr-hint">Loading…</p>
           <template v-else>
-            <p v-if="trackLine" class="dr-hint sr-track-line" id="sr-track-line">{{ trackLine }}</p>
-            <template v-if="drawnTrack && frameBoxes && presented">
-              <p class="sr-sign-frame">Frame {{ presented.segment }}/{{ presented.frame }} of the video<span class="sr-tag sr-tag-out">Networks</span></p>
-              <ul v-if="frameBoxes.boxes.length" class="sr-sign-list" id="sr-sign-list">
-                <li v-for="(box, index) in frameBoxes.boxes" :key="index" :class="{speed: isSpeedSign(box)}">
-                  <i class="sr-sign-dot proposed" :style="{color: boxColor(box)}"></i>
-                  <span>{{ describe(box) }}</span><small>{{ typeof box.score === 'number' ? 'model ' + Math.round(box.score * 100) + '%' : 'model' }}</small>
-                </li>
-              </ul>
-              <p v-else class="dr-hint">The networks found no sign on this frame.</p>
-            </template>
-            <template v-else-if="signFrame">
+            <template v-if="signFrame">
               <p class="sr-sign-frame">Frame at {{ clockOf(signFrame.at) }} · {{ signOffset }}<span class="sr-tag"
                 :class="{'sr-tag-out': !signFrame.confirmed}">{{ signState }}</span></p>
               <ul v-if="signFrame.boxes.length" class="sr-sign-list" id="sr-sign-list">

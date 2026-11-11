@@ -1,5 +1,5 @@
 // Mouse and touch on the photo and on the zoom: draw a new box (drawing mode, N), select a box, move the
-// corners of the selected one or drag the whole box. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
+// corners of the selected one or drag the whole box; Shift held makes the box drawn or resized a square. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
 // pointer is the SVG's own math.
 import {nextTick} from 'vue';
 import {datasetOf} from './dom';
@@ -34,6 +34,21 @@ function toImagePoint(svg: SVGSVGElement, event: PointerEvent, row: FrameRow): P
   if (matrix !== null) point = point.matrixTransform(matrix.inverse());
   return [Math.min(Math.max(point.x, 0), row.width), Math.min(Math.max(point.y, 0), row.height)];
 }
+
+/** Shift held: the point that makes a square with the corner ``a``, its side the longer one dragged, inside the image. */
+function squared(a: Point, b: Point, row: FrameRow, shift: boolean): Point {
+  if (!shift) return b;
+  const sx = b[0] < a[0] ? -1 : 1;
+  const sy = b[1] < a[1] ? -1 : 1;
+  const room = Math.min(sx > 0 ? row.width - a[0] : a[0], sy > 0 ? row.height - a[1] : a[1]);
+  const side = Math.min(Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])), room);
+  return [a[0] + sx * side, a[1] + sy * side];
+}
+
+/** The corner opposite to the one dragged. */
+const OPPOSITE: Record<Corner, (b: Box) => Point> = {
+  nw: (b) => [b[2], b[3]], ne: (b) => [b[0], b[3]], sw: (b) => [b[2], b[1]], se: (b) => [b[0], b[1]],
+};
 
 function drawDraft(a: Point, b: Point): void {
   state.draft = {
@@ -84,7 +99,7 @@ export function onPointerMove(event: PointerEvent, surface: Surface): void {
   if (!row) return;
   const p = toImagePoint(svg, event, row);
   if (drag.kind === 'draw') {
-    drawDraft(drag.start, p);
+    drawDraft(drag.start, squared(drag.start, p, row, event.shiftKey));
     return;
   }
   const d = selectedDetection();
@@ -97,11 +112,10 @@ export function onPointerMove(event: PointerEvent, surface: Surface): void {
     if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
     return;
   }
-  const b: Box = [...d.bbox_xyxy];
-  if (drag.corner === 'nw') { b[0] = p[0]; b[1] = p[1]; }
-  if (drag.corner === 'ne') { b[2] = p[0]; b[1] = p[1]; }
-  if (drag.corner === 'sw') { b[0] = p[0]; b[3] = p[1]; }
-  if (drag.corner === 'se') { b[2] = p[0]; b[3] = p[1]; }
+  // Shift: a square on the opposite corner.
+  const anchor = OPPOSITE[drag.corner](d.bbox_xyxy);
+  const q = squared(anchor, p, row, event.shiftKey);
+  const b: Box = [anchor[0], anchor[1], q[0], q[1]];
   const x1 = Math.min(b[0], b[2]);
   const x2 = Math.max(b[0], b[2]);
   const y1 = Math.min(b[1], b[3]);
@@ -123,7 +137,7 @@ export function finishDrag(event: PointerEvent, surface: Surface): void {
   if (drag.kind === 'draw') {
     state.draft = null;
     if (event.type === 'pointercancel') return;
-    const p = toImagePoint(svg, event, row);
+    const p = squared(drag.start, toImagePoint(svg, event, row), row, event.shiftKey);
     const box: Box = [
       Math.min(drag.start[0], p[0]), Math.min(drag.start[1], p[1]),
       Math.max(drag.start[0], p[0]), Math.max(drag.start[1], p[1]),

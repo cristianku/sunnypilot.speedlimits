@@ -13,7 +13,7 @@ import {askAi, fitBox, fitLocal} from './ai';
 import {toggleCar} from './car';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeAllBoxes, removeSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
+import {cancelAll, removeAllBoxes, removeSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
   toggleHints, toggleVariable} from './edits';
 import {signStyleOf} from './catalog';
 import {countryOf, currentRow, workOf} from './frames';
@@ -202,6 +202,11 @@ export function useKeyboard(): void {
       if (event.key === 'v' || event.key === 'V') {
         event.preventDefault();
         setOnVehicle();
+        return;
+      }
+      if (event.key === 'q' || event.key === 'Q') {
+        event.preventDefault();
+        squareSelected();
         return;
       }
       if (event.key === 'l' || event.key === 'L') {

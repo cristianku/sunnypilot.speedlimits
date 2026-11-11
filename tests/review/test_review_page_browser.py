@@ -154,6 +154,9 @@ with sync_playwright() as p:
     assert caption.inner_text() == '14×18 px', caption.inner_text()
     square.locator('#netSamples').click()
     until(square, "netViewPicture.width === 160")
+    # Q: the box a square on its centre, its side the mean of its width and height.
+    square.keyboard.press('q')
+    until(square, "document.querySelector('#netCaption')?.innerText === '16×16 px'")
     corner = square.locator('#zoom .handle-hit.se').bounding_box()
     square.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
     square.mouse.down()

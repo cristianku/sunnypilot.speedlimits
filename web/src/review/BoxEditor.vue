@@ -7,11 +7,11 @@ import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELE
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
 import {releaseFocus} from './dom';
-import {applyLabel, setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted, toggleVariable} from './edits';
+import {applyLabel, setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, squareSelected, togglePainted, toggleVariable} from './edits';
 import {countryOf, workOf} from './frames';
 import {vFill} from './fill';
 import {labelKey, labelOf, recentLabels} from './recent';
-import {state} from './store';
+import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
 const props = defineProps<{row: FrameRow; detection: Detection | null}>();
@@ -112,7 +112,11 @@ function booleanChanged(key: BooleanField, event: Event): void {
     <div class="section-head"><h2 id="editorTitle">Box {{ state.selected + 1 }}</h2></div>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
-      <div v-if="canFitHere || canFit" class="fit-chips">
+      <div class="fit-chips">
+        <!-- Square on its centre (Q); Shift while drawing or dragging a corner draws a square. -->
+        <button type="button" class="chip fit" id="squareBox" :disabled="report.readOnly"
+                title="Make this box a square on its centre; hold Shift while drawing or dragging a corner for a square"
+                @click="squareSelected(); releaseFocus($event)">Square<kbd>Q</kbd></button>
         <!-- This rough box made tight on the server, in a fraction of a second; C fits every box of the frame. -->
         <button v-if="canFitHere" type="button" class="chip fit" id="fitLocal" :disabled="localFitting.key !== null"
                 title="This box; C fits every box of the frame"

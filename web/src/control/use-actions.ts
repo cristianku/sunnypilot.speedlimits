@@ -161,20 +161,6 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
       text: 'Runs the road labeler along every scanned drive on the GPU and keeps its chances in '
         + 'derived/road_labeler.' + marks};
   }
-  if (name === 'sign_tracks' && options?.dry === 'on') {
-    return {title: 'Try the signs on every frame?', action: 'Dry run',
-      text: 'The first 41 frames of the first minute of ' + (options.routes?.split(',')[0] ?? 'the first drive')
-        + ' on the CPU, checked against the frames of Sign review: a minute or so. It goes into derived/sign_tracks/dry, '
-        + 'what Speed review shows is not touched; the GPU is not used.'};
-  }
-  if (name === 'sign_tracks') {
-    const drives = options?.routes ? options.routes.split(',').length : 0;
-    return {title: 'Find the signs on every frame?', action: 'Start',
-      text: 'Runs the cutter and the classifier in use on every frame of ' + (drives ? drives + (drives === 1 ? ' drive' : ' drives')
-        : 'every drive with its video') + ' on the GPU, about 50 frames a second (some 9 hours for every drive): the boxes '
-        + 'Speed review draws over the video. A drive already read by these networks is left as it is. It refuses to '
-        + 'start while another job has the GPU.'};
-  }
   if (name === 'box_fit_train' && options?.dry === 'on') {
     return {title: 'Count the boxes for Fit box?', action: 'Dry run',
       text: 'Counts the boxes people drew' + (options.refiner === 'off' ? '' : ' and those the refiner would learn from')
@@ -226,7 +212,6 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   road_labeler_train: 'The pictures of the drives already read stay: training again reads only the others, then starts '
     + 'over on a new run.',
   road_labeler_predict: 'The drives done keep what it wrote; preparing again does every drive again.',
-  sign_tracks: 'The drives done stay, and the minutes done of the drive at work: running again carries on from there.',
   box_fit_train: 'Models already written stay (the rankers once their step is over); the refiner is written only at '
     + 'its end. Training again starts over.',
   simulate: 'The drives already replayed keep their result: replaying again skips them.',

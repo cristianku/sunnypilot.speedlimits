@@ -318,15 +318,15 @@ def test_an_import_or_the_whole_pipeline_runs_alone_either_way(panel, checkout, 
 @pytest.mark.parametrize('first, second, apart', [
     ('train_cutter', 'train_classifier', False), ('train_cutter', 'train_cutter', False),
     ('train_classifier', 'train_decider', False), ('train_brain', 'train_cutter', False),
-    ('road_labeler_train', 'sign_tracks', False), ('regression', 'train_classifier', False),
+    ('regression', 'train_classifier', False),
     ('simulate', 'train_cutter', False), ('simulate', 'train_brain', False), ('simulate', 'regression', False),
-    ('simulate', 'sign_tracks', False), ('simulate', 'simulate', True), ('simulate', 'dataset', True),
-    ('train_brain', 'train_brain', True), ('regression', 'regression', True), ('sign_tracks', 'sign_tracks', True),
+    ('simulate', 'simulate', True), ('simulate', 'dataset', True),
+    ('train_brain', 'train_brain', True), ('regression', 'regression', True),
     ('measure_proposer', 'measure_proposer', True), ('road_labeler_train', 'road_labeler_train', True),
     ('road_labeler_predict', 'road_labeler_predict', True),
     ('train_brain', 'regression', True), ('train_brain', 'road_labeler_predict', True),
     ('regression', 'road_labeler_predict', True), ('road_labeler_train', 'road_labeler_predict', True),
-    ('dataset', 'train_cutter', True), ('train', 'sign_tracks', True), ('train_continue', 'train_brain', True),
+    ('dataset', 'train_cutter', True), ('train_continue', 'train_brain', True),
     ('train_resume', 'train_decider', True), ('setup_vlm', 'train_classifier', True), ('dataset', 'dataset', True),
 ])
 def test_the_pairs_of_the_train_group(first, second, apart):
@@ -736,26 +736,21 @@ def test_a_preparation_needs_no_free_card_and_holds_the_one_it_takes(panel, root
     assert said(panel, classifier, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
 
 
-def test_a_real_road_labeler_or_sign_tracks_run_takes_the_free_card(panel, root, checkout, monkeypatch):  # noqa: F811
+def test_a_real_road_labeler_run_takes_the_free_card(panel, root, checkout, monkeypatch):  # noqa: F811
     from test_panel_road_labeler import RUN, labeler_run, labeler_script, scanned
-    from test_panel_sign_tracks import tracks_script
-    from test_sign_tracks import drive
     monkeypatch.setattr(panel_module, '_nvidia', fake_nvidia(FREE, ''))
     monkeypatch.setenv('FAKE_SLEEP', '30')
     signnet_script(checkout, GPU_SCRIPT)
-    # These two end at once, while the cutter holds GPU 0.
+    # It ends at once, while the cutter holds GPU 0.
     labeler_script(checkout).write_text(GPU_SCRIPT.replace('sleep', ': sleep'))
-    tracks_script(checkout).write_text(GPU_SCRIPT.replace('sleep', ': sleep'))
     scanned(root)
     labeler_run(root)
-    drive(root)
     cutter = panel.start('train_cutter')
     assert said(panel, cutter, 'gpu=') == 'gpu=0 cuda=0 order=PCI_BUS_ID'
-    for action, options in (('road_labeler_predict', {'labeler': RUN}), ('sign_tracks', None)):
-        job = panel.start(action, options)
-        assert finished(panel, job['id'])['state'] == 'ok'
-        assert said(panel, job, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
-        assert record(panel, job) == {'gpus': [1], 'own_progress': True}
+    job = panel.start('road_labeler_predict', {'labeler': RUN})
+    assert finished(panel, job['id'])['state'] == 'ok'
+    assert said(panel, job, 'gpu=') == 'gpu=1 cuda=1 order=PCI_BUS_ID'
+    assert record(panel, job) == {'gpus': [1], 'own_progress': True}
 
 
 def test_the_driver_files_and_the_open_files_of_a_process_as_ct_131_writes_them(tmp_path):
@@ -784,11 +779,11 @@ def test_the_driver_files_and_the_open_files_of_a_process_as_ct_131_writes_them(
 def test_the_actions_that_take_a_card_of_their_own():
     assert set(panel_module.EXCLUSIVE_GPU) == {
         'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain',
-        'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict', 'sign_tracks'}
+        'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict'}
     # The replay of a drive (Models › Drive) shares the card with the most free memory: about 1 GB of a V100.
     assert panel_module.SHARED_GPU == {'simulate': 2048}
     # Nor among those with a dry run: it has no run on the CPU.
-    assert set(panel_module.DRY_ON_CPU) == {'road_labeler_train', 'road_labeler_predict', 'sign_tracks'}
+    assert set(panel_module.DRY_ON_CPU) == {'road_labeler_train', 'road_labeler_predict'}
 
 
 @pytest.mark.parametrize('action, options', [
@@ -957,7 +952,7 @@ def test_every_label_of_the_train_group_has_its_kind():
 
 @pytest.mark.parametrize('label, kind', [
     ('cutter training', 'train_cutter'), ('brain training', 'train_brain'), ('classifier training', 'train_classifier'),
-    ('regression', 'regression'), ('road labeler', 'road_labeler_train'), ('sign tracks', 'sign_tracks'),
+    ('regression', 'regression'), ('road labeler', 'road_labeler_train'),
     ('drive replay', 'simulate'), ('dataset and training', 'train'), ('GPU training', 'train'),
 ])
 def test_work_from_a_terminal_follows_the_pairs_of_its_kind(root, label, kind):  # noqa: F811

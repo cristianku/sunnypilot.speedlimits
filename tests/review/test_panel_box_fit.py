@@ -126,7 +126,7 @@ def test_the_steps_come_from_the_panels_own_log(ready):
 
 @pytest.mark.parametrize('options', [
     {'dry': 'yes'}, {'dry': True}, {'dry': 'off'}, {'refiner': False}, {'refiner': 'no'}, {'refiner': ['off']},
-    {'routes': '000000ca--eb394eea21'}, {'labeler': 'x'}, {'marks': 'off'}, {'start': 'random'},
+    {'labeler': 'x'}, {'marks': 'off'}, {'start': 'random'},
 ])
 def test_a_bad_or_unknown_option_is_refused_and_nothing_starts(ready, options):
     with pytest.raises(PanelError) as refused:
@@ -136,7 +136,7 @@ def test_a_bad_or_unknown_option_is_refused_and_nothing_starts(ready, options):
 
 
 def test_no_other_action_takes_the_refiner(ready):
-    for action in ('sign_tracks', 'road_labeler_train', 'train_brain', 'fetch'):
+    for action in ('road_labeler_train', 'train_brain', 'fetch'):
         with pytest.raises(PanelError) as refused:
             ready.start(action, {'refiner': 'off'})
         assert refused.value.reason == 'bad_option'

@@ -170,6 +170,22 @@ export function removeBox(index: number): void {
   changed(row);
 }
 
+/** Q: the selected box made a square on its centre, its side the mean of its width and height, inside the image (most
+ * signs are round or square; boxes of one shape teach Fit box better). */
+export function squareSelected(): void {
+  const row = currentRow();
+  const d = selectedDetection();
+  if (!row || !d || refuseChange()) return;
+  const [x1, y1, x2, y2] = d.bbox_xyxy;
+  const side = Math.min((x2 - x1 + y2 - y1) / 2, row.width, row.height);
+  const cx = Math.min(Math.max((x1 + x2) / 2, side / 2), row.width - side / 2);
+  const cy = Math.min(Math.max((y1 + y2) / 2, side / 2), row.height - side / 2);
+  d.bbox_xyxy = [cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2];
+  delete d.check_position;
+  markPlacedByHand(d, true);
+  changed(row);
+}
+
 export function removeSelected(): void {
   removeBox(state.selected);
 }

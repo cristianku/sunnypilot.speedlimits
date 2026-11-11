@@ -1841,21 +1841,6 @@ def build_parser() -> argparse.ArgumentParser:
                                                                           "written into Speed review")
     p_labeler_predict.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_labeler_predict.set_defaults(func=_cmd_road_labeler_predict)
-    p_tracks = sub.add_parser("sign-tracks", help="the signs on every frame of a drive's video for Speed review: the "
-                                                  "cutter and the classifier in use on each frame of the raw minutes "
-                                                  "(.venv-gpu), derived/sign_tracks/<route>.json; a drive already read "
-                                                  "by the networks in use on the same minutes is left as it is")
-    p_tracks.add_argument("--route", action="append", help="route id; repeat for more")
-    p_tracks.add_argument("--all", action="store_true", help="every drive with its video (derived/video/<route>.json)")
-    p_tracks.add_argument("--dry-run", action="store_true", help="on the CPU, the first --limit-frames frames of the first "
-                                                                 "minute (of the first drive with --all), into "
-                                                                 "derived/sign_tracks/dry, checked against Sign review")
-    p_tracks.add_argument("--limit-frames", type=int, help="frames of a dry run (default 41)")
-    p_tracks.add_argument("--device", choices=("cuda", "cpu"), help="default: cuda when there is one")
-    p_tracks.add_argument("--force", action="store_true", help="read the drives again even when they are current")
-    p_tracks.add_argument("--out-dir", help="default: <data root>/derived/sign_tracks (dry: its dry folder)")
-    p_tracks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_tracks.set_defaults(func=_cmd_sign_tracks)
     p_brain_export = sub.add_parser("export-brain", help="the brain of a run as the car runs it: one step a second as ONNX with "
                                                          "its contract, checked against PyTorch and along a real drive (CPU, "
                                                          ".venv-gpu). Writes <run>/export/brain.onnx")
@@ -2990,39 +2975,6 @@ def _cmd_road_labeler_predict(args: argparse.Namespace) -> int:
                                          device=args.device)
     print(json.dumps({'drives': len(found)}))
     return 0
-
-
-def _cmd_sign_tracks(args: argparse.Namespace) -> int:
-    from nnslr_tools import sign_tracks
-    from nnslr_tools.preannotate import resolve_data_root
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    routes = list(dict.fromkeys(args.route or []))
-    if args.all:
-        from nnslr_tools import drive_video
-        # Only drives whose video is of their minutes now: one to make again is said, and does not fail the job.
-        found = sign_tracks.video_routes(root)
-        stale = [route for route in found if drive_video.index(root, route) is None]
-        if stale:
-            print(f"left out, their video must be made again first: {' '.join(stale)}", flush=True)
-        routes += [route for route in found if route not in routes and route not in stale]
-    if args.dry_run:
-        # A dry run reads one drive: the first named.
-        routes = routes[:1]
-    if not routes:
-        print("nnslr sign-tracks: name a --route or use --all", file=sys.stderr)
-        return 2
-    if args.limit_frames is not None and (args.limit_frames < 1 or not args.dry_run):
-        print("nnslr sign-tracks: --limit-frames is a whole number of at least 1, for a --dry-run", file=sys.stderr)
-        return 2
-    print(f"drives:       {len(routes)}", flush=True)
-    try:
-        failed = sign_tracks.run(root, routes, device=args.device, dry_run=args.dry_run, limit_frames=args.limit_frames,
-                                 force=args.force, out_dir=Path(args.out_dir) if args.out_dir else None)
-    except sign_tracks.SignTrackError as exc:
-        print(f"nnslr sign-tracks: {exc}", file=sys.stderr)
-        return 1
-    print(json.dumps({'drives': len(routes), 'failed': failed}), flush=True)
-    return 1 if failed else 0
 
 
 def _cmd_export_brain(args: argparse.Namespace) -> int:

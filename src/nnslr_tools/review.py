@@ -1022,12 +1022,6 @@ def make_handler(app: ReviewApp):
                 from nnslr_tools import labeler_runs
                 self._json(200, labeler_runs.summary(app.root))
                 return
-            # The drives with their signs on every frame or without, and the networks in use (nnslr_tools.sign_tracks):
-            # the Signs on every frame card of Models.
-            if path == '/api/panel/sign-tracks':
-                from nnslr_tools import sign_tracks
-                self._json(200, sign_tracks.summary(app.root))
-                return
             # The last summaries of Train Fit box (scripts/train_box_fit.sh): the Fit box card of Models.
             if path == '/api/panel/box-fit':
                 self._json(200, app.panel.box_fit())
@@ -1740,17 +1734,6 @@ def make_handler(app: ReviewApp):
                 self._json(200, {'ok': True, **drive_review.sign_frames(run_id, rows, reviews),
                                  'proposed_by': None if busy else _proposed_by(app.root, directory)})
                 return
-            # The signs on every frame of the drive's video (nnslr_tools.sign_tracks), for the boxes over the video at
-            # 20 frames a second: the file as it is, and whether the networks in use on these minutes made it.
-            match = re.fullmatch(drive + '/sign-track', path)
-            if match:
-                from nnslr_tools import sign_tracks
-                track = sign_tracks.read(app.root, match.group(1))
-                if track is None:
-                    self._problem(404, 'no_sign_track', sign_tracks.NO_TRACK, True)
-                    return
-                self._json(200, {'ok': True, **track})
-                return
             if re.fullmatch(drive + '/(blocks|works|road|road-type)', path) or path == '/api/speed-review/road-kinds':
                 self._problem(405, 'method_not_allowed', 'Use POST.', True)
                 return
@@ -1869,10 +1852,6 @@ def make_handler(app: ReviewApp):
             told) or a new kind of road (/api/speed-review/road-kinds: {"label"}): same origin, JSON, a person signed in
             on the site (never the access token alone: an agent never writes these) and a panel that is not read-only."""
             from nnslr_tools import drive_review, speed_review
-            if re.fullmatch(r'/api/speed-review/drives/[0-9a-f]{8}--[0-9a-f]{10}/sign-track', path):
-                # Made by nnslr sign-tracks only: read here, never written.
-                self._problem(405, 'method_not_allowed', 'Use GET.', True)
-                return
             if not self._same_origin():
                 self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
                 return
@@ -2078,9 +2057,6 @@ def make_handler(app: ReviewApp):
                     # The road labeler's dry run, run and marks, the same way: a dry run sent as true must be refused,
                     # never dropped into a real training on the GPU.
                     options.update((key, body[key]) for key in ('dry', 'labeler', 'marks')
-                                   if isinstance(body, dict) and body.get(key) is not None)
-                    # The drives of the signs on every frame ({"routes": "R1,R2"}), the same way.
-                    options.update((key, body[key]) for key in ('routes',)
                                    if isinstance(body, dict) and body.get(key) is not None)
                     # Whether Train Fit box trains the refiner too ({"refiner": "off"}), the same way: a refiner sent as
                     # false must be refused, never dropped into the hour of the refiner.

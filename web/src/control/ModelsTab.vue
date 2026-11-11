@@ -12,8 +12,7 @@
 // the build's networks”. The networks in use reach the car with Publish (/publish: scripts/send_to_car.sh). The runs
 // themselves are on Results (/evaluate). The settings of the comma's vision limit are no longer shown here (8 Nov 2026,
 // his call): Publish sends them as they are kept (nnslr_tools.car_settings). At the end, the road labeler
-// (RoadLabelerCard.vue): an offline network that prepares Speed review, trained and run from there; then the signs on
-// every frame (SignTracksCard.vue): the networks in use along every frame of the drives, for the boxes of Speed review; then
+// (RoadLabelerCard.vue): an offline network that prepares Speed review, trained and run from there; then
 // Fit box (BoxFitCard.vue): key C of the review page trained again on the CPU, with its last measures.
 import {computed, nextTick, ref, watch} from 'vue';
 import {isoWhen} from '../common/format';
@@ -27,7 +26,6 @@ import ModelItem from './ModelItem.vue';
 import ModelFlow from './ModelFlow.vue';
 import RoadLabelerCard from './RoadLabelerCard.vue';
 import Segmented from './Segmented.vue';
-import SignTracksCard from './SignTracksCard.vue';
 import {ROLE_TEXT, chosenText, metricsOf, putInUse, restoreQuestion, tryQuestion, useModels,
   type CarState} from './models';
 import SectionHead from './SectionHead.vue';
@@ -347,9 +345,6 @@ async function choose(version: ModelVersion): Promise<void> {
     <!-- The road labeler: an offline network that prepares Speed review, never on the car. -->
     <RoadLabelerCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
                      @details="emit('details', $event)"/>
-    <!-- The signs on every frame: the networks in use along every frame of the drives, for the boxes of Speed review. -->
-    <SignTracksCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
-                    @details="emit('details', $event)"/>
     <!-- Fit box: key C of the review page, trained again on the CPU on the boxes people drew. -->
     <BoxFitCard :status="status" @run="(...args) => emit('run', ...args)" @stop="emit('stop', $event)"
                 @details="emit('details', $event)"/>

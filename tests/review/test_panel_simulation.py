@@ -276,7 +276,7 @@ def test_a_replay_from_a_terminal_holds_its_card_and_is_one_replay():
     assert panel_module.ACTIVITY_NAMES['drive replay'] == panel_module.RUNNING_NAMES['simulate'] == 'a replay of a drive'
     assert panel_module._pair_apart('simulate', 'simulate')
     # Beside any training that takes one card; never beside the import or the whole pipeline.
-    for other in ('train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'regression', 'sign_tracks',
+    for other in ('train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'regression',
                   'road_labeler_train', 'road_labeler_predict'):
         assert not panel_module._pair_apart('simulate', other), other
     for other in panel_module.TRAIN_ALONE:

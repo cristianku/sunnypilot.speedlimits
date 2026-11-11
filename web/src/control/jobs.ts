@@ -17,7 +17,7 @@ export const ACTION_GROUP: Record<ActionName, string> = {
   measure_ai_reviewer: 'ai',
   networks_prepare: 'publish', networks_publish: 'publish', road_types: 'prepare', send_to_car: 'publish',
   try_on_comma: 'publish', comma_restore: 'publish', mapillary_locations: 'mapillary', mapillary_windows: 'mapillary',
-  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train', sign_tracks: 'train',
+  review_box: 'review_box', road_labeler_train: 'train', road_labeler_predict: 'train',
   box_fit_train: 'box_fit', simulate: 'train',
 };
 
@@ -28,7 +28,7 @@ export const ACTION_ICON: Record<ActionName, IconName> = {
   update: 'update', ai_review: 'ai',
   measure_ai_reviewer: 'ai', networks_prepare: 'package', networks_publish: 'upload', road_types: 'routes', send_to_car: 'upload',
   try_on_comma: 'upload', comma_restore: 'resume', mapillary_locations: 'routes', mapillary_windows: 'prepare',
-  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes', sign_tracks: 'routes',
+  review_box: 'upload', road_labeler_train: 'train', road_labeler_predict: 'routes',
   box_fit_train: 'train', simulate: 'resume',
 };
 
@@ -44,7 +44,7 @@ export const ACTION_TAB: Record<ActionName, string | null> = {
   measure_proposer: '/evaluate', measure_ai_reviewer: '/evaluate', regression: '/drive', simulate: '/drive',
   networks_prepare: '/publish', networks_publish: '/publish',
   send_to_car: '/publish', try_on_comma: '/models', comma_restore: '/models',
-  road_labeler_train: '/models', road_labeler_predict: '/models', sign_tracks: '/models', box_fit_train: '/models',
+  road_labeler_train: '/models', road_labeler_predict: '/models', box_fit_train: '/models',
   update: null,
 };
 const actionsOf = (tab: string): ActionName[] => (Object.keys(ACTION_TAB) as ActionName[]).filter((name) => ACTION_TAB[name] === tab);
@@ -60,7 +60,7 @@ export const EVALUATE_ACTIONS: ActionName[] = actionsOf('/evaluate');
 export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string | null {
   if (activity.group === 'mapillary') return '/train';
   if (activity.group === 'box_fit') return '/models';
-  if (activity.label === 'networks on the comma' || activity.label === 'sign tracks') return '/models';
+  if (activity.label === 'networks on the comma') return '/models';
   if (activity.label === 'drive replay') return '/drive';
   if (activity.group === 'ai') return activity.label.includes('measure') ? '/evaluate' : '/train';
   if (activity.group === 'publish') return '/publish';
@@ -156,10 +156,10 @@ export function terminalActivities(status: PanelStatus | null, groups?: string[]
 }
 
 /** The actions whose job uses the GPU (the proposers of Prepare and their measure, Qwen3-VL's test, the trainings, the
- * road labeler and the signs on every frame but for their dry runs, the replay of a drive). */
+ * road labeler but for its dry runs, the replay of a drive). */
 const GPU_ACTIONS: ActionName[] = ['prepare', 'prepare_again', 'measure_proposer', 'setup_vlm', 'train', 'train_continue',
   'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain', 'regression', 'road_labeler_train',
-  'road_labeler_predict', 'sign_tracks', 'simulate'];
+  'road_labeler_predict', 'simulate'];
 /** The same for work started from a terminal, by group ("other": the driving model of openpilot.distill). */
 const GPU_GROUPS = ['prepare', 'train', 'other'];
 
@@ -215,7 +215,7 @@ export const GPU_CHIP_STYLE = {display: 'inline-block', marginLeft: '6px', paddi
 /** A holder's label inside a sentence: "a cutter training" for "A cutter training"; a name stays as it is. */
 const inSentence = (label: string): string => /^(A|An|The) /.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label;
 
-/** Whether no GPU can take a real run of the road labeler or of the signs on every frame now: every card held, by the
+/** Whether no GPU can take a real run of the road labeler now: every card held, by the
  * server's word (each card's free); an older server: any process on the GPU, as its start() refuses then. A machine
  * without nvidia-smi: never (the helpers check for themselves). */
 export function noFreeCard(system: SystemInfo | null | undefined): boolean {

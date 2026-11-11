@@ -77,10 +77,10 @@ GUEST_ROUTES = tuple((method, re.compile(address), kinds) for method, address, k
     # The list behind "Next drive" of Sign distance: the server keeps only the guest's drives.
     ('GET', r'/api/sign-distance/drives', None),
     # Sign review, on the Signs side of Speed review: its old address (it leads there), its pictures, its frames and
-    # saves, and what the side reads (the editor's data, the boxes of the drive's frames, the signs on every frame).
+    # saves, and what the side reads (the editor's data, the boxes of the drive's frames).
     ('GET', r'/route/' + DRIVE + r'(/(index\.html)?)?', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/page', ('signs',)),
-    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/(signs|sign-track)', ('signs',)),
+    ('GET', r'/api/speed-review/drives/' + DRIVE + r'/signs', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/images/[0-9]{8}\.jpg', ('signs',)),
     ('GET', r'/route/' + DRIVE + r'/video/' + FRAME + r'\.jpg', ('signs',)),
     ('GET', r'/api/route/' + DRIVE + r'/(reviews|live|busy(/[0-9]{1,7})?)', ('signs',)),
