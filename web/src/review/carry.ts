@@ -1,8 +1,11 @@
 // "Apply previous": the boxes confirmed on the frame before, carried onto the frame on screen by the server
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
-// has looked at each one (moved it onto the sign, pressed "Here", or deleted it).
+// has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
+// has run on the carried boxes without an error, the frame is confirmed, as Enter does, and A alone goes through the
+// frames of a sign.
 import {fitLocal} from './ai';
+import {confirmFrame} from './confirm';
 import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
@@ -41,7 +44,7 @@ export function carryState(row: FrameRow): CarryState {
   return {
     shown: true,
     enabled: true,
-    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame (A)',
+    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame, fitted and confirmed (A)',
   };
 }
 
@@ -90,6 +93,11 @@ export async function applyPrevious(): Promise<void> {
     if (fit && fit !== carried && fit.key === key) {
       state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};
     }
+    // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it),
+    // and the frame is saved and left as Enter does. A wrong one is put right by going back to the frame (←).
+    if (state.currentKey !== key || state.notice?.error) return;
+    for (const d of work.detections) delete d.check_position;
+    await confirmFrame();
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   }
