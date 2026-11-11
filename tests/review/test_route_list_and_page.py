@@ -41,7 +41,7 @@ def test_route_list_counts_proposals_while_to_review_and_the_share_of_the_ai(ser
     store = ReviewStore(db_path(root))
     assert store.confirmed_count(ROUTE, RUN_ID) == 1 and store.confirmed_count(ROUTE, RUN_ID, reviewer_kind='ai') == 1
     assert store.confirmed_count(ROUTE, RUN_ID, reviewer_kind='human') == 0
-    # The list of Speed review's card "Signs to review" (the list page /routes is gone since 9 Nov 2026).
+    # The signs of each drive in Speed review's one list of drives (the list page /routes is gone since 9 Nov 2026).
     routes = {item['route_id']: item for item in json.loads(server.request('GET', '/api/routes')[2])['routes']}
     doing, done = routes[ROUTE], routes[OTHER_ROUTE]
     # The model's proposals: two of the three frames; one confirmed, by the AI.

@@ -10,6 +10,7 @@ interface SignDrive {
   /** Where its signs are reviewed (review.signs_url): the Signs side, or the page of Sign review of a drive without video. */
   url?: string;
   drive?: {title: string | null; when: string | null; minutes: number | null; start?: string | null} | null;
+  dashcam?: boolean | null;
 }
 /** The lists as they were last read, kept while the page is open: back on the tab (from another tab, or from a drive
  * opened by its address) they stand at once and are read again behind, as on the way back from a drive. */
@@ -23,11 +24,11 @@ const shown: {drives: SpeedRow[] | null; signs: SignDrive[] | null} = {drives: n
 // from (sunnypilot off in all of it, speed_review.dashcam_drive, or not read yet: DASHCAM MODE on the first), the newest
 // first, with its blocks, roadworks and kinds of road marked; a tap opens it ("/speed-review?drive=<route>", SpeedReviewDrive.vue). Above the
 // list, Read the logs reads the comma's logs of every drive (ReadLogsCard.vue), the list read again every 2 s while it
-// does: a drive has a speed only once its logs are read. Under it, the drives with frames of their signs still for a
-// person to confirm (GET /api/routes, sunnypilot on or off; a frame the AI saved waits for a person too), a tap opening
-// the drive on its Signs side at the first of them, and folded under them the drives with every frame confirmed, to
-// open again: the list of Sign review, now that its page is retired (9 Nov 2026). Every dashcam drive enters the brain
-// training, each whole (brain_targets.training_routes): there is nothing to mark for it.
+// does: a drive has a speed only once its logs are read. One list since 11 Nov 2026: every drive is one row with its
+// speed and its signs (GET /api/routes, sunnypilot on or off; a frame the AI saved waits for a person too), Signs beside
+// it opening the drive on its Signs side at the first frame still to confirm; a drive with sunnypilot on is there only
+// for its signs, and its row opens them. Every dashcam drive enters the brain training, each whole
+// (brain_targets.training_routes): there is nothing to mark for it.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isGuest} from '../common/guest';
@@ -57,7 +58,7 @@ const startOf = (drive: SpeedRow): string => (drive.day ?? '') + (drive.when ?? 
 const listed = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
   .sort((a, b) => startOf(b).localeCompare(startOf(a))));
 
-/** Drives where sunnypilot was on: the brain does not learn from them, the list leaves them out. */
+/** Drives where sunnypilot was on: the brain does not learn their speed, the list has them only for their signs. */
 const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
 /** What a drive has: its length, its blocks, its roadworks marks and its marks of a kind of road; before its logs are read,
  * what reading them does. */
@@ -69,6 +70,42 @@ const marked = (drive: SpeedRow): boolean => drive.blocks > 0 || drive.works > 0
 const hrefOf = (drive: SpeedRow): string => '/speed-review?drive=' + encodeURIComponent(drive.route);
 
 const signDrives = shallowRef<SignDrive[] | null>(shown.signs);
+/** One row a drive: a dashcam drive with its speed, and every drive with frames of its signs, the newest first. */
+interface Row {
+  route: string;
+  speed: SpeedRow | null;
+  signs: SignDrive | null;
+}
+/** When a drive started, in ms: its signs' start (UTC), else its speed's local day and time. */
+const timeOf = (row: Row): number => {
+  const start = row.signs?.drive?.start;
+  if (start) return Date.parse(start);
+  const speed = row.speed;
+  return speed?.day && speed.when ? Date.parse(speed.day + 'T' + speed.when.slice(-5)) || 0 : 0;
+};
+const rows = computed((): Row[] => {
+  const byRoute = new Map<string, Row>();
+  for (const drive of listed.value) byRoute.set(drive.route, {route: drive.route, speed: drive, signs: null});
+  for (const item of signDrives.value ?? []) {
+    if (item.frame_count <= 0) continue;
+    const row = byRoute.get(item.route_id);
+    if (row) row.signs = item;
+    else byRoute.set(item.route_id, {route: item.route_id, speed: null, signs: item});
+  }
+  return [...byRoute.values()].sort((a, b) => timeOf(b) - timeOf(a));
+});
+const titleOf = (row: Row): string => row.speed?.title ?? row.signs?.drive?.title ?? 'Places unknown';
+const whenOf = (row: Row): string => {
+  const when = row.speed?.when ? (row.speed.when_certain ? '' : '≈ ') + row.speed.when : row.signs?.drive?.when ?? '';
+  const minutes = row.speed?.minutes ?? row.signs?.drive?.minutes ?? null;
+  return when + (minutes !== null ? ' · ' + minutes + ' min' : '');
+};
+const signsUrl = (item: SignDrive): string => item.url ?? signsHref(item.route_id);
+/** Its signs in words: "160 of 1,062 frames confirmed", "1,062 frames confirmed" when all are. */
+const signsText = (item: SignDrive): string => byPerson(item) >= item.frame_count
+  ? 'Signs: all ' + thousands(item.frame_count) + ' frames confirmed'
+  : 'Signs: ' + thousands(byPerson(item)) + ' of ' + thousands(item.frame_count) + ' frames confirmed'
+    + (item.waiting_for_person ? ' · ' + thousands(item.waiting_for_person) + ' saved by the AI, to confirm' : '');
 async function loadSigns(): Promise<void> {
   // The administrator's; a server without the list, or a failure, leaves the card out quietly.
   if (isGuest()) return;
@@ -81,12 +118,7 @@ async function loadSigns(): Promise<void> {
 }
 /** The frames a person confirmed: confirmed_count counts the AI's saves too, which wait for a person. */
 const byPerson = (drive: SignDrive): number => Math.max(0, drive.confirmed_count - (drive.waiting_for_person ?? 0));
-const newestFirst = (a: SignDrive, b: SignDrive): number => (b.drive?.start ?? '').localeCompare(a.drive?.start ?? '');
-/** The drives with frames of their signs left for a person, the newest first. */
-const signsLeft = computed(() => (signDrives.value ?? []).filter((drive) => byPerson(drive) < drive.frame_count).sort(newestFirst));
-/** The drives with every frame confirmed by a person, to open again (a label to correct, the Confirmed filter). */
-const signsDone = computed(() => (signDrives.value ?? [])
-  .filter((drive) => drive.frame_count > 0 && byPerson(drive) >= drive.frame_count).sort(newestFirst));
+const signsLeft = (item: SignDrive): boolean => byPerson(item) < item.frame_count;
 
 // While logs are read, the list again every 2 s (never under an opened drive).
 const reading = computed(() => (drives.value ?? []).some((drive) => drive.scan.state === 'queued' || drive.scan.state === 'scanning'));
@@ -120,70 +152,33 @@ onBeforeUnmount(() => window.clearTimeout(timer));
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>
-        <span v-if="drives" class="ds-when">{{ plural(listed.length, 'drive') }}</span>
+        <span v-if="drives" class="ds-when">{{ plural(rows.length, 'drive') }}</span>
       </div>
       <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
         is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
-        time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too. Nothing here changes the car.</p>
-      <p v-if="engaged" class="import-why" id="sr-engaged">Only drives with sunnypilot off (sunnylink › Toggles › Enable
-        sunnypilot): there the speed is all yours. {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} not listed.</p>
+        time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too.
+        <b>Signs</b> opens the drive on its signs, at the first frame still to confirm. Nothing here changes the car.</p>
+      <p v-if="engaged" class="import-why" id="sr-engaged">The speed is yours only with sunnypilot off (sunnylink › Toggles ›
+        Enable sunnypilot): {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} here only for
+        {{ engaged === 1 ? 'its' : 'their' }} signs.</p>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
       <ul v-else class="rt-list">
-        <li v-for="drive in listed" :key="drive.route" class="rt-drive dr-drive">
-          <a class="rt-open" :href="hrefOf(drive)">
+        <li v-for="row in rows" :key="row.route" class="rt-drive dr-drive sr-row">
+          <a class="rt-open" :href="row.speed ? hrefOf(row.speed) : signsUrl(row.signs!)">
             <div class="rt-name">
-              <strong>{{ drive.title ?? 'Places unknown' }} <b v-if="drive.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
-              <span><template v-if="drive.when">{{ drive.when_certain ? '' : '≈ ' }}{{ drive.when }}</template>{{
-                drive.minutes !== null ? ' · ' + drive.minutes + ' min' : '' }}</span>
+              <strong>{{ titleOf(row) }} <b v-if="row.speed?.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
+              <span>{{ whenOf(row) }}</span>
             </div>
-            <p class="dr-drive-state" :class="{'dr-muted': !marked(drive)}">{{ stateOf(drive) }}</p>
-            <p class="rt-shares"><span class="rt-frames dr-route">{{ drive.route }}</span></p>
-            <span class="data-chev rt-go" aria-hidden="true">›</span>
+            <p v-if="row.speed" class="dr-drive-state" :class="{'dr-muted': !marked(row.speed)}">{{ stateOf(row.speed) }}</p>
+            <p v-if="row.signs" class="dr-drive-state" :class="{'dr-muted': !signsLeft(row.signs)}">{{ signsText(row.signs) }}</p>
+            <p class="rt-shares"><span class="rt-frames dr-route">{{ row.route }}</span></p>
+            <span v-if="!row.speed || !row.signs" class="data-chev rt-go" aria-hidden="true">›</span>
           </a>
+          <a v-if="row.speed && row.signs" class="sr-signs" :class="{'sr-signs-done': !signsLeft(row.signs)}"
+             :href="signsUrl(row.signs)" :title="'Open the signs of this drive at the first frame still to confirm'">Signs ›</a>
         </li>
       </ul>
-    </section>
-    <section v-if="signDrives && signDrives.length" class="card sr-drives" id="sr-sign-drives" aria-labelledby="sr-signs-title">
-      <div class="ds-head">
-        <h2 id="sr-signs-title">Signs to review</h2>
-        <span class="ds-when">{{ plural(signsLeft.length, 'drive') }}</span>
-      </div>
-      <p class="import-why">The signs the networks proposed on the frames of a drive, for you to confirm or correct: a tap opens
-        the drive on its Signs side, at the first frame still to review.</p>
-      <p v-if="!signsLeft.length" class="empty">Every frame is confirmed.</p>
-      <ul v-else class="rt-list">
-        <li v-for="item in signsLeft" :key="item.route_id" class="rt-drive dr-drive">
-          <a class="rt-open" :href="item.url ?? signsHref(item.route_id)">
-            <div class="rt-name">
-              <strong>{{ item.drive?.title ?? 'Places unknown' }}</strong>
-              <span><template v-if="item.drive?.when">{{ item.drive.when }}</template>{{
-                item.drive?.minutes != null ? ' · ' + item.drive.minutes + ' min' : '' }}</span>
-            </div>
-            <p class="dr-drive-state">{{ thousands(byPerson(item)) }} of {{ thousands(item.frame_count) }} frames
-              confirmed<template v-if="item.waiting_for_person"> · {{ thousands(item.waiting_for_person) }} saved by the AI, to confirm</template></p>
-            <p class="rt-shares"><span class="rt-frames dr-route">{{ item.route_id }}</span></p>
-            <span class="data-chev rt-go" aria-hidden="true">›</span>
-          </a>
-        </li>
-      </ul>
-      <details v-if="signsDone.length" class="dr-more" id="sr-signs-done">
-        <summary>Every frame confirmed · {{ plural(signsDone.length, 'drive') }}</summary>
-        <ul class="rt-list">
-          <li v-for="item in signsDone" :key="item.route_id" class="rt-drive dr-drive">
-            <a class="rt-open" :href="item.url ?? signsHref(item.route_id)">
-              <div class="rt-name">
-                <strong>{{ item.drive?.title ?? 'Places unknown' }}</strong>
-                <span><template v-if="item.drive?.when">{{ item.drive.when }}</template>{{
-                  item.drive?.minutes != null ? ' · ' + item.drive.minutes + ' min' : '' }}</span>
-              </div>
-              <p class="dr-drive-state dr-muted">{{ thousands(item.frame_count) }} frames confirmed</p>
-              <p class="rt-shares"><span class="rt-frames dr-route">{{ item.route_id }}</span></p>
-              <span class="data-chev rt-go" aria-hidden="true">›</span>
-            </a>
-          </li>
-        </ul>
-      </details>
     </section>
   </template>
 </template>
