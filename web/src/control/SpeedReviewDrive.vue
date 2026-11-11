@@ -151,7 +151,10 @@ const toStart = watch([t0, drive], () => {
 
 // -- the commands ----------------------------------------------------------------------------------------------------------
 const saving = ref(false);
-const locked = computed(() => saving.value || props.readOnly || signsOnly);
+// A drive with sunnypilot on (#69): the brain does not learn from it, so its Speed side is off (the server refuses its
+// writes too, speed_review._writable_span); its Signs side stays.
+const speedOff = computed(() => drive.value?.dashcam === false);
+const locked = computed(() => saving.value || props.readOnly || signsOnly || speedOff.value);
 async function send(path: string, body: object): Promise<boolean> {
   if (locked.value || !drive.value) return false;
   saving.value = true;
@@ -177,7 +180,7 @@ const within = (ns: number): number => {
   const span = drive.value?.span_ns;
   return span ? Math.min(span[1], Math.max(span[0], ns)) : ns;
 };
-const canStart = computed(() => !props.readOnly && !!drive.value?.span_ns);
+const canStart = computed(() => !props.readOnly && !speedOff.value && !!drive.value?.span_ns);
 function startBlock(): void {
   if (!canStart.value) return;
   pending.value = within(now.value);
@@ -347,7 +350,7 @@ function nextKind(): void {
   picked.value = kinds.value[(index + 1) % kinds.value.length]!.kind;
 }
 // A new kind of road from its name, saved at once and picked. A guest marks with the kinds there are and adds none.
-const canAdd = computed(() => !props.readOnly && !isGuest());
+const canAdd = computed(() => !props.readOnly && !isGuest() && !speedOff.value);
 const adding = ref(false);
 const newLabel = ref('');
 async function addKind(): Promise<void> {
@@ -384,7 +387,7 @@ const typeName = (item: RoadTypeStretch): string => item.road_type === null && t
 const TYPE_SOURCE_NAMES: Record<RoadTypeSource, string> = {person: 'yours', net: 'net', map: 'map'};
 const TYPE_SOURCE_TAGS: Record<RoadTypeSource, string> = {person: 'Yours', net: 'Net', map: 'Map'};
 const typeSourceName = (item: RoadTypeStretch | null): string => item ? TYPE_SOURCE_NAMES[typeSource(item)] : 'map';
-const canType = computed(() => !props.readOnly && !isGuest() && roadTypes.value.length > 0);
+const canType = computed(() => !props.readOnly && !isGuest() && !speedOff.value && roadTypes.value.length > 0);
 /** A start kept with "From here": the next chip sets its type from there to the frame shown, not on the stretch. */
 const typeFrom = ref<number | null>(null);
 /** Whether a chip is the type in force at the frame shown: "can't tell" only where he said it, not where the map has none. */
@@ -551,7 +554,19 @@ function readPanel(): Panel {
 }
 // A link of the signs opens the Signs side; a guest given only the signs has nothing else.
 const panel = ref<Panel>(!showSigns ? 'speed' : signsOnly || asked.side ? 'signs' : readPanel());
+// A drive with Speed review off opens on its signs, without changing the side the next drive opens on.
+let speedOffSide = false;
+watch(speedOff, (off) => {
+  if (off && showSigns && panel.value !== 'signs') {
+    speedOffSide = true;
+    panel.value = 'signs';
+  }
+}, {immediate: true});
 watch(panel, (value) => {
+  if (speedOffSide) {
+    speedOffSide = false;
+    return;
+  }
   try {
     localStorage.setItem(PANEL_KEY, value);
   } catch {
@@ -705,7 +720,7 @@ function onKey(event: KeyboardEvent): void {
   if (target?.closest('input, textarea, select, [contenteditable]') || event.metaKey || event.ctrlKey || event.altKey) return;
   // The Signs side: the keys are Sign review's (use-keyboard.ts, while its editor is open), never the speed's, which
   // work only on the Speed side (B there is a block; on the Signs side it is a box).
-  if (editing.value || signsOnly || panel.value === 'signs') return;
+  if (editing.value || signsOnly || speedOff.value || panel.value === 'signs') return;
   if (event.key === 'b') tapBlock();
   else if (event.key === 'Escape' && pending.value !== null) cancelBlock();
   else if (event.key === 'Escape' && typeFrom.value !== null) typeFrom.value = null;
@@ -905,12 +920,12 @@ function worksIn(from: number, to: number) {
 <template>
   <DriveReviewDrive ref="player" class="sr-view" :class="{'sr-signs-on': showSigns && panel === 'signs'}" :route="route" :read-only="readOnly" tab="speedreview" :back-label="isGuest() ? 'My reviews' : 'Speed review'" simple-lanes
                     :arrows="!(editing && onFrame)"
-                    sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly" @time="follow"
+                    sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly && !speedOff" @time="follow"
                     @pick-map="fromMap" @segments="(value) => { segments = value; }" @index="(value) => { videoIndex = value ?? null; }"
                     @frame="(value) => { presented = value; }" @scan="onScan">
     <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
     <template #hud>
-      <span class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
+      <span v-if="!speedOff" class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
     </template>
     <template #picture="{shown, zoomed}">
@@ -1038,10 +1053,14 @@ function worksIn(from: number, to: number) {
         <template v-else-if="!drive.span_ns">
           <p class="dr-hint" id="sr-no-speed">{{ noSpeed }}</p>
         </template>
+        <template v-else-if="speedOff">
+          <h3 id="sr-card-title">Speed review is off on this drive</h3>
+          <p class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the speed was its own, not yours, and
+            the brain does not learn from it.</strong> It learns only drives with sunnylink › Toggles › Enable sunnypilot off;
+            on this one only its signs are reviewed<template v-if="showSigns && !signsOnly"> (Signs, above)</template>.</p>
+        </template>
         <template v-else>
           <h3 id="sr-card-title">The answer at {{ clockOf(seconds) }}</h3>
-          <p v-if="drive.dashcam === false" class="dr-hint" id="sr-not-learnt"><strong>sunnypilot was on in this drive: the brain
-            does not learn from it.</strong> It learns only drives with sunnylink › Toggles › Enable sunnypilot off.</p>
           <p class="dr-hint">ANSWER is your dashboard speed (vEgoCluster), or your block where there is one. Where openpilot or
             the cruise held the speed it is a dash: not your foot, not learnt.</p>
           <div class="sr-value">

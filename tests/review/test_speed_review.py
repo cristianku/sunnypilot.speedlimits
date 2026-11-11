@@ -38,7 +38,8 @@ class FakeDrives:
         self.points = [list(point) for point in points]
 
     def summary(self, route):
-        return {'t0_ns': T0, 'span_ns': [T0, END]}
+        # A dashcam drive (sunnypilot passive, never engaged): the only ones Speed review writes on (#69).
+        return {'t0_ns': T0, 'span_ns': [T0, END], 'coverage': {'engaged': 0}, 'meta': {'car': {'passive': True}}}
 
     def reading(self):
         return contextlib.nullcontext()
@@ -425,8 +426,7 @@ def test_the_drives_say_their_blocks_and_roadworks(store, monkeypatch):
     rows = speed_review.drives_list(store, FakeDrives())
     assert [(row['route'], row['blocks'], row['works'], row['total_s']) for row in rows] == [
         (routes[0], 0, 0, 300), (routes[1], 2, 1, 300)]
-    # FakeDrives' summary has no carParams: no dashcam drive, the page leaves it out.
-    assert [row['dashcam'] for row in rows] == [False, False]
+    assert [row['dashcam'] for row in rows] == [True, True]
 
 
 def test_the_drives_say_whether_the_brain_learns_from_them(store, monkeypatch):
@@ -914,3 +914,19 @@ def test_every_control_page_shows_the_sign_in_page_without_a_session():
     assert [path for path in CONTROL_TABS if not PAGE_RE.fullmatch(path)] == []
     # An address that left the tabs (Regression, now Models › Drive) still asks for the sign-in before it leads on.
     assert '/regression' not in CONTROL_TABS and PAGE_RE.fullmatch('/regression')
+
+
+def test_speed_review_is_off_on_a_drive_with_sunnypilot_on(store):
+    # #69: the speed was sunnypilot's, not his: no block, roadworks, kind of road or road type is written there.
+    class Engaged(FakeDrives):
+        def summary(self, route):
+            return {'t0_ns': T0, 'span_ns': [T0, END], 'coverage': {'engaged': 12.0}, 'meta': {'car': {'passive': False}}}
+    writes = [(speed_review.save_block, {'start_ns': at(0), 'end_ns': at(30), 'kph': 70, 'note': '', 'base_revision': 0}),
+              (speed_review.save_works, {'tap': 'checked', 'at_ns': at(50), 'base_revision': 0}),
+              (speed_review.save_road, {'kind': 'narrow', 'tap': 'start', 'at_ns': at(50), 'base_revision': 0}),
+              (speed_review.save_road_type, {'road_type': 'rural', 'at_ns': at(50), 'base_revision': 0})]
+    for write, body in writes:
+        with pytest.raises(SpeedReviewError) as refused:
+            write(store, Engaged(), ROUTE, body, 'a')
+        assert (refused.value.status, refused.value.reason) == (409, 'not_dashcam')
+    assert store.blocks(ROUTE) == []

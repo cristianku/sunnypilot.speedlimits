@@ -667,6 +667,18 @@ def _span_of(drives: DriveReviewStore, route: str) -> tuple[int, int] | None:
     return summary['t0_ns'], summary['span_ns'][1]
 
 
+def _writable_span(drives: DriveReviewStore, route: str) -> tuple[int, int]:
+    """The span of a drive Speed review writes on (blocks, roadworks, kinds of road, road types): only a dashcam drive
+    (dashcam_drive), the only ones the brain learns from; on the others Speed review is off (#69): its Signs side stays."""
+    span = _span_of(drives, route)
+    if span is None:
+        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    if not dashcam_drive(drives.summary(route)):
+        raise SpeedReviewError(409, 'not_dashcam', 'sunnypilot was on in this drive: Speed review is off on it, the '
+                               'brain learns only drives with sunnypilot off.')
+    return span
+
+
 def road_type_frames(root: Path, route: str, merged: dict | None) -> list[tuple[int, dict]]:
     """The road type of each frame of the map, one a second, as the brain takes it (road_types.load_road_types: the
     map's, the road labeler's layer over it, a person's corrections over both), with the time the road camera exposed
@@ -799,9 +811,7 @@ def frame_jpeg(root: Path, route: str, segment: int, decoded: int) -> bytes:
 def save_block(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
     """A person's block, set ({start_ns, end_ns, kph, note}), moved (the same and from_start_ns, the start it had) or
     removed ({remove: true, start_ns}): checks it against the drive, applies it, and answers with the drive as it is now."""
-    span = _span_of(drives, route)
-    if span is None:
-        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    span = _writable_span(drives, route)
     if body.get('remove') is True:
         store.remove_block(route, _integer(body.get('start_ns'), 'start_ns'), _integer(body.get('base_revision'), 'base_revision'),
                            reviewer)
@@ -815,9 +825,7 @@ def save_block(store: SpeedReviewStore, drives: DriveReviewStore, route: str, bo
 
 def save_works(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
     """A person's tap on the roadworks: checks it against the drive, applies it, and answers with the drive as it is now."""
-    span = _span_of(drives, route)
-    if span is None:
-        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    span = _writable_span(drives, route)
     tap, at, base = works_tap(body, span)
     store.tap_works(route, tap, at, span[1], base, reviewer)
     return drive_view(store, drives, route)
@@ -826,9 +834,7 @@ def save_works(store: SpeedReviewStore, drives: DriveReviewStore, route: str, bo
 def save_road(store: SpeedReviewStore, drives: DriveReviewStore, route: str, body: dict, reviewer: str) -> dict:
     """A person's tap on a kind of road ({kind, tap, at_ns, base_revision}, as save_works): checks it against the drive,
     applies it, and answers with the drive as it is now."""
-    span = _span_of(drives, route)
-    if span is None:
-        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    span = _writable_span(drives, route)
     kind = body.get('kind')
     if not isinstance(kind, str):
         raise SpeedReviewError(400, 'bad_kind', 'kind is the name of a kind of road.')
@@ -842,9 +848,7 @@ def save_road_type(store: SpeedReviewStore, drives: DriveReviewStore, route: str
     the whole stretch of the page the frame shown is in ({at_ns}: road_type_stretches), or from one frame to another
     ({from_ns, to_ns}, in either order: the frames of the map shown at those times, both kept): checks it against the
     drive, keeps it (SpeedReviewStore.set_road_type), and answers with the drive as it is now."""
-    span = _span_of(drives, route)
-    if span is None:
-        raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    span = _writable_span(drives, route)
     road_type = body.get('road_type')
     if 'road_type' not in body or (road_type is not None and road_type not in road_types.ROAD_TYPES):
         raise SpeedReviewError(400, 'bad_road_type', 'road_type is one of ' + ', '.join(road_types.ROAD_TYPES)
