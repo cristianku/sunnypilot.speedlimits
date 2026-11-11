@@ -863,7 +863,9 @@ watch(() => props.route, () => {
             <button type="button" class="btn small rt-play dr-bar-icon" :aria-label="playing ? 'Pause' : 'Play'" :title="playing ? 'Pause' : 'Play'"
                     @click="toggle"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
               <path :d="playing ? MARKS.pause : MARKS.play" fill="currentColor"/></svg></button>
-            <span class="rt-pos"><b>{{ clockOf(cursor) }}</b> / {{ clockOf(end) }}</span>
+            <span class="rt-pos"><b>{{ clockOf(cursor) }}</b> / {{ clockOf(end) }}<small v-if="presentedFrame" class="rt-frame"
+                  title="The frame of the road video on screen: its minute and its frame in that minute, as Speed review and Sign review name it">frame
+                {{ presentedFrame.segment }}/{{ presentedFrame.frame }}</small></span>
             <button type="button" class="btn small" aria-label="Back 5 seconds" @click="seek(cursor - 5)">−5 s</button>
             <button type="button" class="btn small" aria-label="On 5 seconds" @click="seek(cursor + 5)">+5 s</button>
             <button type="button" class="btn small dr-bar-icon" aria-label="Back one frame" title="Back one frame (Shift+←)"

@@ -6,7 +6,7 @@
 // a time; where the comma's screen goes on the picture; and the regression test in words.
 import {ref, watch} from 'vue';
 import {plural, sentence} from '../common/format';
-import {FPS, type Series, type Value, valueAt} from './drive-review';
+import {type Series, type Value, valueAt} from './drive-review';
 
 /** A set of networks a drive is replayed with (simulation.SETS): the release the comma downloads, or the versions in
  * use on Models. */
@@ -94,6 +94,8 @@ export interface SimulationList {
 /** A box of SignNet on a frame read, in pixels of the frame: its class as the classifier read it, the classifier's
  * confidence (0 to 1) and whose road the applicability network gave it to ('' | own_road | other_road | unresolved). */
 export type SignBox = [x1: number, y1: number, x2: number, y2: number, signClass: string, confidence: number, road: string];
+/** A frame read with its boxes: its time, and its minute and frame k of the video (null in a result without them). */
+export type SignRow = [time: number, boxes: SignBox[], segment: number | null, frame: number | null];
 /** A replay as the page draws it (simulation.view): the series of speedVisionSP as the timeline names them, in seconds
  * from the start of the drive's logs; the readings that pulse; SignNet's boxes by frame read. */
 export interface SimulationView {
@@ -107,7 +109,7 @@ export interface SimulationView {
   frames: number;
   series: Record<string, Series>;
   events: [number, 'sign', number][];
-  signs: [number, SignBox[]][];
+  signs: SignRow[];
 }
 /** A replay against the certified one, with where (simulation.differences): runs of [from, to, certified, now] in
  * seconds, to being the last frame that differs. */
@@ -267,21 +269,17 @@ export function readingWords(signClass: string, value: number): string {
 }
 
 // -- SignNet's boxes ------------------------------------------------------------------------------------------------------
-/** A frame read has its time on the log's clock when speedvisiond got it, about 42 ms after its exposure started, which
- * is the time of its picture in the video: the boxes go on the picture they were found on, not on the next one. */
-const FRAME_LEAD = 0.045;
-/** The boxes hold until the next frame read, 0.2 s later (pipeline.PERIOD); older than this they are of a frame gone. */
-const BOX_SECONDS = 0.35;
+/** The frames read one after the other are 4 or 5 frames of the video apart (pipeline.PERIOD); further apart, a frame read
+ * is missing between them and a box does not travel to the next one. */
+const BOX_FRAMES = 7;
 /** Two boxes of two frames read one after the other are the same sign when their centres are closer than this many times
  * the larger box's longer side: a sign close by moves about one and a half of its size in 0.25 s. */
 const SAME_SIGN = 2;
-/** A box on the picture of a time. The car reads 5 frames a second and the video has 20: on the frame read, SignNet's
- * box as it is; on the frames after it, on its way to the same sign's box of the next frame read, so that it stays on
- * the sign (the sign moves 25-30 px in 0.2 s close by); held: the next frame read has no box of that sign, so it stays
- * where it was read, behind the sign. */
-export interface ShownBox {
-  box: SignBox;
-  held: boolean;
+/** A frame of the comma's road video: its minute and its frame k in that minute's fcamera.hevc (the player's presented
+ * frame, and the replay's frame read). */
+export interface VideoFrame {
+  segment: number;
+  frame: number;
 }
 const centre = (box: SignBox): [number, number] => [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
 const side = (box: SignBox): number => Math.max(box[2] - box[0], box[3] - box[1], 1);
@@ -305,28 +303,34 @@ export function sameSigns(now: readonly SignBox[], next: readonly SignBox[]): (S
   }
   return found;
 }
-/** SignNet's boxes on the picture of a time: those of the last frame read up to it, each moved by the video's frames
- * since it towards the same sign's box of the next frame read (ShownBox); none once that frame is old. */
-export function boxesAt(signs: readonly [number, SignBox[]][], s: number): ShownBox[] {
-  const at = s + FRAME_LEAD;
-  const index = lastAt(signs.length, (row) => signs[row]![0], at);
+/** SignNet's boxes on a frame of the video. On a frame read, its boxes as they are, on the picture they were found on. On
+ * the frames after it (the car reads one in 4 or 5), each box on its way to the same sign's box of the next frame read,
+ * by the frames between them, so it stays on the sign as the car moves; a box whose sign the next frame read lost is
+ * drawn on its own frame only, never left behind where the sign was. None on a frame with no frame read before it in its
+ * minute, or one too far back. */
+export function boxesAt(signs: readonly SignRow[], at: VideoFrame | null): SignBox[] {
+  if (!at) return [];
+  const order = (row: number): number => frameOrder(signs[row]!);
+  const index = lastAt(signs.length, order, at.segment * MINUTE_FRAMES + at.frame);
   const row = signs[index];
-  if (!row || at - row[0] >= BOX_SECONDS) return [];
-  // Whole frames of the video: 0 on the frame read, whatever the few ms between its exposure and FRAME_LEAD.
-  const step = Math.round((at - row[0]) * FPS);
+  if (!row || row[2] !== at.segment || row[3] == null) return [];
+  const step = at.frame - row[3];
+  if (step === 0) return row[1];
+  if (step >= BOX_FRAMES) return [];
   const next = signs[index + 1];
-  const steps = next ? Math.round((next[0] - row[0]) * FPS) : 0;
-  const ahead = next && next[0] - row[0] < BOX_SECONDS && steps > step ? sameSigns(row[1], next[1]) : [];
-  return row[1].map((box, i) => {
+  const steps = next && next[2] === at.segment && next[3] != null ? next[3] - row[3] : 0;
+  if (steps <= step || steps >= BOX_FRAMES) return [];
+  const ahead = sameSigns(row[1], next![1]);
+  const part = step / steps;
+  const way = (from: number, end: number): number => from + (end - from) * part;
+  return row[1].flatMap((box, i): SignBox[] => {
     const to = ahead[i];
-    if (step <= 0) return {box, held: false};
-    if (!to) return {box, held: true};
-    const part = step / steps;
-    const way = (from: number, end: number): number => from + (end - from) * part;
-    return {box: [way(box[0], to[0]), way(box[1], to[1]), way(box[2], to[2]), way(box[3], to[3]), box[4], box[5], box[6]],
-      held: false};
+    return to ? [[way(box[0], to[0]), way(box[1], to[1]), way(box[2], to[2]), way(box[3], to[3]), box[4], box[5], box[6]]] : [];
   });
 }
+/** More frames than a minute of the video has (1200): the order of a frame across the minutes. */
+const MINUTE_FRAMES = 100_000;
+const frameOrder = (row: SignRow): number => row[2] == null || row[3] == null ? -1 : row[2] * MINUTE_FRAMES + row[3];
 
 // -- the picture ----------------------------------------------------------------------------------------------------------
 /** The road camera's frame, when a replay does not say its own. */

@@ -8,7 +8,9 @@
 // player's own timeline, read here once more), a replay with the networks on the car or with those in use (GET
 // /api/simulation/drives/<route>?set=, nnslr_tools.simulation.view: the same series by the same names), or the
 // certified replay. Over the picture also SignNet's boxes of the frame read (the switch Boxes), in the frame's pixels
-// as Speed review's, and on the video's frames between two frames read on their way to the next one's (boxesAt). Three lanes over the player's: the speed to hold as runs, every sign read as a tick with what was
+// as Speed review's, on the very frame of the video it was read on (its minute and frame k), and on the video's frames
+// between two frames read on their way to the same sign's box of the next one (boxesAt). Three lanes over the player's:
+// the speed to hold as runs, every sign read as a tick with what was
 // read, and on a certified drive where the replay shown differs from it (red the speed to hold, orange the reading; a
 // tap goes there). At the side: the values at the time shown; Compute, which replays the drive with the set shown on
 // the GPU (the panel action "simulate", helpers/simulate_drive.sh) where it has no replay or one of other networks
@@ -30,7 +32,7 @@ import Segmented from './Segmented.vue';
 import {ROAD_TYPE_LABELS, roadTypeLabel} from './speed-review';
 import {boxesAt, chosenSet, type Differences, FRAME, identical, inputTexts, isSet, PERIOD, pyRound, readingWords, readTimes,
   regressionText, screenAt, screenPlace, SET_LABEL, type SetKey, type SetStates, showBoxes, type SignBox, type SimulationDrive,
-  type Source, type Summary} from './simulation';
+  type Source, type Summary, type VideoFrame} from './simulation';
 
 const props = defineProps<{route: string; status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: undefined, options?: ActionOptions]; stop: [job: Job];
@@ -158,7 +160,9 @@ watch(overlay, (element) => {
 }, {immediate: true});
 onBeforeUnmount(() => observer?.disconnect());
 const place = computed(() => screenPlace(stage.value, frame.value));
-const boxes = computed(() => showBoxes.value && view.value ? boxesAt(view.value.signs, seconds.value) : []);
+/** The frame of the video the player presents (its minute and frame k): the boxes go on it. */
+const presented = shallowRef<VideoFrame | null>(null);
+const boxes = computed(() => showBoxes.value && view.value ? boxesAt(view.value.signs, presented.value) : []);
 const tagOf = (box: SignBox): string => (readText(box[4], undefined) || 'sign') + ' ' + Math.round(box[5] * 100) + '%';
 
 // -- at the time shown ------------------------------------------------------------------------------------------------------
@@ -325,12 +329,12 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
 
 <template>
   <DriveReviewDrive ref="player" :route="route" :read-only="readOnly" tab="drive" back-label="Drive" :rates="RATES"
-                    start-zoom="ten" :limits="false" full-screen @time="follow" @scan="onScan">
+                    start-zoom="ten" :limits="false" full-screen @time="follow" @scan="onScan" @frame="presented = $event">
     <template #badge><b v-if="certified" class="dv-badge">Certified</b></template>
     <template #picture="{shown}">
       <div ref="overlay" class="dv-overlay" aria-hidden="true">
         <svg v-if="shown && boxes.length" class="dv-boxes" :viewBox="`0 0 ${frame[0]} ${frame[1]}`" preserveAspectRatio="xMidYMid meet">
-          <g v-for="({box, held}, index) in boxes" :key="index" class="dv-box" :class="{other: box[6] === 'other_road', held}">
+          <g v-for="(box, index) in boxes" :key="index" class="dv-box" :class="{other: box[6] === 'other_road'}">
             <rect :x="box[0]" :y="box[1]" :width="Math.max(1, box[2] - box[0])" :height="Math.max(1, box[3] - box[1])"/>
             <text :x="box[0]" :y="Math.max(frame[1] / 30, box[1] - frame[1] / 120)" :font-size="frame[1] / 28">{{ tagOf(box) }}</text>
           </g>
@@ -405,7 +409,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
           <p v-else-if="set" class="dr-hint" id="dv-none">This drive is not replayed with these networks yet.</p>
           <div v-if="view" class="sr-tools">
             <button type="button" class="bc-switch" id="dv-boxes" :aria-pressed="showBoxes"
-                    title="SignNet’s boxes of the frame read, on the picture: grey and dashed a sign of another road. The car reads 5 frames a second: in between, a box follows its sign to the next frame read; faded, the next frame read lost it"
+                    title="SignNet’s boxes of the frame read, on the picture: grey and dashed a sign of another road. Drawn on the frame the car read. The car reads one frame in 4 or 5: in between, a box follows its sign to the next frame read; one whose sign the next frame read lost shows on its own frame only"
                     @click="showBoxes = !showBoxes">Boxes</button>
           </div>
         </template>
