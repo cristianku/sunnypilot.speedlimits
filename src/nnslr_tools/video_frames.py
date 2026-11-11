@@ -58,6 +58,10 @@ DECODE_THREADS = '4'
 _decode_slots = threading.BoundedSemaphore(MAX_DECODES)
 # The parameter sets of fcamera.hevc are at its start, before the first slice: never more than this.
 HEADER_BYTES = 1 << 16
+# A frame between the seconds taken out ahead (prepare_soon) waits in <segment folder>/.prepared-<decoded frame> until
+# its save moves its pictures beside the others (materialize); one never saved goes after this long.
+PREPARED_PREFIX = '.prepared-'
+PREPARED_KEPT_S = 3600
 
 _locks: dict[tuple, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -517,12 +521,96 @@ def added_rows(root: Path, route: str) -> list[dict]:
     return rows
 
 
-def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dict, bool]:
-    """(manifest row, made now) of a frame between the seconds: its PNG taken out of the video as the pictures at 1
-    a second are (nnslr_tools.media.extract_frames), added to video_frames.jsonl of its segment."""
-    root = Path(root)
+def _extract(root: Path, route: str, segment: int, decoded: int, into: Path) -> dict:
+    """Its manifest row of a frame between the seconds, its PNG taken out of the video into the new folder ``into`` as
+    the pictures at 1 a second are (nnslr_tools.media.extract_frames)."""
     video = video_of(root, route, segment)
     first, last = gop_of(video, decoded)
+    alignment = root / 'derived/alignment' / route / f'{int(segment)}.jsonl'
+    alignment = alignment if alignment.is_file() else None
+    # Only its GOP is decoded (0.3 s, the whole video takes 5), with the timings read when its frames were shown.
+    result = extract_frames(video, into, decoded=[decoded], prefix=VIDEO_PREFIX, index_base=READ_INDEX_BASE,
+                            alignment=alignment, route_id=route, segment_index=int(segment), timings=timings_of(video),
+                            gop=(first, gop_bytes(video, first, last)))
+    made = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)[0]
+    if not isinstance(made.get('media_time_s'), (int, float)):
+        raise VideoFrameError('the frame has no time in the video')
+    return made
+
+
+def _move_picture(made: dict, directory: Path) -> None:
+    """The picture of ``made`` (and its frame at full definition) moved into ``directory``, its image_path with it."""
+    picture = Path(made['image_path'])
+    final = directory / picture.name
+    picture.replace(final)
+    if full_picture(picture).is_file():
+        full_picture(picture).replace(full_picture(final))
+    made['image_path'] = str(final)
+
+
+def prepare(root: Path, route: str, segment: int, decoded: int) -> None:
+    """A frame between the seconds the reviewer works on (Apply previous, Fit box) taken out of the video now, before
+    its save asks for it: the save then only moves its pictures (materialize), instead of waiting a second or more
+    for ffmpeg. Nothing is a row of the report until then."""
+    root = Path(root)
+    directory = root / 'derived/frames' / route / str(int(segment))
+    folder = directory / f'{PREPARED_PREFIX}{int(decoded)}'
+    with _lock('prepare', route, int(segment), int(decoded)):
+        if (folder / 'row.json').is_file() or (directory / VIDEO_MANIFEST).is_file() and any(
+                row.get('decoded_frame_index') == decoded for row in _rows(directory / VIDEO_MANIFEST)):
+            return
+        directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
+            staging = Path(temporary) / 'frame'
+            made = _extract(root, route, segment, decoded, staging)
+            made['image_path'] = Path(made['image_path']).name
+            (staging / 'row.json').write_text(json.dumps(made, sort_keys=True))
+            shutil.rmtree(folder, ignore_errors=True)
+            staging.replace(folder)
+    # Those never saved go.
+    now = time.time()
+    for old in directory.glob(PREPARED_PREFIX + '*'):
+        try:
+            if now - old.stat().st_mtime > PREPARED_KEPT_S:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def prepare_soon(root: Path, route: str, segment: int, decoded: int) -> None:
+    """prepare outside the request; a frame it cannot take out is taken out again by its save, which says why."""
+    def run() -> None:
+        try:
+            prepare(root, route, segment, decoded)
+        except (VideoFrameError, MediaToolError, OSError, ValueError):
+            pass
+    threading.Thread(target=run, name='video-prepare', daemon=True).start()
+
+
+def _take_prepared(directory: Path, route: str, segment: int, decoded: int) -> dict | None:
+    """The manifest row of the frame prepare took out, its pictures moved into ``directory``; None without one. Waits
+    for a prepare at work on it."""
+    folder = directory / f'{PREPARED_PREFIX}{int(decoded)}'
+    with _lock('prepare', route, int(segment), int(decoded)):
+        try:
+            made = json.loads((folder / 'row.json').read_text())
+            made['image_path'] = str(folder / made['image_path'])
+            if not isinstance(made, dict) or not Path(made['image_path']).is_file():
+                return None
+            _move_picture(made, directory)
+            return made
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dict, bool]:
+    """(manifest row, made now) of a frame between the seconds: its PNG taken out of the video as the pictures at 1
+    a second are (nnslr_tools.media.extract_frames), or by prepare before, added to video_frames.jsonl of its
+    segment."""
+    root = Path(root)
+    video_of(root, route, segment)
     directory = root / 'derived/frames' / route / str(int(segment))
     manifest = directory / VIDEO_MANIFEST
     with _lock('manifest', route, int(segment)):
@@ -530,24 +618,12 @@ def materialize(root: Path, route: str, segment: int, decoded: int) -> tuple[dic
         for row in rows:
             if row.get('decoded_frame_index') == decoded and Path(row.get('image_path', '')).is_file():
                 return row, False
-        alignment = root / 'derived/alignment' / route / f'{int(segment)}.jsonl'
-        alignment = alignment if alignment.is_file() else None
-        # Taken out on its own folder: extract_frames replaces every picture with its prefix in the folder it writes.
-        with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
-            staging = Path(temporary)
-            # Only its GOP is decoded (0.3 s, the whole video takes 5), with the timings read when its frames were shown.
-            result = extract_frames(video, staging, decoded=[decoded], prefix=VIDEO_PREFIX,
-                                    index_base=READ_INDEX_BASE, alignment=alignment, route_id=route,
-                                    segment_index=int(segment), timings=timings_of(video),
-                                    gop=(first, gop_bytes(video, first, last)))
-            made = extracted_frame_rows(result, route_id=route, segment_index=int(segment), alignment=alignment)[0]
-            if not isinstance(made.get('media_time_s'), (int, float)):
-                raise VideoFrameError('the frame has no time in the video')
-            final = directory / Path(made['image_path']).name
-            Path(made['image_path']).replace(final)
-            if full_picture(made['image_path']).is_file():
-                full_picture(made['image_path']).replace(full_picture(final))
-        made['image_path'] = str(final)
+        made = _take_prepared(directory, route, segment, decoded)
+        if made is None:
+            # Taken out on its own folder: extract_frames replaces every picture with its prefix in the folder it writes.
+            with tempfile.TemporaryDirectory(prefix='.video-', dir=directory) as temporary:
+                made = _extract(root, route, segment, decoded, Path(temporary))
+                _move_picture(made, directory)
         rows = [row for row in rows if row.get('decoded_frame_index') != decoded] + [made]
         temporary = manifest.with_suffix('.jsonl.tmp')
         temporary.write_text(''.join(json.dumps(row, sort_keys=True) + '\n' for row in rows))

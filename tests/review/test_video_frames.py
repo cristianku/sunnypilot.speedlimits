@@ -294,6 +294,27 @@ def test_a_frame_between_the_seconds_with_no_sign_is_saved_too(drive):
     assert saved['confirmed'] and saved['payload']['detections'] == []
 
 
+def test_a_frame_prepared_ahead_is_saved_without_decoding_again_with_the_same_picture(drive, monkeypatch, tmp_path):
+    root, video, rows, server = drive
+    video_frames.prepare(root, ROUTE, 0, 45)
+    folder = root / 'derived/frames' / ROUTE / '0'
+    prepared = folder / f'{video_frames.PREPARED_PREFIX}45'
+    assert (prepared / 'row.json').is_file()
+    # The save only moves the pictures prepare took out.
+    monkeypatch.setattr(video_frames, 'extract_frames', lambda *args, **kwargs: pytest.fail('decoded again'))
+    status, _response, data = server.post_frame(ROUTE, '0/1045', body([]))
+    assert status == 200, data
+    assert not prepared.exists()
+    row = json.loads((folder / video_frames.VIDEO_MANIFEST).read_text())
+    assert row['decoded_frame_index'] == 45 and row['image_path'] == str(folder / 'video_00001045.png')
+    monkeypatch.undo()
+    again = extract_frames(video, tmp_path / 'again', decoded=[45])[0]
+    assert again.image_sha256 == row['image_sha256']
+    # A frame already saved is not prepared again.
+    video_frames.prepare(root, ROUTE, 0, 45)
+    assert not prepared.exists()
+
+
 def test_a_later_read_of_the_same_frame_keeps_one_row(drive):
     root, video, rows, server = drive
     status, _response, data = server.post_frame(ROUTE, '0/1025', body([BOX]))

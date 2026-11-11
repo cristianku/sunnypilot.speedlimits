@@ -113,11 +113,11 @@ export async function confirmFrame(): Promise<void> {
   state.notice = null;
   store();
   // A frame of the video between the seconds (reached with ← →) becomes a picture of the report once saved. Confirm
-  // then goes on through the frames of the video (video.ts afterConfirm).
+  // goes on at once, through the frames of the video (video.ts afterConfirm), while the save is on its way: a save
+  // that fails is listed above the confirm button with "Retry saving" (messages.ts).
   const fromVideo = isVirtual(key);
-  const ok = await send(key);
-  if (!ok || state.currentKey !== key) return;
-  void afterConfirm(key, 'Saved ' + key + ' at ' + timeNow() + '.', fromVideo);
+  void send(key);
+  void afterConfirm(key, 'Confirmed ' + key + ' at ' + timeNow() + '.', fromVideo);
 }
 
 export async function withdrawFrame(): Promise<void> {

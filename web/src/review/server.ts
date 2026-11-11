@@ -58,8 +58,23 @@ export function reviewerName(): string {
   return state.reviewer.trim();
 }
 
+// The saves on their way: Confirm goes on at once, Apply previous waits for them (saved()).
+const sending = new Set<Promise<boolean>>();
+
+/** Once every save on its way has its answer. */
+export async function saved(): Promise<void> {
+  while (sending.size > 0) await Promise.allSettled([...sending]);
+}
+
 // POST one confirmed frame. True when the server stored it.
-export async function send(key: string): Promise<boolean> {
+export function send(key: string): Promise<boolean> {
+  const promise = sendNow(key);
+  sending.add(promise);
+  void promise.finally(() => sending.delete(promise));
+  return promise;
+}
+
+async function sendNow(key: string): Promise<boolean> {
   const s = state.edits[key];
   const apiBase = report.apiBase;
   if (!apiBase || !s || state.inFlight.has(key)) return false;

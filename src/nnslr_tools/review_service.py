@@ -149,6 +149,9 @@ class ReviewService:
         self._log = log
         self._reports = {}
         self._reports_lock = threading.Lock()
+        # The rows of the frames between the seconds, by their manifest line and picture (_added_rows): frame_row
+        # hashes the picture, 4 ms each, which made every save of such a frame wait seconds on a drive with hundreds.
+        self._added_frames = {}
         self._car_positions = {}
 
     def log(self, text: str) -> None:
@@ -207,15 +210,23 @@ class ReviewService:
         """The frames between the seconds saved in Sign review since the report was made (nnslr_tools.video_frames),
         as rows of the report: no proposals, the GPS and the country of the nearest frame of their segment."""
         from nnslr_tools.preannotate import frame_row
+        by_segment = {}
+        for item in rows:
+            by_segment.setdefault(item.get('segment_index'), []).append(item)
         added = []
         for raw in video_frames.added_rows(self.root, route):
             try:
-                row = frame_row(self.root, route, raw.get('segment_index'), raw, Path(video_frames.VIDEO_MANIFEST))
+                tag = (route, json.dumps(raw, sort_keys=True), Path(raw.get('image_path', '')).stat().st_mtime_ns)
+                made = self._added_frames.get(tag)
+                if made is None:
+                    made = frame_row(self.root, route, raw.get('segment_index'), raw, Path(video_frames.VIDEO_MANIFEST))
+                    self._added_frames[tag] = made
             except (PreannotationError, OSError, ValueError, TypeError):
                 continue
+            row = dict(made)
             if row['frame_key'] in by_key or not isinstance(row['media_time_s'], (int, float)):
                 continue
-            near = min((item for item in rows if item.get('segment_index') == row['segment_index']),
+            near = min(by_segment.get(row['segment_index'], ()),
                        key=lambda item: abs(frame_second(item) - row['media_time_s']), default={})
             row.update(schema_version=1, kind='preannotated_frame', run_id=directory.name, width=raw.get('width'),
                        height=raw.get('height'),
@@ -290,6 +301,8 @@ class ReviewService:
                 valid = False
         if not valid:
             raise ReviewRejected(404, 'unknown_frame', 'Frame not in the report of this route.')
+        # The reviewer works on it: its picture is taken out now, so that its save only moves it.
+        video_frames.prepare_soon(self.root, snapshot.route, segment, decoded)
         second = decoded / CAMERA_FPS
         near = min(rows, key=lambda row: abs(frame_second(row) - second))
         return {'frame_key': key, 'segment_index': segment, 'output_index': index, 'decoded_frame_index': decoded,

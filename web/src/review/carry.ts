@@ -13,7 +13,7 @@ import {messageOf} from '../common/api';
 import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
 import {revealEditor} from './scroll';
-import {call} from './server';
+import {call, saved} from './server';
 import {anchorIndex, indexOf, isVirtual, report, state} from './store';
 import type {CarryAnswer, FrameEdit, FrameRow} from './types';
 
@@ -39,12 +39,16 @@ export const carried = ref<string | null>(null);
 
 export function carryState(row: FrameRow): CarryState {
   if (!report.apiBase) return {shown: false, enabled: false, title: ''};
+  if (state.inFlight.has(row.frame_key)) return {shown: true, enabled: false, title: 'Saving…'};
+  // The frame before still on its way to the server: A waits for it (applyPrevious).
+  if (state.inFlight.size > 0) {
+    return {shown: true, enabled: true, title: 'The signs of the frame before, carried onto this frame once it is saved (A)'};
+  }
   const before = previousRow(row);
   if (before === null) return {shown: true, enabled: false, title: 'No frame just before this one.'};
   if (!isConfirmed(before.frame_key)) {
     return {shown: true, enabled: false, title: 'The previous frame (' + before.frame_key + ') is not confirmed yet.'};
   }
-  if (state.inFlight.has(row.frame_key)) return {shown: true, enabled: false, title: 'Saving…'};
   return {
     shown: true,
     enabled: true,
@@ -63,9 +67,16 @@ export function uncheckedIndices(work: FrameEdit): number[] {
 }
 
 export async function applyPrevious(): Promise<void> {
-  const row = currentRow();
+  let row = currentRow();
   const apiBase = report.apiBase;
   if (!row || !apiBase || refuseChange()) return;
+  // Confirm went on before the frame before was saved: the server carries from it once it has it.
+  if (state.inFlight.size > 0 && !state.inFlight.has(row.frame_key)) {
+    const waiting = row.frame_key;
+    await saved();
+    row = currentRow();
+    if (!row || row.frame_key !== waiting) return;
+  }
   const carry = carryState(row);
   if (!carry.enabled) {
     // Why not, said where it is seen (a tooltip never shows on a touch screen).
