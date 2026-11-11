@@ -466,7 +466,7 @@ details[open] summary::after { transform: rotate(45deg); }
 .chip.quick { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; font-size: 14.5px; }
 .chip.quick kbd { font-size: 11px; opacity: 0.6; }
 @media (pointer: coarse) { .chip.quick kbd { display: none; } }
-/* Recent: the labels given last on this drive, under the zoom; six at most. */
+/* Recent: the labels given last on this drive, under the box's heading; six at most. */
 .recent-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: -2px 0 0; }
 .recent-label { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
 .chip.recent { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 10px 2px 6px; min-height: 30px; font-size: 12.5px; white-space: nowrap; }
@@ -499,6 +499,9 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 #editor { gap: 10px; }
 .zoom-wrap { position: relative; display: flex; background: var(--stage); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 #zoom { display: block; flex: 1 1 0; min-width: 0; height: 192px; touch-action: pan-x pan-y pinch-zoom; user-select: none; -webkit-user-select: none; }
+/* Inside the photo, in its top corner on the other side from the box (Stage.vue places and sizes it). */
+.zoom-inset { position: absolute; z-index: 2; border-color: rgba(255, 255, 255, 0.7); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45); }
+.zoom-inset #zoom { height: 100%; }
 /* In the zoom's top right corner, over the picture (the zoom keeps the box out of its way, BoxEditor.vue). On a screen at
    2x each pixel of the square is one the classifier gets: 160 in 80 px; the grid, 320 in 160 px. It takes no pointer,
    only its caption (the tooltip) and the grid button do. */
@@ -524,8 +527,8 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 .net-toggle[aria-pressed="true"], .net-toggle[aria-pressed="true"]:hover { background: var(--accent-soft); color: var(--tab-on-fg); }
 #zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .evidence { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
-/* Under the zoom: where the box comes from, and Fit with AI right by it. */
-.zoom-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; margin-top: -6px; }
+/* Under the box's heading: where the box comes from, and Fit box and Fit with AI right by it. */
+.zoom-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
 .zoom-foot .evidence { margin: 0; min-width: 0; }
 .fit-chips { display: flex; gap: 6px; flex: none; margin-left: auto; }
 .chip.fit.ai { color: var(--muted); }

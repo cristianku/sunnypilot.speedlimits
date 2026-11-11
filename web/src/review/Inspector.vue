@@ -9,7 +9,7 @@ import BoxList from './BoxList.vue';
 import AiLiveBanner from './AiLiveBanner.vue';
 import BusyBanner from './BusyBanner.vue';
 import {boxCountText} from './boxes';
-import {applyPrevious, carryState} from './carry';
+import {applyPrevious, carried, carryState} from './carry';
 import ConfirmArea from './ConfirmArea.vue';
 import RoutePick from './RoutePick.vue';
 import ReviewToolbar from './ReviewToolbar.vue';
@@ -42,9 +42,10 @@ const driveHref = computed(() => report.apiBase === null || isGuest() || report.
       <BusyBanner/>
       <AiLiveBanner/>
       <div class="section-head"><h2>Signs</h2><span class="count" id="boxCount">{{ boxCountText(count) }}</span>
-        <!-- Off, it still answers a press: the reason why appears on the status line. -->
+        <!-- Off, it still answers a press: the reason why appears on the status line. Once it has carried the boxes,
+             a second press saves and goes on, as Enter. -->
         <button v-if="carry.shown" type="button" class="btn small carry" id="applyPrevious" :aria-disabled="!carry.enabled"
-                :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>Apply previous</button></div>
+                :title="carry.title" @click="applyPrevious(); releaseFocus($event)"><Icon name="previous"/>{{ carried === row.frame_key ? 'Save and next' : 'Apply previous' }}</button></div>
       <p v-if="driveHref" class="drive-link"><a id="driveReviewLink" :href="driveHref">What the car did here, in Speed review →</a></p>
       <p class="reasons" id="reasons" :hidden="reasons.length === 0"><template v-if="reasons.length > 0"><strong>Suspicious: </strong>{{ reasons.map((reason) => String(reason.text)).join('; ') }}<button v-if="carryHint" type="button" class="btn small carry-hint" @click="applyPrevious(); releaseFocus($event)">Apply previous <kbd class="keycap">A</kbd></button></template></p>
       <p class="filter-note" id="filterNote" :hidden="state.filterNote === ''">{{ state.filterNote }}</p>

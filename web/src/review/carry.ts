@@ -2,12 +2,12 @@
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
-// has run on the carried boxes without an error, the frame is saved, as Enter does, and stays on screen to be looked at
-// (→ then A for the next frame of the sign).
+// has run on the carried boxes without an error, they count as checked and the frame stays on screen, not saved, to be
+// looked at; A again on it saves it and goes on, as Enter does.
 import {fitLocal} from './ai';
-import {confirmAndStay} from './confirm';
+import {confirmFrame} from './confirm';
 import {refuseChange} from './busy';
-import {nextTick} from 'vue';
+import {nextTick, ref} from 'vue';
 import {messageOf} from '../common/api';
 import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
@@ -33,6 +33,9 @@ export interface CarryState {
   title: string;
 }
 
+/** The frame on which A carried the boxes: A again on it saves it and goes on (confirmFrame). */
+export const carried = ref<string | null>(null);
+
 export function carryState(row: FrameRow): CarryState {
   if (!report.apiBase) return {shown: false, enabled: false, title: ''};
   const before = previousRow(row);
@@ -44,7 +47,8 @@ export function carryState(row: FrameRow): CarryState {
   return {
     shown: true,
     enabled: true,
-    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame, fitted and saved; the frame stays on screen (A)',
+    title: carried.value === row.frame_key ? 'Save this frame and go on, as Enter (A)'
+      : 'The signs confirmed on ' + before.frame_key + ', carried onto this frame and fitted; A again saves and goes on (A)',
   };
 }
 
@@ -68,6 +72,11 @@ export async function applyPrevious(): Promise<void> {
     return;
   }
   const key = row.frame_key;
+  if (carried.value === key) {
+    carried.value = null;
+    await confirmFrame();
+    return;
+  }
   const work = workOf(row);
   const byHand = new Set(work.detections.filter(isPlacedByHand).map((d) => JSON.stringify(d.bbox_xyxy)));
   try {
@@ -84,21 +93,21 @@ export async function applyPrevious(): Promise<void> {
     state.drawing = false;
     changed(row);
     if (first !== undefined) void nextTick(revealEditor);
-    const carried = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
-    state.notice = carried;
+    const message = {key, text: answer.message, error: false, warn: answer.to_check.length > 0};
+    state.notice = message;
     // The carried boxes go straight onto their signs, as C does, but those placed by hand stay where they were put;
     // its message after the one of the carry.
     await fitLocal('carried');
     const fit = state.notice;
-    if (fit && fit !== carried && fit.key === key) {
-      state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};
+    if (fit && fit !== message && fit.key === key) {
+      state.notice = {...fit, text: message.text + ' ' + fit.text, warn: message.warn || Boolean(fit.warn)};
     }
-    // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it),
-    // and the frame is saved as Enter does, but stays on screen with no message: a wrong box is moved and saved again
-    // with Enter.
+    // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it) and
+    // the frame stays on screen, not saved, with no message: A again (or Enter) saves it and goes on.
     if (state.currentKey !== key || state.notice?.error) return;
     for (const d of work.detections) delete d.check_position;
-    await confirmAndStay();
+    state.notice = null;
+    carried.value = key;
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   }

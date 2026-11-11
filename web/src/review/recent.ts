@@ -1,5 +1,5 @@
 // Recent: the labels already given to boxes of this drive, offered again in one tap for the selected box (the row
-// under the zoom). A label is what the sign is: type, number, kind, painted, road, panel and its hours, temporary;
+// under the box's heading). A label is what the sign is: type, number, kind, painted, road, panel and its hours, temporary;
 // never where the box is nor how well the sign is seen.
 //   - From what the page holds: the frames confirmed on the server (all of them, read when the page opens) and this
 //     page's edits. In a frame not confirmed only the boxes the reviewer changed count, never a proposal left as the
@@ -11,7 +11,7 @@ import {isConfirmed} from './frames';
 import {anchorIndex, indexOf, isVirtual, report, state} from './store';
 import type {Detection, FrameRow} from './types';
 
-/** How many at most: one line under the zoom. */
+/** How many at most: one line under the box's heading. */
 const SHOWN = 6;
 
 export const LABEL_FIELDS = ['family', 'value_kph', 'sign_unit', 'sign_type', 'painted', 'applicability',

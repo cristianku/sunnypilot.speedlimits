@@ -2,11 +2,13 @@
 // The photo and what is drawn on it: the boxes with their dark under-stroke and labels, the corner handles of
 // the selected box, the boxes of the second reading, the AI suggestion not applied yet and what the car's networks
 // read (car.ts; neither takes the pointer) and the box being drawn. The frame's country and what the comma had at that moment are in the bar above
-// it (CarMoment.vue). Under it, the grip that makes it lower on a computer (PhotoGrip.vue).
+// it (CarMoment.vue). Under it, the grip that makes it lower on a computer (PhotoGrip.vue). Inside it, the zoom of the
+// selected box (ZoomInset.vue), in the top corner on the other side from the box.
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carAskOf, carDetection, carSignLeft} from './car';
+import {selectedBox} from './current';
 import {coarsePointer} from './dom';
 import {drawAi, drawCar, drawStage, sceneScale, WET_TAG} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
@@ -14,11 +16,13 @@ import PhotoGrip from './PhotoGrip.vue';
 import {hintsOf, state} from './store';
 import type {FrameEdit, FrameRow} from './types';
 import {useScreenSize} from './use-layout';
+import ZoomInset from './ZoomInset.vue';
 
 const props = defineProps<{row: FrameRow; work: FrameEdit}>();
 
 const scene = useTemplateRef<SVGSVGElement>('scene');
 const size = useScreenSize(scene);
+const stage = useTemplateRef<HTMLDivElement>('stage');
 
 /** The photo that has loaded (or failed): its address and the frame it was loaded for. */
 const loaded = ref<{href: string; key: string} | null>(null);
@@ -50,10 +54,36 @@ const carBoxes = computed(() => {
     sceneScale(size.value, props.row.width, props.row.height), props.row.width).filter((_, i) => left[i]);
 });
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
+
+// The zoom of the selected box: inside the photo (the picture shown in the picture's frame, which may leave bands
+// around it), in its top corner on the other side from the box; about a third of the photo wide, half on a phone.
+const INSET_GAP = 8;
+const inset = computed(() => {
+  const d = selectedBox.value;
+  const svg = scene.value;
+  const frame = stage.value;
+  const {width, height} = size.value;
+  if (d === null || svg === null || frame === null || !width || !height || state.drawing || !layersVisible.value) return null;
+  const k = Math.min(width / props.row.width, height / props.row.height);
+  const photoWidth = props.row.width * k;
+  const photoHeight = props.row.height * k;
+  // The picture's frame inside the stage (absolute positions start inside its border).
+  const outer = frame.getBoundingClientRect();
+  const inner = svg.getBoundingClientRect();
+  const left = inner.left - outer.left - frame.clientLeft + (width - photoWidth) / 2;
+  const top = inner.top - outer.top - frame.clientTop + (height - photoHeight) / 2;
+  // Under what the page puts over the top of the photo (Speed review: the comma's limits, --zoom-inset-top).
+  const y = Math.max(top + INSET_GAP, parseFloat(getComputedStyle(frame).getPropertyValue('--zoom-inset-top')) || 0);
+  const w = Math.min(Math.max(photoWidth * (photoWidth < 640 ? 0.5 : 0.34), 170), 440, photoWidth - 2 * INSET_GAP);
+  const h = Math.max(Math.min(w * 0.6, photoHeight * 0.6, top + photoHeight - INSET_GAP - y), 60);
+  const onLeft = (d.bbox_xyxy[0] + d.bbox_xyxy[2]) / 2 < props.row.width / 2;
+  const x = onLeft ? left + photoWidth - INSET_GAP - w : left + INSET_GAP;
+  return {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'};
+});
 </script>
 
 <template>
-  <div class="stage" id="stage" :data-photo-key="loaded?.key ?? ''">
+  <div ref="stage" class="stage" id="stage" :data-photo-key="loaded?.key ?? ''">
     <svg ref="scene" id="scene" :class="{drawing: state.drawing, dragging: resizing}" xmlns="http://www.w3.org/2000/svg"
          aria-label="Frame with the boxes of the signs" :viewBox="'0 0 ' + row.width + ' ' + row.height"
          @pointerdown="onPointerDown($event, 'scene')" @pointermove="onPointerMove($event, 'scene')"
@@ -110,6 +140,7 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
       <rect id="draft" :visibility="state.draft ? 'visible' : 'hidden'" :x="state.draft?.x" :y="state.draft?.y"
             :width="state.draft?.width" :height="state.draft?.height"></rect>
     </svg>
+    <ZoomInset v-if="inset && selectedBox" :style="inset" :row="row" :detection="selectedBox"/>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box</span></div>
   </div>
   <PhotoGrip :row="row" :size="size"/>

@@ -1716,6 +1716,9 @@ width of the side. */
 .sign-editor.sr-editor-stage .stage{position:absolute;inset:0;display:block;min-height:0;border:0;border-radius:0;box-shadow:none;
 background:transparent;overflow:visible}
 .sign-editor.sr-editor-stage #scene{width:100%;height:100%;max-height:none}
+/* The zoom of the selected box (ZoomInset.vue) under the comma's limits at the top of the photo (.dr-hud). */
+.sign-editor.sr-editor-stage .stage{--zoom-inset-top:84px}
+@media (max-width:480px){.sign-editor.sr-editor-stage .stage{--zoom-inset-top:62px}}
 .sign-editor.sr-editor-stage .stage-hint{bottom:64px}
 /* While the editor is on the picture, the clear part of the player's bar lets a touch reach the boxes under it. */
 .sign-editor.sr-editor-stage ~ .dr-bar{pointer-events:none}

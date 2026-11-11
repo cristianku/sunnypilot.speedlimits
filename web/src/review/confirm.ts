@@ -50,18 +50,8 @@ function askAboutDuplicate(row: FrameRow): boolean {
   return true;
 }
 
-/** Enter: saves and goes on. */
+/** Enter (and A again after Apply previous): saves and goes on. */
 export async function confirmFrame(): Promise<void> {
-  await saveFrame();
-}
-
-/** Apply previous (A): saves as Enter, but stays on the frame to be looked at, with no message (only an error says
- * anything). */
-export async function confirmAndStay(): Promise<void> {
-  await saveFrame(true);
-}
-
-async function saveFrame(stay = false): Promise<void> {
   const row = currentRow();
   if (!row || refuseChange()) return;
   const key = row.frame_key;
@@ -71,10 +61,6 @@ async function saveFrame(stay = false): Promise<void> {
   const current = state.edits[key];
   if (report.apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
-    if (stay) {
-      state.notice = null;
-      return;
-    }
     // Through the video: on to the next frame of the second still to confirm.
     if ((state.filter === 'todo' || state.filter === 'all') && hasVideo(row.segment_index)) {
       void afterConfirm(key, 'Already confirmed.');
@@ -121,8 +107,7 @@ async function saveFrame(stay = false): Promise<void> {
       review_timestamp: s.review_timestamp,
     };
     store();
-    if (stay) state.notice = null;
-    else advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
+    advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
     return;
   }
   state.notice = null;
@@ -132,10 +117,6 @@ async function saveFrame(stay = false): Promise<void> {
   const fromVideo = isVirtual(key);
   const ok = await send(key);
   if (!ok || state.currentKey !== key) return;
-  if (stay) {
-    state.notice = null;
-    return;
-  }
   void afterConfirm(key, 'Saved ' + key + ' at ' + timeNow() + '.', fromVideo);
 }
 

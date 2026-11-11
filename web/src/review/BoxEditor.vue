@@ -1,71 +1,24 @@
 <script setup lang="ts">
-// The editor of the selected box: zoom (its corners and inside move the box too) with what the classifier gets in its
-// corner, the labels used last, road, speed signs, other value, type and kinds of other signs, details.
-import {computed, ref, useTemplateRef, watch, watchEffect} from 'vue';
+// The editor of the selected box: where it comes from and Fit box (its zoom is inside the photo, ZoomInset.vue), the
+// labels used last, road, speed signs, other value, type and kinds of other signs, details.
+import {computed, ref, watch} from 'vue';
 import {BOOLEAN_FIELDS, FAMILIES, PANELS, PLATE_HOURS, QUICK_VALUES, ROADS, SELECT_FIELDS, SIGN_KIND_GROUPS, US_VALUES,
   familyHasValue, signStyleOf, type BooleanField, type SelectField} from './catalog';
 import {aiBlocker, canFitLocally, fitBox, fitLocal, fitting, localFitting} from './ai';
 import {addedBy, originalOf} from './boxes';
-import ClassifierView from './ClassifierView.vue';
-import {coarsePointer, releaseFocus} from './dom';
+import {releaseFocus} from './dom';
 import {applyLabel, setFamily, setField, setKind, setOnVehicle, setOtherOurs, setValue, togglePainted, toggleVariable} from './edits';
 import {countryOf, workOf} from './frames';
 import {vFill} from './fill';
-import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
-import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
 import {labelKey, labelOf, recentLabels} from './recent';
 import {state} from './store';
 import type {Detection, FrameRow} from './types';
-import {useScreenSize} from './use-layout';
 
 const props = defineProps<{row: FrameRow; detection: Detection | null}>();
 
-const zoom = useTemplateRef<SVGSVGElement>('zoom');
-const zoomSize = useScreenSize(zoom);
-
-// The classifier's square, in the zoom's top right corner: the box is centred in the part of the zoom it leaves free.
-const net = useTemplateRef<InstanceType<typeof ClassifierView>>('net');
-const netSize = useScreenSize(computed(() => (net.value?.$el as Element | undefined) ?? null));
-// Its margin from the zoom's edge and from the box (px).
-const NET_GAP = 6;
-
-/** The zoom's view, as wide as the zoom on screen: the box's view centred in the part left of the square. */
-function besideSquare(v: Rect, size: {width: number; height: number}, square: number): Rect {
-  if (!size.width || !size.height || !v.width || !v.height) return v;
-  const free = Math.max(size.width - (square ? square + 2 * NET_GAP : 0), size.width / 2);
-  const scale = Math.min(free / v.width, size.height / v.height);
-  const height = size.height / scale;
-  return {x: v.x - (free / scale - v.width) / 2, y: v.y - (height - v.height) / 2, width: size.width / scale, height};
-}
-
-// While a corner of the zoom is dragged its view stays still, so the corner stays under the finger.
-const view = ref<Rect | null>(null);
-watchEffect(() => {
-  const d = props.detection;
-  if (d === null || (state.drag !== null && state.drag.svg === 'zoom')) return;
-  view.value = besideSquare(zoomView(d.bbox_xyxy, props.row.width, props.row.height), zoomSize.value,
-                            netSize.value.width);
-});
-const viewBox = computed(() => {
-  const v = view.value;
-  return v === null ? undefined : v.x + ' ' + v.y + ' ' + v.width + ' ' + v.height;
-});
-const handles = computed(() => {
-  const d = props.detection;
-  const v = view.value;
-  if (d === null) return [];
-  // The SVG keeps its view box in single precision.
-  const kz = v && v.width && v.height ? sceneScale(zoomSize.value, Math.fround(v.width), Math.fround(v.height)) : 1;
-  return handlesOf(d.bbox_xyxy, 12 / kz, (coarsePointer() ? 36 : 22) / kz, false);
-});
-const box = computed(() => {
-  const b = props.detection?.bbox_xyxy;
-  return b ? {x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1]} : null;
-});
 // The labels given last on this drive, one tap each (recent.ts); pressed, the one the box has.
 const recent = computed(() => (props.detection === null ? [] : recentLabels(props.row, state.selected)));
 const labelNow = computed(() => (props.detection === null ? '' : labelKey(labelOf(props.detection))));
-const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'zoom');
 
 const usual = FAMILIES.filter((family) => !family.minor);
 const minor = FAMILIES.filter((family) => family.minor);
@@ -157,25 +110,6 @@ function booleanChanged(key: BooleanField, event: Event): void {
 <template>
   <section id="editor" :hidden="detection === null">
     <div class="section-head"><h2 id="editorTitle">Box {{ state.selected + 1 }}</h2></div>
-    <div class="zoom-wrap">
-      <svg ref="zoom" id="zoom" :class="{dragging: resizing}" xmlns="http://www.w3.org/2000/svg"
-           preserveAspectRatio="xMidYMid meet" aria-label="Zoom of the selected box" :viewBox="viewBox"
-           @pointerdown="onPointerDown($event, 'zoom')" @pointermove="onPointerMove($event, 'zoom')"
-           @pointerup="finishDrag($event, 'zoom')" @pointercancel="finishDrag($event, 'zoom')"
-           @touchstart="onTouchStart($event, 'zoom')">
-        <image id="zoomPhoto" x="0" y="0" preserveAspectRatio="none" :href="row.preview_path" :width="row.width"
-               :height="row.height"></image>
-        <rect id="zoomBox" :x="box?.x" :y="box?.y" :width="box?.width" :height="box?.height"></rect>
-        <g id="zoomHandles">
-          <rect v-for="handle in handles" :key="'mark-' + handle.corner" :x="handle.mark.x" :y="handle.mark.y"
-                :width="handle.mark.width" :height="handle.mark.height" class="handle"/>
-          <rect v-for="handle in handles" :key="'hit-' + handle.corner" :x="handle.hit.x" :y="handle.hit.y"
-                :width="handle.hit.width" :height="handle.hit.height" :class="'handle-hit ' + handle.corner"
-                :data-corner="handle.corner"/>
-        </g>
-      </svg>
-      <ClassifierView ref="net" :row="row" :box="detection?.bbox_xyxy ?? null"/>
-    </div>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
       <div v-if="canFitHere || canFit" class="fit-chips">
@@ -195,7 +129,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
               :title="item.title" @click="applyLabel(item.label); releaseFocus($event)"><span v-if="item.disc !== null"
               class="mini-sign">{{ item.disc }}</span>{{ item.text }}</button>
     </div>
-    <!-- Asked for nearly every box: right under the zoom. -->
+    <!-- Asked for nearly every box: right under the box's heading. -->
     <p class="field-label">Road</p>
     <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
       <button v-for="item in ROADS" :key="item.id" type="button" :aria-pressed="road === item.id"

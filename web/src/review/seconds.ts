@@ -1,9 +1,8 @@
 // A second of the drive. Where the server has the segment's road video (report.videos) it is all the frames of that
 // second, 20 of them: the picture at 1 a second and the frames of the video up to the next one (a sign the comma read,
-// a frame saved, a frame not saved yet). Confirm with To review or All goes on through them frame by frame while the
-// frames have a sign: after a frame confirmed with no sign it skips the frames not saved and goes on to the next frame
-// of the report, the picture of the next second (nextInVideo). Offline, or in a segment with no video, the second is
-// its picture at 1 a second alone.
+// a frame saved, a frame not saved yet). Confirm with To review or All goes on through them frame by frame, after a
+// frame with a sign as after one with no sign (nextInVideo). Offline, or in a segment with no video, the second is its
+// picture at 1 a second alone.
 import {computed} from 'vue';
 import {frameStatus, isBetweenFrame} from './frames';
 import {CAMERA_FPS, READ_INDEX_BASE} from './order';
@@ -29,15 +28,10 @@ function keyAt(segment: number, decoded: number): string {
   return byFrame.value.get(segment + '/' + decoded)?.frame_key ?? segment + '/' + (READ_INDEX_BASE + decoded);
 }
 
-/** The frame is confirmed with at least one box. */
-function withSign(key: string): boolean {
-  return frameStatus(key) === 'done' && (state.edits[key]?.detections.length ?? 0) > 0;
-}
-
-/** The walk of Confirm reaches the frame: a row of the report, or a frame of the video right after one confirmed with a
- * box (the sign is followed frame by frame; after a frame with no sign the frames not saved are skipped). */
+/** The walk of Confirm reaches the frame: a row of the report, or a frame of the video right after one confirmed, with a
+ * box or with no sign (the video is walked frame by frame, never a second at a time). */
 function walked(segment: number, decoded: number): boolean {
-  return byFrame.value.has(segment + '/' + decoded) || (decoded > 0 && withSign(keyAt(segment, decoded - 1)));
+  return byFrame.value.has(segment + '/' + decoded) || (decoded > 0 && frameStatus(keyAt(segment, decoded - 1)) === 'done');
 }
 
 /** The frames of the video in the cell of a picture at 1 a second, [first, end) in its segment's video; null: the cell
@@ -71,7 +65,7 @@ function inCell(row: FrameRow): boolean {
 }
 
 /** After Confirm with To review (``skipDone``) or All: the frame after this one, through the frames of the cells with
- * their video that the walk reaches (walked: a frame not saved only right after one with a sign) and from picture to
+ * their video that the walk reaches (walked: a frame not saved only right after one confirmed) and from picture to
  * picture elsewhere; with To review the first one not confirmed. Null: none left after it. */
 export function nextInVideo(key: string, skipDone: boolean): string | null {
   const row = rowOf(key);

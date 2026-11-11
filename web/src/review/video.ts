@@ -4,7 +4,7 @@
 // of the video is not a picture of the report (store.ts virtualRowOf) until it is confirmed. Offline (no
 // server) the arrows go from picture to picture (navigation.ts step).
 import {currentRow, isBetweenFrame} from './frames';
-import {advanceAfterConfirm, openFrame, secondTarget, step} from './navigation';
+import {advanceAfterConfirm, openFrame, step} from './navigation';
 import {CAMERA_FPS} from './order';
 import {hasVideo, nextInVideo} from './seconds';
 import {call} from './server';
@@ -138,18 +138,9 @@ async function moveOne(delta: number): Promise<boolean> {
   return true;
 }
 
-/** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved; saved
- * with no sign (``noSign``), the picture of the next second. */
-async function nextVideoFrame(savedText: string, noSign: boolean): Promise<void> {
-  if (noSign) {
-    const target = walking ? null : secondTarget(state.currentKey, 1);
-    if (target !== null) openFrame(target);
-    if (state.currentKey !== null) {
-      state.notice = {key: state.currentKey, text: savedText + (target !== null ? ' Here is the next second.' : ''),
-        error: false};
-    }
-    return;
-  }
+/** After Confirm on a frame of the video between the seconds: the next frame of the video, with what was saved, a sign
+ * or none. */
+async function nextVideoFrame(savedText: string): Promise<void> {
   const moved = !walking && await moveOne(1);
   if (state.currentKey === null) return;
   state.notice = {key: state.currentKey, text: savedText + (moved ? ' Here is the next frame of the video.' : ''),
@@ -185,14 +176,13 @@ async function nextToConfirm(key: string): Promise<string | null> {
 /** After Confirm (and Confirm on a frame already confirmed, unchanged: ``savedText`` "Already confirmed."): the next
  * frame, confirmed or not, with To review as with All (going back over confirmed frames, Enter goes through each of
  * them, it never jumps to the next one not confirmed), through the frames of the video (seconds.ts) where
- * the server has it, frame by frame while they have a sign and on to the next second after one with no sign;
- * elsewhere a frame of the video that was not saved (``fromVideo``) goes on to the next frame of the video (with no
- * sign to the next second), a frame of the report to the next one of the filter (navigation.ts). */
+ * the server has it, frame by frame, with a sign or with none; elsewhere a frame of the video that was not saved
+ * (``fromVideo``) goes on to the next frame of the video, a frame of the report to the next one of the filter
+ * (navigation.ts). */
 export async function afterConfirm(key: string, savedText: string, fromVideo = false): Promise<void> {
   const row = rowOf(key);
-  const noSign = (state.edits[key]?.detections.length ?? 0) === 0;
   if (row === null || !walksVideo(row)) {
-    if (fromVideo) await nextVideoFrame(savedText, noSign);
+    if (fromVideo) await nextVideoFrame(savedText);
     else advanceAfterConfirm(key, savedText);
     return;
   }
