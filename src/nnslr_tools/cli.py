@@ -1907,6 +1907,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_signnet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_signnet.add_argument("--dry-run", action="store_true",
                            help="build the plan only (no torch): one JSON line with its frames and boxes by split")
+    p_signnet.add_argument("--plan-out", default=None,
+                           help="with --dry-run: also write the plan there, for the training's --plan")
+    p_signnet.add_argument("--plan", default=None,
+                           help="the plan a --dry-run --plan-out wrote, used instead of building it again when the "
+                                "dataset, split, Mapillary windows and settings are still the same (else built)")
     p_signnet.set_defaults(func=_cmd_train_signnet)
     p_remeasure = sub.add_parser("remeasure-signnet", help="add the lenient car measure (a box's centre inside the "
                                                            "sign's, 0.5x to 2x its size) to a finished SignNet run's "
@@ -1918,7 +1923,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_remeasure.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
     p_remeasure.add_argument("--batch", type=int, default=16)
     p_remeasure.add_argument("--workers", type=int, default=8)
-    p_remeasure.add_argument("--device", choices=("cpu", "cuda"), default=None, help="default: cuda when there is one")
+    p_remeasure.add_argument("--device", choices=("cpu", "cuda"), default="cuda",
+                             help="the card; without one it stops, never the CPU on its own")
     p_remeasure.add_argument("--dry-run", action="store_true", help="measure and print, write nothing")
     p_remeasure.add_argument("--data-root", default=None)
     p_remeasure.set_defaults(func=_cmd_remeasure_signnet)
@@ -3193,13 +3199,41 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
             raise ValueError(f"--mapillary: the windows are the car's band ({CAR_BAND[0]}x{CAR_BAND[1]}, the frame's top "
                              f"{WINDOW[0]}x{WINDOW[1]}); --band-width {args.band_width} makes a {band[0]}x{band[1]} "
                              "band of other rows")
-    plan = prepare_detector_training(Path(args.dataset or root / "annotations" / "objects.jsonl"),
-                                     Path(args.split or root / "splits" / "latest.json"), root,
-                                     dataset_kind=args.dataset_kind, families=args.families,
-                                     mapillary=Path(args.mapillary) if args.mapillary else None,
-                                     mapillary_region=args.mapillary_region, mapillary_share=args.mapillary_share,
-                                     mapillary_only=args.mapillary_only,
-                                     mapillary_ratio=1.0 if args.mapillary_ratio is None else args.mapillary_ratio)
+    if args.plan_out and not args.dry_run:
+        raise ValueError("--plan-out writes the plan of a --dry-run: add --dry-run, or --plan to read one")
+    dataset = Path(args.dataset or root / "annotations" / "objects.jsonl")
+    split = Path(args.split or root / "splits" / "latest.json")
+    # What the plan is made of: a plan written by the dry run is the training's only while all of it is the same.
+    inputs = {"data_root": str(root.resolve()), "dataset_kind": args.dataset_kind, "families": args.families,
+              "mapillary_region": args.mapillary_region, "mapillary_share": args.mapillary_share,
+              "mapillary_only": args.mapillary_only, "mapillary_ratio": args.mapillary_ratio,
+              **{name: [str(path.resolve()), sha256_of(path) if path.is_file() else None]
+                 for name, path in (("dataset", dataset), ("split", split),
+                                    ("mapillary", Path(args.mapillary) if args.mapillary else None)) if path}}
+    plan = None
+    if args.plan:
+        try:
+            saved = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {}
+        if saved.get("inputs") == inputs:
+            plan = saved["plan"]
+            print(f"plan: {args.plan}, written by the check of the population", file=sys.stderr, flush=True)
+        else:
+            print(f"plan: {args.plan} is missing or of other data or settings, built again", file=sys.stderr,
+                  flush=True)
+    if plan is None:
+        plan = prepare_detector_training(dataset, split, root,
+                                         dataset_kind=args.dataset_kind, families=args.families,
+                                         mapillary=Path(args.mapillary) if args.mapillary else None,
+                                         mapillary_region=args.mapillary_region,
+                                         mapillary_share=args.mapillary_share, mapillary_only=args.mapillary_only,
+                                         mapillary_ratio=1.0 if args.mapillary_ratio is None else args.mapillary_ratio)
+    if args.plan_out:
+        out = Path(args.plan_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_name(out.name + ".tmp").write_text(json.dumps({"inputs": inputs, "plan": plan}), encoding="utf-8")
+        out.with_name(out.name + ".tmp").replace(out)
     if args.init_from and not Path(args.init_from).is_file():
         raise ValueError(f"--init-from is not a file: {args.init_from}")
     mapillary = plan.get("mapillary")

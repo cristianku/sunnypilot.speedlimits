@@ -217,7 +217,7 @@ def test_a_tiny_training_logs_its_lines_and_saves_the_data(tmp_path):
             'trainable': True}
     lines = []
     result = train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=2, batch=2, workers=0,
-                           band_width=96, log=lines.append)
+                           band_width=96, log=lines.append, device='cpu')
     assert [line.split(' train_loss ')[0] for line in lines[:2]] == ['signnet epoch 1/2', 'signnet epoch 2/2']
     assert all(' val_recall ' in line and ' val_false_per_frame ' in line and line.endswith('s') for line in lines[:2])
     assert lines[2] == f"signnet measure the best epoch {result['best_epoch']} on validation and test"
@@ -231,12 +231,10 @@ def test_a_tiny_training_logs_its_lines_and_saves_the_data(tmp_path):
         assert set(result[split]['car']) == set(result[split]['by_box_budget']['5'])
 
 
-def test_the_band_cache_gives_the_bands_of_the_frames(tmp_path, monkeypatch):
-    import random
-
+def test_the_band_cache_gives_the_bands_of_the_frames(tmp_path):
     from PIL import Image
 
-    from nnslr_tools import signnet, synthetic_signs
+    from nnslr_tools import signnet
     frames = []
     for index in range(3):
         image = Image.new('RGB', (128, 96), (90 + 20 * index, 90, 90))
@@ -249,23 +247,95 @@ def test_the_band_cache_gives_the_bands_of_the_frames(tmp_path, monkeypatch):
     cache = signnet.band_cache(frames, tmp_path, 96, workers=0)
     assert (cache['frames'], cache['cut'], cache['kept']) == (4, 3, 0) and 'gone.png' not in cache['files']
     assert signnet.band_cache(frames, tmp_path, 96, workers=0)['kept'] == 3  # cut once
-    plain = signnet._dataset(frames[:3], tmp_path, 8, train=False, seed=0, band_width=96)
-    ready = signnet._dataset(frames[:3], tmp_path, 8, train=False, seed=0, band_width=96, cached=cache['files'])
+    plain = signnet._dataset(frames[:3], tmp_path, band_width=96)
+    ready = signnet._dataset(frames[:3], tmp_path, band_width=96, cached=cache['files'])
     for index in range(3):
-        assert torch.equal(plain[index][0], ready[index][0])  # the very pixels of the frame's band
-        assert all(torch.equal(a, b) for a, b in zip(plain[index][1:5], ready[index][1:5]))
-    # In training, a frame with a speed sign is decoded only when a sign is drawn on it; otherwise its band is read.
-    decoded = []
-    band_image = signnet._band_image
-    monkeypatch.setattr(signnet, '_band_image', lambda *args: decoded.append(args) or band_image(*args))
-    train = signnet._dataset(frames[:3], tmp_path, 8, train=True, seed=0, band_width=96, cached=cache['files'])
+        assert torch.equal(plain[index][0], ready[index][0]) and ready[index][1] == index  # the frame's very pixels
+
+
+def _speed_frames(tmp_path, count=6):
+    from PIL import Image
+    frames = []
+    for index in range(count):
+        image = Image.new('RGB', (128, 96), (80 + 10 * index, 90, 100))
+        # Every sign in the band, each centred on a cell of its own.
+        image.paste((240, 240, 240), (8 + 13 * index, 4 + index, 24 + 13 * index, 20 + index))
+        image.save(tmp_path / f'f{index}.png')
+        frames.append({'image_path': f'f{index}.png', 'split': 'train', 'width': 128, 'height': 96,
+                       'boxes': [[8.0 + 13 * index, 4.0 + index, 24.0 + 13 * index, 20.0 + index]],
+                       'box_families': ['maximum_speed'],
+                       'ignore_boxes': [[100.0, 30.0, 120.0, 40.0]] if index % 2 else []})
+    return frames
+
+
+@pytest.mark.parametrize('workers', [0, 2])
+def test_the_bands_in_memory_are_the_frames_with_their_targets(tmp_path, workers):
+    """#70: a training's bands and targets in memory (Resident, filled here or by forked processes) are each frame's
+    band and encode's targets of it, as it is and mirrored."""
+    from nnslr_tools import signnet
+    frames = _speed_frames(tmp_path)
+    cache = signnet.band_cache(frames, tmp_path, 96, workers=0)
+    store = signnet.resident(frames, tmp_path, 8, 96, cache['files'], targets=True, workers=workers)
+    bands = signnet.resident(frames, tmp_path, 8, 96, cache['files'], targets=False, workers=workers)
+    assert len(store) == len(frames) and bands.heat is None
+    assert store.bytes() > bands.bytes() == len(frames) * 3 * 32 * 96
+    index = torch.arange(len(frames))
+    for flip in (False, True):
+        image, *targets = store.batch(index, torch.full((len(frames),), flip))
+        for row, frame in enumerate(frames):
+            band, width = signnet._frame_band(frame, tmp_path, 96, {})
+            assert torch.equal(image[row], band) and torch.equal(bands.bands[row], band)  # never mirrored here
+            for got, want in zip(targets, signnet._targets(frame, width, 96, 8, flip)):
+                assert torch.equal(got[row], want)
+
+
+def test_an_epoch_in_memory_draws_the_same_bands_in_any_process(tmp_path, monkeypatch):
+    """#70: the epoch's batches are the store's, but for the frames with an end of limit drawn, which the painter's
+    processes make; the same seed gives the same epoch, painted in this process or in two others."""
+    import random
+
+    from nnslr_tools import signnet, synthetic_signs
+    monkeypatch.setattr(synthetic_signs, 'SHARE', 0.5)
+    frames = _speed_frames(tmp_path, 8)
+    store = signnet.resident(frames, tmp_path, 8, 96, None, targets=True, workers=0)
+    paintable = {index for index, frame in enumerate(frames) if signnet._paintable(frame)}
+    assert paintable == set(range(8))
+
+    def epoch(workers):
+        painter = signnet._painter(frames, tmp_path, 8, 96, workers)
+        rng, generator = random.Random(7), torch.Generator().manual_seed(7)
+        return [list(signnet._epoch(store, 3, rng, generator, paintable, painter)) for _ in range(2)]
+    here, forked = epoch(0), epoch(2)
+    drawn = 0
+    for first, second in zip(here, forked):
+        assert len(first) == 2  # 8 frames in batches of 3: the last one dropped
+        for a, b in zip(first, second):
+            assert all(torch.equal(x, y) for x, y in zip(a, b))
+        for image, heat, shape, mask, weight, flip, light in first:
+            assert image.dtype == torch.uint8 and light.shape == (3, 2)
+            for row in range(3):
+                found = [k for k in range(8) if torch.equal(store.heat[int(flip[row]), k], heat[row])]
+                assert len(found) == 1  # the targets of one frame, for its flip
+                if not torch.equal(image[row], store.bands[found[0]]):
+                    drawn += 1  # an end of limit drawn over the frame's band
+    assert drawn > 0
+    # Without a sign drawn every band is the store's, and the painter is never asked.
     monkeypatch.setattr(synthetic_signs, 'SHARE', 0.0)
-    train[0]
-    assert decoded == []
-    monkeypatch.setattr(synthetic_signs, 'SHARE', 1.0)
-    random.seed(0)
-    image = train[1][0]
-    assert len(decoded) == 1 and decoded[0][2] is not None and image.shape == plain[1][0].shape
+    for image, heat, *_ in signnet._epoch(store, 4, random.Random(1), torch.Generator().manual_seed(1), paintable,
+                                          signnet._painter(frames, tmp_path, 8, 96, 0)):
+        assert any(torch.equal(image[0], band) for band in store.bands)
+
+
+def test_without_a_card_it_stops(tmp_path, monkeypatch):
+    from nnslr_tools import signnet
+    monkeypatch.setattr(torch.cuda, 'is_available', lambda: False)
+    with pytest.raises(ValueError, match='no_cuda_card'):
+        signnet.on_a_card('cuda')
+    assert signnet.on_a_card('cpu').type == 'cpu'
+    plan = {'frames': [{'split': 'train'}], 'trainable': True, 'families': 'all'}
+    with pytest.raises(ValueError, match='no_cuda_card'):
+        train_signnet(plan, tmp_path, tmp_path / 'run', batch=1, log=lambda line: None)
+    assert not (tmp_path / 'run').exists()
 
 
 def test_the_mapillary_stage_names_its_lines_and_keeps_the_epoch_of_the_speed_signs(tmp_path):
@@ -284,7 +354,7 @@ def test_the_mapillary_stage_names_its_lines_and_keeps_the_epoch_of_the_speed_si
             'trained_on': {'ours': 0, 'ours_boxes': 0, 'mapillary_windows': 4, 'mapillary_boxes': 4}}
     lines = []
     result = train_signnet(plan, tmp_path, tmp_path / 'run' / 'pretrain', widths=(4, 4, 4, 4), epochs=2, batch=2,
-                           workers=0, band_width=96, log=lines.append)
+                           workers=0, band_width=96, log=lines.append, device='cpu')
     assert lines[0].startswith('signnet_pretrain keeps the epoch with the best validation recall of the speed signs')
     assert [line.split(' train_loss ')[0] for line in lines[1:3]] == ['signnet_pretrain epoch 1/2',
                                                                       'signnet_pretrain epoch 2/2']
@@ -302,7 +372,7 @@ def test_the_mapillary_stage_names_its_lines_and_keeps_the_epoch_of_the_speed_si
     lines = []
     second = train_signnet({**plan, 'frames': ours, 'mapillary': None, 'mapillary_only': False}, tmp_path,
                            tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96,
-                           init_from=stage, log=lines.append)
+                           init_from=stage, log=lines.append, device='cpu')
     assert lines[0].startswith("signnet starts from run's Mapillary stage: every layer of its epoch ")
     assert second['start']['mapillary_only'] is True and second['start']['mapillary'] == summary
     assert second['start']['run'] == 'run' and second['start']['mapillary_stage'] is True
@@ -338,8 +408,10 @@ def test_the_default_log_flushes_every_line(tmp_path, monkeypatch):
         frames.append({'image_path': f'f{index}.jpg', 'split': split, 'width': 128, 'height': 96,
                        'boxes': [[40.0, 6.0, 56.0, 22.0]], 'box_families': ['speed_limit']})
     plan = {'frames': frames, 'trainable': True, 'families': 'all'}
-    train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96)
-    assert printed == [True, True, True, True]  # the band cache, the epoch, the measure and the complete lines
+    train_signnet(plan, tmp_path, tmp_path / 'run', widths=(4, 4, 4, 4), epochs=1, batch=2, workers=0, band_width=96,
+                  device='cpu')
+    # The band cache, the bands in memory, the epoch, the measure and the complete lines.
+    assert printed == [True, True, True, True, True]
 
 
 def test_the_car_measure_keeps_the_best_5_boxes_of_0_3(tmp_path, monkeypatch):

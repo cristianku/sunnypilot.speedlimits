@@ -98,6 +98,11 @@ def test_the_two_stages_train_the_windows_first_then_ours_from_them(tmp_path):
     # Both plans are checked first; the second one's without the weights the first stage has not made yet.
     checks = [line.split() for line in log.splitlines() if line.startswith('args: train-signnet --dry-run')]
     assert len(checks) == 2 and '--mapillary-only' in checks[0] and '--init-from' not in checks[1]
+    # Each training reads the plan its check wrote (#70), in a folder of the job's own, gone at the end.
+    assert [_after(check, '--plan-out') for check in checks] == [_after(first, '--plan'), _after(second, '--plan')]
+    assert _after(first, '--plan') != _after(second, '--plan')
+    assert not Path(_after(first, '--plan')).parent.exists()
+    assert 'CUDA_VISIBLE_DEVICES= ' not in (REPO / 'scripts' / 'run_signnet.sh').read_text()  # never a hidden card
 
 
 def test_a_first_stage_trained_is_not_trained_again(tmp_path):

@@ -322,3 +322,37 @@ def test_the_signnet_dry_run_says_what_train_holds(tmp_path, capsys):
     code, out = signnet("--mapillary", str(windows), "--band-width", "1344")
     assert code == 2 and "the windows are the car's band" in out.err
     assert "torch" not in sys.modules
+
+
+def test_the_signnet_training_reads_the_plan_of_its_check(tmp_path, capsys, monkeypatch):
+    """#70: the check of the population writes its plan (--dry-run --plan-out) and the training reads it (--plan)
+    instead of building it again; with another setting, or no file, the training builds its own."""
+    from nnslr_tools import signnet, training
+    _training_fixture(tmp_path, capsys)
+    saved = tmp_path / "plans" / "main.json"
+
+    def signnet_cli(*options):
+        return invoke(capsys, "train-signnet", "--run-dir", str(tmp_path / "run"), "--data-root", str(tmp_path),
+                      "--batch", "2", *options)
+
+    code, out = signnet_cli("--dry-run", "--plan-out", str(saved))
+    assert code == 0 and saved.is_file() and not (tmp_path / "run").exists()
+    code, out = signnet_cli("--plan-out", str(saved))
+    assert code == 2 and "add --dry-run" in out.err
+    built, trained = [], []
+    real = training.prepare_detector_training
+    monkeypatch.setattr(training, "prepare_detector_training", lambda *a, **kw: built.append(1) or real(*a, **kw))
+    measured = {"recall_iou": 0.5, "false_positives_per_image": 1.0}
+    result = {"best_epoch": 1, "parameters": 1,
+              **{split: {"by_box_budget": {"5": measured}, "car": measured} for split in ("validation", "test")}}
+    monkeypatch.setattr(signnet, "train_signnet", lambda plan, *a, **kw: trained.append(plan) or result)
+    code, out = signnet_cli("--plan", str(saved))
+    assert code == 0 and built == [] and "written by the check of the population" in out.err
+    assert trained[0] == json.loads(saved.read_text(encoding="utf-8"))["plan"]
+    assert trained[0] == real(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json",
+                              tmp_path)
+    code, out = signnet_cli("--plan", str(saved), "--families", "speed")
+    assert code == 0 and built == [1] and "built again" in out.err and trained[-1]["families"] == "speed"
+    saved.unlink()
+    code, out = signnet_cli("--plan", str(saved))
+    assert code == 0 and built == [1, 1] and "built again" in out.err and trained[-1] == trained[0]

@@ -286,11 +286,16 @@ if [[ "$OLD_LOG" == "1" ]]; then
 fi
 
 echo "== 1/3 Check the training population (CPU-only) =="
+# The plans built here are the trainings' (--plan-out, --plan): each built once, not again before its training
+# (#70); a training builds its own when the data changed in between.
+PLANS="$(mktemp -d)"
+trap 'rm -rf "$PLANS"' EXIT
 if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
-  CUDA_VISIBLE_DEVICES= "$NN" train-signnet --dry-run --run-dir "$PRETRAIN_ROOT" --dataset-kind "$DATASET_KIND" \
-    "${PRETRAIN_SETTINGS[@]}"
+  "$NN" train-signnet --dry-run --run-dir "$PRETRAIN_ROOT" --dataset-kind "$DATASET_KIND" \
+    "${PRETRAIN_SETTINGS[@]}" --plan-out "$PLANS/pretrain.json"
 fi
-CUDA_VISIBLE_DEVICES= "$NN" train-signnet --dry-run --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${CHECK_SETTINGS[@]}"
+"$NN" train-signnet --dry-run --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${CHECK_SETTINGS[@]}" \
+  --plan-out "$PLANS/main.json"
 
 echo "== 2/3 Explicit CUDA smoke test =="
 # CUDA_VISIBLE_DEVICES maps the selected physical GPU to logical cuda:0.
@@ -309,13 +314,14 @@ if [[ "$MAPILLARY_MODE" == "pretrain" ]]; then
     fi
   else
     "$NN" train-signnet --run-dir "$PRETRAIN_ROOT" --dataset-kind "$DATASET_KIND" "${PRETRAIN_SETTINGS[@]}" \
-      --workers "$NUM_WORKERS"
+      --workers "$NUM_WORKERS" --plan "$PLANS/pretrain.json"
     mkdir -p "$PRETRAIN_ROOT"
     printf '%s\n' "$PRETRAIN_KEY" > "$PRETRAIN_RECORD"
   fi
   echo "-- the second stage: our frames alone, from the first --"
 fi
-"$NN" train-signnet --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${SETTINGS[@]}" --workers "$NUM_WORKERS"
+"$NN" train-signnet --run-dir "$RUN_ROOT" --dataset-kind "$DATASET_KIND" "${SETTINGS[@]}" --workers "$NUM_WORKERS" \
+  --plan "$PLANS/main.json"
 
 echo
 echo "Nothing was imported, exported, deployed or put in use (Models > Use this one)."
