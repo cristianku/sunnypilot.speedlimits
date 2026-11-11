@@ -3,7 +3,8 @@
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
 // has run on the carried boxes without an error, they count as checked and the frame stays on screen, not saved, to be
-// looked at; A again on it saves it and goes on, as Enter does.
+// looked at, its first sign selected so that its zoom opens inside the photo; A again on it saves it and goes on, as
+// Enter does.
 import {fitLocal} from './ai';
 import {confirmFrame} from './confirm';
 import {refuseChange} from './busy';
@@ -87,8 +88,9 @@ export async function applyPrevious(): Promise<void> {
     // Every box comes back anew: one placed by hand that the carry kept where it was is still placed by hand.
     for (const d of answer.detections) if (byHand.has(JSON.stringify(d.bbox_xyxy))) markPlacedByHand(d, true);
     work.detections = answer.detections;
+    // The first box to check is selected, else the first sign carried: its zoom opens inside the photo.
     const first = uncheckedIndices(work)[0];
-    state.selected = first === undefined ? -1 : first;
+    state.selected = first ?? (work.detections.length > 0 ? 0 : -1);
     state.selectedByUser = first !== undefined;
     state.drawing = false;
     changed(row);
@@ -106,6 +108,7 @@ export async function applyPrevious(): Promise<void> {
     // the frame stays on screen, not saved, with no message: A again (or Enter) saves it and goes on.
     if (state.currentKey !== key || state.notice?.error) return;
     for (const d of work.detections) delete d.check_position;
+    if (state.selected < 0 || state.selected >= work.detections.length) state.selected = work.detections.length > 0 ? 0 : -1;
     state.notice = null;
     carried.value = key;
   } catch (error) {
