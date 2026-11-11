@@ -50,7 +50,17 @@ function askAboutDuplicate(row: FrameRow): boolean {
   return true;
 }
 
+/** Enter: saves and goes on. */
 export async function confirmFrame(): Promise<void> {
+  await saveFrame();
+}
+
+/** Apply previous (A): saves as Enter, but stays on the frame to be looked at; its notice after ``text``. */
+export async function confirmAndStay(text: string): Promise<void> {
+  await saveFrame(text);
+}
+
+async function saveFrame(stay?: string): Promise<void> {
   const row = currentRow();
   if (!row || refuseChange()) return;
   const key = row.frame_key;
@@ -60,6 +70,10 @@ export async function confirmFrame(): Promise<void> {
   const current = state.edits[key];
   if (report.apiBase && frameStatus(key) === 'done' && current && sameAsServer(current)) {
     state.lastSave = {key, result: 'unchanged', revision: current.revision || 0};
+    if (stay !== undefined) {
+      state.notice = {key, text: (stay + ' Already confirmed.').trim(), error: false};
+      return;
+    }
     // Through the video: on to the next frame of the second still to confirm.
     if ((state.filter === 'todo' || state.filter === 'all') && hasVideo(row.segment_index)) {
       void afterConfirm(key, 'Already confirmed.');
@@ -106,7 +120,8 @@ export async function confirmFrame(): Promise<void> {
       review_timestamp: s.review_timestamp,
     };
     store();
-    advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
+    if (stay !== undefined) state.notice = {key, text: (stay + ' Confirmed ' + key + ' in this browser.').trim(), error: false};
+    else advanceAfterConfirm(key, 'Confirmed ' + key + ' in this browser.');
     return;
   }
   state.notice = null;
@@ -116,6 +131,10 @@ export async function confirmFrame(): Promise<void> {
   const fromVideo = isVirtual(key);
   const ok = await send(key);
   if (!ok || state.currentKey !== key) return;
+  if (stay !== undefined) {
+    state.notice = {key, text: (stay + ' Saved ' + key + ' at ' + timeNow() + '.').trim(), error: false};
+    return;
+  }
   void afterConfirm(key, 'Saved ' + key + ' at ' + timeNow() + '.', fromVideo);
 }
 

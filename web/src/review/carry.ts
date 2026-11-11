@@ -2,10 +2,10 @@
 // (review_service.apply_previous). A box of this frame that is the same sign takes the previous labels; a sign
 // not found here gets a box where it should be, marked "check": Confirm refuses the frame until the reviewer
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
-// has run on the carried boxes without an error, the frame is confirmed, as Enter does, and A alone goes through the
-// frames of a sign.
+// has run on the carried boxes without an error, the frame is saved, as Enter does, and stays on screen to be looked at
+// (→ then A for the next frame of the sign).
 import {fitLocal} from './ai';
-import {confirmFrame} from './confirm';
+import {confirmAndStay} from './confirm';
 import {refuseChange} from './busy';
 import {nextTick} from 'vue';
 import {messageOf} from '../common/api';
@@ -44,7 +44,7 @@ export function carryState(row: FrameRow): CarryState {
   return {
     shown: true,
     enabled: true,
-    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame, fitted and confirmed (A)',
+    title: 'The signs confirmed on ' + before.frame_key + ', carried onto this frame, fitted and saved; the frame stays on screen (A)',
   };
 }
 
@@ -94,10 +94,11 @@ export async function applyPrevious(): Promise<void> {
       state.notice = {...fit, text: carried.text + ' ' + fit.text, warn: carried.warn || Boolean(fit.warn)};
     }
     // The fit without error: every carried box counts as checked (a box the fit kept stays where the carry put it),
-    // and the frame is saved and left as Enter does. A wrong one is put right by going back to the frame (←).
-    if (state.currentKey !== key || state.notice?.error) return;
+    // and the frame is saved as Enter does, but stays on screen: a wrong box is moved and saved again with Enter.
+    const shown = state.notice;
+    if (state.currentKey !== key || shown?.error) return;
     for (const d of work.detections) delete d.check_position;
-    await confirmFrame();
+    await confirmAndStay(shown?.key === key ? shown.text : '');
   } catch (error) {
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   }
