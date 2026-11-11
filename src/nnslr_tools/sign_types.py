@@ -6,7 +6,7 @@ speed (weight, height, width, minimum speed): the model has to know them apart f
 Direction signs say where they point; a green one (a board with places or an arrow: in Switzerland the way to a
 motorway or an expressway) is ``motorway_direction`` whatever its arrow, a hint that a motorway is near for the
 road-type network. The motorway sign itself is ``motorway_start``: the green square with the motorway pictogram
-alone, no places and no arrow. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
+alone, no places and no arrow. ``motorway_exit`` is the sign at the gore of a motorway or expressway exit (the blue arrow up to the right, "Ausfahrt"): ours when the car takes that exit, another road when it stays on. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
 with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign that looks most like a speed limit.
 Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
 
@@ -37,6 +37,7 @@ SIGN_TYPES = (
     'roundabout', 'one_way',
     # Directions
     'direction_left', 'direction_right', 'direction_straight', 'direction_several', 'motorway_direction',
+    'motorway_exit',
     'other',
 )
 # What a "not a sign" box is, when said.
