@@ -4,12 +4,13 @@
 // has looked at each one (moved it onto the sign, pressed "Here", or deleted it). Pressing A is that look: once the fit
 // has run on the carried boxes without an error, they count as checked and the frame stays on screen, not saved, to be
 // looked at, its first sign selected so that its zoom opens inside the photo; A again on it saves it and goes on, as
-// Enter does.
+// Enter does. The boxes of the frame before show at once, the first one zoomed, while the server carries them.
 import {fitLocal} from './ai';
 import {confirmFrame} from './confirm';
 import {refuseChange} from './busy';
 import {nextTick, ref} from 'vue';
 import {messageOf} from '../common/api';
+import {clone} from './dom';
 import {changed, isPlacedByHand, markPlacedByHand} from './edits';
 import {currentRow, isConfirmed, workOf} from './frames';
 import {revealEditor} from './scroll';
@@ -101,14 +102,29 @@ export async function applyPrevious(): Promise<void> {
     ? {frame_key: before.frame_key, detections: workOf(before).detections} : undefined;
   carrying = key;
   saveAfterCarry = false;
+  const sent = work.detections;
+  let answered = false;
+  // At once, before the server answers: the boxes of the frame before shown here, the first selected so that its zoom
+  // opens; the server's carried boxes take their place.
+  const shown = before !== null ? workOf(before).detections : [];
+  if (shown.length > 0) {
+    work.detections = shown.map((d) => ({...clone(d), check_position: true}));
+    state.selected = 0;
+    state.selectedByUser = false;
+    state.drawing = false;
+  }
   try {
     const answer = await call<CarryAnswer>('POST', apiBase + '/frame/' + key + '/apply-previous',
-      {run_id: report.runId, detections: work.detections, previous});
+      {run_id: report.runId, detections: sent, previous});
     // The reviewer may have moved on while the server answered.
-    if (state.currentKey !== key) return;
+    if (state.currentKey !== key) {
+      work.detections = sent;
+      return;
+    }
     // Every box comes back anew: one placed by hand that the carry kept where it was is still placed by hand.
     for (const d of answer.detections) if (byHand.has(JSON.stringify(d.bbox_xyxy))) markPlacedByHand(d, true);
     work.detections = answer.detections;
+    answered = true;
     // The first box to check is selected, else the first sign carried: its zoom opens inside the photo.
     const first = uncheckedIndices(work)[0];
     state.selected = first ?? (work.detections.length > 0 ? 0 : -1);
@@ -138,6 +154,7 @@ export async function applyPrevious(): Promise<void> {
       await confirmFrame();
     }
   } catch (error) {
+    if (!answered) work.detections = sent;
     state.notice = {key, text: 'Apply previous: ' + messageOf(error), error: true};
   } finally {
     if (carrying === key) carrying = null;
