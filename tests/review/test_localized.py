@@ -588,3 +588,15 @@ def test_ctrl_c_drops_the_segments_not_started(tmp_path, monkeypatch):
     with pytest.raises(KeyboardInterrupt):
         localized.localize_routes(root, routes, workers=1, on_route=interrupt)
     assert len(started) <= 2
+
+
+def test_positions_cover_every_frame_of_the_report(tmp_path):
+    root = tmp_path / 'data'
+    rows = [{'frame_key': '0/0'}, {'frame_key': '0/1'}]
+    assert not gps.positions_cover(root, ROUTE, rows)
+    target = gps.positions_path(root, ROUTE)
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps({'frame_key': '0/0'}) + '\n')
+    assert not gps.positions_cover(root, ROUTE, rows)
+    target.write_text(json.dumps({'frame_key': '0/0'}) + '\n' + json.dumps({'frame_key': '0/1'}) + '\n')
+    assert gps.positions_cover(root, ROUTE, rows)

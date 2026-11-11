@@ -679,3 +679,17 @@ def test_person_removals_are_a_person_s_only():
     for reviewer in ('net/run', 'osm'):
         undo = [{**row, 'reviewer': reviewer} for row in history[:3]]
         assert person_removals(undo) == []
+
+
+def test_build_gives_a_line_to_every_frame_of_the_report(tmp_path):
+    # Positions read on an older report: a frame taken out again later has none, and still gets a line to correct.
+    road_map = _map(tmp_path)
+    positions = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0, 'latitude': 47.0005, 'longitude': 8.0,
+                  'bearing_deg': 0.0}]
+    frames = [{'frame_key': '0/0', 'segment_index': 0, 'output_index': 0},
+              {'frame_key': '0/1', 'segment_index': 0, 'output_index': 1}]
+    result = build_road_types(tmp_path, ROUTE, positions, road_map, frames=frames)
+    assert result['frames'] == 2
+    lines = load_road_types(tmp_path, ROUTE)
+    assert [line['frame_key'] for line in lines] == ['0/0', '0/1']
+    assert lines[1]['road_type'] is None and 'no gps' in lines[1]['basis']

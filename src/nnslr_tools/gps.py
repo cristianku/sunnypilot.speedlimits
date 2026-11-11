@@ -440,6 +440,22 @@ def positions_current(root: Path, route: str, distill: Path | None = None) -> bo
     return (not first or b'"position_from"' in first) and newest <= stamp
 
 
+def positions_cover(root: Path, route: str, rows: list[dict]) -> bool:
+    """Whether positions.jsonl of a route has a line for every report row given: a report made again later, on frames
+    taken out again, has frames the positions read on the older one lack."""
+    try:
+        text = positions_path(root, route).read_text(encoding='utf-8', errors='replace')
+    except OSError:
+        return False
+    known = set()
+    for line in text.splitlines():
+        try:
+            known.add(json.loads(line)['frame_key'])
+        except (ValueError, TypeError, KeyError):
+            continue
+    return all(row.get('frame_key') in known for row in rows)
+
+
 def _nearest_countries(lines: list[dict]) -> None:
     """A frame without a fix (the GPS still searching, a tunnel) takes the country of the nearest frame that has
     one: a route rarely crosses a border, and the reviewer sees where the proposal comes from."""

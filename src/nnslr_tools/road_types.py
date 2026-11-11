@@ -426,9 +426,15 @@ def road_types_path(root: Path, route: str) -> Path:
 
 
 def build_road_types(root: Path, route: str, positions: list[dict], road_map: RoadMap,
-                     parking: ParkingMap | None = None) -> dict:
+                     parking: ParkingMap | None = None, frames: list[dict] | None = None) -> dict:
     """Writes the road types of a route; returns how many frames of each type. parking: the car parks, read from the
-    data root when not given."""
+    data root when not given. frames: the rows of the route's report; one without a position (read on an older report)
+    still gets a line, "no gps", so that a person can set its type in Speed review."""
+    known = {item['frame_key'] for item in positions}
+    positions = list(positions) + [
+        {'frame_key': row['frame_key'], 'segment_index': row.get('segment_index'),
+         'output_index': row.get('output_index'), 'latitude': None, 'longitude': None, 'bearing_deg': None}
+        for row in frames or [] if row.get('frame_key') not in known]
     # At 1 a second: the frames of the comma's reads (sign_reads) are only for the sign review.
     ordered = sorted((item for item in positions if not is_read_frame(item)),
                      key=lambda item: (item.get('segment_index') or 0, item.get('output_index') or 0))

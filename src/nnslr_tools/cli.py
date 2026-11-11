@@ -2765,14 +2765,15 @@ def _cmd_review_withdraw_ai(args: argparse.Namespace) -> int:
 
 
 def _cmd_gps(args: argparse.Namespace) -> int:
-    from nnslr_tools.gps import GpsError, build_positions, positions_current, recountry_positions
+    from nnslr_tools.gps import GpsError, build_positions, positions_cover, positions_current, recountry_positions
     from nnslr_tools.preannotate import resolve_data_root
     from nnslr_tools.review import latest_report, list_reports, report_rows
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     routes = list(args.route or [])
     if args.all:
         routes += [route for route, _ in list_reports(root)
-                   if not (args.missing and positions_current(root, route))]
+                   if not (args.missing and positions_current(root, route)
+                           and positions_cover(root, route, _report_frames(root, route)))]
     if not routes:
         if args.all:
             # --all --missing with every route already done.
@@ -3081,6 +3082,16 @@ def _cmd_tunnels(args: argparse.Namespace) -> int:
     return 0
 
 
+def _report_frames(root: Path, route: str) -> list[dict]:
+    """The rows of a route's latest report, [] when it has none."""
+    from nnslr_tools.preannotate import PreannotationError
+    from nnslr_tools.review import latest_report, report_rows
+    try:
+        return report_rows(latest_report(root, route))
+    except (PreannotationError, ValueError, OSError):
+        return []
+
+
 def _cmd_road_types(args: argparse.Namespace) -> int:
     from nnslr_tools.gps import GPS_RELATIVE_DIR, positions_path
     from nnslr_tools.map_context import RoadMap
@@ -3105,7 +3116,7 @@ def _cmd_road_types(args: argparse.Namespace) -> int:
             if not path.is_file():
                 raise ValueError(f"no GPS positions yet: nnslr gps --route {route}")
             positions = [line for line in _read_jsonl(path) if isinstance(line, dict) and "frame_key" in line]
-            result = build_road_types(root, route, positions, road_map)
+            result = build_road_types(root, route, positions, road_map, frames=_report_frames(root, route))
         except (ValueError, OSError) as exc:
             failed += 1
             result = {"route_id": route, "error": str(exc)}
