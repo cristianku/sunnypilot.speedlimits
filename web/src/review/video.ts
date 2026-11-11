@@ -165,8 +165,8 @@ function walksVideo(row: FrameRow): boolean {
 
 /** nextInVideo, once the server has said how many frames the video of the frame found has when a frame not saved is in
  * the last second of a segment not counted yet (the frames of its GOP give it). */
-async function nextToConfirm(key: string, skipDone: boolean): Promise<string | null> {
-  let found = nextInVideo(key, skipDone);
+async function nextToConfirm(key: string): Promise<string | null> {
+  let found = nextInVideo(key, false);
   const row = found === null || !isVirtual(found) ? null : rowOf(found);
   if (row === null || typeof row.decoded_frame_index !== 'number' || report.videos?.[row.segment_index] != null) {
     return found;
@@ -175,15 +175,16 @@ async function nextToConfirm(key: string, skipDone: boolean): Promise<string | n
   const first = Math.floor(row.decoded_frame_index / CAMERA_FPS) * CAMERA_FPS;
   try {
     await gopOf(row.segment_index, first);
-    found = nextInVideo(key, skipDone);
+    found = nextInVideo(key, false);
   } catch {
     // Kept as found: the frame shows that it cannot be read.
   }
   return found;
 }
 
-/** After Confirm (and Confirm on a frame already confirmed, unchanged: ``savedText`` "Already confirmed."): with To
- * review the next frame not confirmed, with All the next frame, through the frames of the video (seconds.ts) where
+/** After Confirm (and Confirm on a frame already confirmed, unchanged: ``savedText`` "Already confirmed."): the next
+ * frame, confirmed or not, with To review as with All (going back over confirmed frames, Enter goes through each of
+ * them, it never jumps to the next one not confirmed), through the frames of the video (seconds.ts) where
  * the server has it, frame by frame while they have a sign and on to the next second after one with no sign;
  * elsewhere a frame of the video that was not saved (``fromVideo``) goes on to the next frame of the video (with no
  * sign to the next second), a frame of the report to the next one of the filter (navigation.ts). */
@@ -199,7 +200,7 @@ export async function afterConfirm(key: string, savedText: string, fromVideo = f
     state.notice = {key, text: savedText, error: false};
     return;
   }
-  const next = await nextToConfirm(key, state.filter === 'todo');
+  const next = await nextToConfirm(key);
   // The reviewer opened another frame meanwhile.
   if (state.currentKey !== key) return;
   if (next === null) {
