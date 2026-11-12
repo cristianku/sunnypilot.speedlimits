@@ -114,6 +114,18 @@ h1 span{color:var(--green)}
 .aside{margin-top:clamp(40px,5vw,56px);font-size:clamp(19px,2.3vw,24px);font-weight:600;letter-spacing:-.01em;max-width:36em}
 .aside span{color:var(--mute-dark)}
 
+.banner{margin-top:clamp(40px,6vw,64px);display:grid;grid-template-columns:auto minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center;
+  background:radial-gradient(70% 90% at 0% 50%,rgba(176,38,212,.3),transparent 70%),#000;color:#f5f5f7;border-radius:28px;padding:clamp(30px,4.6vw,56px)}
+.banner h3{font-size:clamp(30px,4.4vw,48px);line-height:1.08;font-weight:700;letter-spacing:-.02em;margin-bottom:16px}
+.banner p{color:var(--mute-dark);max-width:38em}
+.banner p+p{margin-top:12px}
+.banner .tag{font-weight:600;color:var(--green);margin-bottom:8px}
+.banner .where{font-size:15px;border-top:1px solid var(--line-dark);padding-top:14px;margin-top:18px}
+.banner b{color:#f5f5f7;font-weight:600}
+.sign{display:grid;justify-items:center;gap:10px}
+.sign .disc{width:150px;height:150px;border-radius:50%;background:#fff;border:16px solid #e30613;display:grid;place-content:center;
+  color:#000;font-size:64px;font-weight:700;letter-spacing:-.03em}
+.sign .plate{background:#fff;color:#000;border:3px solid #000;border-radius:6px;padding:4px 18px;font-size:30px;font-weight:700;white-space:nowrap}
 .modes{display:flex;flex-wrap:wrap;gap:8px;margin-top:clamp(36px,5vw,52px)}
 .modes span{background:#fff;border-radius:999px;padding:11px 20px;font-weight:500;color:var(--mute)}
 .modes .on{background:#000;color:var(--green);font-weight:700}
@@ -206,7 +218,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   .brain{width:260px}
 }
 @media (max-width:760px){
-  .cards,.two,.steps,.pair,.numbers,.links{grid-template-columns:minmax(0,1fr)}
+  .cards,.two,.steps,.pair,.numbers,.links,.banner{grid-template-columns:minmax(0,1fr)}
   .facts{grid-template-columns:minmax(0,1fr);gap:20px;text-align:left}
   .bar .opt{display:none}
   .specs div{grid-template-columns:minmax(0,1fr)}
@@ -259,6 +271,16 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
     <article class="card rise"><h3>A limit with no end sign</h3><p>Motorway roadworks often have none, and one missed end sign once held me at 80 for a whole stretch of motorway.</p></article>
     <article class="card rise"><h3>After a motorway ramp</h3><p>The limit posted on the ramp stops counting on the acceleration lane, and nothing tells you so.</p></article>
     <article class="card rise"><h3>Car parks</h3><p>The limit of the road outside doesn't apply in there, and usually no sign gives you another one.</p></article>
+  </div>
+  <div class="banner rise" id="hours">
+    <div class="sign" role="img" aria-label="A round 30 sign with a plate under it that reads 22–6 h"><div class="disc">30</div><div class="plate">22–6 h</div></div>
+    <div>
+      <p class="tag">The plate under the sign</p>
+      <h3>A 30 that holds only at night.</h3>
+      <p>German towns put up 30 limits against noise that hold only at night, with the hours on a plate under the sign. A reader that sees only the 30 brings the car down to 30 at three in the afternoon on a 50 road. One that skips the plate drives 50 through the village at midnight. Other plates say the limit holds only on a wet road.</p>
+      <p>In Smartspeed the classifier reads the sign with its plate as a class of its own, a 30 with hours or an 80 for a wet road. The brain gets the plate, the hours written on it and the local hour, and learns from my drives whether the 30 holds now. No rule in code decides it.</p>
+      <p class="where"><b>Where it stands:</b> the classifier in the car has these classes, from few examples. The brain in the car was trained without plates, so today it doesn't use them. The hours can be read only in the full-resolution recording.</p>
+    </div>
   </div>
 </div></section>
 
