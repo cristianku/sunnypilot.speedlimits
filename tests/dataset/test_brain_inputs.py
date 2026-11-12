@@ -410,8 +410,8 @@ def test_a_box_goes_to_the_column_of_its_centre_with_its_size_over_the_frame():
     ('maximum_speed:80', 0), ('maximum_speed_hours:30:22-6', 0), ('maximum_speed_wet:80', 0), ('zone:30', 0),
     ('road_marking:30', 0), ('cancellation', 0), ('variable_display:100', 0), ('variable_display:unknown', 0),
     ('other_sign:stop', 1), ('other_sign:motorway_start', 1), ('other_sign', 1),
-    ('other_sign:traffic_light_red', None), ('other_sign:road_user_car', None), ('unreadable', None),
-    ('not_a_sign', None), ('zone:unknown', None)])
+    ('maximum_speed:unknown', 0), ('zone:unknown', 0), ('unreadable', 1),
+    ('other_sign:traffic_light_red', None), ('other_sign:road_user_car', None), ('not_a_sign', None)])
 def test_a_speed_sign_and_any_other_sign_have_a_channel_each_and_a_light_or_a_road_user_none(name, channel):
     brain, vision = _car()
     assert brain.sign_box_channel(vision)(name) == channel

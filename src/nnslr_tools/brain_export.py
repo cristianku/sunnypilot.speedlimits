@@ -8,8 +8,9 @@ is the network's own (its class_kph, kept in the checkpoint): 200 classes of a k
 km/h for those before, which load and export as they were. The GRU is written out with matrix products as the road-type
 network's (gru_step): no GRU node in the graph the comma compiles. A brain with the limit ahead (trained from 7 to 11 Nov
 2026; none since, brain_net) also gives next (1, classes + 1), kph[argmax] or none for the last class, and metres (1,
-1), the metres to it over output.metres_scale: the car no longer reads the two, and they stay in the export so that such
-a brain exported again is the file that was published, its contract the same. The contract's
+1), the metres to it over output.metres_scale: the car no longer reads the two, and they stay in the export under the
+same names and places. Such a brain that also learnt the road type (2026-11-11_2241-brain-s0) now exports with road_type
+and output.road_types as well (below), so its file and contract are no longer the ones published on 11 Nov. The contract's
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
