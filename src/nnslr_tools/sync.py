@@ -8,9 +8,10 @@ The raw comma files are stored once in a shared folder outside the clone
 (COMMA_VIDEOS_DIR), with the same layout as on the comma:
 <videos dir>/<route>--<segment>/<file>. Other projects (openpilot.distill) use
 the same folder. <data root>/raw/routes/<route>/<segment>/<file> only holds
-absolute symlinks to those files. In this project sync_route is the only
-writer of the shared folder (openpilot.distill's fetch script writes it too);
-link_videos only reads it. sync_route and link_videos are the only writers of
+absolute symlinks to those files. In this project sync_route and
+connect_fetch (a drive shared in comma connect) are the only writers of the
+shared folder (openpilot.distill's fetch script writes it too); link_videos
+only reads it. sync_route and link_videos are the only writers of
 those symlinks.
 """
 from __future__ import annotations

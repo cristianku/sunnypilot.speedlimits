@@ -80,6 +80,7 @@ from pathlib import Path
 from typing import Iterator
 
 from nnslr_tools import drive_logs, road_types, video_frames
+from nnslr_tools.connect_fetch import outside_drive
 from nnslr_tools.drive_review import DriveReviewStore, drives_view, utc_now
 from nnslr_tools.road_type_signs import STEPS_PER_SECOND
 
@@ -229,6 +230,12 @@ def dashcam_drive(summary: dict | None) -> bool:
     car = (summary.get('meta') or {}).get('car') or {}
     passive = car.get('passive', car.get('dashcam_only'))
     return passive is True and not (summary.get('coverage') or {}).get('engaged')
+
+
+def _brain_drive(drives: DriveReviewStore, route: str) -> bool:
+    """Whether the brain learns from a scanned drive, as brain_targets.training_routes takes them: a dashcam drive
+    (dashcam_drive) of our comma, not one of another car downloaded from comma connect (connect_fetch.outside_drive)."""
+    return dashcam_drive(drives.summary(route)) and outside_drive(drives.root, route) is None
 
 
 def engaged_series(merged: dict | None) -> list[str]:
@@ -673,6 +680,9 @@ def _writable_span(drives: DriveReviewStore, route: str) -> tuple[int, int]:
     span = _span_of(drives, route)
     if span is None:
         raise SpeedReviewError(404, 'not_scanned', 'This drive has no scanned logs.')
+    if outside_drive(drives.root, route) is not None:
+        raise SpeedReviewError(409, 'outside_drive', 'This is a drive of another car, downloaded from comma connect: '
+                               'Speed review is off on it, the brain learns only his drives.')
     if not dashcam_drive(drives.summary(route)):
         raise SpeedReviewError(409, 'not_dashcam', 'sunnypilot was on in this drive: Speed review is off on it, the '
                                'brain learns only drives with sunnypilot off.')
@@ -754,7 +764,7 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
     (held: held_spans), its blocks, its roadworks, the kinds of road (road_kinds), their marks (road) and how far each was
     gone through (road_checked_ns, by kind), the road types of the map with a person's corrections (road_types:
     road_type_stretches; road_type_names, in their order), its first and last ns (span_ns, where a block may go), its
-    length and whether it is a drive the brain learns from (dashcam: dashcam_drive; each one does, whole:
+    length and whether it is a drive the brain learns from (dashcam: _brain_drive; each one does, whole:
     brain_targets.training_routes), and the reading of its logs (scan: state, progress, error of
     DriveReviewStore.scan_state). A drive whose logs are not scanned has no speed, no span, no road types and
     dashcam None."""
@@ -765,7 +775,7 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
             'road': store.road(route), 'road_checked_ns': store.road_checked(route), 'road_types': [],
             'road_type_names': list(road_types.ROAD_TYPES), 'speed': [], 'held': [],
             'span_ns': None, 'total_s': 0, 'max_kph': MAX_KPH,
-            'dashcam': None if span is None else dashcam_drive(drives.summary(route)),
+            'dashcam': None if span is None else _brain_drive(drives, route),
             'scan': {key: scan[key] for key in ('state', 'progress', 'error')}}
     if span is not None:
         merged = drives.merged(route)
@@ -777,7 +787,7 @@ def drive_view(store: SpeedReviewStore, drives: DriveReviewStore, route: str) ->
 
 def drives_list(store: SpeedReviewStore, drives: DriveReviewStore) -> list[dict]:
     """The drives for the page, which puts them in order: each with its length, how many blocks, roadworks marks and
-    marks of a kind of road it has, and whether the brain learns from it (dashcam: dashcam_drive, None before its logs are
+    marks of a kind of road it has, and whether the brain learns from it (dashcam: _brain_drive, None before its logs are
     read). The page lists only the ones not False; Read the logs and Regression take them all."""
     counts = store.counts()
     with drives.reading():
@@ -790,7 +800,7 @@ def _drives_list(drives: DriveReviewStore, counts: dict) -> list[dict]:
         span = _span_of(drives, drive['route'])
         rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0, 'road': 0}),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0,
-                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route']))})
+                     'dashcam': None if span is None else _brain_drive(drives, drive['route'])})
     return rows
 
 

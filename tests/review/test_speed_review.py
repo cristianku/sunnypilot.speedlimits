@@ -33,6 +33,8 @@ SPAN = (T0, END)
 
 class FakeDrives:
     """What the store needs of a drive review: the span of a drive, its joined logs with the car's speed in km/h."""
+    # A data root without drives of other cars (raw/connect, connect_fetch.outside_drive).
+    root = Path('/nonexistent-data-root')
 
     def __init__(self, points=((T0, 80.0),)):
         self.points = [list(point) for point in points]
