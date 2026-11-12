@@ -84,7 +84,8 @@ network never learned, approach and exit included.
 The inputs (drive_inputs), one group each so that a comparison can leave one out, all made only from what comes at or
 before the frame:
 
-- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion: what the car has,
+- signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion, road_signs,
+  sign_boxes: what the car has,
   described in sunnypilot/speed_limits/brain_inputs.py. A drive not read yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -96,6 +97,11 @@ before the frame:
   turn signals, the steering wheel and the yaw rates (drive_extract: steer within 1 degree, yaw within 0.5 deg/s), the values
   still held given again at each frame (motion_inputs); unknown on a drive whose logs were read before they were kept.
   road_signs is every other sign of those readings through the same SignInputs (road_sign_inputs): no kind picked out.
+  sign_boxes is where the signs of each reading are in the picture and how big, through the car's brain_inputs.BoxInputs
+  (box_inputs): the record's boxes, which are SignNet's in the pixels of FRAME_SIZE, the car's frame, of the same signs the
+  car gives its own (sure enough, of our road). The record keeps only the readings with a sign, and every frame here is a
+  frame the reader read: one with no reading in the record had no sign, so its columns are empty, as on the car. Zeros on a
+  drive read before the boxes were kept: check_drives refuses it.
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
@@ -106,6 +112,10 @@ the network itself decides on the car. The brain trained with them on 10 Nov 202
 his speed. The measure still reads them (drive['inputs'], never packed): the frames with no gas, and the ones with the car's
 speed far from the answer. The measure's own speed is the dashboard's (drive_logs.dashboard_speed: vEgoCluster, or vEgo +
 3 km/h on a Peugeot log without it), in the units of the answers.
+
+sign_distance is made and no longer learned either (LEFT_OUT since 12 Nov 2026, his rule): no metres worked out by a
+formula go into the brain, which gets the boxes of the signs as they are (sign_boxes). The brain of 11 Nov 2026 took it:
+its checkpoint says so, and its replay and its export still pack it.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
@@ -151,7 +161,8 @@ exactly this of their frames.
 
 What the training refuses (check_drives), so that nothing goes wrong without a word: a drive not read or read by another
 reader than the car's today, since an unread drive looks like a drive with no sign and then "no reading" is learned as a
-speed; a drive with no frame; at RATE_HZ, a drive without the brain's pictures.
+speed; a drive read before the boxes of its signs were kept (boxes_read), whose sign_boxes would say "no sign" on every
+frame; a drive with no frame; at RATE_HZ, a drive without the brain's pictures.
 """
 from __future__ import annotations
 
@@ -201,6 +212,7 @@ RATE_HZ = float(STEPS_PER_SECOND)  # the brain's steps a second since 7 Nov 2026
 # output.metres_scale). No brain is trained with it since.
 METRES_SCALE = 100.0
 SPEED_GRID_SECONDS = 0.05  # vEgo to vision.SignDistance on this grid; the car gives it every carState, 100 a second
+READING_SECONDS = VIDEO_STEP / VIDEO_FPS  # between two frames the reader read (road_type_signs)
 
 
 def _load_brain_inputs(path: Path):
@@ -222,7 +234,9 @@ INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
 # network, his call the same night; pedals and speed (the gas, the brake and vEgo, 10 Nov 2026): the brain trained with
 # them followed his speed on the road, his call that day. A brain built before keeps them: its groups are in its checkpoint
 # and contract, and Models no longer lets one that takes the driver be chosen (model_roles.DRIVER_GROUPS).
-LEFT_OUT = ('engaged', 'pedals', 'speed')
+# sign_distance (vision.SignDistance's metres, 12 Nov 2026): no metres worked out by a formula go into the brain, his call;
+# it gets the boxes of the signs instead (sign_boxes). The brain of 11 Nov took it and can still be chosen in Models.
+LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance')
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 
@@ -660,6 +674,30 @@ def sign_distance_inputs(ns: np.ndarray, merged: dict, readings: list | None, bo
     return rows
 
 
+def box_inputs(seconds: np.ndarray, readings: list | None, boxes: list | None) -> np.ndarray:
+    """The sign_boxes group (frames, size) by the car's own BoxInputs: see the module's text. Readings [[seconds, [[class,
+    confidence], ...]], ...] and their boxes in the same order (x1, y1, x2, y2 in the pixels of FRAME_SIZE), each given at
+    its time as brain.BrainReader.add_signs gives a frame's; a frame the record has no reading at is given as a reading
+    with no sign. None (the drive was not read, or before the boxes were kept): zeros."""
+    rows = np.zeros((len(seconds), INPUT_SIZES['sign_boxes']), dtype=np.float32)
+    if not readings or boxes is None or len(boxes) != len(readings):
+        return rows
+    ordered = sorted(zip(readings, boxes), key=lambda item: item[0][0])
+    memory = BRAIN_INPUTS.BoxInputs(VISION, BRAIN_INPUTS.SIGN_BOX_CHANNELS, BRAIN_INPUTS.sign_box_channel(VISION))
+    width, height = FRAME_SIZE
+    pointer = 0
+    for row, second in enumerate(seconds):
+        last = None
+        while pointer < len(ordered) and ordered[pointer][0][0] <= second:
+            (last, read), places = ordered[pointer]
+            memory.add(last, [(name, confidence, box) for (name, confidence), box in zip(read, places)], width, height)
+            pointer += 1
+        if last is None or second - last >= READING_SECONDS / 2:  # this frame's own reading is not in the record: no sign
+            memory.add(second, [], width, height)
+        rows[row] = memory.row(second)
+    return rows
+
+
 def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """The signs, plate, plate_hours and plate_wet groups (frames, size) from the sure readings [[seconds, [[class, confidence], ...]], ...] of a
     drive, by the car's own file. Only readings at or before the frame count; None: the drive was not read, all unknown."""
@@ -741,7 +779,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed']),
             'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes),
-            'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings)}
+            'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings),
+            'sign_boxes': box_inputs(seconds, readings, boxes)}
 
 
 def inputs_sha256() -> str:
@@ -764,7 +803,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     kinds: road_kinds), road_type, type_weight, typed_by_person (type_answers), types (the frames without a road type
     answer nothing: see the module's text), measured (the frames a measure counts: one a
     second, so that it reads the same at both rates), inputs, own_kph (the car's speed as the dashboard shows it, in the
-    labels' units: drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read, reader (what read
+    labels' units: drive_logs.dashboard_speed; NaN unknown; for the measure, no input), signs_read, boxes_read (the
+    record has the boxes of its signs: sign_boxes), reader (what read
     them), pictures (at RATE_HZ, the brain's pictures are there), no_picture_s (seconds of the drive with an answer of the
     speed and no frame with its picture: prepare keeps only the slow ones at the start and the end of a drive).
     labels: read_labels' of the drive, NO_LABELS without a block or a mark. need_pictures=False (a dry run): a frame
@@ -820,6 +860,7 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None)
             if inputs else None,
             'signs_read': readings is not None,
+            'boxes_read': record is not None and record.get('boxes') is not None,
             'reader': record.get('fingerprint') if record else None,
             'pictures': rate == 1.0 or pictures_ready(root, record),
             'no_picture_s': max(round((taught - int(pictured.sum())) / rate), 0)}
@@ -899,6 +940,10 @@ def check_drives(drives: list[dict]) -> None:
     other = [drive['route'] for drive in drives if not drive['reader_current']]
     if other:
         raise ValueError(f"drives read by another reader than the car's of today: {', '.join(other)}. Run {READ_COMMAND}")
+    boxless = [drive['route'] for drive in drives if not drive.get('boxes_read', True)]
+    if boxless:
+        raise ValueError('drives read before the boxes of the signs were kept, which the brain now gets (sign_boxes): '
+                         f'{", ".join(boxless)}. Run {READ_COMMAND}')
     bare = [drive['route'] for drive in drives if not drive.get('pictures', True)]
     if bare:
         raise ValueError(f"drives without the brain's pictures: {', '.join(bare)}. Run {READ_COMMAND}")

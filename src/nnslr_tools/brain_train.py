@@ -68,7 +68,8 @@ types): the measure is on those too, so a brain with types and one without measu
 
 The comparison he asked for is the same training twice, with works and with works=False, on the same split. His pedals
 and the car's speed are never inputs (brain_targets.LEFT_OUT, since 10 Nov 2026; off by default since 8 Nov): the answer is
-his own speed, and with the car's among the inputs the network learns to say it back, on the car its own.
+his own speed, and with the car's among the inputs the network learns to say it back, on the car its own. Nor are the
+metres to the sign ahead (sign_distance, LEFT_OUT since 12 Nov 2026): the brain gets the boxes of the signs (sign_boxes).
 
 A training can go on from an earlier brain (brain_start, nnslr train-brain --init-from, Train › Brain's "Start from"):
 its weights instead of ImageNet's and random ones, the rest of the training the same. Only a brain stepped as this one
@@ -606,7 +607,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     and result.json into run_dir; the checkpoint
     says what it came from, its table of the speeds too (the class_kph of its weights), and its kinds of road. Refuses what
     would train wrong: brain_targets.check_drives. It learns from LEARNED_INPUTS, never his pedals nor the car's
-    speed. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
+    speed, nor the metres to a sign. road: with the kinds of road of Speed review as a task of their own (road_head); False, the comparison.
     types: with the road type as a task of its own (type_head), and only the seconds that have one (brain_targets'
     types); False, the comparison. routes: only these drives (those of the run's start, run_brain.sh), and of them only
     the ones still in training_routes; None, every drive of training_routes. init_from: an earlier brain-last.pt whose

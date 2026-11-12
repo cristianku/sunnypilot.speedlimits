@@ -305,12 +305,13 @@ def test_the_training_runs_on_drives_read_by_todays_reader():
 
 
 @pytest.mark.parametrize('change, says', [({'signs_read': False, 'reader_current': False}, 'no reading of the signs'),
-                                          ({'reader_current': False}, 'another reader'), ({'frames': []}, 'no frame')])
+                                          ({'reader_current': False}, 'another reader'), ({'frames': []}, 'no frame'),
+                                          ({'boxes_read': False}, 'before the boxes of the signs were kept')])
 def test_the_training_refuses_what_would_go_wrong_without_a_word(change, says):
     targets = _targets()
     with pytest.raises(ValueError, match=says) as found:
         targets.check_drives([checked(), checked(route='r2', **change)])
-    if 'reader' in str(found.value) or 'reading' in str(found.value):
+    if 'reader' in str(found.value) or 'reading' in str(found.value) or 'boxes' in str(found.value):
         assert 'r2' in str(found.value) and 'r1' not in str(found.value) and targets.READ_COMMAND in str(found.value)
 
 
@@ -349,6 +350,23 @@ def test_a_drive_not_read_yet_has_its_signs_unknown():
     numpy = _np()
     signs, plates, _hours, _wet = _targets().sign_inputs(numpy.array([1.0, 2.0]), None)
     assert signs.sum() == 0 and (plates[:, -1] == 1).all() and plates.sum() == 2
+
+
+def test_the_boxes_of_the_signs_reach_the_brain_from_the_record_of_the_drive():
+    numpy = _np()
+    targets = _targets()
+    frames = [{'segment': 0, 'index': second, 'seconds': second} for second in (9.75, 10.0, 10.25, 10.5)]
+    ns = (numpy.array([frame['seconds'] for frame in frames]) * NS).astype(numpy.int64)
+    readings = [[10.0, [['maximum_speed:80', .9], ['other_sign:give_way', .9]]], [10.25, [['maximum_speed:80', .9]]]]
+    boxes = [[[1008.0, 190.0, 1050.0, 232.0], [84.0, 304.0, 168.0, 380.0]], [[1100.0, 180.0, 1150.0, 230.0]]]
+    found = targets.drive_inputs(frames, ns, {}, readings, None, boxes)['sign_boxes']
+    cells = found[:, :-2].reshape(4, 2, 8, 3)
+    assert not found[0].any()  # before the first sign
+    assert cells[1, 0, 6] == pytest.approx([42 / 1344, 42 / 760, 211 / 760]) and cells[1, 1, 0] == pytest.approx([84 / 1344, 76 / 760, 342 / 760])
+    assert cells[2, 0, 6] == pytest.approx([50 / 1344, 50 / 760, 205 / 760]) and not cells[2, 1].any()  # the give way is gone
+    assert not cells[3].any() and found[3, -2] == 1 and found[3, -1] > 0  # no reading at 10.5: no sign there, the age runs
+    # a drive read before the boxes were kept: nothing, and the training refuses it (check_drives)
+    assert not targets.drive_inputs(frames, ns, {}, readings, None)['sign_boxes'].any()
 
 
 def inputs_of(ns, series, readings=None, gps=()):
@@ -434,13 +452,17 @@ def test_the_hour_of_a_frame_is_the_local_one_from_the_gps_clock():
     assert hour[1][0] == pytest.approx(-.5, abs=.01)  # 14:05 on the circle
 
 
-def test_engaged_the_pedals_and_the_speed_are_made_and_never_learned():
+def test_engaged_the_pedals_the_speed_and_the_sign_distance_are_made_and_never_learned():
     """openpilot on or off only confused the network (7 Nov 2026), and with his pedals and the car's speed in, the brain
-    followed his speed on the road (10 Nov 2026): the groups are still made as on the car, no brain learns them. A brain of
-    before keeps packing every group it took."""
+    followed his speed on the road (10 Nov 2026); no metres worked out by a formula go into the brain, which gets the boxes
+    of the signs instead (12 Nov 2026): the groups are still made as on the car, no brain learns them. A brain of before
+    keeps packing every group it took."""
     numpy = _np()
     targets = _targets()
-    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed') and set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES)
+    assert targets.LEFT_OUT == ('engaged', 'pedals', 'speed', 'sign_distance')
+    assert set(targets.LEFT_OUT) <= set(targets.INPUT_SIZES) and 'sign_boxes' not in targets.LEFT_OUT
+    made = inputs_of(seconds(10, 20), {})
+    assert set(made) == set(targets.INPUT_SIZES) and made['sign_distance'].shape == (2, 2) and made['sign_boxes'].shape == (2, 50)
     inputs = {name: numpy.zeros((2, size), dtype=numpy.float32) for name, size in targets.INPUT_SIZES.items()}
     learned = tuple(name for name in targets.INPUT_SIZES if name not in targets.LEFT_OUT)
     assert targets.pack_inputs(inputs, learned).shape == (2, sum(targets.INPUT_SIZES[name] for name in learned))

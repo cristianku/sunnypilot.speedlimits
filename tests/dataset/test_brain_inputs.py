@@ -196,7 +196,8 @@ def test_a_group_has_the_size_it_says():
             'lead': brain.lead_row(10.0, 50.0), 'country': brain.country_row('CH'), 'pedals': brain.PedalInputs().row(10.0),
             'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row(),
             'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0),
-            'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0)}
+            'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0),
+            'sign_boxes': sign_boxes().row(10.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 
@@ -370,3 +371,173 @@ def test_the_motion_group_on_the_car_is_the_one_of_the_training():
     found = motion_inputs(series, numpy.array(frames) * NS // 100)
     numpy.testing.assert_allclose(found, numpy.array(said), atol=1e-6)
     assert found[:, 0].any() and found[:, 1].any() and not found[:, 7].all() and found[:, 6].any()
+
+
+# -- the boxes of the signs (BoxInputs, the group sign_boxes) ---------------------------------------------------------------
+FRAME = (1344, 760)
+
+
+def sign_boxes():
+    brain, vision = _car()
+    return brain.BoxInputs(vision, brain.SIGN_BOX_CHANNELS, brain.sign_box_channel(vision))
+
+
+def grid(row):
+    """A row of sign_boxes as (channel, column, [width, height, centre y]), and its known and age."""
+    brain, _ = _car()
+    return row[:-2].reshape(brain.SIGN_BOX_CHANNELS, brain.BOX_COLUMNS, brain.BOX_NUMBERS), row[-2], row[-1]
+
+
+def test_the_boxes_are_fifty_numbers_and_all_zero_before_the_first_sign():
+    brain, _ = _car()
+    assert (brain.BOX_COLUMNS, brain.BOX_NUMBERS, brain.SIGN_BOX_CHANNELS) == (8, 3, 2)
+    assert brain.INPUT_SIZES['sign_boxes'] == brain.box_size(2) == 50
+    boxes = sign_boxes()
+    assert not boxes.row(10.0).any()
+    boxes.add(10.0, [], *FRAME)
+    assert not boxes.row(10.0).any()
+
+
+def test_a_box_goes_to_the_column_of_its_centre_with_its_size_over_the_frame():
+    boxes = sign_boxes()
+    boxes.add(10.0, [('maximum_speed:80', .9, (1008.0, 190.0, 1050.0, 232.0))], *FRAME)
+    cells, known, age = grid(boxes.row(10.0))
+    assert cells[0, 6] == pytest.approx([42 / 1344, 42 / 760, 211 / 760])  # centre x 1029 of 1344: the seventh of 8
+    assert cells.sum() == pytest.approx(cells[0, 6].sum()) and (known, age) == (1, 0)
+
+
+@pytest.mark.parametrize('name, channel', [
+    ('maximum_speed:80', 0), ('maximum_speed_hours:30:22-6', 0), ('maximum_speed_wet:80', 0), ('zone:30', 0),
+    ('road_marking:30', 0), ('cancellation', 0), ('variable_display:100', 0), ('variable_display:unknown', 0),
+    ('other_sign:stop', 1), ('other_sign:motorway_start', 1), ('other_sign', 1),
+    ('other_sign:traffic_light_red', None), ('other_sign:road_user_car', None), ('unreadable', None),
+    ('not_a_sign', None), ('zone:unknown', None)])
+def test_a_speed_sign_and_any_other_sign_have_a_channel_each_and_a_light_or_a_road_user_none(name, channel):
+    brain, vision = _car()
+    assert brain.sign_box_channel(vision)(name) == channel
+    boxes = sign_boxes()
+    boxes.add(10.0, [(name, .9, (100.0, 100.0, 140.0, 140.0))], *FRAME)
+    cells, known, _ = grid(boxes.row(10.0))
+    assert [bool(cells[at].any()) for at in (0, 1)] == [channel == 0, channel == 1] and known == (channel is not None)
+
+
+def test_of_two_signs_in_one_column_the_tallest_is_kept_and_another_channel_or_column_keeps_its_own():
+    boxes = sign_boxes()
+    boxes.add(10.0, [('maximum_speed:80', .99, (700.0, 200.0, 720.0, 220.0)),  # the best score first, as read_signs
+                     ('maximum_speed:60', .9, (800.0, 150.0, 840.0, 200.0)),  # the same column (672 to 840), taller
+                     ('other_sign:give_way', .9, (760.0, 300.0, 790.0, 330.0)),  # the same column, the other channel
+                     ('cancellation', .9, (20.0, 100.0, 50.0, 130.0))], *FRAME)
+    cells, _, _ = grid(boxes.row(10.0))
+    assert cells[0, 4] == pytest.approx([40 / 1344, 50 / 760, 175 / 760])
+    assert cells[1, 4] == pytest.approx([30 / 1344, 30 / 760, 315 / 760])
+    assert cells[0, 0] == pytest.approx([30 / 1344, 30 / 760, 115 / 760])
+    assert (cells.reshape(-1, 3).any(axis=1)).sum() == 3
+
+
+def test_a_box_read_under_the_confidence_is_not_taken():
+    brain, vision = _car()
+    boxes = sign_boxes()
+    boxes.add(10.0, [('maximum_speed:80', vision.MIN_CONFIDENCE - .01, (700.0, 200.0, 720.0, 220.0))], *FRAME)
+    assert not boxes.row(10.0).any()
+    boxes.add(10.2, [('maximum_speed:80', vision.MIN_CONFIDENCE, (700.0, 200.0, 720.0, 220.0))], *FRAME)
+    assert boxes.row(10.2)[-2] == 1
+
+
+def test_when_the_sign_leaves_the_columns_empty_and_the_age_grows():
+    brain, _ = _car()
+    boxes = sign_boxes()
+    boxes.add(10.0, [('maximum_speed:80', .9, (1300.0, 100.0, 1340.0, 140.0))], *FRAME)
+    held = boxes.row(10.1)  # a step between two readings: the last reading's columns
+    assert grid(held)[0][0, 7].all() and held[-1] == pytest.approx(__import__('math').log1p(.1) / brain.SIGN_AGE_SCALE)
+    boxes.add(10.25, [], *FRAME)
+    for now, age in ((10.25, .25), (40.0, 30.0)):
+        cells, known, said = grid(boxes.row(now))
+        assert not cells.any() and known == 1
+        assert said == pytest.approx(__import__('math').log1p(age) / brain.SIGN_AGE_SCALE)
+    # a reading with only a sign of no channel is a reading with no box
+    boxes.add(41.0, [('other_sign:road_user_car', .9, (100.0, 100.0, 300.0, 300.0))], *FRAME)
+    assert grid(boxes.row(41.0))[2] == pytest.approx(__import__('math').log1p(31.0) / brain.SIGN_AGE_SCALE)
+
+
+def test_the_two_definitions_of_the_frame_give_the_same_fractions():
+    numpy = pytest.importorskip('numpy')
+    signs = [('maximum_speed:80', .9, (1008.3, 190.1, 1050.7, 232.9)), ('other_sign:stop', .9, (167.9, 300.0, 168.1, 380.0)),
+             ('cancellation', .8, (-20.0, -10.0, 30.5, 41.5)), ('maximum_speed:50', .9, (1330.0, 700.0, 1400.0, 790.0))]
+    low, full = sign_boxes(), sign_boxes()
+    low.add(10.0, signs, 1344, 760)
+    full.add(10.0, [(name, confidence, tuple(2 * value for value in box)) for name, confidence, box in signs], 2688, 1520)
+    assert numpy.array_equal(low.row(10.0), full.row(10.0)) and numpy.count_nonzero(low.row(10.0)[:-2]) == 12
+
+
+def test_a_box_over_the_edge_counts_for_its_part_inside_the_frame():
+    boxes = sign_boxes()
+    boxes.add(10.0, [('cancellation', .9, (-20.0, -10.0, 30.0, 40.0)), ('maximum_speed:50', .9, (1330.0, 700.0, 1400.0, 790.0)),
+                     ('other_sign:stop', .9, (1350.0, 100.0, 1400.0, 150.0))], *FRAME)  # the last one all outside
+    cells, _, _ = grid(boxes.row(10.0))
+    assert cells[0, 0] == pytest.approx([30 / 1344, 40 / 760, 20 / 760])
+    assert cells[0, 7] == pytest.approx([14 / 1344, 60 / 760, 730 / 760])
+    assert not cells[1].any() and cells.max() <= 1 and cells.min() >= 0
+
+
+def as_the_car(readings, boxes, times):
+    """The rows the car gives at times: every frame read given to BoxInputs as brain.BrainReader.add_signs gives it (one
+    the record has no reading at had no sign), then the row at that frame, where the brain steps."""
+    numpy = pytest.importorskip('numpy')
+    signs = {seconds: [(name, confidence, box) for (name, confidence), box in zip(read, places)]
+             for (seconds, read), places in zip(readings, boxes)}
+    car, rows = sign_boxes(), []
+    for now in times:
+        car.add(now, signs.get(now, []), *FRAME)
+        rows.append(car.row(now))
+    return numpy.array(rows)
+
+
+def test_the_boxes_on_the_car_are_the_ones_of_the_training():
+    numpy = pytest.importorskip('numpy')
+    from nnslr_tools.brain_targets import box_inputs
+    times = [n * .25 for n in range(4 * 30)]  # every frame read of 30 s, each one a step of the brain
+    readings, boxes = [], []
+    for at, now in enumerate(times):
+        read = []
+        if 8 <= at < 40:  # a number that comes nearer on the right, lost on two frames
+            if at not in (20, 21):
+                side = 10.0 + at
+                read.append((['maximum_speed:80', .7 + at / 200], [900.0 + 9 * at, 300.0 - 4 * at, 900.0 + 9 * at + side, 300.0 - 4 * at + side]))
+        if 30 <= at < 60:  # a give way on the left meanwhile, and a light the group does not take
+            read.append((['other_sign:give_way', .95], [300.0 - 8 * (at - 30), 350.0, 330.0 - 8 * (at - 30), 380.0]))
+            read.append((['other_sign:traffic_light_red', .95], [600.0, 100.0, 620.0, 150.0]))
+        if read:
+            readings.append([now, [item[0] for item in read]])
+            boxes.append([item[1] for item in read])
+    found = box_inputs(numpy.array(times), readings, boxes)
+    assert numpy.array_equal(found, as_the_car(readings, boxes, times))
+    assert found[7].sum() == 0 and found[8][-2] == 1 and found[20][:-2].sum() == 0 and found[20][-1] > 0
+    assert found[35][:24].any() and found[35][24:48].any() and found[-1][:-2].sum() == 0 and found[-1][-2] == 1
+    # one frame a second (the summary's rate) sees the same rows at its frames
+    assert numpy.array_equal(box_inputs(numpy.array(times[::4]), readings, boxes), found[::4])
+    # a drive not read, or read before the boxes were kept: zeros
+    for unread in ((None, None), (readings, None), ([], [])):
+        assert not box_inputs(numpy.array(times), *unread).any()
+
+
+def test_the_boxes_of_a_real_drive_are_on_the_car_what_they_are_in_the_training():
+    """One record of the reader (data/derived/road_type_signs), every frame it read: 4 a second, the brain's steps."""
+    import json
+    from pathlib import Path
+    numpy = pytest.importorskip('numpy')
+    from nnslr_tools.brain_targets import INPUT_SIZES, box_inputs
+    from nnslr_tools.road_type_signs import SEGMENT_SECONDS, SIGNS_RELATIVE, VIDEO_FPS, VIDEO_STEP
+    folder = Path(__file__).resolve().parents[2] / 'data' / SIGNS_RELATIVE
+    record = next((found for found in (json.loads(path.read_text(encoding='utf-8'))
+                                       for path in sorted(folder.glob('releases/*/*.json'))[:5])
+                   if found.get('boxes') and len(found['boxes']) > 100), None)
+    if record is None:
+        pytest.skip('no drive read with its boxes on this machine')
+    times = [int(segment) * SEGMENT_SECONDS + at * VIDEO_STEP / VIDEO_FPS
+             for segment, frames in sorted(record['frames'].items(), key=lambda item: int(item[0])) for at in range(frames)]
+    assert {seconds for seconds, _ in record['readings']} <= set(times)  # every reading is at a frame the brain steps at
+    found = box_inputs(numpy.array(times), record['readings'], record['boxes'])
+    assert found.shape == (len(times), INPUT_SIZES['sign_boxes']) and found.dtype == numpy.float32
+    assert numpy.array_equal(found, as_the_car(record['readings'], record['boxes'], times))
+    with_a_box = (found[:, :-2] != 0).any(axis=1)
+    assert with_a_box.sum() > 100 and found[:, :-2].min() >= 0 and found[:, :-2].max() <= 1

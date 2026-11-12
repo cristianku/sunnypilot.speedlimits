@@ -9,7 +9,7 @@ Use a short, vertically flowing diagram that makes the real data path obvious:
 ```text
 INPUTS · 4 times/second
   Road image (256 × 144) ─→ MobileNetV3-small ─┐
-  Read signs + plates + sign distance ─────────┤
+  Read signs + plates + sign boxes ────────────┤
   Hour + country + lead-car information ───────┘
                                                ↓
                                            GRU memory
@@ -19,7 +19,7 @@ INPUTS · 4 times/second
 
 The speed to hold is the brain's only output on the car since 12 Nov 2026: no next limit and no metres to it.
 
-The visual layout must show **MobileNetV3 before the GRU**, not as two parallel modules. Other inputs join the **visual features before the GRU**; they do not pass through MobileNetV3. Check actual selected groups against the current brain contract instead of hard-coding outdated input claims. Pedals and car speed are **never** inputs (`brain_targets.LEFT_OUT`, since 10 Nov 2026: a brain with them followed his speed on the road).
+The visual layout must show **MobileNetV3 before the GRU**, not as two parallel modules. Other inputs join the **visual features before the GRU**; they do not pass through MobileNetV3. Check actual selected groups against the current brain contract instead of hard-coding outdated input claims. Pedals and car speed are **never** inputs (`brain_targets.LEFT_OUT`, since 10 Nov 2026: a brain with them followed his speed on the road). The metres to the sign ahead (`sign_distance`) are not either since 12 Nov 2026: the brain gets the box of each sign read (`sign_boxes`), where it is in the picture and how big.
 
 Under the main flow, add one compact **ONLY DURING TRAINING** section:
 

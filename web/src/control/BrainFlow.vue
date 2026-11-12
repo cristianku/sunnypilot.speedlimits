@@ -4,7 +4,8 @@
 // memory gives two groups of outputs: the car's one, the speed to hold, and those only the training has (by its switches), which teach the
 // shared weights through their losses and are dropped from the car's file. Under each group, the correct labels it is
 // compared with: the map only offline, for the road type. The inputs are the groups of brain-card.ts the training gives (the
-// car's; never the driver's pedals nor the car's speed): tests/review/test_brain_card.py keeps them those of the code. A tap
+// car's; never the driver's pedals nor the car's speed, nor the metres to a sign: the boxes of the signs instead):
+// tests/review/test_brain_card.py keeps them those of the code. A tap
 // on a block opens what it is under the flow.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import {plural} from '../common/format';
@@ -22,7 +23,7 @@ const facts = (names: string[]): BrainFact[] => names.map((name) => {
   const group = BRAIN_GROUPS.find((item) => item.name === name)!;
   return {name: group.name + ' · ' + group.size, what: group.what};
 });
-const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_distance', 'road_signs'];
+const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_boxes', 'road_signs'];
 const carGroups = BRAIN_GROUPS.filter((group) => group.use === 'car').map((group) => group.name);
 /** The car's groups that are not the signs': hour, car ahead, country, and any group added after them. */
 const placeGroups = carGroups.filter((name) => !SIGN_GROUPS.includes(name));
@@ -31,9 +32,10 @@ const camera: Block = {id: 'camera', title: 'Road image', sub: '256 × 144', kin
 const features: Block = {id: 'features', title: 'MobileNetV3-small', sub: 'frozen · image → features', kind: 'net',
   facts: [{name: 'features', what: 'what the frozen MobileNetV3-small sees in the picture, the same on the car'}]};
 const inputs = computed<Block[]>(() => [
-  {id: 'signs', title: 'Signs read, plates, sign distance, traffic lights', sub: 'what our sign networks read, mistakes included', kind: 'input',
+  {id: 'signs', title: 'Signs read, plates, sign boxes, traffic lights', sub: 'what our sign networks read, mistakes included', kind: 'input',
     facts: facts(SIGN_GROUPS.filter((name) => carGroups.includes(name))),
-    note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown.'},
+    note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown. '
+      + 'No metres to a sign: the brain gets the box of each sign, where it is in the picture and how big.'},
   {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
     note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
 ]);

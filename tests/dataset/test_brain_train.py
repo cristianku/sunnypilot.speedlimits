@@ -9,7 +9,8 @@ import pytest
 NS = 1_000_000_000
 T = 8
 # The groups of the tiny brains of these tests: those of a brain of 8 Nov 2026 with the driver's inputs (pedals, speed), which
-# no brain learns since 10 Nov (brain_targets.LEFT_OUT); a brain of before keeps packing what it took.
+# no brain learns since 10 Nov, and the metres to the sign ahead (sign_distance), which none learns since 12 Nov
+# (brain_targets.LEFT_OUT); a brain of before keeps packing what it took.
 GROUPS = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'pedals', 'speed', 'plate_wet', 'sign_distance')
 
 
@@ -887,10 +888,11 @@ def test_a_brain_of_before_says_its_speeds_in_its_own_table():
     assert numpy.issubdtype(found['kph'].dtype, numpy.integer)
 
 
-def test_no_brain_learns_engaged_the_pedals_or_the_speed():
+def test_no_brain_learns_engaged_the_pedals_the_speed_or_the_sign_distance():
     import inspect
     from nnslr_tools import brain_train
-    assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed'}
+    assert set(brain_train.INPUT_SIZES) - set(brain_train.LEARNED_INPUTS) == {'engaged', 'pedals', 'speed', 'sign_distance'}
+    assert 'sign_boxes' in brain_train.LEARNED_INPUTS  # the boxes of the signs instead of the metres to one
     assert 'driver' not in inspect.signature(brain_train.train_brain).parameters
 
 
@@ -1055,6 +1057,30 @@ def test_a_brain_going_on_from_another_says_what_it_said_without_the_inputs_it_d
 def numpy_random(shape):
     import numpy
     return numpy.random.default_rng(1).random(shape).astype(numpy.float32)
+
+
+def test_a_brain_of_today_going_on_from_the_one_of_11_nov_drops_its_sign_distance_and_adds_the_boxes(tmp_path):
+    """The brain on the car (2026-11-11_2241-brain-s0) took the metres to the sign ahead and had the heads of the limit
+    ahead; a brain of today takes the boxes of the signs instead, and starts from it saying the same speed wherever the
+    metres were 0 (no sign ahead), whatever its new inputs say."""
+    from nnslr_tools.brain_train import LEARNED_INPUTS, brain_start
+    torch = torch_or_skip()
+    theirs = ('signs', 'plate', 'plate_hours', 'hour', 'lead', 'country', 'plate_wet', 'sign_distance', 'motion')
+    old = tiny(torch, ahead=True, groups=theirs, road_kinds=1)
+    for value in old.parameters():
+        value.data.add_(torch.randn_like(value) * 0.05)
+    path = start_file(torch, tmp_path, old, groups=theirs, ahead=True)
+    assert 'sign_boxes' in LEARNED_INPUTS and 'sign_distance' not in LEARNED_INPUTS
+    new = tiny(torch, groups=LEARNED_INPUTS, road_kinds=1)
+    start = brain_start(torch, new, path, source_of(LEARNED_INPUTS))
+    assert start['fresh'] == [] and start['inputs_left_out'] == ['sign_distance']
+    assert start['inputs_added'] == ['road_signs', 'sign_boxes']
+    drive = fake_drive(['train'] * T)
+    for name in ('signs', 'lead', 'motion', 'road_signs', 'sign_boxes'):
+        drive['inputs'][name][:] = numpy_random(drive['inputs'][name].shape)
+    array = pictures(drive)
+    for got, wanted in zip(said_by(torch, new, LEARNED_INPUTS, drive, array), said_by(torch, old, theirs, drive, array)):
+        assert torch.allclose(got, wanted, atol=1e-5)
 
 
 def test_the_speeds_go_on_by_km_h_and_a_speed_the_start_lacks_starts_fresh(tmp_path):

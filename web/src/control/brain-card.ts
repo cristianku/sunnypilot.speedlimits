@@ -10,7 +10,7 @@ export interface BrainFact {
 
 /** One group of the frame's inputs (INPUT_SIZES): its size, and whether a training of today gives it to the network:
  * car (always, brain_train.LEARNED_INPUTS), never (made on the car, no brain learns it: brain_targets.LEFT_OUT; the
- * driver's pedals and the car's speed since 10 Nov 2026). */
+ * driver's pedals and the car's speed since 10 Nov 2026, the metres to the sign ahead since 12 Nov 2026). */
 export interface BrainGroup extends BrainFact {
   size: number;
   use: 'car' | 'never';
@@ -31,7 +31,10 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'hour', size: 3, use: 'car', what: 'the local hour, on a circle'},
   {name: 'lead', size: 3, use: 'car', what: 'metres and speed of the car ahead (radarState.leadOne)'},
   {name: 'country', size: 7, use: 'car', what: 'the last country of the GPS: CH, DE, FR, IT, AT, US, none'},
-  {name: 'sign_distance', size: 2, use: 'car', what: 'the metres to the round sign ahead (vision.SignDistance), from its box and vEgo'},
+  {name: 'sign_boxes', size: 50, use: 'car', what: 'where the signs of the last frame read are in the picture and how big, as SignNet’s '
+    + 'boxes say, with no metres worked out: the picture in 8 columns and, for the speed signs and for the other signs, the tallest '
+    + 'box of each column (its width, its height and the height of its centre, over the frame’s); then whether a sign was ever seen '
+    + 'and the age of the last one (brain_inputs.BoxInputs)'},
   {name: 'road_signs', size: 98, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
     + 'crossing, roundabout…), the traffic light by what is lit (red, amber, green, off) and the road users (person, bicycle, car…): '
     + 'for each, confirmed, and the age of its last reading'},
@@ -40,6 +43,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'pedals', size: 3, use: 'never', what: 'gas and brake pressed in the last second (carState)'},
   {name: 'speed', size: 2, use: 'never', what: 'the car’s own speed, vEgo'},
   {name: 'engaged', size: 7, use: 'never', what: 'openpilot on or off (selfdriveState.enabled)'},
+  {name: 'sign_distance', size: 2, use: 'never', what: 'the metres to the round sign ahead (vision.SignDistance), worked out from its '
+    + 'box and vEgo: only a brain trained until 11 Nov 2026 gets them, a brain of today gets the boxes (sign_boxes)'},
 ];
 
 /** What it says on the car (the head the car's network keeps): the speed to hold and nothing else, since 12 Nov 2026. */
