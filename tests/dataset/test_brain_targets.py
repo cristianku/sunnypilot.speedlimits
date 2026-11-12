@@ -329,6 +329,22 @@ def test_a_sign_read_counts_from_its_second_on_and_never_before():
     assert (plates[:, -1] == 1).all()
 
 
+def test_every_other_sign_reaches_the_brain_once_confirmed():
+    numpy = _np()
+    targets = _targets()
+    from nnslr_tools.sign_types import SIGN_TYPES
+    assert targets.BRAIN_INPUTS.ROAD_SIGNS == SIGN_TYPES  # all of them, none picked out
+    stop = 2 * SIGN_TYPES.index('stop')
+    readings = [[10.0, [['other_sign:stop', .9]]], [10.2, [['other_sign:stop', .9]]], [30.0, [['other_sign:give_way', .9]]]]
+    rows = targets.road_sign_inputs(numpy.array([9.0, 10.0, 10.2, 20.0, 31.0]), readings)
+    assert rows[0].sum() == 0 and rows[1].sum() == 0  # one reading is not confirmed
+    assert rows[2][stop:stop + 2] == pytest.approx([1, 0])
+    assert rows[3][stop + 1] > rows[2][stop + 1]
+    give_way = 2 * SIGN_TYPES.index('give_way')
+    assert rows[4][give_way] == 0  # read once only
+    assert targets.road_sign_inputs(numpy.array([1.0]), None).sum() == 0
+
+
 def test_a_drive_not_read_yet_has_its_signs_unknown():
     numpy = _np()
     signs, plates, _hours, _wet = _targets().sign_inputs(numpy.array([1.0, 2.0]), None)

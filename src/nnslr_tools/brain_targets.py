@@ -130,6 +130,7 @@ before the frame:
   drive read before the boxes were kept. motion goes through the car's brain_inputs.MotionInputs with the changes of the
   turn signals, the steering wheel and the yaw rates (drive_extract: steer within 1 degree, yaw within 0.5 deg/s), the values
   still held given again at each frame (motion_inputs); unknown on a drive whose logs were read before they were kept.
+  road_signs is every other sign of those readings through the same SignInputs (road_sign_inputs): no kind picked out.
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
@@ -1040,6 +1041,21 @@ def sign_inputs(seconds: np.ndarray, readings: list | None) -> tuple[np.ndarray,
     return signs, plates, hours, wet
 
 
+def road_sign_inputs(seconds: np.ndarray, readings: list | None) -> np.ndarray:
+    """The road_signs group (frames, size): every other sign of the sure readings, by the car's own SignInputs as on the
+    car. Only readings at or before the frame count; None: the drive was not read, all unknown."""
+    rows = np.zeros((len(seconds), INPUT_SIZES['road_signs']), dtype=np.float32)
+    ordered = sorted(readings or [], key=lambda item: item[0])
+    memory, pointer = BRAIN_INPUTS.SignInputs(VISION), 0
+    for row, second in enumerate(seconds):
+        while pointer < len(ordered) and ordered[pointer][0] <= second:
+            now, read = ordered[pointer]
+            memory.add(now, [(name, confidence) for name, confidence in read])
+            pointer += 1
+        rows[row] = memory.road_signs_row(second)
+    return rows
+
+
 def countries_so_far(gps: list, ns: np.ndarray, root: Path | None) -> list[str | None]:
     """The country at each time as the car has it: that of the last fix at or before it [t_ns, latitude, longitude,
     unix_ms], none before the first."""
@@ -1086,7 +1102,7 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'pedals': np.stack([gas, brake, gas_known * brake_known], axis=1),
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed']),
             'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes),
-            'motion': motion_inputs(series, ns)}
+            'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings)}
 
 
 def inputs_sha256() -> str:
