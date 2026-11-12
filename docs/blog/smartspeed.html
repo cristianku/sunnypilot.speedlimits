@@ -245,29 +245,29 @@
 <p class="eyebrow">The portal</p>
 <h2>I run all of it from my own server</h2>
 
-<p>Video and logs play in sync, with what the camera read, the map, sunnypilot's resolver and the car's state on one timeline. Labelling signs, training, replaying a drive with new networks and publishing all start from there. More than 15,000 frames of signs are confirmed so far, most of them by me and the rest by an AI review, and SignNet and the classifier also pretrain on Mapillary.</p>
+<p>Video and logs play in sync, with what the camera read, the map, sunnypilot's resolver and the car's state on one timeline. Labelling signs, training, replaying a drive with new networks and publishing all start from there. More than 9,000 frames of signs are confirmed by hand so far, and SignNet and the classifier also pretrain on Mapillary.</p>
 
 <figure><img src="https://cristianku.com/wp-content/uploads/2026/11/smartspeed-portal-timeline.png" alt="The portal's timeline for one drive, with the marked speed, the speed the comma read, the map's limit and the car's speed" /><figcaption>A drive from before the brain: the speed I marked, what the comma read, what the map said and what the car did.</figcaption></figure>
 
 <p class="eyebrow">Where it stands</p>
-<h2>One car, one driver, 34 drives</h2>
+<h2>One car, one driver, 33 drives</h2>
 
 <div class="stats">
   <div class="stat"><b>26.6 %</b><span>of test seconds within 2 km/h of my dashboard speed, on 12,153 seconds from places kept out of training</span></div>
   <div class="stat"><b>9.9 km/h</b><span>mean error on test. Saying 100 everywhere misses by 36.1</span></div>
-  <div class="stat"><b>11.8 h</b><span>of dashcam driving in 34 drives, the only ones it learns from</span></div>
+  <div class="stat"><b>11.8 h</b><span>of dashcam driving in 33 drives, the only ones it learns from</span></div>
 </div>
 
 <p>These numbers are offline, for the brain the comma downloaded on 12 November. On validation it's 22.7 % and 10.3 km/h on 3,586 seconds. On the training drives it gets 94.6 %, so it still knows the roads it has seen far better than new ones. Where a sign is in force, simply copying it is still right more often on test (43.9 % against 27.2 %), with the same mean error of 10.0 km/h. When I swap the number on the test signs, its answer moves on only 120 of 2,208 seconds, so it still leans on the road more than on the sign. Honestly, this training didn't beat the brain before it: the sign reading got better, the brain stayed where it was.</p>
 
-<p>On the road there's very little so far. A brain has been on the car since 7 November, but since then I've driven with sunnypilot off to collect training drives, so the car hasn't acted on what it says yet. This one has no drive yet.</p>
+<p>On the road there's very little so far. A brain has been on the car since 7 November, but since then I've driven with sunnypilot off to collect training drives, so the car hasn't acted on what it says yet.</p>
 
 <p class="eyebrow">Next</p>
-<h2>Curves, snow and stops</h2>
+<h2>Curves, red lights, people crossing</h2>
 
-<p>I want Smartspeed to take over the whole choice of speed from openpilot, whose speed on European roads I don't like, and I've started with curves: in Smartspeed, sunnypilot's own curve control is now off and the brain alone slows down for them, from how I drive. It reaches the car with the next update.</p>
+<p>Smartspeed is a set speed that sets itself: the brain only ever gives a speed, four times a second, and openpilot does the rest. That's the rule for everything I add. I've started with curves: in Smartspeed, sunnypilot's own curve control is now off and the brain alone slows down for them, from how I drive. openpilot follows a lower set speed at no more than 0.5 m/s²; in Smartspeed, and only there, I let it follow the brain at up to 1.2, which is closer to how a person slows down. Both reach the car with the next update.</p>
 
-<p>Next comes the road itself. The brain will say whether the road is dry, wet or snowy, which the picture shows. Red lights and stops will follow, with the point where openpilot's driving model expects to stop as one more input. None of this is trained yet.</p>
+<p>For a red light the plan is not to stop the car myself. The sign networks learn to find traffic lights and say what is lit, the brain gets that as an input, and from my drives it learns to bring the speed down before the light, so openpilot arrives slow and has an easy stop. The same goes for the people, bicycles and cars that cross my road: openpilot's planner only knows the vehicle ahead in my lane, so they go in as boxes and a lower speed comes out. The next brain also drops the metres to the sign, which came from a formula on the box's size, and gets the box itself; it no longer says the next limit either. After that comes the road: dry, wet or snowy, which the picture shows. None of this is trained yet.</p>
 
 <div class="cta">
   <h2>Want to help?</h2>

@@ -190,14 +190,14 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <p class="eyebrow">Built into <a href="https://github.com/sunnypilot/sunnypilot">sunnypilot</a>, the <a href="https://github.com/commaai/openpilot">openpilot</a> fork, for the comma 4</p>
   <h1>Smart<span>speed</span></h1>
   <p class="lead">You press cruise and the car picks its own speed.</p>
-  <p class="sub">Two small networks read the signs. A third one, with memory, takes what they read, the picture of the road and the car ahead, and says the speed to hold four times a second. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
+  <p class="sub">Three small networks find the signs, read them and tell which ones are for my road. A fourth one, with memory, takes what they read, the picture of the road and the car ahead, and says the speed to hold four times a second, like a set speed that sets itself. It's a research build that runs on my own comma 4, in a Peugeot 3008.</p>
   <figure class="screen"><img src="product/product-smartspeed-screen.jpg" width="1608" height="720"
     alt="The comma 4 screen on a wet road: 48 km/h in the middle, and in the top right corner the word SMART in green beside a purple square with an eye and the number 50."></figure>
   <p class="note">Mock-up, not a photo of the comma: the screen's widgets drawn at their real size over a real frame.</p>
   <div class="facts">
     <div><b>4 Hz</b><span>speed out of the brain</span></div>
     <div><b>5 Hz</b><span>sign finder and reader</span></div>
-    <div><b>12 MB</b><span>all three networks, ONNX</span></div>
+    <div><b>21 MB</b><span>all four networks, ONNX</span></div>
   </div>
 </header>
 
@@ -216,21 +216,22 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 <section class="dark" id="brain"><div class="wrap">
   <p class="eyebrow rise">The brain</p>
   <h2 class="rise">A small network with memory picks the speed.</h2>
-  <p class="intro rise">It's a frozen MobileNetV3-small with a GRU on top. Four times a second it gets a 256×144 picture of the road, the number the sign reader confirmed, the metres to the sign ahead, the car ahead, the local hour and the country. Gas, brake and the car's own speed aren't inputs: the answer it learns is my own speed, and with them it would only copy me. It never reads the map. It says the speed to hold, the next limit and the metres to it, and they go out unchanged as the vision limit.</p>
+  <p class="intro rise">It's a frozen MobileNetV3-small with a GRU on top. Four times a second it gets a 256×144 picture of the road, the number the sign reader confirmed, the metres to the sign ahead, the car ahead, the turn signals and the steering, the local hour and the country. Gas, brake and the car's own speed aren't inputs: the answer it learns is my own speed, and with them it would only copy me. It never reads the map. What comes out is one number, the speed to hold, and only that goes to openpilot, as a set speed given again four times a second. Before a lower limit the brain brings it down by itself, the way I lift my foot.</p>
   <div class="flow rise">
     <ul class="inputs">
       <li><b>Road camera</b><span>256×144, four times a second</span></li>
       <li><b>Signs read</b><span>number and age, from SignNet and the classifier</span></li>
       <li><b>Distance to the sign</b><span>from its box and the metres driven</span></li>
       <li><b>The car ahead</b><span>distance and speed</span></li>
+      <li><b>Turn signals and steering</b><span>with the yaw rate</span></li>
       <li><b>Hour and country</b><span>from GPS</span></li>
     </ul>
     <div class="arrow"></div>
     <div class="brain"><b>The brain</b><span>MobileNetV3-small + GRU</span></div>
     <div class="arrow"></div>
-    <div class="out"><div class="square">50</div><b>Speed to hold</b><span>1 to 200 km/h, with the next limit and the metres to it</span></div>
+    <div class="out"><div class="square">50</div><b>Speed to hold</b><span>1 to 200 km/h, the only thing that goes to openpilot</span></div>
   </div>
-  <p class="aside rise">It's a separate network. <span>openpilot's model still does the driving.</span></p>
+  <p class="aside rise">It's a separate network. <span>openpilot's model still does the driving, and the braking for the car ahead and the stopping stay its own.</span></p>
 </div></section>
 
 <section class="white" id="learn"><div class="wrap">
@@ -247,7 +248,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 <section class="paper" id="modes"><div class="wrap">
   <p class="eyebrow rise">In sunnylink</p>
   <h2 class="rise">Smartspeed is a fifth mode.</h2>
-  <p class="intro rise">Off, Information, Warning and Assist work as before, each with its Speed Limit Source. In Smartspeed cruise only turns it on and off, + and - do nothing, and the car drives to what the brain says, even above the set speed. Curves still slow it down.</p>
+  <p class="intro rise">Off, Information, Warning and Assist work as before, each with its Speed Limit Source. In Smartspeed cruise only turns it on and off, + and - do nothing, and the car drives to what the brain says, even above the set speed. openpilot follows a lower set speed at no more than 0.5&nbsp;m/s²; in Smartspeed, and only there, I let it follow the brain at up to 1.2, which is closer to how a person slows down. sunnypilot's own curve control is off in this mode, so the speed for a curve is the brain's too. Both reach the car with the next update.</p>
   <div class="modes rise" role="img" aria-label="Speed limit modes: Off, Information, Warning, Assist, and Smartspeed selected">
     <span>Off</span><span>Information</span><span>Warning</span><span>Assist</span><span class="on">Smartspeed</span>
   </div>
@@ -264,7 +265,7 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   <div class="pair">
     <figure class="shot rise"><img src="product/product-portal-sign.jpg" width="2360" height="1600" loading="lazy"
       alt="Sign review: a country road with a round 60 sign in a yellow box, the crop of the sign on the right, and the drive's frames below.">
-      <figcaption>Sign review. About 15,200 frames confirmed so far, 6,700 by me and the rest by an AI review. SignNet and the classifier also pretrain on Mapillary.</figcaption></figure>
+      <figcaption>Sign review. More than 9,000 frames confirmed by hand so far. SignNet and the classifier also pretrain on Mapillary.</figcaption></figure>
     <figure class="shot rise"><img src="product/post-portal-networks.png" width="2360" height="1450" loading="lazy"
       alt="The Models page: a card for each network with its version, its measures and whether it is in the branch.">
       <figcaption>Models: each network with its numbers, and which run is in the branch.</figcaption></figure>
@@ -273,12 +274,13 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 
 <section class="white" id="specs"><div class="wrap">
   <p class="eyebrow rise">The networks</p>
-  <h2 class="rise">Three networks, 12 MB in total.</h2>
+  <h2 class="rise">Four networks, 21 MB in total.</h2>
   <dl class="specs rise">
     <div><dt>Sign finder</dt><dd><b>SignNet.</b> Looks only at a band at the top of the picture, where signs stand, 5 times a second, and keeps up to 5 boxes.</dd></div>
     <div><dt>Sign reader</dt><dd><b>Classifier.</b> Reads each box: a speed, the end of a limit, another kind of sign, or not a sign. One rule is still in code here: a number counts once two pictures within 1.5 s agree.</dd></div>
-    <div><dt>Brain</dt><dd><b>MobileNetV3-small and a GRU.</b> Its memory is 128 numbers, and it steps four times a second. The speed is one of 200 classes, 1 to 200 km/h. The sign's number also reaches the output directly, through a weight the GRU sets, because as a plain input the network ignored it. The plate under a sign (hours, wet road) is an input too, but no drive in its training had one yet, so the car leaves it out for this brain. In training each drive's clock is shifted at random for now, so the hour tells it nothing yet. Training also asks it for the road type, from the map with my corrections; that head stays on the server, and the car's network never sees the map.</dd></div>
-    <div><dt>Next inputs</dt><dd>The turn signals, the steering angle and the yaw are wired in, in the car's code and in training. The brain on the car now was trained without them, and no brain with them has been trained yet.</dd></div>
+    <div><dt>Whose sign</dt><dd><b>Applicability.</b> Looks at the sign's crop and at where it stands in the whole picture, and says whether it is for my road or for another one: the exit beside me, the road running parallel.</dd></div>
+    <div><dt>Brain</dt><dd><b>MobileNetV3-small and a GRU.</b> Its memory is 128 numbers, and it steps four times a second. The speed is one of 200 classes, 1 to 200 km/h. The sign's number also reaches the output directly, through a weight the GRU sets, because as a plain input the network ignored it. The plate under a sign (hours, wet road) is wired in as an input, but this brain was trained without it, so the car leaves it out. In training each drive gets another clock every epoch for now, so the hour tells it nothing yet. Training also asks it for the road type, from the map with my corrections, and on test it names it right 78&nbsp;% of the time. With the next update the comma shows that road type on screen, for debugging only. The map is only in those training labels: the car's network never sees it.</dd></div>
+    <div><dt>Next inputs</dt><dd>Every other sign the classifier reads (give way, stop, pedestrian crossing, roundabout and the rest) and the traffic light by what is lit: red, amber, green or off. They are wired in, in the car's code and in training, but no brain has been trained with them yet, and the sign networks can't find a traffic light yet.</dd></div>
     <div><dt>Where it runs</dt><dd>On the comma 4's GPU, next to the driving model. Training runs on my server.</dd></div>
     <div><dt>Same on both sides</dt><dd>Car and training load the same <code>brain_inputs.py</code>, and the car refuses a brain trained with an incompatible version.</dd></div>
   </dl>
@@ -286,15 +288,15 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
 
 <section class="paper" id="status"><div class="wrap">
   <p class="eyebrow rise">Where it stands</p>
-  <h2 class="rise">One car, one driver, 27 drives.</h2>
+  <h2 class="rise">One car, one driver, 33 drives.</h2>
   <div class="numbers rise">
-    <div><b>23.6&nbsp;%</b><span>of test seconds within 2&nbsp;km/h of my dashboard speed: 11,520 seconds from places kept out of training</span></div>
-    <div><b>11.0&nbsp;km/h</b><span>mean error on test. Saying 100 everywhere misses by 35.5</span></div>
-    <div><b>15,274</b><span>seconds that teach it, from 27 dashcam drives of 10.1 hours in all</span></div>
+    <div><b>26.6&nbsp;%</b><span>of test seconds within 2&nbsp;km/h of my dashboard speed: 12,153 seconds from places kept out of training</span></div>
+    <div><b>9.9&nbsp;km/h</b><span>mean error on test. Saying 100 everywhere misses by 36.1</span></div>
+    <div><b>18,810</b><span>seconds that teach it, from 33 dashcam drives of 11.8 hours in all</span></div>
   </div>
-  <p class="intro rise">These numbers are offline, for the brain on the car now. On validation it's 23.2&nbsp;% and 10.4&nbsp;km/h on 2,695 seconds. Where a sign is in force, simply copying it still does better on test: 42.4&nbsp;% against 24.2&nbsp;%, 11.1&nbsp;km/h of error against 11.4. When I swap the number on the test signs, 50 for 60 and so on, its answer moves on only 173 of 1,662 seconds. On the training drives it gets 69.6&nbsp;%, so it still knows the roads it has seen far better than new ones. In the seconds before a limit changes, it names the next limit on 17&nbsp;% of them on test, against 99&nbsp;% on train.</p>
-  <p class="intro rise">On the road there's little so far. This brain went on the car on 8 November and ran on one 14-minute drive on 9 November, with sunnypilot off, so the car didn't act on it. It gave a speed for 819 of the drive's 819.5 seconds. The server now has 29 dashcam drives, 10.4 hours.</p>
-  <p class="intro rise"><b>What I'm adding next.</b> I want Smartspeed to take over the whole choice of speed from openpilot, whose speed on European roads I don't like, and I've started with curves: in Smartspeed, sunnypilot's own curve control is now off and the brain alone slows down for them, from how I drive (on the car with the next update). Next comes the road itself. The brain will say whether the road is dry, wet or snowy, which the picture shows. Red lights and stops will follow, with the point where openpilot's driving model expects to stop as one more input. None of this is trained yet.</p>
+  <p class="intro rise">These numbers are offline, for the brain in the car's branch now. On validation it's 22.7&nbsp;% and 10.3&nbsp;km/h on 3,586 seconds. Where a sign is in force, simply copying it still does better on test: 43.9&nbsp;% against 27.2&nbsp;%, with the same 10.0&nbsp;km/h of error. When I swap the number on the test signs, 50 for 60 and so on, its answer moves on only 120 of 2,208 seconds. On the training drives it gets 94.6&nbsp;%, so it still knows the roads it has seen far better than new ones.</p>
+  <p class="intro rise">On the road there's little so far. I published this brain to the car's branch on 12 November, and I still drive with sunnypilot off, so the comma records what the brain says and the car doesn't act on it. The server now has 39 dashcam drives, 13.9 hours.</p>
+  <p class="intro rise"><b>What I'm adding next.</b> Smartspeed stays what it is, a set speed that sets itself: the brain only ever gives a speed, and openpilot does the rest. So for a red light the plan is not to stop the car myself. The sign networks learn to find traffic lights and say what is lit, the brain gets that as an input, and from my drives it learns to bring the speed down before the light, so openpilot arrives slow and has an easy stop. The same goes for the people, bicycles and cars that cross my road: openpilot's planner only knows the vehicle ahead in my lane, so they go in as boxes and a lower speed comes out. The next brain also drops the metres to the sign, which came from a formula on the box's size, and gets the box itself; it no longer says the next limit either. After that comes the road: dry, wet or snowy, which the picture shows. None of this is trained yet.</p>
   <div class="join rise" id="join">
     <p>I need help confirming the speed signs. If you'd like to join, leave your email and a line about yourself, and I'll set up an account for you. I only use your address to answer you.</p>
     <p class="done" id="sent">Thanks, your message reached me. I'll answer by email.</p>
