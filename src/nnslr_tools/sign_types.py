@@ -8,7 +8,10 @@ motorway or an expressway) is ``motorway_direction`` whatever its arrow, a hint 
 road-type network. The motorway sign itself is ``motorway_start``: the green square with the motorway pictogram
 alone, no places and no arrow. ``motorway_exit`` is the sign at the gore of a motorway or expressway exit (the blue arrow up to the right, "Ausfahrt"): ours when the car takes that exit, another road when it stays on. ``no_vehicles`` is a round ban with a red ring and a white disc, empty or
 with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign that looks most like a speed limit.
-Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
+A traffic light is a kind too, one for what is lit in the picture: ``traffic_light_red`` (red, also red with amber),
+``traffic_light_amber``, ``traffic_light_green``, ``traffic_light_off`` (no lamp lit). One box around the whole light of
+our lane. A flashing amber is amber on one frame and off on the next: each frame says what it shows, and the brain
+learns the flashing from the sequence. Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
 
 A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
 disc or panel on a vehicle, such as the top-speed sticker on the back of a truck. It stays "not a sign" for
@@ -39,6 +42,8 @@ SIGN_TYPES = (
     'direction_left', 'direction_right', 'direction_straight', 'direction_several', 'motorway_direction',
     'motorway_exit',
     'other',
+    # Traffic lights, by what is lit (added 12 Nov 2026, after 'other': the kinds before keep their place)
+    'traffic_light_red', 'traffic_light_amber', 'traffic_light_green', 'traffic_light_off',
 )
 # What a "not a sign" box is, when said.
 NOT_A_SIGN_TYPES = ('on_vehicle',)

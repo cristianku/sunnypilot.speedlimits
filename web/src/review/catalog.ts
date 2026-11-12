@@ -110,6 +110,13 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'motorway_direction', label: 'Motorway direction (green)', chip: 'Motorway direction', short: 'motorway dir.'},
     {id: 'motorway_exit', label: 'Motorway exit (gore arrow)', chip: 'Motorway exit', short: 'exit'},
   ]},
+  // By what is lit in this picture; a flashing amber is amber on one frame and off on the next.
+  {label: 'Traffic light', kinds: [
+    {id: 'traffic_light_red', label: 'Traffic light: red (also red with amber)', chip: 'Red', short: 'light red'},
+    {id: 'traffic_light_amber', label: 'Traffic light: amber', chip: 'Amber', short: 'light amber'},
+    {id: 'traffic_light_green', label: 'Traffic light: green', chip: 'Green', short: 'light green'},
+    {id: 'traffic_light_off', label: 'Traffic light: off (no lamp lit)', chip: 'Off', short: 'light off'},
+  ]},
   {label: 'Other', kinds: [{id: 'other', label: 'Something else', chip: 'Something else', short: 'other'}]},
 ];
 

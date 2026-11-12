@@ -21,7 +21,7 @@ const facts = (names: string[]): BrainFact[] => names.map((name) => {
   const group = BRAIN_GROUPS.find((item) => item.name === name)!;
   return {name: group.name + ' · ' + group.size, what: group.what};
 });
-const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_distance'];
+const SIGN_GROUPS = ['signs', 'plate', 'plate_hours', 'plate_wet', 'sign_distance', 'road_signs'];
 const carGroups = BRAIN_GROUPS.filter((group) => group.use === 'car').map((group) => group.name);
 /** The car's groups that are not the signs': hour, car ahead, country, and any group added after them. */
 const placeGroups = carGroups.filter((name) => !SIGN_GROUPS.includes(name));
@@ -30,7 +30,7 @@ const camera: Block = {id: 'camera', title: 'Road image', sub: '256 × 144', kin
 const features: Block = {id: 'features', title: 'MobileNetV3-small', sub: 'frozen · image → features', kind: 'net',
   facts: [{name: 'features', what: 'what the frozen MobileNetV3-small sees in the picture, the same on the car'}]};
 const inputs = computed<Block[]>(() => [
-  {id: 'signs', title: 'Signs read, plates, sign distance', sub: 'what our sign networks read, mistakes included', kind: 'input',
+  {id: 'signs', title: 'Signs read, plates, sign distance, traffic lights', sub: 'what our sign networks read, mistakes included', kind: 'input',
     facts: facts(SIGN_GROUPS.filter((name) => carGroups.includes(name))),
     note: 'As the car reads them, never the signs you confirmed in Sign review. A drive not read yet has them unknown.'},
   {id: 'place', title: 'Hour, country, car ahead', sub: 'from the car', kind: 'input', facts: facts(placeGroups),
