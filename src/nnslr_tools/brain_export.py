@@ -11,7 +11,8 @@ network's (gru_step): no GRU node in the graph the comma compiles. A brain with 
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
-works_head and road_head stay out (brain_net.car_weights). What comes out of the export is checked twice: against PyTorch
+works_head and road_head stay out (brain_net.car_weights). A brain that learnt the road type also gives road_type (1,
+types), the logits of output.road_types: the car only shows it on the screen, the speed is the same with or without it. What comes out of the export is checked twice: against PyTorch
 with onnxruntime on random inputs, and along a whole real drive against what training measured (brain_train.predict), the
 memory fed back as on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
 """
@@ -40,26 +41,36 @@ TIE = 1e-3
 
 
 def load_brain(checkpoint: Path):
-    """(the network on the CPU in eval mode, without works_head and road_head; what the checkpoint says of itself). The
-    network has the table of its checkpoint (class_kph): a brain of 5 km/h classes stays one."""
+    """(the network on the CPU in eval mode, without works_head and road_head, with type_head when it learnt the road
+    type; what the checkpoint says of itself). The network has the table of its checkpoint (class_kph): a brain of 5 km/h
+    classes stays one."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
     table = saved['weights'].get('class_kph')
     model = build_brain_net(tuple(saved['groups']), pool=saved['pool'], works=False, ahead=saved.get('ahead', False),
                             pretrained=False, features=saved['features'], hidden=saved['hidden'],
-                            kph=None if table is None else table.tolist())
-    weights = {name: value for name, value in saved['weights'].items() if name in car_weights(model)}
+                            kph=None if table is None else table.tolist(), road_types=len(road_types_of(saved)))
+    weights = {name: value for name, value in saved['weights'].items()
+               if name in car_weights(model) or name.startswith('type_head.')}
     model.load_state_dict(weights, strict=True)
     return model.eval(), saved
 
 
+def road_types_of(saved: dict) -> list[str]:
+    """The road types a checkpoint's type_head says, in its order: none for a brain that did not learn them."""
+    return list(saved.get('road_types') or []) if 'type_head.weight' in saved.get('weights', {}) else []
+
+
 def output_names(model) -> list[str]:
-    return AHEAD_OUTPUT_NAMES if getattr(model, 'ahead', False) else OUTPUT_NAMES
+    names = AHEAD_OUTPUT_NAMES if getattr(model, 'ahead', False) else OUTPUT_NAMES
+    if getattr(model, 'type_head', None) is not None:
+        names = [*names[:-1], 'road_type', names[-1]]
+    return names
 
 
 def step_module(model):
     """A step of the car: (image, extra, hidden) -> (speed logits, hidden_out), with the limit ahead (speed logits, next
-    logits, metres, hidden_out): the numbers of BrainNet.forward."""
+    logits, metres, hidden_out), with the road type its logits just before hidden_out: the numbers of BrainNet.forward."""
     torch = _torch()
     from torch import nn
 
@@ -73,13 +84,16 @@ def step_module(model):
             hidden_out = gru_step(self.model.gru, x, hidden)
             number = self.model.number_in_force(extra)
             speed = self.model.speed_head(hidden_out) + self.model.trust(hidden_out) * number
-            if not self.model.ahead:
-                return speed, hidden_out
-            following = (self.model.next_head(hidden_out) +
-                         self.model.trust_next(hidden_out) * torch.cat([number, number[..., :1] * 0], dim=-1))
-            metres = (self.model.metres_head(hidden_out) +
-                      self.model.metres_gate(hidden_out) * self.model.sign_metres(extra)[..., None])
-            return speed, following, metres, hidden_out
+            found = (speed,)
+            if self.model.ahead:
+                following = (self.model.next_head(hidden_out) +
+                             self.model.trust_next(hidden_out) * torch.cat([number, number[..., :1] * 0], dim=-1))
+                metres = (self.model.metres_head(hidden_out) +
+                          self.model.metres_gate(hidden_out) * self.model.sign_metres(extra)[..., None])
+                found += (following, metres)
+            if getattr(self.model, 'type_head', None) is not None:
+                found += (self.model.type_head(hidden_out),)
+            return (*found, hidden_out)
 
     return Step().eval()
 
@@ -251,6 +265,10 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         outputs += [{'name': 'next', 'shape': [1, len(table) + 1], 'dtype': 'float32',
                      'meaning': 'the next limit: kph[argmax], none for the last class'},
                     {'name': 'metres', 'shape': [1, 1], 'dtype': 'float32', 'meaning': 'the metres to it over metres_scale'}]
+    road_types = road_types_of(saved)
+    if road_types:
+        outputs.append({'name': 'road_type', 'shape': [1, len(road_types)], 'dtype': 'float32',
+                        'meaning': 'the road type: road_types[argmax], shown on the screen only'})
     outputs.append({'name': 'hidden_out', 'shape': [1, hidden], 'dtype': 'float32', 'meaning': 'give it back as hidden'})
     contract = {
         'schema_version': 1, 'task': 'brain', 'architecture': 'mobilenet_v3_small+gru', 'checkpoint': str(checkpoint),
@@ -263,7 +281,8 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
                              'narrow road camera NV12 -> vision.yuv_to_rgb -> vision.resize')},
         'inputs': [{'name': name, 'shape': shapes[name], 'dtype': 'float32'} for name in INPUT_NAMES],
         'output': {'name': 'speed', 'shape': [1, len(table)], 'kph': table,
-                   'decode': 'kph[argmax(speed)]', **({'metres_scale': METRES_SCALE} if model.ahead else {})},
+                   'decode': 'kph[argmax(speed)]', **({'metres_scale': METRES_SCALE} if model.ahead else {}),
+                   **({'road_types': road_types} if road_types else {})},
         'outputs': outputs,
         'step': {'rate_hz': rate, 'clock': 'last' if rate == 1.0 else 'schedule',
                  'picture': 'brain' if brain_picture else 'road_type', 'groups': list(groups),

@@ -29,7 +29,8 @@ the kinds when the training started: a kind added later is a new column of the n
 The road type (town, rural, motorway... of the map, with a person's corrections in Speed review: brain_targets.type_answers)
 teaches the memory as well: type_head is one layer with a logit a type, loss += TYPE_LOSS * cross entropy of the type on
 the frames that have one. The map never reaches the network's inputs, nor the car: type_head is TRAINING_ONLY, so the car's
-brain is the same network with or without it. The memory learns that a motorway is driven faster than a town, from the
+speed is the same network with or without it; the export gives its logits apart, only to show the road type on the comma's
+screen (brain_export, since 12 Nov 2026). The memory learns that a motorway is driven faster than a town, from the
 picture and the signs, and says it with the speed.
 
 His speed is no single class but a bell over the table around it (speed_targets, SPEED_SIGMA_KPH wide): at a km/h a

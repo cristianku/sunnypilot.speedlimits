@@ -314,9 +314,9 @@ def load_type_head(root: Path, contract: dict | None) -> dict | None:
 
 def save_type_head(root: Path, set_key: str, package: Path | None = None, log=print) -> Path | None:
     """The road type head of a set's brain written beside the replays, from its run's weights (brain-last.pt, the one
-    the contract's checkpoint_sha256 names): type_head is for the training only (brain_net.TRAINING_ONLY), so no ONNX
-    has it, and the replay applies it on the memory of the car's brain at each of its steps. In the GPU environment,
-    whose PyTorch reads the weights; nothing for a set without a brain or a brain that learnt no road type."""
+    the contract's checkpoint_sha256 names): type_head is for the training only (brain_net.TRAINING_ONLY), so the ONNX
+    of a brain exported before 12 Nov 2026 has it not, and the replay applies it on the memory of the car's brain at each
+    of its steps. In the GPU environment, whose PyTorch reads the weights; nothing for a set without a brain or a brain that learnt no road type."""
     import numpy as np
 
     from nnslr_tools.model_roles import BRAIN_WEIGHTS

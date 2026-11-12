@@ -194,3 +194,26 @@ def test_the_contract_says_whether_the_car_gives_the_plates(tmp_path, monkeypatc
     brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
     contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
     assert contract['step']['plates'] is plates
+
+
+def test_a_brain_that_learnt_the_road_type_gives_it_to_the_screen_with_the_same_speed(tmp_path):
+    # type_head goes in the ONNX as road_type, before hidden_out, with its names in the contract; the speed's weights stay.
+    import torch
+
+    from nnslr_tools.brain_net import build_brain_net, car_weights
+    path = tmp_path / 'brain-last.pt'
+    torch.manual_seed(0)
+    trained = build_brain_net(GROUPS, pool='grid', works=True, ahead=True, pretrained=False, road_types=3)
+    torch.save({'weights': trained.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True,
+                'road_kinds': [], 'road_types': ['town', 'rural', 'motorway'], 'features': 128, 'hidden': 128,
+                'ahead': True, 'rate_hz': 4.0, 'picture': 'brain', 'split': 'x', 'reader': None,
+                'inputs_sha256': inputs_sha256()}, path)
+    model, _saved = brain_export.load_brain(path)
+    assert torch.equal(model.type_head.weight, trained.type_head.weight)
+    assert set(car_weights(model)) == set(car_weights(trained))
+    done = brain_export.export_brain_onnx(path, tmp_path / 'brain.onnx')
+    contract = json.loads((tmp_path / 'brain.onnx.contract.json').read_text())
+    assert done['verification']['passed']
+    assert contract['output']['road_types'] == ['town', 'rural', 'motorway']
+    assert [output['name'] for output in contract['outputs']] == ['speed', 'next', 'metres', 'road_type', 'hidden_out']
+    assert contract['step']['outputs'] == ['speed', 'next', 'metres', 'road_type', 'hidden_out']
