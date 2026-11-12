@@ -1074,6 +1074,9 @@ def _cmd_export_onnx(args: argparse.Namespace) -> int:
     if args.task == "signnet":
         from nnslr_tools.signnet import export_signnet_onnx
         report = export_signnet_onnx(Path(args.checkpoint), Path(args.output), verify=not args.no_verify)
+    elif args.task == "usernet":
+        from nnslr_tools.usernet import export_usernet_onnx
+        report = export_usernet_onnx(Path(args.checkpoint), Path(args.output), verify=not args.no_verify)
     elif args.task == "detector":
         report = export_detector_onnx(
             Path(args.checkpoint),
@@ -1891,6 +1894,36 @@ def build_parser() -> argparse.ArgumentParser:
                            help="the plan a --dry-run --plan-out wrote, used instead of building it again when the "
                                 "dataset, split, Mapillary windows and settings are still the same (else built)")
     p_signnet.set_defaults(func=_cmd_train_signnet)
+    p_usernet = sub.add_parser("train-usernet", help="train UserNet, the road users' detector (person, two-wheeler, "
+                                                     "vehicle) on the window 672x256 of the frame (rows 72-328 of it "
+                                                     "scaled to 672 across): stage bdd on BDD100K's pictures, stage "
+                                                     "drives on our reviewed frames. GPU only (.venv-gpu); writes "
+                                                     "usernet-best.pt and result.json")
+    p_usernet.add_argument("--run-dir", required=True, help="output folder, e.g. data/runs/<time>-users")
+    p_usernet.add_argument("--stage", required=True, choices=("bdd", "drives"),
+                           help="bdd: BDD100K's pictures; drives: our frames (validation: our ticked frames)")
+    p_usernet.add_argument("--bdd-dir", default=None,
+                           help="the BDD100K FiftyOne export with samples.json (default: NNSLR_BDD_DIR or "
+                                "/data/sunnypilot/SPEEDLIMITS/bdd100k)")
+    p_usernet.add_argument("--dataset", default=None, help="default: <data root>/annotations/objects.jsonl")
+    p_usernet.add_argument("--split", default=None, help="default: <data root>/splits/latest.json")
+    p_usernet.add_argument("--dataset-kind", choices=("gold", "training-candidate"), default="gold")
+    p_usernet.add_argument("--epochs", type=int, default=30)
+    p_usernet.add_argument("--batch", type=int, default=32)
+    p_usernet.add_argument("--learning-rate", type=float, default=3e-3)
+    p_usernet.add_argument("--workers", type=int, default=8)
+    p_usernet.add_argument("--init-from", default=None,
+                           help="a finished UserNet's usernet-best.pt to go on from (the drives stage from a bdd one)")
+    p_usernet.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_usernet.add_argument("--dry-run", action="store_true",
+                           help="build the plan only (no torch, no picture read): one JSON line with its frames and "
+                                "users by split; exit 1 when it cannot train")
+    p_usernet.add_argument("--plan-out", default=None,
+                           help="with --dry-run: also write the plan there, for the training's --plan")
+    p_usernet.add_argument("--plan", default=None,
+                           help="the plan a --dry-run --plan-out wrote, used when the data and settings are still the "
+                                "same (else built again)")
+    p_usernet.set_defaults(func=_cmd_train_usernet)
     p_remeasure = sub.add_parser("remeasure-signnet", help="add the lenient car measure (a box's centre inside the "
                                                            "sign's, 0.5x to 2x its size) to a finished SignNet run's "
                                                            "result.json, without training; needs torch (.venv-gpu)")
@@ -2327,10 +2360,11 @@ def build_parser() -> argparse.ArgumentParser:
     # [onnx-export] - START
     p_export = sub.add_parser(
         "export-onnx",
-        help="export a trained reader/detector/signnet checkpoint to a verified ONNX reference artifact",
+        help="export a trained reader/detector/signnet/usernet checkpoint to a verified ONNX reference artifact",
     )
-    p_export.add_argument("--task", choices=("reader", "detector", "signnet"), default="reader")
-    p_export.add_argument("--checkpoint", required=True, help="reader-best.pt, detector-best.pt or signnet-best.pt")
+    p_export.add_argument("--task", choices=("reader", "detector", "signnet", "usernet"), default="reader")
+    p_export.add_argument("--checkpoint", required=True,
+                          help="reader-best.pt, detector-best.pt, signnet-best.pt or usernet-best.pt")
     p_export.add_argument("--output", required=True, help="target .onnx path")
     p_export.add_argument("--detector-input-width", type=int, default=1344,
                           help="detector native input width (default: narrow road 1344)")
@@ -3230,6 +3264,69 @@ def _cmd_train_signnet(args: argparse.Namespace) -> int:
            for split in ("validation", "test")}
     print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
                       "by_box_budget": summary, "car": car}, sort_keys=True), flush=True)
+    return 0
+
+
+def _cmd_train_usernet(args: argparse.Namespace) -> int:
+    from nnslr_tools.preannotate import resolve_data_root
+    from nnslr_tools.usernet import BDD_DIR, prepare_usernet, train_usernet
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.plan_out and not args.dry_run:
+        raise ValueError("--plan-out writes the plan of a --dry-run: add --dry-run, or --plan to read one")
+    if args.init_from and not Path(args.init_from).is_file():
+        raise ValueError(f"--init-from is not a file: {args.init_from}")
+    bdd_dir = Path(args.bdd_dir or os.environ.get("NNSLR_BDD_DIR") or BDD_DIR)
+    dataset = Path(args.dataset or root / "annotations" / "objects.jsonl")
+    split = Path(args.split or root / "splits" / "latest.json")
+    samples = bdd_dir / "samples.json"
+    # What the plan is made of: a plan written by the dry run is the training's only while all of it is the same.
+    inputs = {"data_root": str(root.resolve()), "stage": args.stage, "dataset_kind": args.dataset_kind,
+              **{name: [str(path.resolve()), sha256_of(path) if path.is_file() else None]
+                 for name, path in (("dataset", dataset), ("split", split), ("bdd", samples))}}
+    plan = None
+    if args.plan:
+        try:
+            saved = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            saved = {}
+        if saved.get("inputs") == inputs:
+            plan = saved["plan"]
+            print(f"plan: {args.plan}, written by the check of the population", file=sys.stderr, flush=True)
+        else:
+            print(f"plan: {args.plan} is missing or of other data or settings, built again", file=sys.stderr,
+                  flush=True)
+    if plan is None:
+        plan = prepare_usernet(args.stage, root, bdd_dir=bdd_dir, dataset_path=dataset, split_path=split,
+                               dataset_kind=args.dataset_kind)
+    if args.plan_out:
+        out = Path(args.plan_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_name(out.name + ".tmp").write_text(json.dumps({"inputs": inputs, "plan": plan}), encoding="utf-8")
+        out.with_name(out.name + ".tmp").replace(out)
+    train_frames = sum(1 for frame in plan["frames"] if frame["split"] == "train")
+    short = train_frames < args.batch
+    trainable = bool(plan.get("trainable")) and not short
+    reason = "; ".join(part for part in (plan.get("not_trainable"), f"{train_frames} train frames, fewer than one "
+                                         f"batch of {args.batch}" if short else None) if part)
+    if args.dry_run:
+        print(json.dumps({"dry_run": True, "task": "usernet", "stage": plan["stage"], "uses_bdd": plan["uses_bdd"],
+                          "validation_source": plan["validation_source"], "counts_by_split": plan["counts_by_split"],
+                          "dataset_sha256": plan.get("dataset_sha256"), "split_sha256": plan.get("split_sha256"),
+                          "bdd": plan.get("bdd"), "drives": plan.get("drives"), "train_frames": train_frames,
+                          "batch": args.batch, "trainable": trainable}, sort_keys=True), flush=True)
+        if not trainable:
+            print(f"not trainable: {reason}", file=sys.stderr, flush=True)
+        return 0 if trainable else 1
+    if not trainable:
+        raise ValueError(f"usernet_not_trainable: {reason}")
+    result = train_usernet(plan, root, Path(args.run_dir), epochs=args.epochs, batch=args.batch,
+                           learning_rate=args.learning_rate, workers=args.workers,
+                           init_from=Path(args.init_from) if args.init_from else None,
+                           log=lambda line: print(line, flush=True))
+    print(json.dumps({"run_dir": args.run_dir, "best_epoch": result["best_epoch"], "parameters": result["parameters"],
+                      "uses_bdd": result["uses_bdd"], "validation_source": result["validation_source"],
+                      "validation": result["validation"]["at_min_score"],
+                      "test": (result["test"] or {}).get("at_min_score")}, sort_keys=True), flush=True)
     return 0
 
 

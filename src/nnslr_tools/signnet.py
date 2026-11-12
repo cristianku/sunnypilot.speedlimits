@@ -108,15 +108,19 @@ def fits_the_car(band, stride) -> bool:
         return False
 
 
-def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kernel: int = 3):
+def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kernel: int = 3, *, heads: int = 1):
     """The network: strides 2, 4, 8, 16; the deepest map brought back to ``stride`` (4 or 8) and joined with the
     map of that stride by a convolution of ``fuse_kernel`` (3, or 1: on the Adreno the 3 x 3 at stride 4 is 40 % of
-    the time); out: heat (1, sigmoid) and shape (log width, log height, offset x, offset y)."""
+    the time); out: heat (``heads`` channels, sigmoid: 1 for SignNet, one a kind for UserNet) and shape (log width,
+    log height, offset x, offset y), shared by every kind. With heads 1 (SignNet) the graph and its weights are the
+    same as before ``heads`` existed."""
     torch, nn = _torch()
     if stride not in (4, 8):
         raise ValueError("signnet stride must be 4 or 8")
     if fuse_kernel not in (1, 3):
         raise ValueError("signnet fuse kernel must be 1 or 3")
+    if not isinstance(heads, int) or heads < 1:
+        raise ValueError("signnet heads must be a whole number from 1")
 
     def block(cin, cout, step, kernel=3):
         return nn.Sequential(nn.Conv2d(cin, cout, kernel, step, kernel // 2, bias=False), nn.BatchNorm2d(cout),
@@ -132,9 +136,9 @@ def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kern
             self.s8 = nn.Sequential(block(b, c, 2), block(c, c, 1))
             self.s16 = nn.Sequential(block(c, d, 2), block(d, d, 1))
             self.fuse = block(d + (b if stride == 4 else c), c, 1, fuse_kernel)
-            self.out = nn.Conv2d(c, 5, 1)
+            self.out = nn.Conv2d(c, heads + 4, 1)
             # Heat starts near 0.01 everywhere (CenterNet's prior): the focal loss starts from few false alarms.
-            nn.init.constant_(self.out.bias[:1], -4.6)
+            nn.init.constant_(self.out.bias[:heads], -4.6)
 
         def forward(self, images):
             x4 = self.s4(self.s2(images))
@@ -143,7 +147,7 @@ def build_signnet(widths=DEFAULT_WIDTHS, stride: int = DEFAULT_STRIDE, fuse_kern
             skip = x4 if self.stride == 4 else x8
             up = nn.functional.interpolate(x16, size=skip.shape[-2:], mode='nearest')
             y = self.out(self.fuse(torch.cat([up, skip], 1)))
-            return torch.sigmoid(y[:, :1]), y[:, 1:]
+            return torch.sigmoid(y[:, :heads]), y[:, heads:]
 
     return SignNet()
 

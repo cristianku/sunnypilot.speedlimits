@@ -69,6 +69,16 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
           : 'three seeds on the GPU: about 15 minutes. Three new versions in Models; ')
         + 'nothing goes to the car until you choose one and Publish.' + works + mean};
   }
+  if (name === 'train_users') {
+    const from = /^users:(.+)\/usernet$/.exec(options?.start ?? '')?.[1];
+    const start = from ? ' It goes on from the UserNet of ' + from + '.' : ' It starts from random weights.';
+    return {title: 'Train UserNet?', action: 'Start training',
+      text: (options?.stage === 'drives'
+        ? 'Trains UserNet on the GPU on the road users you boxed in Sign review; the frames ticked “Road users complete” '
+          + 'also teach it where there is none, and measure it.'
+        : 'Trains UserNet on the GPU on BDD100K’s pictures, read as it trains; its weights then carry BDD100K’s licence.')
+        + ' Its run is a new one, named by the time it starts; nothing goes to the car.' + start};
+  }
   if (name === 'train_decider') {
     return {title: 'Train applicability?', action: 'Start training',
       text: 'Trains three applicability networks on the GPU (the crop alone; with position and speed; with the scene) and compares them: '
@@ -197,6 +207,7 @@ const STOP_TEXT: Partial<Record<ActionName, string>> = {
   train_cutter: 'This training is lost: training again starts a new run from the beginning.',
   train_decider: 'The applicability networks already trained stay; training again starts a new run.',
   train_brain: 'The seeds already trained stay in Models; training again starts a new run.',
+  train_users: 'This training is lost: training again starts a new run from the beginning.',
   ai_review: 'The frames already saved stay saved; the others are left to review.',
   networks_prepare: 'Nothing is kept: preparing again starts over.',
   networks_publish: 'What Hugging Face already received may stay there.',

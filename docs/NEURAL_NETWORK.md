@@ -659,3 +659,38 @@ The runs below were brains of 1 Hz with classes of 5 km/h, on the labels of Spee
 **On the car (5 Nov 2026).** The brain is the vision limit: no second choice in sunnylink, `speed_limits/brain.py` takes the place of `vis_limit` when the release has a `brain`, and later trainings only change that file. `nnslr export-brain` makes one step of the network an ONNX (`src/nnslr_tools/brain_export.py`); Publish does the same for the brain in use on the Models tab, and with it the scene network does not go. Its contract holds the hash of `brain_inputs.py`, and the car refuses another. Checked on `0000015a--e47d11b0b0`, 3,009 frames: onnxruntime and tinygrad (`scripts/check_brain_tinygrad.py`, on CUDA, also with FLOAT16) say the speed of PyTorch on every frame. Not tested on the Adreno: its IMAGE kernels and its time per step are measured only on the comma. Two small gaps with training stay: the car reads signs 5 times a second, the training's drives 4; and the car's country comes about 10 s after the first fix (`confirm_s`), the training's at once. The finder, the classifier and the sign settings of the training are the ones Publish sends (checked by hash, 5 Nov 2026).
 
 **What the comma's limit scores.** On the first 4,251 labelled frames `vis_limit` equals the label on 48 %, 20.6 km/h off on average. The labelled drives were chosen for their errors, so this is a starting point, not the limit's overall score.
+
+## UserNet: the road users (12 November 2026)
+
+**What it is for.** A second small detector that finds the road users in the road frame, in three kinds: person, two-wheeler and vehicle. Later its boxes go into the brain as the input `user_boxes`, the same way the signs' boxes go in as `sign_boxes`: a cyclist ahead or a queue of cars is something the brain should see when it decides the speed to hold. It is not on the car and not in a release yet, and it is not one of the cutter's checks. Its code is `src/nnslr_tools/usernet.py`.
+
+**The network.** It is SignNet's network (`build_signnet`) with `heads=3`: channels 16, 24, 32 and 48, grid 8, a 1 × 1 fuse, the network that already runs on the Adreno. It has three heat channels, one for each kind, and the same four shape channels as SignNet (log width, log height and the centre's offset), shared by every kind. With `heads=1`, the default, SignNet's graph and checkpoints stay byte for byte as they were.
+
+**The input.** The frame scaled to 672 pixels across, rows 72 to 328 of that picture: 672 × 256, a grid of 84 × 32. On a 1344 × 760 frame those are rows 144 to 656, where the road users of the road ahead are. The window is cut from the picture as it is read, so nothing is written to disk.
+
+**The output.** `decode` gives each user back in the frame's pixels, with its kind and its score: at most `MAX_USERS` (24) a frame, of score `MIN_USER_SCORE` (0.5) or more, which is what the brain will read. The ONNX export (`nnslr export-onnx --task usernet`) has one output of 7 channels (3 heat, 4 shape) and checks itself against PyTorch, as SignNet's does.
+
+**Stage 1: BDD100K** (`--stage bdd`, the default). It learns from BDD100K's 10,000 pictures of 1280 × 720 (`/data/sunnypilot/SPEEDLIMITS/bdd100k/samples.json`, `NNSLR_BDD_DIR`), one window a picture. Their labels become ours:
+
+| BDD100K | UserNet |
+| --- | --- |
+| pedestrian | person |
+| a rider on a bicycle or motorcycle (their boxes overlap by 0.3 of the smaller one or more) | one two-wheeler, the box around both |
+| a bicycle or motorcycle alone | two-wheeler |
+| car, truck, bus | vehicle |
+| traffic sign, traffic light | background (not a road user, as on our frames) |
+| anything else (other person, other vehicle, train, trailer, a rider on nothing) | ignore: neither a user nor background |
+
+The pictures are split by their name, 80 % train, 10 % validation and 10 % test, by a hash of the name, so a picture always stays in the same partition. The split's sha256 is kept with the weights.
+
+**Stage 2: your drives** (`--stage drives`). It learns from the frames of Sign review, with the dataset and split of the cutter. `road_user_person` is a person; `road_user_bicycle` and `road_user_motorcycle` are two-wheelers; car, truck, bus and tram are vehicles; `road_user_other` is an ignore box. A frame ticked **Road users complete** (key J, `users_complete`) has every user boxed from the size rule up (persons and two-wheelers from 24 px tall, vehicles from 40 px): everything else on it is background, so those frames teach the negatives, and they are the only frames validation and test take. On a frame that is not ticked only the boxed users are judged: the loss weight is 0 everywhere else, so a missing box is not learnt as "nobody there". A frame with no user box and no tick is left out. The stage starts from an earlier UserNet (the BDD stage, as a rule) or from random weights.
+
+In both stages a box lower than 12 px in the window is an ignore box, and so is a box whose centre is outside the window but which reaches into it (half a car at the edge is not "nobody there"). A known limit: on a ticked frame, a user below the size rule but over 12 px is learnt as background, since the tick promises nothing about it.
+
+**Validation.** The best epoch is the one with the most validation users found at score 0.5. Validation is your ticked frames; the BDD stage falls back to BDD's own validation pictures only while there are no ticked frames (`validation_source` says which).
+
+**The measure.** In the frame's pixels, a box found when it overlaps a user by IoU 0.5 or more, of the same kind. It only judges what the tick promises: a user below the size rule, found or missed, counts as neither. The numbers are the users found (recall, also by kind), the boxes that are users (precision) and the false boxes a frame, at scores 0.1, 0.3 and 0.5.
+
+**The licence.** A UserNet that learnt BDD100K's pictures says so (`uses_bdd`, in `usernet-best.pt` and `result.json`), and keeps saying so in every UserNet that goes on from it, as SignNet keeps `uses_mapillary`: BDD100K's licence goes with the weights.
+
+**Training it.** Train › UserNet in the portal (`scripts/run_usernet.sh NAME`, `nnslr train-usernet`): the stage, the network to start from, Train. It runs on one V100 and stops when no card is free; it never falls back to the CPU. 30 epochs, batch 32, AdamW with a one-cycle learning rate of 0.003, the window mirrored half of the time. The run's curves and numbers are on Evaluate, and the network is on Models as a fifth role, UserNet.

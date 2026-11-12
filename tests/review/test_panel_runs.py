@@ -1098,3 +1098,98 @@ def test_a_chain_report_names_its_signnet_by_the_path_of_its_weights(root, index
     headline = runs_module.chain_headline(runs_module.chain_digest(report))
     assert (headline['cutter_id'], headline['score_threshold'], headline['at_chain_score']) == ('cutter:s1/signnet', 0.3, True)
     assert headline['cutter_size'] == '896x288'
+
+
+# -- a UserNet run: "Train UserNet" (scripts/run_usernet.sh NAME) ----------------------------------------------------
+USERNET_LOG = '''== scripts/run_usernet.sh {name}
+== 1/3 Check the training population (CPU-only) ==
+== 2/3 Explicit CUDA smoke test ==
+== 3/3 Train UserNet ==
+usernet epoch 1/2 train_loss 3.1000 val_recall 0.200 val_false_per_frame 2.50 60s
+usernet epoch 2/2 train_loss 2.4000 val_recall 0.350 val_false_per_frame 1.80 61s
+'''
+USERNET_END = 'usernet measure the best epoch 2 on validation and test\nUserNet complete: {run}\n'
+
+
+def usernet_measure(frames: int, recall: float, precision: float, false_per_frame: float) -> dict:
+    """validation or test of a UserNet's result.json (usernet.measure): the road users found at MIN_USER_SCORE."""
+    found = {'recall': recall, 'precision': precision, 'false_per_frame': false_per_frame,
+             'by_kind': {'person': {'recall': recall}, 'two_wheeler': {'recall': None}, 'vehicle': {'recall': recall}}}
+    return {'frames': frames, 'at_min_score': found}
+
+
+def make_usernet_run(root: Path, name: str = '2026-11-12_1200-users', *, upto: str = 'done') -> Path:
+    """A run folder as scripts/run_usernet.sh NAME leaves it at the step `upto` (usernet, evaluate) or at its end."""
+    run = root / 'runs' / name
+    log = USERNET_LOG.format(name=name)
+    if upto in ('evaluate', 'done'):
+        log += USERNET_END.format(run=run)
+    write(run / 'usernet.log', log)
+    write(run / 'usernet-best.pt', 'weights')
+    if upto == 'done':
+        write(run / 'result.json', {
+            'task': 'usernet', 'stage': 'bdd', 'epochs': 2, 'best_epoch': 2, 'uses_bdd': True,
+            'validation_source': 'bdd', 'dataset_sha256': DATASET_SHA, 'split_sha256': SPLIT_SHA, 'start': None,
+            'history': [{'epoch': 1, 'loss': 3.1, 'validation_recall': 0.2, 'validation_false_per_frame': 2.5, 'seconds': 60.2},
+                        {'epoch': 2, 'loss': 2.4, 'validation_recall': 0.35, 'validation_false_per_frame': 1.8, 'seconds': 61.0}],
+            'validation': usernet_measure(10, 0.35, 0.5, 1.8), 'test': usernet_measure(12, 0.3, 0.45, 2.0)})
+    return run
+
+
+def test_a_usernet_run_is_a_kind_of_its_own(root, index):
+    run = make_usernet_run(root)
+    make_signnet_run(root)
+    runs = {item['name']: item for item in index.summaries()['runs']}
+    summary = runs[run.name]
+    assert (summary['kind'], summary['state'], summary['stage'], summary['stage_label']) == (
+        'usernet', 'finished', 'done', 'finished')
+    assert summary['finished_at'] and summary['evaluated'] and summary['problems'] == []
+    assert (summary['split_sha256'], summary['dataset_sha256'], summary['start']['kind']) == (SPLIT_SHA, DATASET_SHA, 'random')
+    # Its line: the stage, BDD100K's licence and, on test, the road users found at its score.
+    assert summary['usernet'] == {'stage': 'bdd', 'uses_bdd': True, 'validation_source': 'bdd', 'best_epoch': 2,
+                                  'partition': 'test', 'frames': 12, 'score_threshold': 0.5, 'recall': 0.3,
+                                  'precision': 0.45, 'false_per_frame': 2.0}
+    # A SignNet run beside it stays a cutter run without a UserNet line.
+    assert (runs['2026-10-30_1200-cutter']['kind'], runs['2026-10-30_1200-cutter']['usernet']) == ('cutter', None)
+    detail = index.detail(run.name)
+    assert detail['curves']['usernet']['epochs'] == 2
+    assert detail['curves']['usernet']['points'][1] == {'epoch': 2, 'train_loss': 2.4, 'val_recall': 0.35,
+                                                        'val_false_per_frame': 1.8, 'seconds': 61}
+    assert detail['usernet_run']['test']['recall'] == 0.3 and 'history' not in detail['usernet_run']
+    # Without its log, the curve of its result.json.
+    (run / 'usernet.log').unlink()
+    assert index.detail(run.name)['curves']['usernet']['points'][0]['train_loss'] == 3.1
+    json.dumps(index.detail(run.name), allow_nan=False)
+    assert index.detail('2026-10-30_1200-cutter')['usernet_run'] is None
+
+
+def test_a_usernet_run_that_went_on_from_another(root, index):
+    run = make_usernet_run(root)
+    result = json.loads((run / 'result.json').read_text())
+    write(run / 'result.json', {**result, 'stage': 'drives', 'start': {'run': 'older_u', 'epoch': 9, 'stage': 'bdd',
+                                                                        'uses_bdd': True, 'path': '/x/usernet-best.pt'}})
+    summary = next(item for item in index.summaries()['runs'] if item['name'] == run.name)
+    assert (summary['start']['kind'], summary['start']['run'], summary['start']['label']) == (
+        'run', 'older_u', 'Continued from run older_u')
+    assert (summary['usernet']['stage'], summary['usernet']['uses_bdd']) == ('drives', True)
+
+
+@pytest.mark.parametrize('upto, stage, label', [('usernet', 'usernet', 'training UserNet'),
+                                                ('evaluate', 'evaluate', 'measuring on validation and test')])
+def test_the_steps_of_a_usernet_run(root, index, upto, stage, label):
+    make_usernet_run(root, 'u1', upto=upto)
+    run = next(run for run in index.summaries()['runs'] if run['name'] == 'u1')
+    assert (run['kind'], run['state'], run['stage'], run['stage_label']) == ('usernet', 'incomplete', stage, label)
+    assert run['finished_at'] is None and run['started_at'] and run['usernet'] is None
+    index.running_runs = lambda: {'u1': {'usernet'}}
+    run = next(run for run in index.summaries()['runs'] if run['name'] == 'u1')
+    assert run['state'] == 'running'
+    if upto == 'usernet':
+        assert run['progress'] == 'UserNet · epoch 2 of 2'
+
+
+def test_an_unreadable_usernet_result(root, index):
+    run = make_usernet_run(root, 'u1')
+    (run / 'result.json').write_text('{"task": ')
+    summary = next(item for item in index.summaries()['runs'] if item['name'] == 'u1')
+    assert (summary['kind'], summary['stage'], summary['problems']) == ('usernet', 'evaluate', ['result.json is unreadable'])

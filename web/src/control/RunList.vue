@@ -5,7 +5,7 @@
 // the chain end to end, in one line). A row opens the run below; the name is the button, for the keyboard.
 import {thousands} from '../common/format';
 import type {RunSummary} from '../common/panel-types';
-import {RUN_STATE, modeText, notEvaluatedText, pct, runWhen, stageText} from './evaluate';
+import {RUN_STATE, modeText, notEvaluatedText, pct, runWhen, stageText, usernetLine} from './evaluate';
 import {perFrame} from './models';
 
 /** A cutter run in one line: a SignNet as the car reads it, "Cutter (SignNet), as the car reads: 40.0% of the signs found
@@ -58,6 +58,7 @@ const emit = defineEmits<{select: [name: string]}>();
           <td>{{ run.start.label }}<span v-if="modeText(run)" class="run-sub">{{ modeText(run) }}</span></td>
           <td><span class="pill" :class="RUN_STATE[run.state][1]">{{ RUN_STATE[run.state][0] }}</span><span class="run-sub">{{ stageText(run) }}</span></td>
           <td v-if="run.evaluated && run.kind === 'cutter'" colspan="4" class="run-cutter">{{ cutterLine(run) }}</td>
+          <td v-else-if="run.evaluated && run.kind === 'usernet'" colspan="4" class="run-cutter">{{ usernetLine(run) }}</td>
           <td v-else-if="run.evaluated && run.kind === 'classifier'" colspan="4" class="run-classifier">{{ classifierLine(run) }}<span
             v-if="run.chain_old_reader" class="run-sub">old reader in the same chain: {{ pct(run.chain_old_reader.recall) }} end to end</span></td>
           <template v-else-if="run.evaluated">

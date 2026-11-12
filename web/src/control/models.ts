@@ -1,10 +1,11 @@
-// The Models tab: the three networks of the pipeline (cutter, classifier, decider) and the road type (docs/NEURAL_NETWORK.md), every
+// The Models tab: the three networks of the pipeline (cutter, classifier, decider), the brain and UserNet (docs/NEURAL_NETWORK.md), every
 // version trained on this server (GET /api/panel/models 10 s after each answer while the tab is open), the one in use for each
 // role (POST /api/panel/models/active, asked first in the confirm dialog), and the words the tab shows.
 import {ref, shallowRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import {isoWhen, thousands} from '../common/format';
-import type {ActionState, ActiveChosen, ActiveModel, BrainNumbers, ModelRole, ModelVersion, ModelsPayload} from '../common/panel-types';
+import type {ActionState, ActiveChosen, ActiveModel, BrainNumbers, ModelRole, ModelVersion, ModelsPayload,
+  UserNetNumbers} from '../common/panel-types';
 import {askConfirm, type ConfirmOptions} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {chooseRun, pct} from './evaluate';
@@ -48,6 +49,15 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     empty: 'No brain trained yet.',
     emptyMore: 'nnslr train-brain on the server; it appears here.',
     uses: 'The comma runs the brain in use once Publish puts it in its software, in place of the rules of the signs.',
+  },
+  users: {
+    what: 'UserNet finds the road users in the picture: people, two-wheelers and vehicles, in the band 672 × 256 of the '
+      + 'road camera. It will give the brain their boxes.',
+    today: 'Today: judged on the frames you ticked “Road users complete” in Sign review: the users it finds at score 0.5 '
+      + '(at most 24 a frame) and its false boxes a frame.',
+    empty: 'No UserNet trained yet.',
+    emptyMore: '“Train UserNet” on the Train tab: first on BDD100K, then on your drives; it appears here.',
+    uses: 'The next “Train UserNet” starts from the one in use. It is not on the car yet.',
   },
 };
 
@@ -226,8 +236,8 @@ export interface Metric {
  * test at its score (a detector passes on a couple of hundred boxes a frame at that score, SignNet a few), and the
  * speed signs among its 5 best boxes a frame at any score; the classifier with “not a sign”: the speed-sign crops and every sign
  * crop read right (the kind of an other sign aside), and the chain with the cutter; an old reader: its crops read
- * right; the brain: the frames of the test and of validation where it says the speed right; the decider: the “Another”
- * signs found on validation and on the test. */
+ * right; the brain: the frames of the test and of validation where it says the speed right; UserNet: the road users it
+ * finds at score 0.5 on the test and on validation; the decider: the “Another” signs found on validation and on the test. */
 export function metricsOf(version: ModelVersion): Metric[] {
   const of = (part: number | null | undefined, whole: number | null | undefined): string =>
     whole ? thousands(part ?? 0) + ' of ' + thousands(whole) : '';
@@ -302,6 +312,13 @@ export function metricsOf(version: ModelVersion): Metric[] {
       detail: numbers?.mean_error_kph == null ? '' : numbers.mean_error_kph.toFixed(1) + ' km/h off on average'});
     return version.test === null ? [] : [speed('Right on the test', 'test', version.test),
       speed('On validation', 'validation', version.validation)];
+  }
+  if (version.role === 'users') {
+    const found = (label: string, key: string, numbers: UserNetNumbers | null): Metric => ({key, label,
+      value: numbers?.recall ?? null, count: numbers?.frames ? thousands(numbers.frames) + ' frames' : '',
+      detail: numbers?.false_per_frame == null ? '' : perFrame(numbers.false_per_frame) + ' false boxes per frame'});
+    return version.validation === null && version.test === null ? []
+      : [found('Users found on the test', 'test', version.test), found('On validation', 'validation', version.validation)];
   }
   const another = (numbers: typeof version.validation): Metric['count'] =>
     numbers?.other_road_support ? of(numbers.other_road_found, numbers.other_road_support) : '';

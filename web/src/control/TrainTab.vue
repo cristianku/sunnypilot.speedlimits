@@ -4,7 +4,8 @@
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the brain (scripts/run_brain.sh: its three seeds, from every dashcam drive with its logs read, each whole: his own speed with
-// the blocks of Speed review, which it says before the click), the pipeline (PipelineSection: those trainings one
+// the blocks of Speed review, which it says before the click), UserNet (scripts/run_usernet.sh: the road users' detector, on
+// BDD100K's pictures or on the road users of your drives), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
 // (TrainSettingsSection), then its curves and its latest version
@@ -13,7 +14,7 @@ import {computed, ref, shallowRef, toRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
 import {isoWhen, plural, thousands} from '../common/format';
 import type {ActionName, ActionOptions, ActionState, Activity, BrainLabels, CutterFamilies, Job, JobProgress as Progress,
-  ModelRole, ModelVersion, PanelStatus, PipelineAction, TrainingStart, TrainSettingsAction} from '../common/panel-types';
+  ModelRole, ModelVersion, PanelStatus, PipelineAction, TrainingStart, TrainSettingsAction, UserNetStage} from '../common/panel-types';
 import ActionList from './ActionList.vue';
 import {useBrainChoices} from './brain-choices';
 import BrainChoices from './BrainChoices.vue';
@@ -41,16 +42,18 @@ const props = defineProps<{status: PanelStatus | null}>();
 const emit = defineEmits<{run: [name: ActionName, state: ActionState, start?: TrainingStart, options?: ActionOptions]; stop: [job: Job];
   details: [job: Job]; pipeline: [steps: {action: PipelineAction; options: ActionOptions}[], text: string]; stopPipeline: []}>();
 
-/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Brain, the whole
- * Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
-type Section = 'cutter' | 'classifier' | 'decider' | 'brain' | 'pipeline';
+/** The page as an app: one line of data, then one network at a time (Cutter, Classifier, Applicability, Brain, UserNet,
+ * the whole Pipeline), whose Train button becomes its progress, in the same place, while it trains. */
+type Section = 'cutter' | 'classifier' | 'decider' | 'brain' | 'users' | 'pipeline';
 const SECTIONS: {key: Section; label: string}[] = [{key: 'cutter', label: 'Cutter'}, {key: 'classifier', label: 'Classifier'},
-  {key: 'decider', label: 'Applicability'}, {key: 'brain', label: 'Brain'}, {key: 'pipeline', label: 'Pipeline'}];
+  {key: 'decider', label: 'Applicability'}, {key: 'brain', label: 'Brain'}, {key: 'users', label: 'UserNet'},
+  {key: 'pipeline', label: 'Pipeline'}];
 function sectionOf(action: ActionName): Section | null {
   if (action === 'train_cutter') return 'cutter';
   if (action === 'train_classifier') return 'classifier';
   if (action === 'train_decider') return 'decider';
   if (action === 'train_brain') return 'brain';
+  if (action === 'train_users') return 'users';
   return PIPELINE_ACTIONS.includes(action) ? 'pipeline' : null;
 }
 /** The newest job of a section (running or the last one). */
@@ -60,8 +63,8 @@ function jobFor(section: Section): Job | null {
 /** The work started from a terminal, by section (its label names the network; else the pipeline). */
 function activitiesFor(section: Section): Activity[] {
   return activities.value.filter((activity) => {
-    const named: Section = activity.label.includes('cutter') ? 'cutter' : activity.label.includes('classifier') ? 'classifier'
-      : activity.label.includes('brain') ? 'brain' : 'pipeline';
+    const named: Section = activity.label.includes('UserNet') ? 'users' : activity.label.includes('cutter') ? 'cutter'
+      : activity.label.includes('classifier') ? 'classifier' : activity.label.includes('brain') ? 'brain' : 'pipeline';
     return named === section;
   });
 }
@@ -80,7 +83,7 @@ const section = computed({
 const job = computed(() => jobFor(section.value));
 /** The training whose settings the section shows (Settings, under its action): none for the whole pipeline. */
 const SETTINGS_OF: Partial<Record<Section, TrainSettingsAction>> = {cutter: 'train_cutter', classifier: 'train_classifier',
-  decider: 'train_decider', brain: 'train_brain'};
+  decider: 'train_decider', brain: 'train_brain', users: 'train_users'};
 const settingsAction = computed(() => SETTINGS_OF[section.value] ?? null);
 /** The job of the section in its slot: running or failed; one done or stopped by hand is a line. In the pipeline: only a
  * first pipeline (detector and reader) at work; the last line is PipelineSection's. */
@@ -113,7 +116,8 @@ const latestClassifier = computed(() => latest('classifier'));
 const latestDecider = computed(() => latest('decider'));
 const roleLabel = (role: ModelRole): string => roleOf(role)?.label ?? role;
 const sectionLatest = computed(() => section.value === 'cutter' ? latestCutter.value : section.value === 'classifier'
-  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'brain' ? latest('brain') : null);
+  ? latestClassifier.value : section.value === 'decider' ? latestDecider.value : section.value === 'brain' ? latest('brain')
+    : section.value === 'users' ? latest('users') : null);
 /** The headline of a version in one line: its main number and what it counts (the numbers of ModelItem). */
 function headlineOf(version: ModelVersion): {value: string; text: string} | null {
   if (version.role === 'cutter') {
@@ -130,12 +134,17 @@ function headlineOf(version: ModelVersion): {value: string; text: string} | null
     return null;
   }
   if (version.role === 'brain') return version.test ? {value: pct(version.test.right), text: 'speed right on the test'} : null;
+  if (version.role === 'users') {
+    const found = version.test?.frames ? {numbers: version.test, on: 'the test'} : version.validation ? {numbers: version.validation,
+      on: 'validation'} : null;
+    return found ? {value: pct(found.numbers.recall), text: 'road users found at 0.5 on ' + found.on} : null;
+  }
   return version.validation ? {value: pct(version.validation.other_road_recall), text: '“Another” found on validation'} : null;
 }
 const latestHeadline = computed(() => sectionLatest.value ? headlineOf(sectionLatest.value) : null);
 /** How many versions the section's network has: Models lists them, to compare and to choose. */
 const sectionVersions = computed(() => section.value === 'cutter' || section.value === 'classifier' || section.value === 'decider'
-  || section.value === 'brain' ? roleOf(section.value)?.versions.length ?? 0 : 0);
+  || section.value === 'brain' || section.value === 'users' ? roleOf(section.value)?.versions.length ?? 0 : 0);
 
 /** The cutter: a SignNet at the car's band (status.cutter_options.band), and the signs it learns to find. */
 const FAMILY_OPTIONS: {key: CutterFamilies; label: string}[] = [{key: 'all', label: 'Every sign'}, {key: 'speed', label: 'Speed signs only'}];
@@ -150,7 +159,8 @@ const cutterFamilies = computed({
 const versionsOf = (role: ModelRole) => roleOf(role)?.versions;
 const starts = {cutter: useNetworkStart('cutter', toRef(props, 'status'), versionsOf),
   decider: useNetworkStart('decider', toRef(props, 'status'), versionsOf),
-  brain: useNetworkStart('brain', toRef(props, 'status'), versionsOf, () => brainChoices.pool)};
+  brain: useNetworkStart('brain', toRef(props, 'status'), versionsOf, () => brainChoices.pool),
+  users: useNetworkStart('users', toRef(props, 'status'), versionsOf)};
 /** The cutter's Mapillary switch (cutter-choices.ts), the same in its section and in the pipeline. */
 const cutterChoices = useCutterChoices(toRef(props, 'status'));
 const CUTTER_ACTIONS = computed((): [ActionName, string][] => [
@@ -199,6 +209,15 @@ const BRAIN_ACTIONS = computed((): [ActionName, string][] => {
     + ', after reading the signs of the drives as the car does '
     + '(the applicability network leaves out those of another road). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
 });
+/** UserNet's stage: BDD100K's pictures first, then the road users of your drives, usually from a BDD100K one
+ * (scripts/run_usernet.sh, NNSLR_USERNET_STAGE). */
+const USER_STAGES: {key: UserNetStage; label: string}[] = [{key: 'bdd', label: 'BDD100K'}, {key: 'drives', label: 'Your drives'}];
+const usersStage = ref<UserNetStage>('bdd');
+const USERS_ACTIONS = computed((): [ActionName, string][] => [
+  ['train_users', 'A new UserNet, the road users’ detector (people, two-wheelers, vehicles in the 672 × 256 band of the '
+    + 'frame), on ' + (usersStage.value === 'bdd' ? 'BDD100K’s pictures' : 'the road users you boxed in Sign review')
+    + starts.users.words + '. On the GPU; nothing goes to the car.'],
+]);
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
 const CLASSIFIER_ACTIONS = computed((): [ActionName, string][] => [
@@ -293,6 +312,8 @@ const numbers = computed(() => {
     <p v-if="section === 'cutter'" class="role-what">SignNet, the same network the comma runs: it finds every box that could be a sign at the top of the frame. It must miss nothing: the classifier drops its false boxes.</p>
     <p v-else-if="section === 'classifier'" class="role-what">Says what each box of the cutter is: a speed value, end of limit, another sign and its kind, or not a sign.</p>
     <p v-else-if="section === 'decider'" class="role-what">Says whom each sign applies to: our road, another road, or abstain.</p>
+    <p v-else-if="section === 'users'" class="role-what">UserNet finds the road users in the picture: people, two-wheelers and
+      vehicles. It will give the brain their boxes; it is not on the car.</p>
     <p v-else-if="section === 'brain'" class="role-what">The comma’s vision limit: one network with memory that says the speed to hold, four
       times a second, from the road camera and what the car reads, never the map. It learns how you drive: your own speed on every second of
       the drives with sunnypilot off, your blocks of Speed review the only corrections.</p>
@@ -397,6 +418,19 @@ const numbers = computed(() => {
           v-else-if="brainLabels.road_kinds?.length"> No kind of road is marked in Speed review yet.</template></p>
         <p v-else class="latest-none" id="train-brain-labels">Counting the seconds of your drives…</p>
       </template>
+      <template v-else-if="section === 'users'">
+        <NetworkStartPicker :start="starts.users" id="train-users-start"/>
+        <div class="seg-row">
+          <Segmented v-model="usersStage" :options="USER_STAGES" label="What UserNet learns from"/>
+        </div>
+        <ActionList :items="USERS_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
+                    @run="(name, state) => emit('run', name, state, undefined, {stage: usersStage, ...starts.users.option})"/>
+        <p v-if="usersStage === 'bdd'" class="latest-none" id="train-users-note">BDD100K: one window a picture, read as it trains.
+          Its pictures’ licence goes with the weights, and with every UserNet that goes on from them. Validation is your frames
+          ticked “Road users complete” (J in Sign review), BDD100K’s own only while there are none.</p>
+        <p v-else class="latest-none" id="train-users-note">Your drives: the road users you boxed in Sign review. Only the frames
+          ticked “Road users complete” (J) teach it where there is none, and only they measure it.</p>
+      </template>
       <PipelineSection v-else v-model:families="cutterFamilies" :status="status" :choices="choices" :cutter-choices="cutterChoices" :starts="starts" :brain-choices="brainChoices" :sign-networks="signNetworks" :fresh="numbers?.fresh ?? 0"
                        :family-options="FAMILY_OPTIONS" @pipeline="(steps, text) => emit('pipeline', steps, text)"
                        @stop-pipeline="emit('stopPipeline')" @stop="emit('stop', $event)" @details="emit('details', $event)"
@@ -425,6 +459,8 @@ const numbers = computed(() => {
     <p v-else-if="section === 'classifier'" class="latest-none">{{ models === null ? 'Loading…'
       : 'None trained yet: the reader of a whole pipeline plays this role.' }}</p>
     <p v-else-if="section === 'brain'" class="latest-none">{{ models === null ? 'Loading…' : 'None trained yet.' }}</p>
+    <p v-else-if="section === 'users'" class="latest-none">{{ models === null ? 'Loading…'
+      : 'None trained yet: first on BDD100K, then on your drives from there.' }}</p>
 
     <!-- The curves stay open once the training ends: closing them is a tap. -->
     <TrainingCharts v-if="charted?.running" :progress="charted.progress" :running="true"/>

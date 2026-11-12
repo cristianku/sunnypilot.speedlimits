@@ -2067,6 +2067,10 @@ def make_handler(app: ReviewApp):
                     # never dropped into a replay with other networks or of another drive.
                     options.update((key, body[key]) for key in ('set', 'certified')
                                    if isinstance(body, dict) and body.get(key) is not None)
+                    # UserNet's stage ({"stage": "bdd" | "drives"}), the same way: a stage sent as something else must be
+                    # refused, never dropped into a training on BDD100K.
+                    options.update((key, body[key]) for key in ('stage',)
+                                   if isinstance(body, dict) and body.get(key) is not None)
                     options = options or None
                     # [ai-reviewer] - END
                     job = app.panel.start(run.group(1), options)

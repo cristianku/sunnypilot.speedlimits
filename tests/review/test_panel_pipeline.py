@@ -118,10 +118,13 @@ def test_the_networks_train_one_after_the_other_each_on_those_before_and_all_go_
     # Each is a job of its own, with its own log and run.
     assert {job['action'] for job in real.jobs()} == {'train_cutter', 'train_classifier', 'train_decider', 'train_brain'}
     # All ended well: every network it trained is in use, of the brain's seeds the one with the smallest error.
+    # UserNet is no step of the pipeline: its role stays empty.
     assert in_use(root) == {'cutter': f'cutter:{cutter}/signnet', 'classifier': f'classifier:{classifier}/classifier',
-                            'decider': f'decider:{decider}/experiment-b/full', 'brain': f'brain:{brain}-s1/brain'}
+                            'decider': f'decider:{decider}/experiment-b/full', 'brain': f'brain:{brain}-s1/brain',
+                            'users': None}
     active = json.loads((root / 'models' / 'active.json').read_text())
-    assert {(entry['who'], entry['via']) for role, entry in active.items() if role != 'schema_version'} == {('admin', 'local')}
+    assert {(entry['who'], entry['via']) for role, entry in active.items()
+            if role not in ('schema_version', 'users')} == {('admin', 'local')}
     assert done['reason'] == (f'Put in use: cutter {cutter}, classifier {classifier}, applicability {decider} (full), '
                               f'brain {brain}-s1.')
 

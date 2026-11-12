@@ -36,6 +36,9 @@ from nnslr_tools.job_progress import last_line, progress, with_step_progress
 from nnslr_tools.model_roles import (BRAIN_WEIGHTS, CAR_NETWORKS, NOT_SELECTABLE, SIGNNET_PART, ModelChoiceError,
                                      ModelIndex)
 from nnslr_tools.runs import RunsIndex, WatchError
+from nnslr_tools.usernet import BDD_DIR
+from nnslr_tools.usernet import LOG as USERNET_LOG
+from nnslr_tools.usernet import WEIGHTS as USERNET_WEIGHTS
 
 REPO = Path(__file__).resolve().parents[2]
 ACTIONS_ENV = 'NNSLR_PANEL_ACTIONS'
@@ -76,7 +79,7 @@ CLASSIFIER_ID = re.compile(r'classifier:([A-Za-z0-9][A-Za-z0-9._-]{0,99})/classi
 # own and every seed of the brain from the one brain.
 NETWORK_FRESH = 'fresh'
 NETWORK_STARTS = {'train_cutter': ('cutter', 'NNSLR_CUTTER_INIT_FROM'), 'train_decider': ('decider', 'NNSLR_DECIDER_INIT_FROM'),
-                  'train_brain': ('brain', 'NNSLR_BRAIN_INIT_FROM')}
+                  'train_brain': ('brain', 'NNSLR_BRAIN_INIT_FROM'), 'train_users': ('users', 'NNSLR_USERNET_INIT_FROM')}
 # A split file's sha256 (splits/latest.json).
 SPLIT_SHA = re.compile(r'[0-9a-f]{64}')
 # The cutter is SignNet, the network the comma runs, trained with the car's setup (896 x 288, stride 8). The jobs of
@@ -91,6 +94,11 @@ DECIDER_SCRIPT = 'scripts/run_experiment_b.sh'
 # of the script, the first of each the usual one. The driver's inputs are gone since 10 Nov 2026 (brain_targets.LEFT_OUT):
 # 'driver' is still taken as 'off', the only value, so that a page loaded before can start a training.
 BRAIN_SCRIPT = 'scripts/run_brain.sh'
+# UserNet, the detector of the road users (nnslr_tools.usernet), on a run of its own (start() adds <time>-users). Its
+# option {'stage': 'bdd' | 'drives'}: BDD100K's pictures or the road users boxed in Sign review (USERNET_STAGES, the
+# script's NNSLR_USERNET_STAGE); where it starts is a finished UserNet of Models (NETWORK_STARTS), or random weights.
+USERNET_SCRIPT = 'scripts/run_usernet.sh'
+USERNET_STAGES = ('bdd', 'drives')
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
@@ -148,6 +156,7 @@ RUN_LINES = {
                      re.compile(r'^== scripts/run_detector_sizes\.sh (\S+)(?: \S+)*\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_decider': (re.compile(r'^== scripts/run_experiment_b\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     'train_brain': (re.compile(r'^== scripts/run_brain\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
+    'train_users': (re.compile(r'^== scripts/run_usernet\.sh (\S+)\s*$', re.M), RUN_ARGUMENT_LINE),
     # helpers/road_labeler.sh: "run:          <name>" (the run trained, or the run predict uses).
     'road_labeler_train': (RUN_ARGUMENT_LINE,),
     'road_labeler_predict': (RUN_ARGUMENT_LINE,),
@@ -197,6 +206,7 @@ QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
                                   'sign_classifier', 'sign_decider'),
+                  'train_users': ('stage', 'start'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
                   'road_labeler_train': ('dry',), 'road_labeler_predict': ('dry', 'labeler', 'marks'),
@@ -252,16 +262,18 @@ def _run_of(log: Path, action: str = 'train') -> str | None:
 # "settings:     --epochs 20 --batch-size 8 ... --pretrained".
 SETTING_LINE = re.compile(r'^([a-z][a-z ]{1,20}):\s+(.+)$')
 FAMILY_TEXT = {'all': 'every sign', 'speed': 'speed signs only'}
+USERNET_STAGE_WORDS = {'bdd': 'BDD100K', 'drives': 'your drives'}
 # The "negatives:" line of scripts/run_classifier.sh: the score, per frame and factor of its mined false boxes.
 NEGATIVES_LINE = re.compile(r'score >= (\S+) .*at most (\S+) per frame and (\S+) x')
 NEGATIVES_DEFAULT = ('0.1', '3', '3')
 
 
 def _settings_of(log: Path, action: str) -> list[str]:
-    """How a training of the cutter, the classifier or the decider was launched, as short chips from the head of
-    its log: ["896 × 288", "every sign", "stride 8", "40 epochs", "batch 16", "learning rate 0.003"], ["1344 × 760",
-    "speed signs only", "20 epochs", "batch 8", "pretrained"]; [] for other jobs."""
-    if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_brain'):
+    """How a training of the cutter, the classifier, the decider, the brain or UserNet was launched, as short chips from
+    the head of its log: ["896 × 288", "every sign", "stride 8", "40 epochs", "batch 16", "learning rate 0.003"],
+    ["1344 × 760", "speed signs only", "20 epochs", "batch 8", "pretrained"], ["BDD100K", "30 epochs", "batch 32", ...];
+    [] for other jobs."""
+    if action not in ('train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'train_users'):
         return []
     try:
         with log.open('rb') as handle:
@@ -282,6 +294,9 @@ def _settings_of(log: Path, action: str) -> list[str]:
     if pretraining:
         flags = {**{key: value for key, value in pretraining.items() if key.startswith('--mapillary')}, **flags}
     chips = []
+    # UserNet's stage (scripts/run_usernet.sh, "settings:     --stage bdd ...").
+    if flags.get('--stage'):
+        chips.append(USERNET_STAGE_WORDS.get(flags['--stage'], flags['--stage']))
     if fields.get('band'):
         chips.append(fields['band'].replace('x', ' × '))
     elif flags.get('--band-width'):
@@ -370,12 +385,14 @@ def _flags(settings: str) -> dict[str, str]:
 
 
 def _start_words(path: str) -> str:
-    """The start of a classifier, a SignNet or a brain (--init-from) in words: the run of a
-    .../runs/<run>/classifier/reader-best.pt, of a .../runs/<run>/signnet-best.pt or of a .../runs/<run>/brain-last.pt."""
+    """The start of a classifier, a SignNet, a brain or a UserNet (--init-from) in words: the run of a
+    .../runs/<run>/classifier/reader-best.pt, of a .../runs/<run>/signnet-best.pt, .../runs/<run>/brain-last.pt or
+    .../runs/<run>/usernet-best.pt."""
     parts = Path(path).parts
     if len(parts) >= 3 and parts[-2] in ('classifier', 'pretrain', 'reader'):
         return parts[-3]
-    return parts[-2] if len(parts) >= 2 and parts[-1] in ('signnet-best.pt', 'brain-last.pt') else Path(path).name
+    return parts[-2] if len(parts) >= 2 and parts[-1] in ('signnet-best.pt', 'brain-last.pt', USERNET_WEIGHTS) \
+        else Path(path).name
 
 
 def _region_words(region: str) -> str:
@@ -417,6 +434,8 @@ ACTIONS = {
     'train_cutter': {'label': 'Train the cutter', 'group': 'train', 'command': [CUTTER_SCRIPT]},
     'train_decider': {'label': 'Train applicability', 'group': 'train', 'command': [DECIDER_SCRIPT]},
     'train_brain': {'label': 'Train the brain', 'group': 'train', 'command': [BRAIN_SCRIPT]},
+    # UserNet, the road users' detector ({'stage', 'start'}), on a run of its own (start() adds <time>-users).
+    'train_users': {'label': 'Train UserNet', 'group': 'train', 'command': [USERNET_SCRIPT]},
     'regression': {'label': 'Run the regression', 'group': 'train', 'command': [REGRESSION_SCRIPT]},
     # A drive, or every certified drive, replayed with a set of networks for Models › Drive (SIMULATE_SCRIPT; start()
     # adds --set and --route or --certified). In the train group: the GPU.
@@ -478,6 +497,8 @@ ACTIVITIES = (
     ('train', 'cutter training', 'run_detector_sizes.sh'),
     ('train', 'brain training', 'run_brain.sh'),
     ('train', 'brain training', 'nnslr train-brain'),
+    ('train', 'UserNet training', 'run_usernet.sh'),
+    ('train', 'UserNet training', 'nnslr train-usernet'),
     ('train', 'regression', 'run_regression.sh'),
     ('train', 'drive replay', SIMULATE_SCRIPT),
     ('train', 'drive replay', 'nnslr simulate'),
@@ -511,7 +532,7 @@ RUNNING_NAMES = {'fetch': 'a download from the comma', 'prepare': 'a preparation
                  'dataset': 'an import of the reviews', 'train': 'a training', 'train_continue': 'a training',
                  'train_resume': 'a training', 'train_classifier': 'a classifier training',
                  'train_cutter': 'a cutter training', 'train_decider': 'a decider training',
-                 'train_brain': 'a brain training', 'regression': 'a regression run',
+                 'train_brain': 'a brain training', 'train_users': 'a UserNet training', 'regression': 'a regression run',
                  'simulate': 'a replay of a drive',
                  'road_labeler_train': 'a road labeler training', 'road_labeler_predict': 'a road labeler run',
                  'box_fit_train': 'a training of Fit box',
@@ -527,7 +548,8 @@ ACTIVITY_NAMES = {'download from the comma': 'a download from the comma', 'prepa
                   'frame extraction': 'a preparation', 'pre-annotation': 'a preparation',
                   'dataset and training': 'an import or a training', 'GPU training': 'a training',
                   'classifier training': 'a classifier training', 'cutter training': 'a cutter training',
-                  'brain training': 'a brain training', 'regression': 'a regression run',
+                  'brain training': 'a brain training', 'UserNet training': 'a UserNet training',
+                  'regression': 'a regression run',
                   'drive replay': 'a replay of a drive',
                   'road labeler': 'a road labeler run',
                   'Fit box training': 'a training of Fit box',
@@ -563,14 +585,14 @@ TRAIN_APART = (frozenset(('train_brain', 'regression')), frozenset(('train_brain
                frozenset(('regression', 'road_labeler_predict')),
                frozenset(('road_labeler_train', 'road_labeler_predict')))
 # The work of the train group started from a terminal, by its label (ACTIVITIES), as the action it is for these rules.
-TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain',
+TERMINAL_KINDS = {'cutter training': 'train_cutter', 'brain training': 'train_brain', 'UserNet training': 'train_users',
                   'classifier training': 'train_classifier', 'regression': 'regression',
                   'drive replay': 'simulate',
                   'road labeler': 'road_labeler_train',
                   'dataset and training': 'train', 'GPU training': 'train'}
 # The actions that take a card of their own, the free one of lowest index: none starts while every card is busy.
 EXCLUSIVE_GPU = ('train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider',
-                 'train_brain', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
+                 'train_brain', 'train_users', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train',
                  'road_labeler_predict', 'box_fit_train')
 # The actions that share a card: the one with the most free memory, refused only when it has less than they need. The
 # replay of a drive takes about 1 GB of a V100 (NVDEC and the networks under onnxruntime), never the CPU.
@@ -1231,11 +1253,11 @@ class Panel:
         # The road labeler and the replay of a drive started from a terminal have no log of
         # their own to read: no progress, and not the whole pipeline's either.
         terminal = {'classifier training': 'train_classifier', 'cutter training': 'train_cutter',
-                    'brain training': 'train_brain', 'road labeler': 'road_labeler',
+                    'brain training': 'train_brain', 'UserNet training': 'train_users', 'road labeler': 'road_labeler',
                     'drive replay': 'simulate'}
         patterns = (('train', ('logs/train-*.log',)), ('train_classifier', ('runs/*/classifier.log',)),
                     ('train_cutter', ('runs/*/signnet.log', 'runs/*/train.log', 'runs/*/detector-sizes/*.log')),
-                    ('train_brain', ('runs/*/brain.log',)))
+                    ('train_brain', ('runs/*/brain.log',)), ('train_users', ('runs/*/' + USERNET_LOG,)))
         for action, globs in patterns:
             items = [item for item in trainings if terminal.get(item['label'], 'train') == action]
             found = [path for pattern in globs for path in self.root.glob(pattern) if items]
@@ -1253,6 +1275,9 @@ class Panel:
                 text = '== 3/4 Train the detector at ' + logs[-1].stem + ' ==\n' + text
             elif action == 'train_cutter':
                 text = '== 3/3 Train SignNet ==\n' + text
+            elif action == 'train_users':
+                # The tail of usernet.log may have lost the script's step lines: its epochs are step 3's.
+                text = '== 3/3 Train UserNet ==\n' + text
             result = progress(action, 'running', text)
             for item in items:
                 item['progress'] = result
@@ -1413,6 +1438,14 @@ class Panel:
                 # when it starts (start()), so a dry run on the CPU stays possible while every card is busy; the
                 # candidates are cut on the CPU first. The script counts the boxes people drew and stops when they are
                 # too few, and start() refuses a real run without .venv-gpu.
+                pass
+            elif name == 'train_users' and not (self.repo / USERNET_SCRIPT).is_file():
+                reason = USERNET_SCRIPT + ' is missing in this installation'
+            elif name == 'train_users' and gpu_reason:
+                reason = gpu_reason
+            elif name == 'train_users':
+                # BDD100K's pictures or the road users boxed in Sign review: its script's dry run checks the stage's
+                # data when it starts (start() refuses BDD's stage without its pictures); it needs no confirmed sign.
                 pass
             elif name == 'regression' and not (self.repo / REGRESSION_SCRIPT).is_file():
                 reason = REGRESSION_SCRIPT + ' is missing in this installation'
@@ -2320,11 +2353,12 @@ class Panel:
         return found
 
     def _network_start(self, action: str, start: object) -> dict:
-        """The environment of where the cutter's, the applicability's or the brain's training starts (one of
+        """The environment of where the cutter's, the applicability's, the brain's or UserNet's training starts (one of
         NETWORK_STARTS): nothing for its default (NETWORK_FRESH), or the variable of a finished version of its role in
         Models given by its id: the signnet-best.pt of a SignNet of the comma's band and grid, the experiment-b folder of
         an applicability run, the brain-last.pt of a brain (one that took the driver's pedals and speed too: the new
-        one leaves those inputs out; its script's dry run checks the rest: stepped as the new one, on the same split)."""
+        one leaves those inputs out; its script's dry run checks the rest: stepped as the new one, on the same split),
+        the usernet-best.pt of a UserNet (its training checks that it is the same network)."""
         if start is None or start == NETWORK_FRESH:
             return {}
         if not isinstance(start, str):
@@ -2345,6 +2379,8 @@ class Panel:
             return {variable: str(run / SIGNNET_FILE)}
         if role == 'brain':
             return {variable: str(run / BRAIN_WEIGHTS)}
+        if role == 'users':
+            return {variable: str(run / USERNET_WEIGHTS)}
         return {variable: str(run / entry['part'].split('/')[0])}
 
     def start(self, action: str, options: dict | None = None, *, check_only: bool = False) -> dict | None:
@@ -2478,6 +2514,17 @@ class Panel:
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':
             start_env.update(self._brain_choices(options or {}, check_only))
+        stage = (options or {}).get('stage')
+        if stage is not None and action != 'train_users':
+            raise PanelError(400, 'bad_option', 'Only "Train UserNet" takes a stage.')
+        if action == 'train_users':
+            stage = USERNET_STAGES[0] if stage is None else stage
+            if stage not in USERNET_STAGES:
+                raise PanelError(400, 'bad_option', 'The stage of UserNet is bdd (BDD100K) or drives (your drives).')
+            if stage == 'bdd' and not (Path(os.environ.get('NNSLR_BDD_DIR') or BDD_DIR) / 'samples.json').is_file():
+                raise PanelError(409, 'not_available', 'BDD100K is not on this server (its samples.json): train on '
+                                 'your drives, or put it back first.')
+            start_env['NNSLR_USERNET_STAGE'] = stage
         for key in ('openpilot', 'brains'):
             if (options or {}).get(key) is not None and action != 'regression':
                 raise PanelError(400, 'bad_option', 'Only "Run the regression" takes ' + key + '.')
@@ -2587,6 +2634,8 @@ class Panel:
             raise PanelError(403, 'actions_disabled', DECIDER_SCRIPT + ' is missing in this installation.')
         if action == 'train_brain' and not (self.repo / BRAIN_SCRIPT).is_file():
             raise PanelError(403, 'actions_disabled', BRAIN_SCRIPT + ' is missing in this installation.')
+        if action == 'train_users' and not (self.repo / USERNET_SCRIPT).is_file():
+            raise PanelError(403, 'actions_disabled', USERNET_SCRIPT + ' is missing in this installation.')
         if action == 'train_brain' and (missing := self._brain_drives_missing()):
             # Not only the button: a POST of its own or a pipeline's Brain step (checked when the pipeline starts) is
             # refused the same way while there is no dashcam drive to learn from.
@@ -2646,6 +2695,8 @@ class Panel:
                 command.append(self.new_run_name('decider'))
             if action == 'train_brain':
                 command.append(self.new_run_name('brain'))
+            if action == 'train_users':
+                command.append(self.new_run_name('users'))
             if action == 'train_cutter':
                 # NAME: one SignNet, at the car's band, on a run of its own.
                 command.append(self.new_run_name('cutter'))

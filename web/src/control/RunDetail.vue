@@ -6,7 +6,8 @@
 // the old reader, the false boxes it learnt from, the comparison in plain text. A run of the cutter: SignNet
 // (scripts/run_signnet.sh) in its 5 best boxes of each frame, as the car reads it (SignNetSection); an old Detector run
 // (scripts/run_detector_sizes.sh), each size as the Models tab judges a cutter. Watch plays the frames of a route with
-// the cutter's boxes over them, for every report of the run that has frames (WatchSection).
+// the cutter's boxes over them, for every report of the run that has frames (WatchSection). A UserNet run
+// (scripts/run_usernet.sh): the road users found at its score, its false boxes a frame, what it learnt from.
 import {computed} from 'vue';
 import {thousands} from '../common/format';
 import type {CurveNet, JobProgress, RunDetail, RunSummary} from '../common/panel-types';
@@ -14,7 +15,7 @@ import ChainSection from './ChainSection.vue';
 import ClassifierSection from './ClassifierSection.vue';
 import CutterSection from './CutterSection.vue';
 import DetectorSection from './DetectorSection.vue';
-import {RUN_STATE, modeText, notEvaluatedText, pct, plain, runWhen, shortSha} from './evaluate';
+import {RUN_STATE, modeText, notEvaluatedText, pct, plain, runWhen, shortSha, usernetStageText} from './evaluate';
 import ExperimentSection from './ExperimentSection.vue';
 import {perFrame} from './models';
 import NegativesSection from './NegativesSection.vue';
@@ -36,6 +37,7 @@ const nets = computed((): CurveNet[] => {
   if (value === null || value.kind === 'experiment') return [];
   if (value.kind === 'classifier') return value.curves.pretrain?.points.length ? ['pretrain', 'classifier'] : ['classifier'];
   if (value.kind === 'cutter') return value.signnet_run || value.curves.signnet?.points.length ? ['signnet'] : ['detector'];
+  if (value.kind === 'usernet') return ['usernet'];
   return value.curves.classifier?.points.length ? ['detector', 'reader', 'classifier'] : ['detector', 'reader'];
 });
 /** The curves as the Train tab's charts take them (a job's progress without steps). */
@@ -64,6 +66,8 @@ const where = computed(() => {
     return value.kind === 'experiment' ? 'Finished: the three variants of experiment B are measured.'
       : value.kind === 'classifier' ? 'Finished: the classifier is trained, measured alone and in the chain with the cutter.'
         : value.kind === 'cutter' ? 'Finished: the cutter is trained and measured on test and validation.'
+        : value.kind === 'usernet' ? 'Finished: UserNet is trained and measured on ' + (detail.value?.usernet_run?.test
+          ? 'validation and test.' : 'validation (no test frames yet).')
         : 'Finished: trained, evaluated, exported and packaged.';
   }
   return 'Stopped while ' + value.stage_label + '.';
@@ -154,7 +158,31 @@ const where = computed(() => {
         <span class="tile-note">the model alone</span>
       </div>
     </div>
-    <div v-else-if="run.evaluated && run.kind !== 'cutter'" class="tiles" id="run-tiles">
+    <div v-else-if="run.evaluated && run.kind === 'usernet' && run.usernet" class="tiles" id="run-tiles">
+      <div class="tile">
+        <span class="tile-label">Road users found</span>
+        <span class="tile-value">{{ pct(run.usernet.recall) }}</span>
+        <span class="tile-note">at score {{ run.usernet.score_threshold }} on {{ run.usernet.partition }}{{
+          run.usernet.frames ? ', ' + thousands(run.usernet.frames) + ' frames' : '' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Its boxes that are road users</span>
+        <span class="tile-value">{{ pct(run.usernet.precision) }}</span>
+        <span class="tile-note">best epoch {{ run.usernet.best_epoch ?? '–' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">False boxes per frame</span>
+        <span class="tile-value">{{ run.usernet.false_per_frame === null ? '–' : run.usernet.false_per_frame.toFixed(2) }}</span>
+        <span class="tile-note">validated on {{ run.usernet.validation_source === 'bdd' ? 'BDD100K pictures' : 'your ticked frames' }}</span>
+      </div>
+      <div class="tile">
+        <span class="tile-label">Learnt from</span>
+        <span class="tile-value">{{ run.usernet.stage === 'bdd' ? 'BDD100K' : run.usernet.stage === 'drives' ? 'Drives' : '–' }}</span>
+        <span class="tile-note">{{ usernetStageText(run.usernet.stage, run.usernet.uses_bdd) }}{{
+          run.usernet.uses_bdd ? ': BDD100K’s licence goes with the weights' : '' }}</span>
+      </div>
+    </div>
+    <div v-else-if="run.evaluated && run.kind !== 'cutter' && run.kind !== 'usernet'" class="tiles" id="run-tiles">
       <div class="tile">
         <span class="tile-label">Reader accuracy</span>
         <span class="tile-value">{{ pct(run.reader?.accuracy) }}</span>

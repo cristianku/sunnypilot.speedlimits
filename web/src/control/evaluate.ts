@@ -122,7 +122,7 @@ export function stageText(run: RunSummary): string {
   if (run.state === 'running') return run.progress || run.stage_label;
   if (run.state === 'finished') {
     return run.kind === 'experiment' ? 'every variant measured' : run.kind === 'classifier' ? 'classifier and chain measured'
-      : run.kind === 'cutter' ? 'cutter measured' : 'bundle packaged';
+      : run.kind === 'cutter' ? 'cutter measured' : run.kind === 'usernet' ? 'UserNet measured' : 'bundle packaged';
   }
   return 'while ' + run.stage_label;
 }
@@ -134,10 +134,27 @@ export function notEvaluatedText(run: RunSummary): string {
   }
   if (run.state === 'running') {
     return run.kind === 'classifier' ? 'Not evaluated yet: the classifier and the chain are measured after the training.'
-      : run.kind === 'cutter' ? 'Not evaluated yet: test and validation come after the training.'
+      : run.kind === 'cutter' || run.kind === 'usernet' ? 'Not evaluated yet: test and validation come after the training.'
         : 'Not evaluated yet: the test comes after the training.';
   }
   return 'No evaluation: the run stopped before it.';
+}
+
+/** What a UserNet learnt from, in words: "BDD100K" or "your drives" (with "after BDD100K" when it went on from it). */
+export function usernetStageText(stage: string | null | undefined, usesBdd: boolean): string {
+  if (stage === 'bdd') return 'BDD100K';
+  if (stage === 'drives') return usesBdd ? 'your drives, after BDD100K' : 'your drives';
+  return '–';
+}
+
+/** A UserNet run in one line: "UserNet (BDD100K), at score 0.5 on test: 62.0% of the road users found · 1.80 false boxes
+ * per frame". */
+export function usernetLine(run: RunSummary): string {
+  const line = run.usernet;
+  if (!line || !line.partition) return 'UserNet: open the run for its numbers.';
+  return 'UserNet (' + usernetStageText(line.stage, line.uses_bdd) + '), at score ' + line.score_threshold + ' on '
+    + line.partition + ': ' + pct(line.recall) + ' of the road users found · '
+    + (line.false_per_frame === null ? '–' : line.false_per_frame.toFixed(2)) + ' false boxes per frame';
 }
 
 /** The first characters of a hash, for the page. */

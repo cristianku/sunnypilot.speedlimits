@@ -779,7 +779,8 @@ def test_the_driver_files_and_the_open_files_of_a_process_as_ct_131_writes_them(
 def test_the_actions_that_take_a_card_of_their_own():
     assert set(panel_module.EXCLUSIVE_GPU) == {
         'train', 'train_continue', 'train_resume', 'train_classifier', 'train_cutter', 'train_decider', 'train_brain',
-        'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict', 'box_fit_train'}
+        'train_users', 'regression', 'measure_proposer', 'setup_vlm', 'road_labeler_train', 'road_labeler_predict',
+        'box_fit_train'}
     # The replay of a drive (Models › Drive) shares the card with the most free memory: about 1 GB of a V100.
     assert panel_module.SHARED_GPU == {'simulate': 2048}
     # Nor among those with a dry run: it has no run on the CPU.

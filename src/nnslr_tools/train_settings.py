@@ -1,7 +1,7 @@
-"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Brain): the epochs, the patience, the batch,
-the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an environment
-variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh,
-run_brain.sh)
+"""The settings of the trainings of Train (Cutter, Classifier, Applicability, Brain, UserNet): the epochs, the patience,
+the batch, the learning rate, the processes reading the frames and the classifier's false boxes. Each one is an
+environment variable its script already reads (scripts/run_signnet.sh, run_classifier.sh, run_experiment_b.sh,
+run_brain.sh, run_usernet.sh)
 with the same default: the panel sets the ones changed here when it starts the next training of that kind
 (Panel.start, environment), the one running keeps its own. The job's chips say the values a training used (the head
 of its log, panel._settings_of).
@@ -101,6 +101,24 @@ TRAININGS = {
     ), 'fixed': (
         {'label': 'Picture', 'value': '256 × 144', 'help': 'One frame a second, as the car gives it.'},
         {'label': 'Memory', 'value': 'GRU, 128', 'help': 'What it keeps of the seconds before.'},
+    )},
+    'train_users': {'label': 'UserNet', 'script': 'scripts/run_usernet.sh', 'settings': (
+        {'key': 'epochs', 'env': 'NNSLR_USERNET_EPOCHS', 'label': 'Epochs',
+         'help': 'Passes over the training pictures; the best one on validation is kept (road users found at score '
+                 '0.5).', 'default': 30, 'min': 1, 'max': 200, 'step': 1, 'unit': 'epochs'},
+        {'key': 'batch', 'env': 'NNSLR_USERNET_BATCH', 'label': 'Batch',
+         'help': 'Pictures in each step of the training: more takes more of the GPU.', 'default': 32, 'min': 1,
+         'max': 256, 'step': 1, 'unit': 'pictures'},
+        {'key': 'learning_rate', 'env': 'NNSLR_USERNET_LEARNING_RATE', 'label': 'Learning rate',
+         'help': 'How far each step moves the weights.', 'default': 0.003, 'min': 0.00001, 'max': 0.1,
+         'step': 0.00001, 'unit': ''},
+        _workers('The processes reading the pictures and cutting their windows for the GPU.'),
+    ), 'fixed': (
+        {'label': 'Window', 'value': '672 × 256', 'help': 'The frame scaled to 672 across, its rows 72 to 328: the road '
+                                                       'ahead.'},
+        {'label': 'Grid', 'value': 'stride 8', 'help': 'A box can start every 8 pixels.'},
+        {'label': 'Channels', 'value': '16, 24, 32, 48', 'help': 'The size of the network, as SignNet’s.'},
+        {'label': 'Kinds', 'value': 'person, two-wheeler, vehicle', 'help': 'A heat map for each, the box shared.'},
     )},
 }
 

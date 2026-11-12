@@ -474,3 +474,37 @@ def test_the_experiment_b_curves_have_the_measure_that_chooses_their_best_epoch(
     # Since #72 the line says the measure that chose the epoch (the reading and the other-road F1): it is taken as it is.
     assert third['val_other_road_f1'] == 0.857 and third['val_selection_score'] == 0.7786
     assert result['detail'] == 'The crop alone · epoch 3 of 20'
+
+
+# scripts/run_usernet.sh: UserNet, the road users' detector (one stage a run).
+USERNET_LOG = """== scripts/run_usernet.sh 2026-11-12_1200-users
+run:          2026-11-12_1200-users
+stage:        bdd
+== 1/3 Check the training population (CPU-only) ==
+== 2/3 Explicit CUDA smoke test ==
+== 3/3 Train UserNet ==
+usernet epoch 3/30 train_loss 2.4924 val_recall 0.412 val_false_per_frame 1.25 61s
+"""
+
+
+def test_the_usernet_training_has_its_own_steps_and_curve():
+    from nnslr_tools.job_progress import USERNET_STEPS
+    assert sum(weight for _, _, weight in USERNET_STEPS) == 100
+    result = progress('train_users', 'running', USERNET_LOG)
+    assert states(result) == {'checks': 'done', 'usernet': 'current', 'evaluate': 'todo'}
+    assert [step['label'] for step in result['steps']] == ['Checks and GPU smoke test', 'Train UserNet',
+                                                            'Measure on validation and test']
+    # 5 done, and 3 of 30 epochs of UserNet's 85.
+    assert result['percent'] == 13.5 and result['detail'] == 'UserNet · epoch 3 of 30'
+    assert result['curves'] == {'usernet': {'epochs': 30, 'points': [
+        {'epoch': 3, 'train_loss': 2.4924, 'val_recall': 0.412, 'val_false_per_frame': 1.25, 'seconds': 61}]}}
+    checks = progress('train_users', 'running', USERNET_LOG.split('== 2/3')[0])
+    assert states(checks)['checks'] == 'current' and checks['percent'] == 0.0
+    measuring = progress('train_users', 'running', USERNET_LOG + 'usernet measure the best epoch 3 on validation and test\n')
+    assert states(measuring) == {'checks': 'done', 'usernet': 'done', 'evaluate': 'current'}
+    assert measuring['percent'] == 90.0
+    done = progress('train_users', 'ok', USERNET_LOG + 'usernet measure the best epoch 3 on validation and test\n'
+                                                       'UserNet complete: data/runs/2026-11-12_1200-users\n')
+    assert set(states(done).values()) == {'done'} and done['percent'] == 100.0
+    # Another action never reads UserNet's lines as its own steps.
+    assert 'usernet' not in states(progress('train_cutter', 'running', USERNET_LOG))

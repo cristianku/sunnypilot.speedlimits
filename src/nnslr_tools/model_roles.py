@@ -23,11 +23,16 @@ from what the training and the evaluation wrote:
 - decider: ``<run>/experiment-b/<variant>/<variant>-best.pt`` with its ``result.json`` (nnslr_tools.context_experiment):
   whom the sign applies to on validation and test, and the reading;
 - brain: ``<run>/brain-last.pt`` with its ``result.json`` (``nnslr train-brain``): the speed it says against the
-  labels of Speed review, on validation and test.
+  labels of Speed review, on validation and test;
+- users: ``<run>/usernet-best.pt`` with its ``result.json`` (``nnslr train-usernet``, scripts/run_usernet.sh: UserNet,
+  the road users' detector, nnslr_tools.usernet): the road users found at its score on validation and test, the false
+  boxes a frame, its stage (BDD100K or our drives) and whether it learnt BDD's pictures (uses_bdd, their licence). It
+  is not on the car: the one in use is only where the next UserNet training starts (Train › UserNet › Start from).
 
 Each artifact has a stable id ``<role>:<run>/<part>``: ``cutter:2026-10-24_1452/detector``,
 ``cutter:<run>/detector-sizes/640x360``, ``cutter:<run>/signnet``, ``classifier:<run>/reader``,
-``classifier:<run>/classifier``, ``decider:<run>/experiment-b/crop_geom``, ``brain:<run>/brain``.
+``classifier:<run>/classifier``, ``decider:<run>/experiment-b/crop_geom``, ``brain:<run>/brain``,
+``users:<run>/usernet``.
 
 What runs on the comma is <data root>/models/on-car.json, written by ``nnslr on-car --models <clone>``
 (record_on_car) from a clone of the published models repository (speed_limits.json and each network's contract):
@@ -66,9 +71,12 @@ from nnslr_tools.runs import (CHAIN_WEIGHTS, EXPERIMENT_DIR, INPUT_NAMES, RUN_NA
                               plan_digest, reader_digest, result_digest)
 from nnslr_tools.signnet import CAR_MAX_BOXES, CAR_MIN_SCORE, car_measure, fits_the_car
 from nnslr_tools.training import DETECTOR_FAMILIES
+from nnslr_tools.usernet import WEIGHTS as USERNET_WEIGHTS
+from nnslr_tools.usernet import digest as usernet_result
 
-ROLES = ('cutter', 'classifier', 'decider', 'brain')
-ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'brain': 'Brain'}
+ROLES = ('cutter', 'classifier', 'decider', 'brain', 'users')
+ROLE_LABELS = {'cutter': 'Cutter', 'classifier': 'Classifier', 'decider': 'Applicability', 'brain': 'Brain',
+               'users': 'UserNet'}
 # The cutter must miss nothing: it is judged on recall at a low score (nnslr_tools.evaluation.CUTTER_SCORE_THRESHOLDS).
 CUTTER_SCORE = 0.1
 # What a cutter learnt to find (result.json and its reports, "families"): every sign (the speed signs and the other
@@ -82,8 +90,11 @@ SIGNNET_PART = 'signnet'
 SIGNNET_ID = re.compile(rf'cutter:({_RUN})/{SIGNNET_PART}')
 # The brain (nnslr train-brain): its weights at the root of its run too, its id brain:<run>/brain.
 BRAIN_PART = 'brain'
-# Any id of the index; the signnet part only for the cutter (role_of).
-MODEL_ID = re.compile(rf'(cutter|classifier|decider|brain):({_RUN})/({SIGNNET_PART}|{BRAIN_PART}|detector|'
+# UserNet, the road users' detector (nnslr train-usernet): its weights at the root of its run, its id users:<run>/usernet.
+USERNET_PART = 'usernet'
+# Any id of the index; the signnet part only for the cutter, the brain and usernet parts only for theirs (role_of).
+MODEL_ID = re.compile(rf'(cutter|classifier|decider|brain|users):({_RUN})/({SIGNNET_PART}|{BRAIN_PART}|{USERNET_PART}|'
+                      rf'detector|'
                       rf'detector-sizes/{SIZE_NAME.pattern}|reader|classifier|{EXPERIMENT_DIR}/{_RUN})')
 # The boxes a frame the classifier reads after the cutter in the car (SignNet keeps its epoch with the best recall
 # at this many, nnslr_tools.signnet.BOX_BUDGETS): every cutter is also judged on the speed signs among its best 5.
@@ -465,15 +476,38 @@ def decider_digest(result: Any) -> dict:
     }
 
 
+def usernet_digest(result: Any) -> dict:
+    """result.json of ``nnslr train-usernet`` (nnslr_tools.usernet.digest): its stage, best epoch, uses_bdd, where it
+    was validated, and at its score (usernet.MIN_USER_SCORE) the road users found on validation and test, by kind too,
+    with the false boxes a frame; and the UserNet it went on from (whose test is not fair when that one learnt our
+    drives on another split)."""
+    digest = usernet_result(result)
+    if digest is None:
+        raise ValueError('not a UserNet result')
+    start = digest['start']
+    if start is not None:
+        theirs, ours = start.get('split_sha256'), digest.get('split_sha256')
+        run = start.get('run')
+        start = {'run': run if isinstance(run, str) and RUN_NAME.fullmatch(run) else None, 'epoch': _int(start.get('epoch')),
+                 'stage': start.get('stage') if start.get('stage') in ('bdd', 'drives') else None,
+                 'uses_bdd': bool(start.get('uses_bdd')),
+                 # Only a start that learnt our drives can have seen this test's frames (BDD100K has none of them).
+                 'another_split': start.get('stage') == 'drives' and isinstance(theirs, str) and isinstance(ours, str)
+                 and theirs != ours}
+    return {**digest, 'start': start}
+
+
 def role_of(model_id: Any) -> str | None:
     """The role of an id of the index (None when it is not one): the signnet part is the cutter's alone, the brain part
-    the brain's, and the brain has no other."""
+    the brain's and the usernet part UserNet's, and neither of those two has another."""
     if not isinstance(model_id, str) or len(model_id) > MAX_ID:
         return None
     match = MODEL_ID.fullmatch(model_id)
     if match is None or (match.group(3) == SIGNNET_PART and match.group(1) != 'cutter'):
         return None
     if (match.group(3) == BRAIN_PART) != (match.group(1) == 'brain'):
+        return None
+    if (match.group(3) == USERNET_PART) != (match.group(1) == 'users'):
         return None
     return match.group(1)
 
@@ -889,6 +923,32 @@ class ModelIndex:
                       'validation': trained.get('validation'), 'test': trained.get('test')})
         return entry
 
+    def _users(self, name: str, run: Path) -> dict | None:
+        """UserNet of a run of scripts/run_usernet.sh (nnslr train-usernet): the road users' detector. Not on the car;
+        the one in use is where the next UserNet training starts."""
+        checkpoint = self.runs._file(run, USERNET_WEIGHTS)
+        if checkpoint is None:
+            return None
+        problems: list[str] = []
+        result = self._read(run, 'result.json', usernet_digest, problems)
+        trained = result or {}
+        stage = trained.get('stage')
+        entry = self._base('users', name, USERNET_PART, checkpoint, result, problems)
+        entry.update({
+            'kind': 'usernet', 'label': 'UserNet',
+            'detail': ('not finished' if result is None else
+                       'learnt on BDD100K' if stage == 'bdd' else 'learnt on your drives' if stage == 'drives' else 'road users')
+                      + (' · carries BDD100K’s licence' if trained.get('uses_bdd') and stage != 'bdd' else ''),
+            'architecture': None, 'initialization': 'start' if trained.get('start') else None,
+            'stage': stage, 'uses_bdd': bool(trained.get('uses_bdd')),
+            'validation_source': trained.get('validation_source'),
+            'split_sha256': trained.get('split_sha256'), 'start': trained.get('start'),
+            'best_epoch': trained.get('best_epoch'), 'epochs': trained.get('epochs'),
+            'epochs_run': trained.get('epochs_run'), 'parameters': trained.get('parameters'),
+            'validation': trained.get('validation'), 'test': trained.get('test'),
+        })
+        return entry
+
     def artifacts(self, roles: tuple[str, ...] = ROLES) -> dict[str, list[dict]]:
         """Every trained artifact by role (of the roles asked), newest first (by the time of its weights)."""
         found: dict[str, list[dict]] = {role: [] for role in ROLES}
@@ -903,6 +963,8 @@ class ModelIndex:
                 found['decider'] += self._deciders(name, run)
             if 'brain' in roles:
                 found['brain'] += [entry for entry in (self._brain(name, run),) if entry is not None]
+            if 'users' in roles:
+                found['users'] += [entry for entry in (self._users(name, run),) if entry is not None]
             if 'cutter' not in roles:
                 continue
             cutters = [self._cutter(name, run, 'detector', 'evaluation', 'detector', None)]
@@ -989,8 +1051,8 @@ class ModelIndex:
         return version, ''
 
     def index(self) -> dict:
-        """GET /api/panel/models: the roles (the three of the sign pipeline and the brain), each with its versions
-        newest first and the one in use."""
+        """GET /api/panel/models: the roles (the three of the sign pipeline, the brain and UserNet), each with its
+        versions newest first and the one in use."""
         artifacts = self.artifacts()
         active, problem = self.read_active()
         on_car, car_problem = self.read_on_car()
@@ -1023,7 +1085,7 @@ class ModelIndex:
         can be chosen (selectable: finished; for the cutter a SignNet that fits the car, never an old Detector; for the
         brain one that does not take the driver's inputs); the file keeps the other roles as they are."""
         if not isinstance(role, str) or role not in ROLES:
-            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider or brain.')
+            raise ModelChoiceError(400, 'bad_role', 'Unknown role: cutter, classifier, decider, brain or users.')
         if not isinstance(model_id, str) or len(model_id) > MAX_ID or MODEL_ID.fullmatch(model_id) is None:
             raise ModelChoiceError(400, 'bad_id', 'Not a model id.')
         if role_of(model_id) != role:

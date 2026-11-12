@@ -101,7 +101,7 @@ def by_role(index: dict) -> dict:
 # -- the index --------------------------------------------------------------------------------------------
 def test_without_runs_every_role_is_empty_and_nothing_is_in_use(models):
     index = models.index()
-    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain']
+    assert [role['role'] for role in index['roles']] == ['cutter', 'classifier', 'decider', 'brain', 'users']
     assert all(role['versions'] == [] and role['active'] is None for role in index['roles'])
     assert (index['runs_dir_exists'], index['active_problem'], index['cutter_score_threshold']) == (False, None, 0.1)
 
@@ -247,7 +247,8 @@ def test_choosing_the_model_in_use_writes_only_active_json(root, models):
     assert (entry['id'], entry['who'], entry['via']) == ('cutter:s1/signnet', 'admin', 'sign-in') and entry['at']
     path = root / 'models' / 'active.json'
     saved = json.loads(path.read_text())
-    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None, 'brain': None}
+    assert saved == {'schema_version': 1, 'cutter': entry, 'classifier': None, 'decider': None, 'brain': None,
+                     'users': None}
     # Atomic: the temporary file is renamed, nothing is left next to it.
     assert sorted(item.name for item in path.parent.iterdir()) == ['active.json']
 

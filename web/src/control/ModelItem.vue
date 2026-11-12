@@ -4,7 +4,8 @@
 // then by width, boxes per frame, time per frame; the
 // classifier: the speed signs and every sign read right on the test, and for the classifier with “not a sign” the “not a sign” crops it rejects and
 // the chain end to end at the cutter's score, the speed signs found and read right and the false boxes per frame that
-// survive it; the decider: the "Another" road found, on validation and test; the brain: the test frames it says right),
+// survive it; the decider: the "Another" road found, on validation and test; the brain: the test frames it says right;
+// UserNet: the road users it finds at score 0.5 on the test, else on validation, and by kind),
 // the button that puts it in use and the link to its run on Evaluate. “Use this one” only on a version the server lets be chosen (version.selectable: finished,
 // and for the cutter a SignNet at the car's band; an old Detector is kept to compare), else why not in a small note.
 // A SignNet (the cutter the comma runs) has its own details and, next to “Use this one”, “Try on the comma now”
@@ -29,9 +30,16 @@ const forCar = computed(() => signnet.value && cutter.value?.fits_the_car !== fa
 const classifier = computed(() => props.version.role === 'classifier' ? props.version : null);
 const decider = computed(() => props.version.role === 'decider' ? props.version : null);
 const brain = computed(() => props.version.role === 'brain' ? props.version : null);
-/** The earlier run a SignNet or an applicability variant went on from (Train › Start from). */
+const users = computed(() => props.version.role === 'users' ? props.version : null);
+/** UserNet's numbers: on the test, else on validation (the test has no ticked frame yet). */
+const usersFound = computed(() => users.value?.test?.frames ? {numbers: users.value.test, on: 'test'}
+  : users.value?.validation ? {numbers: users.value.validation, on: 'validation'} : null);
+const USER_KINDS = [{key: 'person', label: 'People'}, {key: 'two_wheeler', label: 'Two-wheelers'},
+  {key: 'vehicle', label: 'Vehicles'}] as const;
+const USERS_STAGE = {bdd: 'BDD100K’s pictures', drives: 'Your drives'} as const;
+/** The earlier run a SignNet, an applicability variant, a brain or a UserNet went on from (Train › Start from). */
 const networkStart = computed(() => props.version.role === 'cutter' || props.version.role === 'decider'
-  || props.version.role === 'brain' ? props.version.start ?? null : null);
+  || props.version.role === 'brain' || props.version.role === 'users' ? props.version.start ?? null : null);
 /** The cutter's numbers: on the test, else on validation (a size compared before its test was measured). */
 const cut = computed(() => cutter.value?.test ?? cutter.value?.validation ?? null);
 const cutterMetrics = computed((): Metric[] => cutter.value ? metricsOf(cutter.value) : []);
@@ -43,7 +51,7 @@ const cutterCaption = computed(() => cut.value === null ? ''
     + (signnet.value && cut.value.car_centre ? '. As the car reads them, a box counts when it sits on the sign (its centre on '
       + 'it, half to twice its size); in small, the strict count at IoU 0.5' : ''));
 const evaluated = computed(() => cut.value !== null || (classifier.value?.test ?? null) !== null || (classifier.value?.chain ?? null) !== null
-  || decider.value?.validation != null || decider.value?.test != null || brain.value?.test != null);
+  || decider.value?.validation != null || decider.value?.test != null || brain.value?.test != null || usersFound.value !== null);
 const epoch = computed(() => epochText(props.version.best_epoch, props.version.epochs_run ?? props.version.epochs));
 /** The classifier with “not a sign” (classifier:<run>/classifier); an old reader has none of its numbers. */
 const rejects = computed(() => classifier.value?.class_scheme !== undefined);
@@ -241,6 +249,30 @@ const noOtherOnTest = computed(() => decider.value?.test?.other_road_support ===
         </dl>
         </details>
       </template>
+    </template>
+
+    <template v-else-if="users">
+      <template v-if="usersFound">
+        <div class="model-big">
+          <strong>{{ pct(usersFound.numbers.recall) }}</strong>
+          <span>of the road users found at score 0.5 on {{ thousands(usersFound.numbers.frames ?? 0) }} {{ usersFound.on }}
+            frames, {{ perFrame(usersFound.numbers.false_per_frame) }} false boxes a frame</span>
+        </div>
+        <details class="model-more"><summary>Details</summary>
+        <dl class="model-facts">
+          <div v-for="kind in USER_KINDS" :key="kind.key"><dt :title="kind.label + ' found at score 0.5 on the ' + usersFound.on">{{
+            kind.label }}</dt><dd>{{ pct(usersFound.numbers.recall_by_kind[kind.key]) }}</dd></div>
+          <div><dt title="Share of its boxes at score 0.5 that are road users">Boxes right</dt><dd>{{ pct(usersFound.numbers.precision) }}</dd></div>
+          <div v-if="usersFound.on === 'test'"><dt>On validation</dt><dd>{{ pct(users.validation?.recall) }}</dd></div>
+          <div><dt>Learnt on</dt><dd>{{ users.stage ? USERS_STAGE[users.stage] : '–' }}</dd></div>
+          <div><dt title="Where its best epoch was chosen">Validation</dt><dd>{{ users.validation_source === 'bdd'
+            ? 'BDD100K’s (no ticked frame yet)' : users.validation_source === 'drives' ? 'Your ticked frames' : '–' }}</dd></div>
+          <div><dt>Best epoch</dt><dd>{{ epoch }}</dd></div>
+          <div><dt>Weights</dt><dd>{{ users.parameters ? thousands(users.parameters) : '–' }}</dd></div>
+        </dl>
+        </details>
+      </template>
+      <p v-if="users.uses_bdd" class="note">It learnt BDD100K’s pictures: their licence goes with these weights.</p>
     </template>
 
     <p v-if="networkStart" class="note" :class="{'warn-text': networkStart.another_split}" data-start>Went on from

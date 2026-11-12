@@ -20,7 +20,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 def test_the_defaults_until_one_is_saved(tmp_path):
     view = train_settings.view(tmp_path)['trainings']
-    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_brain']
+    assert list(view) == ['train_cutter', 'train_classifier', 'train_decider', 'train_brain', 'train_users']
     classifier = {item['key']: item for item in view['train_classifier']['settings']}
     assert {key: item['value'] for key, item in classifier.items()} == {
         'epochs': 30, 'pretrain_epochs': 30, 'patience': 5, 'batch': 64, 'workers': train_settings.DEFAULT_WORKERS,

@@ -40,7 +40,7 @@ const readOnly = computed(() => (props.status !== null && !props.status.actions_
 /** The version being put in use, so its button waits for the answer. */
 const busy = ref<string | null>(null);
 
-const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'brain'];
+const ROLES: readonly ModelRole[] = ['cutter', 'classifier', 'decider', 'brain', 'users'];
 /** The role whose versions are listed: the address's (/models#role-classifier, or /models#role-decider:<version id>,
  * Train's link to its latest version), else the cutter. */
 const hashRole = location.hash.split(':')[0];
@@ -125,10 +125,11 @@ function signnetText(version: ModelVersion): string {
 }
 /** Whether the comma runs the version in use of a role, in words. Two versions often have the same name: the time
  * of the one on the car tells them apart. The comma runs the cutter, the classifier, the applicability network and the
- * brain (Publish puts the ones in use there); a trial replaces the first two until its next software update. */
+ * brain (Publish puts the ones in use there); a trial replaces the first two until its next software update. UserNet is
+ * not on the car: no line. */
 interface CarLine {tone: 'same' | 'other' | 'none'; text: string; more?: string}
 function carLine(role: RoleModels): CarLine | null {
-  if (payload.value?.on_car_problem) return null;
+  if (payload.value?.on_car_problem || role.role === 'users') return null;
   const used = inUseOf(role);
   const car = carOf(role);
   const tried = role.role === 'cutter' ? trial.value?.signnet.run : role.role === 'classifier' ? trial.value?.classifier.run : null;
