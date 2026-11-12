@@ -1,28 +1,28 @@
 // Every page of the site but the route list and the review pages is one Vue app: the tab shown follows the address
-// ("/", "/prepare", "/dataset", "/speed-review", "/sign-distance", "/train", "/evaluate",
+// ("/", "/prepare", "/dataset", "/speed-review", "/sign-distance", "/crossings", "/train", "/evaluate",
 // "/models", "/drive", "/publish", "/reviewers"). The pages are grouped in four sections (pages.SECTIONS): Overview, Data (Drives,
-// Speed review, Sign distance, Training dataset, Reviewers), Training, Models (Versions, Drive, Results, Publish); the
+// Speed review, Sign distance, Crossings, Training dataset, Reviewers), Training, Models (Versions, Drive, Results, Publish); the
 // section links of the top bar and the phone's tab bar (rendered by pages.py), the pages under a section's title
 // (SectionHead.vue) and the brand switch tab here without a reload. Signs are reviewed on the Signs side of Speed review
 // (the route list /routes and the page of Sign review lead there since 9 Nov 2026). A reviewer from outside has their list at "/reviews": "/" of the public names is the page of the project. A drive opened on Speed review, Sign distance or Models › Drive is "/speed-review?drive=<route>"
-// ("/sign-distance?drive=<route>&sign=<key>"):
+// ("/sign-distance?drive=<route>&sign=<key>", "/crossings?drive=<route>&event=<id>"):
 // an address of its own, Back returns to the list.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 import {isGuest} from '../common/guest';
 
-export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'speedreview' | 'signdistance'
+export type ControlTab = 'overview' | 'prepare' | 'dataset' | 'speedreview' | 'signdistance' | 'crossings'
   | 'reviewers' | 'train' | 'evaluate' | 'models' | 'drive' | 'publish';
 export type Section = 'overview' | 'data' | 'train' | 'models';
 
 export const TAB_PATH: Record<ControlTab, string> = {
   overview: isGuest() ? '/reviews' : '/', prepare: '/prepare', dataset: '/dataset',
-  speedreview: '/speed-review', signdistance: '/sign-distance', reviewers: '/reviewers', train: '/train', evaluate: '/evaluate', models: '/models',
+  speedreview: '/speed-review', signdistance: '/sign-distance', crossings: '/crossings', reviewers: '/reviewers', train: '/train', evaluate: '/evaluate', models: '/models',
   drive: '/drive', publish: '/publish',
 };
 /** The name of each page, in the window title and under its section's title. */
 const TAB_TITLE: Record<ControlTab, string> = {
   overview: 'Overview', prepare: 'Drives', dataset: 'Training dataset',
-  speedreview: 'Speed review', signdistance: 'Sign distance', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
+  speedreview: 'Speed review', signdistance: 'Sign distance', crossings: 'Crossings', reviewers: 'Reviewers', train: 'Training', evaluate: 'Results', models: 'Versions',
   drive: 'Drive', publish: 'Publish',
 };
 /** A page of a section: its address and name. */
@@ -36,7 +36,7 @@ export const SECTIONS: Record<Section, {title: string; pages: SectionPage[]}> = 
   overview: {title: 'Overview', pages: []},
   data: {title: 'Data', pages: [{key: 'prepare', href: '/prepare', label: 'Drives'},
     {key: 'speedreview', href: '/speed-review', label: 'Speed review'},
-    {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'},
+    {key: 'signdistance', href: '/sign-distance', label: 'Sign distance'}, {key: 'crossings', href: '/crossings', label: 'Crossings'},
     {key: 'dataset', href: '/dataset', label: 'Training dataset'}, {key: 'reviewers', href: '/reviewers', label: 'Reviewers'}]},
   train: {title: 'Training', pages: []},
   models: {title: 'Models', pages: [{key: 'models', href: '/models', label: 'Versions'}, {key: 'drive', href: '/drive', label: 'Drive'},
@@ -56,9 +56,10 @@ export function tabOf(path: string): ControlTab | null {
 export const currentTab = ref<ControlTab>(tabOf(location.pathname) ?? 'overview');
 
 /** The tabs with a drive of their own at "?drive=<route>". */
-const DRIVE_TABS: readonly ControlTab[] = ['speedreview', 'signdistance', 'drive'];
-/** The tabs whose drive has one thing of its own opened in the address: a sign on Sign distance ("&sign=<key>"). */
-const ITEM_KEY: Partial<Record<ControlTab, string>> = {signdistance: 'sign'};
+const DRIVE_TABS: readonly ControlTab[] = ['speedreview', 'signdistance', 'crossings', 'drive'];
+/** The tabs whose drive has one thing of its own opened in the address: a sign on Sign distance ("&sign=<key>"), a
+ * vehicle on Crossings ("&event=<id>"). */
+const ITEM_KEY: Partial<Record<ControlTab, string>> = {signdistance: 'sign', crossings: 'event'};
 /** The drive of an address on Speed review, Sign distance or Models › Drive ("/speed-review?drive=<route>"), or null (the
  * list, or another tab). */
 function driveOf(path: string, search: string): string | null {
@@ -77,6 +78,8 @@ export const tabDrive = ref<string | null>(driveOf(location.pathname, location.s
 const tabItem = ref<string | null>(itemOf(location.pathname, location.search));
 /** The sign opened on Sign distance, null for none. */
 export const tabSign = computed(() => currentTab.value === 'signdistance' ? tabItem.value : null);
+/** The vehicle opened on Crossings, null for none. */
+export const tabEvent = computed(() => currentTab.value === 'crossings' ? tabItem.value : null);
 
 /** The address of a tab, with its drive and the sign of that drive. */
 function addressOf(tab: ControlTab, drive: string | null, item: string | null): string {
@@ -129,6 +132,10 @@ function showItem(tab: ControlTab, item: string | null): void {
 /** Another sign of the drive shown on Sign distance. */
 export function showSign(sign: string | null): void {
   showItem('signdistance', sign);
+}
+/** Another vehicle of the drive shown on Crossings. */
+export function showEvent(event: string | null): void {
+  showItem('crossings', event);
 }
 
 /** Clicks on the tab links and the back button, for the life of the app. */

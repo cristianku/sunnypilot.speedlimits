@@ -55,14 +55,15 @@ COMMA_PILL = '<div class="tabs-machine" id="comma-pill"></div>'
 # shows them under its title (sub_nav; web/src/control/SectionHead.vue draws the same): Data holds the drives, Speed
 # review (the one review page of a drive: the speed a person wants held along it on its Speed side, the boxes of its
 # signs on its Signs side, which took the place of the page of Sign review on 9 Nov 2026), Sign distance
-# (where the comma's vision says a sign is passed against the frame a person marks) and the training dataset; Models the
+# (where the comma's vision says a sign is passed against the frame a person marks), Crossings (the vehicles a
+# person says cross our path, the only vehicles the brain learns) and the training dataset; Models the
 # versions to choose, Drive (a recorded drive replayed with a set of networks: the comma's screen over its video, and the
 # certified drives of the regression test), their results and the package to publish.
 # Account is the icon at the right. A page is (key of the current page, address, label).
 SECTIONS = (
     ('overview', '/', 'Overview', ()),
     ('data', '/prepare', 'Data', (('prepare', '/prepare', 'Drives'), ('speedreview', '/speed-review', 'Speed review'),
-                                  ('signdistance', '/sign-distance', 'Sign distance'),
+                                  ('signdistance', '/sign-distance', 'Sign distance'), ('crossings', '/crossings', 'Crossings'),
                                   ('dataset', '/dataset', 'Training dataset'), ('reviewers', '/reviewers', 'Reviewers'))),
     ('train', '/train', 'Training', ()),
     ('models', '/models', 'Models', (('models', '/models', 'Versions'), ('drive', '/drive', 'Drive'),
@@ -74,7 +75,7 @@ SITE_TABS = tuple(page for key, href, label, pages in SECTIONS for page in (page
 SECTION_OF = {page[0]: key for key, _, _, pages in SECTIONS for page in (pages or ((key, '', ''),))}
 # The tabs that are one Vue app (web/src/control), by address: the app shows the tab of the address.
 CONTROL_TABS = {'/': 'overview', '/prepare': 'prepare', '/dataset': 'dataset',
-                '/speed-review': 'speedreview', '/sign-distance': 'signdistance',
+                '/speed-review': 'speedreview', '/sign-distance': 'signdistance', '/crossings': 'crossings',
                 '/reviewers': 'reviewers', '/train': 'train', '/evaluate': 'evaluate', '/models': 'models', '/drive': 'drive',
                 '/publish': 'publish'}
 # The icons of the sections in the phone's tab bar (24 × 24, stroked like web/src/components/icons).

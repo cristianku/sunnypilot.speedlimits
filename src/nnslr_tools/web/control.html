@@ -1854,6 +1854,15 @@ color:inherit;opacity:.85}
   .sd-keys,.sd-kbd{display:none}
 }
 @media (pointer:coarse){.sd-keys,.sd-kbd{display:none}}
+/* Crossings (CrossingsDrive.vue): the drive's video around the proposed vehicle, its box and its path drawn over it in
+the road frame's pixels (the video fills the stage, which has the frame's shape), and a thin bar of the loop's time. */
+.cx-stage video,.cx-over{position:absolute;inset:0;width:100%;height:100%;display:block}
+.cx-stage video{object-fit:fill}
+.cx-over{pointer-events:none}
+.cx-box{fill:none;stroke:#ffd60a;stroke-width:3;vector-effect:non-scaling-stroke}
+.cx-path{fill:none;stroke:#ffd60a;stroke-width:2;stroke-dasharray:6 5;stroke-linecap:round;stroke-linejoin:round;
+vector-effect:non-scaling-stroke;opacity:.8}
+.cx-loop{position:absolute;left:0;bottom:0;height:3px;background:rgba(255,255,255,.7);pointer-events:none}
 /* My reviews, the list of a reviewer from outside (GuestApp.vue), and Data › Reviewers, who works on what (ReviewersTab.vue). */
 .gr-list,.rw-list{list-style:none;margin:0;padding:0}
 .gr-drive,.rw-drive{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:12px 0}

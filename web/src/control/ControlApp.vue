@@ -23,6 +23,7 @@ import OverviewTab from './OverviewTab.vue';
 import PrepareTab from './PrepareTab.vue';
 import PublishTab from './PublishTab.vue';
 import SignDistanceTab from './SignDistanceTab.vue';
+import CrossingsTab from './CrossingsTab.vue';
 import ReviewersTab from './ReviewersTab.vue';
 import SpeedReviewTab from './SpeedReviewTab.vue';
 import {currentTab, useTabRouting} from './tabs';
@@ -31,7 +32,7 @@ import {RESUME_JOB, RETRY_ACTIONS, RETRY_JOB, usePanelActions} from './use-actio
 
 useTabRouting();
 /** The tabs that need of the status only actions_enabled: their own data comes from their own addresses. */
-const LIGHT_TABS: ReadonlySet<string> = new Set(['speedreview', 'signdistance']);
+const LIGHT_TABS: ReadonlySet<string> = new Set(['speedreview', 'signdistance', 'crossings']);
 const STATUS_MS = 4000;
 const LIGHT_STATUS_MS = 60000;
 const hidden = ref(document.hidden);
@@ -100,6 +101,7 @@ watch(busyPaths, markBusy);
     <SpeedReviewTab v-else-if="currentTab === 'speedreview'" :read-only="status?.actions_enabled === false"/>
     <DriveTab v-else-if="currentTab === 'drive'" :status="status" @run="run" @stop="stop" @details="details"/>
     <SignDistanceTab v-else-if="currentTab === 'signdistance'" :read-only="status ? !status.actions_enabled : null"/>
+    <CrossingsTab v-else-if="currentTab === 'crossings'" :read-only="status ? !status.actions_enabled : null"/>
     <PublishTab v-else-if="currentTab === 'publish'" :status="status" @run="run" @stop="stop" @details="details"/>
     <ReviewersTab v-else-if="currentTab === 'reviewers'" :status="status" @run="run" @stop="stop" @details="details"/>
     <ModelsTab v-else :status="status" @run="run" @stop="stop" @details="details"/>
