@@ -1,0 +1,275 @@
+<!-- Smartspeed post for https://cristianku.com/2026/11/06/smartspeed/ (WordPress post 1100).
+     Paste everything below into one "Custom HTML" block. The styles are scoped to .ssp, the diagrams are inline SVG,
+     the two pictures are the ones already in the media library. Facts checked on 12 Nov 2026 against brain
+     2026-11-11_2241-brain-s0 and speed-limits-models 2026-11-12.2 (dccd9d6). Issue #73. -->
+<style>
+.ssp{--ink:#1d1d1f;--soft:#6e6e73;--line:#e3e3e8;--card:#f5f5f7;--blue:#0071e3;--green:#1f9d55;--amber:#c77700;--purple:#7d3cc9;
+  color:var(--ink);font-size:18px;line-height:1.6;max-width:760px;margin:0 auto}
+.ssp *{box-sizing:border-box}
+.ssp h2{font-size:30px;line-height:1.2;letter-spacing:-.01em;margin:56px 0 14px}
+.ssp h3{font-size:20px;margin:28px 0 8px}
+.ssp p{margin:0 0 16px}
+.ssp a{color:var(--blue)}
+.ssp .lead{font-size:22px;line-height:1.5}
+.ssp .eyebrow{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);margin:56px 0 -6px}
+.ssp figure{margin:28px 0}
+.ssp figure img{width:100%;height:auto;border-radius:16px;display:block}
+.ssp figcaption{font-size:14px;color:var(--soft);margin-top:8px}
+.ssp .diagram{background:var(--card);border-radius:20px;padding:22px 18px;margin:28px 0}
+.ssp .diagram svg{width:100%;height:auto;display:block}
+.ssp .diagram p.cap{font-size:14px;color:var(--soft);margin:12px 4px 0}
+.ssp .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0}
+.ssp .stat{background:var(--card);border-radius:16px;padding:18px}
+.ssp .stat b{display:block;font-size:34px;line-height:1.1;letter-spacing:-.02em}
+.ssp .stat span{display:block;font-size:14px;color:var(--soft);margin-top:6px;line-height:1.4}
+.ssp .cases{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+.ssp .case{border:1px solid var(--line);border-radius:16px;padding:16px}
+.ssp .case h3{margin:0 0 6px;font-size:17px}
+.ssp .case p{font-size:15px;margin:0;color:#3a3a3c}
+.ssp .cta{background:var(--ink);color:#fff;border-radius:20px;padding:28px;margin:48px 0 20px}
+.ssp .cta h2{color:#fff;margin:0 0 10px}
+.ssp .cta p{color:#d2d2d7}
+.ssp .cta a.btn{display:inline-block;background:var(--blue);color:#fff;text-decoration:none;font-weight:600;border-radius:999px;padding:12px 22px;margin-top:6px}
+.ssp .small{font-size:14px;color:var(--soft)}
+@media (max-width:640px){.ssp .stats,.ssp .cases{grid-template-columns:1fr}.ssp h2{font-size:25px}.ssp .lead{font-size:19px}}
+</style>
+
+<div class="ssp">
+
+<p class="lead">I've been building <strong>Smartspeed</strong>, a research build of sunnypilot for the comma 4: you press cruise and the car picks its own speed. It runs on my own comma 4 in a Peugeot 3008, it still has a lot to learn, and I'm looking for people to help me confirm speed signs. Everything about it, and the sign-up, is on the <a href="https://smartspeed.14bodhi.com/">Smartspeed page</a>.</p>
+
+<figure><img src="https://cristianku.com/wp-content/uploads/2026/11/smartspeed-screen.jpg" alt="A wet road with a 50 sign ahead, with Smartspeed's widgets on top: 48 km/h, SMART and a 50 read by the camera" /><figcaption>Mock-up, not a photo of the comma: the screen's widgets drawn at their real size over a real frame.</figcaption></figure>
+
+<p class="eyebrow">Why</p>
+<h2>The map alone isn't enough</h2>
+
+<p>sunnypilot's Speed Limit Assist takes the limit from the car or from the map. Many cars send none, so it often comes down to the map, and a map misses a lot: temporary and variable limits, limits nobody has mapped, roadworks. Without a good GPS fix it doesn't even know which road you're on. That's why I started reading the signs with the road camera.</p>
+
+<p>A camera alone wasn't enough either. Signs get hidden or are meant for the exit lane, and on some roads no sign tells you the speed at all. These three are the ones that bother me most, and Smartspeed doesn't handle them yet:</p>
+
+<div class="cases">
+  <div class="case"><h3>A limit with no end sign</h3><p>Motorway roadworks often have none, and one missed end sign once held me at 80 for a whole stretch of motorway.</p></div>
+  <div class="case"><h3>After a motorway ramp</h3><p>The limit posted on the ramp stops counting on the acceleration lane, and nothing tells you so.</p></div>
+  <div class="case"><h3>Car parks</h3><p>The limit of the road outside doesn't apply in there, and usually no sign gives you another one.</p></div>
+</div>
+
+<p>A rule for each of these would never end, so I decided to let a network with memory learn them from how I drive.</p>
+
+<p class="eyebrow">On the comma</p>
+<h2>Four small networks, 21 MB in total</h2>
+
+<p>They run on the comma 4's GPU next to openpilot's driving model, which still does the driving. Three of them read the signs, and the fourth, the one I call the brain, decides the speed.</p>
+
+<div class="diagram">
+<svg viewBox="0 0 720 470" role="img" aria-label="From the road camera to the speed: SignNet finds the signs, the classifier reads them, the applicability network keeps those for our road, and the brain says the speed to hold">
+  <defs>
+    <marker id="ssp-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#86868b"/></marker>
+  </defs>
+  <style>.t{font:600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1d1d1f}.s{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#6e6e73}.w{font:600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#fff}.ws{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#e8e8ed}.l{stroke:#86868b;stroke-width:1.6;fill:none}</style>
+  <!-- camera -->
+  <rect x="10" y="20" width="200" height="72" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="28" y="50">Road camera</text>
+  <text class="s" x="28" y="72">1344 × 760, 20 pictures a second</text>
+  <!-- signnet -->
+  <rect x="260" y="20" width="200" height="72" rx="14" fill="#fff" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="278" y="50">SignNet · 0.3 MB</text>
+  <text class="s" x="278" y="72">top band, 5 Hz, up to 5 boxes</text>
+  <!-- classifier -->
+  <rect x="510" y="20" width="200" height="72" rx="14" fill="#fff" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="528" y="50">Classifier · 6.6 MB</text>
+  <text class="s" x="528" y="72">50, end of 80, other sign…</text>
+  <!-- applicability -->
+  <rect x="510" y="132" width="200" height="72" rx="14" fill="#fff" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="528" y="162">Applicability · 9.1 MB</text>
+  <text class="s" x="528" y="184">is this sign for our road?</text>
+  <!-- confirm -->
+  <rect x="260" y="132" width="200" height="72" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="278" y="162">Confirmed number</text>
+  <text class="s" x="278" y="184">2 pictures agree within 1.5 s</text>
+  <!-- other inputs -->
+  <rect x="10" y="132" width="200" height="150" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="28" y="162">Also into the brain</text>
+  <text class="s" x="28" y="186">the road picture, 256 × 144</text>
+  <text class="s" x="28" y="206">metres to the sign ahead</text>
+  <text class="s" x="28" y="226">the car ahead</text>
+  <text class="s" x="28" y="246">turn signals, steering, yaw</text>
+  <text class="s" x="28" y="266">local hour and country</text>
+  <!-- brain -->
+  <rect x="260" y="244" width="200" height="96" rx="16" fill="#1d1d1f"/>
+  <text class="w" x="278" y="276">Brain · 5.4 MB</text>
+  <text class="ws" x="278" y="298">a network with memory</text>
+  <text class="ws" x="278" y="318">4 times a second</text>
+  <!-- output -->
+  <rect x="510" y="244" width="200" height="96" rx="16" fill="#e8f2fd" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="528" y="276">Speed to hold</text>
+  <text class="s" x="528" y="298">1 to 200 km/h, plus the next</text>
+  <text class="s" x="528" y="318">limit and the metres to it</text>
+  <!-- sunnypilot -->
+  <rect x="510" y="380" width="200" height="72" rx="14" fill="#fff" stroke="#1f9d55" stroke-width="1.6"/>
+  <text class="t" x="528" y="410">sunnypilot</text>
+  <text class="s" x="528" y="432">Smartspeed mode drives to it</text>
+  <rect x="260" y="380" width="200" height="72" rx="14" fill="#fff" stroke="#d2d2d7" stroke-dasharray="5 4"/>
+  <text class="t" x="278" y="410">The map</text>
+  <text class="s" x="278" y="432">only if the brain doesn't load</text>
+  <!-- arrows -->
+  <path class="l" d="M210 56 H258" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M460 56 H508" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M610 92 V130" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M510 168 H462" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M360 204 V242" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M210 270 H258" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M460 292 H508" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M610 340 V378" marker-end="url(#ssp-a)"/>
+  <path class="l" d="M460 416 H508" stroke-dasharray="5 4" marker-end="url(#ssp-a)"/>
+</svg>
+<p class="cap">What runs on the comma. The brain never reads the map: the map only comes back through sunnypilot's resolver if the brain can't load.</p>
+</div>
+
+<p>SignNet only looks at a band across the top of the picture, where signs stand, because the median sign is 17 pixels wide and the rest of the picture only costs time. The classifier reads each box it finds. The applicability network is the newest one: it looks at a sign and its surroundings and says whether that sign is for our road or for the one next to it, so a 40 on an exit doesn't slow me down on the motorway. One piece is still a hand-written rule: a number counts once two pictures within 1.5 seconds agree.</p>
+
+<p class="eyebrow">The brain</p>
+<h2>A small network with memory picks the speed</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 720 400" role="img" aria-label="Inside the brain: a frozen MobileNetV3-small on the road picture and the other inputs feed a GRU with 128 numbers of memory, whose heads say the speed, the next limit and the metres to it">
+  <defs>
+    <marker id="ssp-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#86868b"/></marker>
+  </defs>
+  <style>.t{font:600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1d1d1f}.s{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#6e6e73}.w{font:600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#fff}.ws{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#e8e8ed}.l{stroke:#86868b;stroke-width:1.6;fill:none}</style>
+  <!-- picture branch -->
+  <rect x="10" y="20" width="170" height="64" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="26" y="48">Road picture</text>
+  <text class="s" x="26" y="68">256 × 144, 4 Hz</text>
+  <rect x="210" y="20" width="200" height="64" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="226" y="48">MobileNetV3-small</text>
+  <text class="s" x="226" y="68">ImageNet weights, frozen</text>
+  <rect x="440" y="20" width="160" height="64" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="456" y="48">Grid → 128</text>
+  <text class="s" x="456" y="68">keeps where things are</text>
+  <!-- other inputs -->
+  <rect x="10" y="118" width="400" height="104" rx="14" fill="#fff" stroke="#d2d2d7"/>
+  <text class="t" x="26" y="146">The other inputs</text>
+  <text class="s" x="26" y="170">the confirmed sign: its number, kind and age</text>
+  <text class="s" x="26" y="190">metres to the sign, the car ahead, hour, country</text>
+  <text class="s" x="26" y="210">turn signals, steering angle and yaw (new in this brain)</text>
+  <!-- GRU -->
+  <rect x="440" y="118" width="160" height="104" rx="16" fill="#1d1d1f"/>
+  <text class="w" x="456" y="150">GRU</text>
+  <text class="ws" x="456" y="172">128 numbers</text>
+  <text class="ws" x="456" y="192">of memory, one</text>
+  <text class="ws" x="456" y="212">step every 0.25 s</text>
+  <path class="l" d="M600 200 C 650 200, 650 250, 600 250 C 560 250, 545 240, 540 224" marker-end="url(#ssp-b)"/>
+  <!-- heads -->
+  <rect x="10" y="262" width="220" height="118" rx="14" fill="#e8f2fd" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="26" y="290">Speed to hold</text>
+  <text class="s" x="26" y="312">200 classes, 1 to 200 km/h</text>
+  <text class="s" x="26" y="332">+ trust × the sign's number:</text>
+  <text class="s" x="26" y="352">the memory sets how much</text>
+  <text class="s" x="26" y="372">the sign counts</text>
+  <rect x="250" y="262" width="190" height="118" rx="14" fill="#e8f2fd" stroke="#0071e3" stroke-width="1.6"/>
+  <text class="t" x="266" y="290">Next limit</text>
+  <text class="s" x="266" y="312">and the metres to it</text>
+  <rect x="460" y="262" width="250" height="118" rx="14" fill="#fff" stroke="#d2d2d7" stroke-dasharray="5 4"/>
+  <text class="t" x="476" y="290">Only in training</text>
+  <text class="s" x="476" y="312">are we in roadworks?</text>
+  <text class="s" x="476" y="332">what kind of road is this?</text>
+  <text class="s" x="476" y="352">they shape the memory and stay</text>
+  <text class="s" x="476" y="372">on the server, off the car</text>
+  <!-- arrows -->
+  <path class="l" d="M180 52 H208" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M410 52 H438" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M520 84 V116" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M410 170 H438" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M470 222 L 140 260" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M500 222 L 345 260" marker-end="url(#ssp-b)"/>
+  <path class="l" d="M560 222 V260" stroke-dasharray="5 4" marker-end="url(#ssp-b)"/>
+</svg>
+<p class="cap">The brain on the car since 12 November, 2026-11-11_2241-brain-s0, trained on one of my two V100s.</p>
+</div>
+
+<p>Gas, brake and the car's own speed are not inputs on purpose. The answer it learns is my own speed, and a brain I trained with them on 10 November simply followed whatever speed I was already doing on the road. The sign's number also reaches the output directly, through a weight the memory sets, because as a plain input the network learned the road and ignored the sign. The plate under a sign (hours, wet road) is wired in, but no drive in training had one yet, so this brain leaves it out.</p>
+
+<p class="eyebrow">How it learns</p>
+<h2>It learns from how I drive</h2>
+
+<div class="diagram">
+<svg viewBox="0 0 720 190" role="img" aria-label="The learning loop: a dashcam drive, the answer from my dashboard speed and my corrections, training on the V100s, and Publish back to the comma">
+  <defs>
+    <marker id="ssp-c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#86868b"/></marker>
+  </defs>
+  <style>.t{font:600 15px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#1d1d1f}.s{font:13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#6e6e73}.n{font:700 13px -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;fill:#fff}.l{stroke:#86868b;stroke-width:1.6;fill:none}</style>
+  <g>
+    <rect x="10" y="20" width="155" height="118" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <circle cx="34" cy="44" r="12" fill="#0071e3"/><text class="n" x="30" y="49">1</text>
+    <text class="t" x="54" y="49">Drive</text>
+    <text class="s" x="24" y="78">sunnypilot off: the</text>
+    <text class="s" x="24" y="98">comma only records,</text>
+    <text class="s" x="24" y="118">every speed is mine</text>
+  </g>
+  <g>
+    <rect x="195" y="20" width="155" height="118" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <circle cx="219" cy="44" r="12" fill="#0071e3"/><text class="n" x="215" y="49">2</text>
+    <text class="t" x="239" y="49">Answer</text>
+    <text class="s" x="209" y="78">my dashboard speed;</text>
+    <text class="s" x="209" y="98">where I drove wrong,</text>
+    <text class="s" x="209" y="118">a block I draw fixes it</text>
+  </g>
+  <g>
+    <rect x="380" y="20" width="155" height="118" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <circle cx="404" cy="44" r="12" fill="#0071e3"/><text class="n" x="400" y="49">3</text>
+    <text class="t" x="424" y="49">Train</text>
+    <text class="s" x="394" y="78">on the V100s, drive</text>
+    <text class="s" x="394" y="98">by drive, with half the</text>
+    <text class="s" x="394" y="118">signs swapped</text>
+  </g>
+  <g>
+    <rect x="565" y="20" width="145" height="118" rx="14" fill="#fff" stroke="#d2d2d7"/>
+    <circle cx="589" cy="44" r="12" fill="#0071e3"/><text class="n" x="585" y="49">4</text>
+    <text class="t" x="609" y="49">Publish</text>
+    <text class="s" x="579" y="78">ONNX, checked</text>
+    <text class="s" x="579" y="98">against PyTorch, then</text>
+    <text class="s" x="579" y="118">an update on the comma</text>
+  </g>
+  <path class="l" d="M165 79 H193" marker-end="url(#ssp-c)"/>
+  <path class="l" d="M350 79 H378" marker-end="url(#ssp-c)"/>
+  <path class="l" d="M535 79 H563" marker-end="url(#ssp-c)"/>
+  <path class="l" d="M637 138 V168 H88 V140" marker-end="url(#ssp-c)"/>
+  <text class="s" x="300" y="162">the next drive runs on the new brain</text>
+</svg>
+</div>
+
+<p>I drive with sunnypilot switched off in sunnylink, so the comma doesn't drive: it records the video and the logs, and every speed in them is mine. A drive where openpilot was on is left out whole. The answer is the speed my dashboard showed. Where I drove wrong, I draw a block with the right speed in the portal, and that's the only correction. During training, on half of the sign passages where I drove at the sign's number, number and answer get swapped (50 and 60, 100 and 120), otherwise it learns the road and ignores the sign.</p>
+
+<p>Publish exports all four networks to ONNX and runs them against PyTorch, the brain along a whole drive one step at a time as on the car, and only then rebuilds the branch the comma updates from.</p>
+
+<p class="eyebrow">The portal</p>
+<h2>I run all of it from my own server</h2>
+
+<p>Video and logs play in sync, with what the camera read, the map, sunnypilot's resolver and the car's state on one timeline. Labelling signs, training, replaying a drive with new networks and publishing all start from there. More than 15,000 frames of signs are confirmed so far, most of them by me and the rest by an AI review, and SignNet and the classifier also pretrain on Mapillary.</p>
+
+<figure><img src="https://cristianku.com/wp-content/uploads/2026/11/smartspeed-portal-timeline.png" alt="The portal's timeline for one drive, with the marked speed, the speed the comma read, the map's limit and the car's speed" /><figcaption>A drive from before the brain: the speed I marked, what the comma read, what the map said and what the car did.</figcaption></figure>
+
+<p class="eyebrow">Where it stands</p>
+<h2>One car, one driver, 34 drives</h2>
+
+<div class="stats">
+  <div class="stat"><b>26.6 %</b><span>of test seconds within 2 km/h of my dashboard speed, on 12,153 seconds from places kept out of training</span></div>
+  <div class="stat"><b>9.9 km/h</b><span>mean error on test. Saying 100 everywhere misses by 36.1</span></div>
+  <div class="stat"><b>11.8 h</b><span>of dashcam driving in 34 drives, the only ones it learns from</span></div>
+</div>
+
+<p>These numbers are offline, for the brain the comma downloaded on 12 November. On validation it's 22.7 % and 10.3 km/h on 3,586 seconds. On the training drives it gets 94.6 %, so it still knows the roads it has seen far better than new ones. Where a sign is in force, simply copying it is still right more often on test (43.9 % against 27.2 %), with the same mean error of 10.0 km/h. When I swap the number on the test signs, its answer moves on only 120 of 2,208 seconds, so it still leans on the road more than on the sign. Honestly, this training didn't beat the brain before it: the sign reading got better, the brain stayed where it was.</p>
+
+<p>On the road there's very little so far. A brain has been on the car since 7 November, but since then I've driven with sunnypilot off to collect training drives, so the car hasn't acted on what it says yet. This one has no drive yet.</p>
+
+<div class="cta">
+  <h2>Want to help?</h2>
+  <p>I need people to confirm speed signs on real drives. Leave your email and a line about yourself on the Smartspeed page and I'll set up an account for you. The page has the whole story, with the networks and the numbers kept up to date.</p>
+  <a class="btn" href="https://smartspeed.14bodhi.com/">smartspeed.14bodhi.com</a>
+</div>
+
+<p>The code is on GitHub: <a href="https://github.com/cristianku/sunnypilot.speedlimits">the portal, the training and the tools</a>, and <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits">the code on the car</a>.</p>
+
+<p class="small">Smartspeed is built on top of sunnypilot and openpilot. It's not made by comma.ai or the sunnypilot team.</p>
+
+</div>
