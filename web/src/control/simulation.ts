@@ -281,7 +281,8 @@ export function screenAt(series: Record<string, Series>, reads: readonly number[
     limitConfidence: limitAt === -Infinity ? 0 : numberOf(valueOf('vis_raw_conf', limitAt)),
     seen: series['vis_raw_seen'] ? at('vis_raw_seen') === true : numberOf(at('vis_sign_size')) > 0,
     distance: numberOf(at('vis_sign_dist')),
-    road: textOf(at('vis_road')),
+    // With a brain the car shows the road type its brain names (since 12 Nov 2026): a replay keeps it as brain_type.
+    road: textOf(at('vis_road')) || textOf(at('brain_type')),
     pulse: pulseAt(reads, s),
   };
 }
