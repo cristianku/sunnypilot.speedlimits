@@ -707,6 +707,7 @@ def watched(monkeypatch):
 def test_the_training_moves_the_clock_every_epoch_and_the_measure_has_the_real_one(tmp_path, monkeypatch):
     import numpy
     from nnslr_tools.brain_targets import BRAIN_INPUTS, pack_inputs
+    from nnslr_tools.brain_train import LEARNED_INPUTS
     torch = torch_or_skip()
     trained, measured = watched(monkeypatch)
     run_training(torch, tmp_path, monkeypatch, [5.0, 4.0], at_two_in_the_afternoon)
@@ -715,7 +716,7 @@ def test_the_training_moves_the_clock_every_epoch_and_the_measure_has_the_real_o
     assert not numpy.allclose(trained[0][0][0], real) and not numpy.allclose(trained[0][0][0], trained[1][0][0])
     drive = fake_drive(['train'] * T)
     at_two_in_the_afternoon(drive)
-    assert len(measured) >= 3 and all(numpy.array_equal(extra, pack_inputs(drive['inputs'], GROUPS)) for extra in measured)
+    assert len(measured) >= 3 and all(numpy.array_equal(extra, pack_inputs(drive['inputs'], LEARNED_INPUTS)) for extra in measured)
 
 
 def test_a_night_copy_goes_through_the_training_and_not_through_the_measure(tmp_path, monkeypatch):

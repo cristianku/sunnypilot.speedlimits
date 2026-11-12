@@ -276,6 +276,13 @@ def test_the_sets_say_their_networks_and_whether_they_are_ready(tmp_path):
     (root / simulation.SETS_RELATIVE / 'in-use' / simulation.SOURCE_FILE).write_text(json.dumps(
         {'finder': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier'}))
     wanted = {'finder': 'cutter:a/signnet', 'classifier': 'classifier:b/classifier', 'decider': None}
+    # An export from before what an export writes changed (no stamp, or an older one): to export again.
+    old = simulation.set_states(root, wanted, package=package)['in-use']
+    assert not old['ready'] and 'export changed' in old['reason']
+    stamp = root / simulation.SETS_RELATIVE / 'in-use' / simulation.STAMP_FILE
+    stamp.write_text(json.dumps({'stamp': simulation.EXPORT_STAMP - 1}))
+    assert not simulation.set_states(root, wanted, package=package)['in-use']['ready']
+    stamp.write_text(json.dumps({'stamp': simulation.EXPORT_STAMP}))
     ready = simulation.set_states(root, wanted, package=package)['in-use']
     assert ready['ready'] and ready['settings'] == car_settings.values(root)
     changed = simulation.set_states(root, {**wanted, 'finder': 'cutter:c/signnet'}, package=package)['in-use']

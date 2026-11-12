@@ -195,7 +195,7 @@ const now = computed(() => {
       + (at('vis_raw_road') === 'other_road' ? ' · other road' : taken === true ? ' · taken' : taken === false ? ' · not taken' : ''),
     sign: metres > 0 ? 'in ' + metres + ' m' + (shown.seen ? ', in view' : '') : shown.seen ? 'in view' : 'none',
     road: shown.road,
-    // A replay with a brain that learnt the road type: the type its type_head names, on the screen too.
+    // A replay with a brain that learnt the road type: the type its type_head names (the screen shows the car's own).
     brainType: all['brain_type'] === undefined ? null : brainTypeText(at('brain_type'), at('brain_type_p')),
   };
 });
@@ -362,7 +362,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
         </svg>
       </div>
       <div v-if="shownSeries?.['brain_type']" class="dr-lane" id="dv-brain-type"
-           title="The road type the brain names at each of its steps (its road-type head on the car brain’s memory; the screen shows it left of the reading square, as the car does); hatched: no frame read there">
+           title="The road type the brain names at each of its steps (its road-type head on the car brain’s memory). The comma’s screen above shows it only for a brain whose export has the road type, as the car does; hatched: no frame read there">
         <span class="dr-lane-name">Road type<small>brain</small></span>
         <svg :width="width" height="18" :viewBox="`0 0 ${width} 18`" aria-hidden="true">
           <g v-for="(run, index) in lanesIn(from, to, width, x).types" :key="index">

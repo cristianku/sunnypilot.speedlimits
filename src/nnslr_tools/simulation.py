@@ -85,6 +85,10 @@ PACKAGE_RELATIVE = Path('openpilot') / 'sunnypilot' / 'speed_limits'
 MANIFEST = 'speed_limits.json'
 MANIFEST_FORMAT = 2
 SOURCE_FILE = 'source.json'  # of an exported set: the versions it was exported from
+STAMP_FILE = 'export.json'  # of an exported set: the EXPORT_STAMP it was made with
+# What an export writes for the same versions: raised when it changes, so the set 'in-use' is exported again.
+# 2: the brain's road type as an output of its ONNX (12 Nov 2026).
+EXPORT_STAMP = 2
 # The car's code a result depends on: another one of these and the result is of another loop.
 CODE_FILES = ('pipeline.py', 'vision.py', 'applicability.py', 'brain.py', 'brain_inputs.py', 'country.py')
 ROLES = {'finder': 'SignNet', 'classifier': 'Classifier', 'decider': 'Applicability', 'brain': 'Brain'}
@@ -380,6 +384,9 @@ def set_states(root: Path, in_use: dict[str, str | None] | None = None, package:
             state['wanted'] = wanted
             if networks is None:
                 state['reason'] = 'Not exported yet: Compute exports the versions in use first.'
+            elif exported_stamp(root) != EXPORT_STAMP:
+                state['ready'] = False
+                state['reason'] = 'The export changed: Compute exports them again first.'
             elif in_use is not None and exported != wanted:
                 state['ready'] = False
                 state['reason'] = 'The versions in use changed: Compute exports them again first.'
@@ -388,6 +395,15 @@ def set_states(root: Path, in_use: dict[str, str | None] | None = None, package:
                 state['reason'] = "The car's settings changed: Compute exports them again first."
         states[key] = state
     return states
+
+
+def exported_stamp(root: Path) -> int | None:
+    """The EXPORT_STAMP the export of 'in-use' was made with; None without one or from before the stamp."""
+    try:
+        found = json.loads((Path(root) / SETS_RELATIVE / 'in-use' / STAMP_FILE).read_text(encoding='utf-8'))
+        return int(found['stamp'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 def exported_source(root: Path) -> dict[str, str]:
@@ -1132,7 +1148,8 @@ def run(root: Path, routes: list[str], set_key: str, *, device: str = 'cuda', ag
 def export_set(root: Path, *, log=print) -> Path:
     """The versions in use on Models exported as Publish exports them (ONNX, contracts, speed_limits.json with the car's
     settings of today), into the release of the set 'in-use'; nothing when it is theirs already, only speed_limits.json
-    again when the car's settings alone changed. In the GPU environment: the export is PyTorch's. Each ONNX is checked
+    again when the car's settings alone changed. An export made before what an export writes changed (EXPORT_STAMP) is
+    made again. In the GPU environment: the export is PyTorch's. Each ONNX is checked
     against PyTorch as Publish checks it, but for the brain's check along a drive. A brain in use that takes the
     driver's inputs is exported too, which Publish refuses: a replay never reaches the car."""
     from nnslr_tools import car_release, car_settings
@@ -1141,7 +1158,7 @@ def export_set(root: Path, *, log=print) -> Path:
     source = {role: chosen[role]['id'] for role in ROLES if chosen.get(role)}
     target = Path(root) / SETS_RELATIVE / 'in-use'
     networks = release_networks(target)
-    if exported_source(root) == source and networks is not None:
+    if exported_source(root) == source and networks is not None and exported_stamp(root) == EXPORT_STAMP:
         manifest = car_release.manifest_of('in-use', car_settings.values(root), bool(chosen.get('brain')),
                                            bool(chosen.get('decider')))
         if release_settings(target) != manifest.get('settings', {}):
@@ -1159,6 +1176,7 @@ def export_set(root: Path, *, log=print) -> Path:
                                            bool(chosen.get('decider')))
         (folder / MANIFEST).write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
         (folder / SOURCE_FILE).write_text(json.dumps(source, indent=2) + '\n', encoding='utf-8')
+        (folder / STAMP_FILE).write_text(json.dumps({'stamp': EXPORT_STAMP}) + '\n', encoding='utf-8')
         old = target.with_name(target.name + '.old')
         shutil.rmtree(old, ignore_errors=True)
         if target.exists():

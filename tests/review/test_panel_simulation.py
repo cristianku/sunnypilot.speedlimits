@@ -115,6 +115,7 @@ def release(directory, source=None):
     (directory / simulation.MANIFEST).write_text(json.dumps(manifest))
     if source is not None:
         (directory / simulation.SOURCE_FILE).write_text(json.dumps(source))
+        (directory / simulation.STAMP_FILE).write_text(json.dumps({'stamp': simulation.EXPORT_STAMP}))
 
 
 def in_use(root, **ids):  # noqa: F811
