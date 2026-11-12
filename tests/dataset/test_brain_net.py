@@ -530,3 +530,76 @@ def test_the_car_gets_the_trust():
     from nnslr_tools.brain_net import car_weights
     assert 'trust.weight' in car_weights(net())
 
+
+def users_answers(t=T, on=(), present=()):
+    """(presence, height, weight) (1, t, kinds, columns): on, the (frame, kind, column) with an answer; present, those of
+    them with one there, a third of the frame tall."""
+    from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS
+    shape = (1, t, len(USER_KINDS), USER_COLUMNS)
+    presence, height, weight = torch.zeros(shape), torch.zeros(shape), torch.zeros(shape)
+    for frame, kind, column in on:
+        weight[0, frame, kind, column] = 1
+    for frame, kind, column in present:
+        presence[0, frame, kind, column], height[0, frame, kind, column] = 1, 1 / 3
+    return presence, height, weight
+
+
+def test_the_road_users_are_a_presence_and_a_size_a_kind_and_column_last_only_when_asked():
+    from nnslr_tools.brain_net import USER_COLUMNS, USER_KINDS, outputs
+    model = net(road_types=4, users=True)
+    said = model(*batch(), types=True, users=True)
+    assert len(said) == 5 and said[4].shape == (1, T, 2, len(USER_KINDS), USER_COLUMNS)
+    found = outputs(said, types=True, users=True)
+    assert found['users'] is said[4] and found['types'] is said[3]
+    assert len(model(*batch())) == 3 and net()(*batch(), users=True)[3] is None
+    assert (len(USER_KINDS), USER_COLUMNS) == (3, 8)
+
+
+def test_a_road_user_reaches_the_memory_and_not_the_speed_head_and_an_unknown_cell_adds_nothing():
+    from nnslr_tools.brain_net import USERS_LOSS, brain_loss
+    model = net(users=True)
+    model.zero_grad()
+    speed_logits, works_logit, _state, users = model(*batch(), users=True)
+    speed, speed_weight, works, works_weight = answers()
+    alone = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight)
+    # Weight 0 everywhere (a drive nobody read): the same loss as without the head, whatever presence says.
+    unknown = torch.ones(1, T, 3, 8), torch.full((1, T, 3, 8), 0.5), torch.zeros(1, T, 3, 8)
+    nothing = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                         users=(users, *unknown, None))
+    assert float(nothing) == pytest.approx(float(alone)) and 0 < USERS_LOSS < 1
+    loss = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                      users=(users, *users_answers(on=[(1, 0, 3), (1, 2, 4)], present=[(1, 0, 3)]), None))
+    assert float(loss) > float(alone)
+    loss.backward()
+    assert gradient_of(model, 'users_head') > 0 and gradient_of(model, 'gru') > 0 and gradient_of(model, 'project') > 0
+    assert gradient_of(model, 'speed_head') == 0 and gradient_of(model, 'works_head') == 0
+    # Only the answered cells learn: the rows of the presence of a person in column 5, of nobody's size, stay still.
+    grad = model.users_head.weight.grad.view(2, 3, 8, -1)
+    assert float(grad[0, 0, 3].abs().sum()) > 0 and float(grad[0, 2, 4].abs().sum()) > 0
+    assert float(grad[1, 0, 3].abs().sum()) > 0 and float(grad[1, 2, 4].abs().sum()) == 0
+    assert float(grad[0, 0, 5].abs().sum()) == 0
+
+
+def test_a_rare_presence_weighs_more_with_its_pos_weight():
+    from nnslr_tools.brain_net import brain_loss
+    speed_logits, works_logit, _state, users = net(users=True)(*batch(), users=True)
+    speed, speed_weight, works, works_weight = answers()
+    labels = users_answers(on=[(1, 0, 3)], present=[(1, 0, 3)])
+    plain = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, users=(users, *labels, None))
+    lifted = brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight,
+                        users=(users, *labels, torch.full((3, 8), 5.0)))
+    assert float(lifted) > float(plain)
+
+
+def test_the_speed_does_not_depend_on_the_users_head_and_the_car_does_not_get_it():
+    from nnslr_tools.brain_net import TRAINING_ONLY, build_brain_net, car_weights
+    model = net(users=True)
+    images, extra = batch()
+    with torch.no_grad():
+        speed = model(images, extra)[0]
+        model.users_head.weight.mul_(100).add_(1)
+        again = model(images, extra, users=True)[0]
+    assert torch.equal(speed, again) and 'users_head.' in TRAINING_ONLY
+    weights = car_weights(model)
+    without = build_brain_net(GROUPS, pretrained=False, works=False)
+    assert set(weights) == set(without.state_dict())

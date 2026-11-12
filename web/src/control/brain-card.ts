@@ -59,6 +59,7 @@ export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'works_head', what: 'the roadworks on the road, where they are marked in Speed review (Roadworks on)'},
   {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Road conditions on)'},
   {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},
+  {name: 'users_head', what: 'where the persons and two-wheelers are (a detector, nnslr road-users) and the vehicles you confirmed crossing our path, in 8 columns, with their height (Road users on)'},
 ];
 
 /** The seconds that answer nothing (brain_targets.OUT_REASONS): they still go through the memory, as on the car. */

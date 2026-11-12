@@ -68,6 +68,15 @@ The kinds of road (road_answers): the same answer, kind by kind (road_kinds: a n
 potholes, and those a person added in Speed review), from that kind's marks and its own "checked to here". A frame can be of
 several kinds at once: one column a kind, each with its target and its weight, and a kind nobody went through has none.
 
+The road users (users_answers, nnslr_tools.road_users): for each of usernet.KINDS (person, two-wheeler, vehicle) and each
+of road_users.COLUMNS (8) columns of the road frame, a presence of 1 or 0, the height of the tallest one over the frame's
+height, and a weight; an answer of a head only the training has (brain_net's users_head), never an input. Persons and
+two-wheelers are the COCO detector's, on every reading it read (nnslr road-users); a vehicle is one only where a person
+confirmed that it crosses our path, among the events the crossing rule proposed, and 0 only on a drive whose proposals all
+have a person's verdict. A frame the detector did not read, a drive not reviewed and a column the rule could not judge
+answer nothing (weight 0, never "nobody there"); so does every frame out of the speed's frames (no picture), and with
+types every frame without a road type, as for the other heads.
+
 No limit ahead. The brains of 7 to 11 Nov 2026 were also taught the next limit and the metres to it, from the signs our
 networks read on the pictures a second time with Sign review over them. Since 12 Nov 2026 the speed to hold is the
 brain's only word to openpilot, and it lowers that speed itself before a sign (his rule): no such answer is made, and
@@ -185,6 +194,7 @@ from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
 from nnslr_tools.road_type_data import FRAMES_RELATIVE, frame_cells, frame_path
 from nnslr_tools.road_types import ROAD_TYPES, load_road_types
+from nnslr_tools.usernet import KINDS as USER_KINDS
 from nnslr_tools.road_type_signs import (SEGMENT_SECONDS, STEPS_PER_SECOND, VIDEO_FPS, VIDEO_STEP, fingerprint, load_signs,
                                          load_vision, package_path, picture_path, pictures_ready)
 from nnslr_tools.speed_review import (FIRST_ROAD_KINDS, NS, dashcam_drive, db_path, driver_speed, engaged_series,
@@ -445,6 +455,13 @@ def type_answers(root: Path, route: str, frames: list[dict]) -> tuple[np.ndarray
             found[at] = ROAD_TYPES.index(line['road_type'])
             person[at] = line.get('reviewed') is True
     return found, person
+
+
+def users_answers(root: Path, route: str, frames: list[dict]) -> dict:
+    """The road users' answers of a drive's frames (road_users.drive_answers): presence, height, weight, each (frames,
+    KINDS, COLUMNS), and whether its vehicles are reviewed, the crossings confirmed, the events proposed."""
+    from nnslr_tools import road_users
+    return road_users.drive_answers(root, route, frames)
 
 
 def road_answers(ns: np.ndarray, road: list[dict], checked: dict[str, int], kinds: tuple[str, ...]) -> tuple[np.ndarray, np.ndarray]:
@@ -838,11 +855,14 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
     road_weight[~usable] = 0
     road_type, typed_by_person = type_answers(root, route, frames)
     typed = road_type >= 0
+    users = users_answers(root, route, frames)
+    users['weight'][~usable] = 0
     if types:
         speed_out[(speed_out == 0) & ~typed] = NO_TYPE
         speed[~typed] = -1
         works_weight[~typed] = 0
         road_weight[~typed] = 0
+        users['weight'][~typed] = 0
     readings = record['readings'] if record else None
     own = _last_at(drive_logs.dashboard_speed(merged), ns)
     span = merged.get('span') or [None, None]
@@ -857,6 +877,8 @@ def drive_targets(root: Path, route: str, labels: dict, merged: dict, split: dic
             'works': works, 'works_weight': works_weight, 'road': road, 'road_weight': road_weight, 'road_kinds': list(kinds),
             'road_type': road_type, 'type_weight': (typed & usable).astype(np.float32), 'typed_by_person': typed_by_person,
             'types': types,
+            'users': users['presence'], 'users_height': users['height'], 'users_weight': users['weight'],
+            'users_reviewed': users['reviewed'], 'users_confirmed': users['confirmed'], 'users_proposed': users['proposed'],
             'measured': np.array([not frame.get('step') for frame in frames], dtype=bool),
             'marks': [mark for mark in labels['works'] if mark['end_ns'] is not None],
             'inputs': drive_inputs(frames, ns, merged, readings, root, record.get('boxes') if record else None)
@@ -973,6 +995,14 @@ def type_weights(drive: dict, partition: str) -> np.ndarray | None:
     return drive['type_weight'] * inside
 
 
+def users_weights(drive: dict, partition: str) -> np.ndarray | None:
+    """The road users' weight (frames, kinds, columns) of a drive in one partition; None for a drive without them."""
+    if 'users_weight' not in drive:
+        return None
+    inside = np.array([name == partition for name in drive['partitions']], dtype=np.float32)
+    return drive['users_weight'] * inside[:, None, None]
+
+
 def other_hour(hour: np.ndarray, hours: float) -> np.ndarray:
     """The hour group with the clock moved by hours on every frame. An unknown hour stays unknown."""
     sin, cos, angle = hour[:, 0], hour[:, 1], 2 * np.pi * hours / 24
@@ -1061,6 +1091,8 @@ def night_copy(drive: dict, groups: tuple[str, ...], rng) -> dict | None:
         copy['road_weight'] = np.zeros_like(drive['road_weight'])
     if 'type_weight' in drive:
         copy['type_weight'] = np.zeros_like(drive['type_weight'])
+    if 'users_weight' in drive:
+        copy['users_weight'] = np.zeros_like(drive['users_weight'])
     return copy
 
 
@@ -1159,6 +1191,8 @@ def _per_second(drive: dict) -> dict:
         found['road_weight'] = drive['road_weight'] * kept[:, None]
     if 'type_weight' in drive:
         found['type_weight'] = drive['type_weight'] * kept
+    if 'users_weight' in drive:
+        found['users_weight'] = drive['users_weight'] * kept[:, None, None]
     return found
 
 
@@ -1176,7 +1210,8 @@ def summary(drives: list[dict]) -> dict:
                        'out': int((weight[:, column] * (1 - road[:, column])).sum())} for column, kind in enumerate(kinds)}
 
     parts = {name: {'speed': 0, 'works_in': 0, 'works_out': 0, 'sites': 0,
-                    'road': {kind: {'in': 0, 'out': 0} for kind in kinds}, 'types': {kind: 0 for kind in ROAD_TYPES}}
+                    'road': {kind: {'in': 0, 'out': 0} for kind in kinds}, 'types': {kind: 0 for kind in ROAD_TYPES},
+                    'users': {kind: {'labelled': 0, 'present': 0} for kind in USER_KINDS}}
              for name in ('train', 'validation', 'test', 'buffer')}
     rows = []
     for drive in drives:
@@ -1193,6 +1228,9 @@ def summary(drives: list[dict]) -> dict:
             if 'type_weight' in drive:
                 for column, kind in enumerate(ROAD_TYPES):
                     part['types'][kind] += int((drive['type_weight'][here] * (drive['road_type'][here] == column)).sum())
+            for kind, count in users_of(drive, here).items():
+                part['users'][kind]['labelled'] += count['labelled']
+                part['users'][kind]['present'] += count['present']
         for mark in drive['marks']:
             inside = np.flatnonzero((drive['ns'] >= mark['start_ns']) & (drive['ns'] < mark['end_ns']))
             if len(inside):
@@ -1206,10 +1244,51 @@ def summary(drives: list[dict]) -> dict:
                      'typed_s': int(drive['type_weight'].sum()) if 'type_weight' in drive else 0,
                      'typed_by_person_s': int((drive['type_weight'] * drive['typed_by_person']).sum())
                      if 'type_weight' in drive else 0,
+                     'users': users_of(drive, slice(None)), 'users_reviewed': bool(drive.get('users_reviewed')),
+                     'users_proposed': drive.get('users_proposed'), 'users_confirmed': drive.get('users_confirmed', 0),
                      'signs_read': drive['signs_read'], 'reader_current': drive.get('reader_current', False),
                      'pictures': drive.get('pictures', True), 'no_picture_s': drive['no_picture_s']})
     return {'partitions': parts, 'drives': rows, 'road_kinds': list(kinds), 'road_types': list(ROAD_TYPES),
-            'types': any(drive.get('types') for drive in drives)}
+            'types': any(drive.get('types') for drive in drives), 'user_kinds': list(USER_KINDS),
+            'users': users_counts(drives)}
+
+
+def users_of(drive: dict, here) -> dict:
+    """The road users' seconds of a drive's frames here: {kind: {labelled: with an answer in at least one column,
+    present: with one in some column}}."""
+    if 'users_weight' not in drive:
+        return {}
+    weight, presence = drive['users_weight'][here], drive['users'][here]
+    return {kind: {'labelled': int((weight[:, column] > 0).any(axis=1).sum()),
+                   'present': int(((weight[:, column] * presence[:, column]) > 0).any(axis=1).sum())}
+            for column, kind in enumerate(USER_KINDS)}
+
+
+def users_counts(drives: list[dict]) -> dict:
+    """How many drives and seconds (one a second) have road users' answers, for the dry run's log: drives with any,
+    drives whose vehicles a person reviewed whole, crossings confirmed, seconds with an answer of each kind."""
+    seconds = {kind: 0 for kind in USER_KINDS}
+    with_any = reviewed = confirmed = 0
+    for drive in drives:
+        if 'users_weight' not in drive:
+            continue
+        kept = drive.get('measured', np.ones(len(drive['frames']), dtype=bool))
+        weight = drive['users_weight'] * kept[:, None, None]
+        with_any += int(weight.any())
+        reviewed += int(bool(drive.get('users_reviewed')))
+        confirmed += int(drive.get('users_confirmed') or 0)
+        for column, kind in enumerate(USER_KINDS):
+            seconds[kind] += int((weight[:, column] > 0).any(axis=1).sum())
+    return {'drives': with_any, 'reviewed_drives': reviewed, 'confirmed_crossings': confirmed, 'seconds': seconds}
+
+
+def users_counts_text(counts: dict) -> str:
+    """users_counts for a log."""
+    return (f"Road users: answers on {counts['drives']} drives (persons {counts['seconds'].get('person', 0)} s, "
+            f"two-wheelers {counts['seconds'].get('two_wheeler', 0)} s, vehicles {counts['seconds'].get('vehicle', 0)} s); "
+            f"{counts['reviewed_drives']} drives with every proposed crossing reviewed, {counts['confirmed_crossings']} "
+            "crossings confirmed" + ('' if counts['confirmed_crossings'] else
+                                     ' (none yet: the vehicles answer nothing until a person reviews the proposals)'))
 
 
 def summary_text(found: dict) -> str:
@@ -1223,6 +1302,12 @@ def summary_text(found: dict) -> str:
     for name, part in found['partitions'].items():
         typed = ', '.join(f'{kind} {count}' for kind, count in part.get('types', {}).items() if count)
         lines.append(f"  road types in {name}: {typed or 'none'}")
+    for name, part in found['partitions'].items():
+        users = ', '.join(f"{kind} {count['labelled']} ({count['present']} with one)"
+                          for kind, count in part.get('users', {}).items() if count['labelled'])
+        lines.append(f"  road users in {name}: {users or 'none'}")
+    if 'users' in found:
+        lines.append(users_counts_text(found['users']))
     lines.append('Per drive:')
     for row in found['drives']:
         out = ', '.join(f'{name} {count}' for name, count in row['out'].items() if count)

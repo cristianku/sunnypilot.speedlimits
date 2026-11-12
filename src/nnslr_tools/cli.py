@@ -1770,6 +1770,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_brain_net.add_argument("--no-road-types", action="store_true",
                              help="the comparison: without the road type of the map and Speed review, and with the "
                                   "seconds that have none")
+    p_brain_net.add_argument("--no-users", action="store_true",
+                             help="the comparison: without users_head, the road users (nnslr road-users) as a task of "
+                                  "the network; they are still measured (users_speed)")
     p_brain_net.add_argument("--pool", choices=("mean", "grid"), default="grid",
                              help="grid keeps where things are in the frame, mean only what is there")
     p_brain_net.add_argument("--epochs", type=int, default=None)
@@ -2001,6 +2004,28 @@ def build_parser() -> argparse.ArgumentParser:
                                    "for the brain) instead of the clone's, the car's speed from each drive's logs")
     p_road_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_road_signs.set_defaults(func=_cmd_road_type_signs)
+    p_road_users = sub.add_parser("road-users", help="the road users of the brain's training (nnslr_tools.road_users): "
+                                                     "an off-the-shelf COCO detector (torchvision Faster R-CNN) on "
+                                                     "the road video at the brain's 4 readings a second, decoded by "
+                                                     "NVDEC, on the V100s only (never the CPU), its boxes kept in "
+                                                     "derived/road_users/<route>/<segment>.npz; then the crossing "
+                                                     "rule proposes the vehicles that cross our path "
+                                                     "(proposals.json, for a person's review); --check: the "
+                                                     "detector against the frames ticked road users complete")
+    p_road_users.add_argument("--route", action="append",
+                              help="route id; repeat for more (default: every drive the brain learns from, "
+                                   "brain_targets.training_routes)")
+    p_road_users.add_argument("--gpus", type=_cards, default=None,
+                              help="the cards, one process each, by nvidia-smi's numbers: 0,1 (default: the first "
+                                   "card this process sees, NNSLR_GPU_INDEX or CUDA_VISIBLE_DEVICES)")
+    p_road_users.add_argument("--batch", type=int, default=None, help="frames a batch on the card (default 4)")
+    p_road_users.add_argument("--proposals-only", action="store_true",
+                              help="no detector: only make the proposals again from the readings there (no card)")
+    p_road_users.add_argument("--check", action="store_true",
+                              help="no detector: the readings against a person's frames ticked road users complete, "
+                                   "found and false boxes by kind and height (24-48, 48-96, 96+ px)")
+    p_road_users.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
+    p_road_users.set_defaults(func=_cmd_road_users)
     p_motion = sub.add_parser("car-motion", help="the car's own motion of every second of the drives with GPS "
                                                  "positions or road types, from their rlogs (deviceMotion/livePose yaw rate, carState "
                                                  "steering angle, blinkers and vEgo): derived/car_motion/<route>.json, "
@@ -2916,7 +2941,7 @@ def _cmd_train_brain(args: argparse.Namespace) -> int:
     store = DriveReviewStore(root)
     result = brain_train.train_brain(root, Path(args.run_dir), lambda route: store.merged(route, keep=False), pool=args.pool,
                                      works=not args.no_works, road=not args.no_road,
-                                     types=not args.no_road_types, device=args.device,
+                                     types=not args.no_road_types, users=not args.no_users, device=args.device,
                                      dry_run=args.dry_run, routes=args.route,
                                      epochs=args.epochs or brain_train.EPOCHS, seed=args.seed,
                                      init_from=Path(args.init_from) if args.init_from else None,
@@ -3403,6 +3428,38 @@ def _cmd_road_type_signs(args: argparse.Namespace) -> int:
               + (f"{len(left)} with a sign of another road left out, " if left else '') +
               f"motorway signs confirmed at {', '.join(f'{t:.0f} s' for t in sign_times(record)) or 'none'}, "
               f"green boards at {', '.join(f'{t:.0f} s' for t in board_times(record)) or 'none'}", flush=True)
+    return 0
+
+
+def _cmd_road_users(args: argparse.Namespace) -> int:
+    """The road users of the brain's training: the detector on the drives' road video (the V100s), then the crossing
+    rule's proposals; or the check of the readings against a person's ticked frames (nnslr_tools.road_users)."""
+    from nnslr_tools import road_users
+    from nnslr_tools.brain_targets import _exposures, training_routes
+    from nnslr_tools.drive_review import DriveReviewStore
+    from nnslr_tools.preannotate import resolve_data_root
+    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
+    if args.check:
+        print(road_users.check_text(road_users.check(root)), flush=True)
+        return 0
+    routes = list(args.route or []) or training_routes(root)
+    for route in routes:
+        road_users.checked_route(route)
+    if not routes:
+        print("nnslr road-users: no drive to read (the brain's drives: dashcam drives with their logs read)",
+              file=sys.stderr)
+        return 2
+    if not args.proposals_only:
+        cards = args.gpus
+        if cards is None and os.environ.get('NNSLR_GPU_INDEX', '').strip():
+            cards = _cards(os.environ['NNSLR_GPU_INDEX'].strip())
+        done = road_users.read_drives(root, routes, cards=cards, batch=args.batch or road_users.BATCH,
+                                      log=lambda line: print(line, flush=True))
+        print(f"road users: {done['segments']} segments read, {done['frames']} readings, {done['seconds']:.0f} s "
+              "on the cards", flush=True)
+    store = DriveReviewStore(root)
+    road_users.refresh_proposals(root, routes, lambda route: store.merged(route, keep=False), _exposures,
+                                 log=lambda line: print(line, flush=True))
     return 0
 
 

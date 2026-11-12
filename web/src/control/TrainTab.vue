@@ -395,7 +395,7 @@ const numbers = computed(() => {
       </template>
       <template v-else-if="section === 'brain'">
         <NetworkStartPicker :start="starts.brain" id="train-brain-start"/>
-        <BrainChoices :choices="brainChoices" id="train-brain"/>
+        <BrainChoices :choices="brainChoices" id="train-brain" :runs="brainLabels?.same_drives ?? []"/>
         <SignNetworksPicker :choice="signNetworks" id="train-brain"/>
         <ActionList :items="BRAIN_ACTIONS" :actions="status?.actions ?? null" :tip="gpuTip"
                     @run="(name, state) => emit('run', name, state, undefined, {...brainChoices.option, ...starts.brain.option, ...signNetworks.option})"/>

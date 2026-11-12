@@ -9,6 +9,8 @@ The network, per frame: encoder (MobileNetV3-small, as the road-type network) ->
     works  = works_head(h)                       are we inside roadworks: only in training
     road   = road_head(h)                        which kinds of road this is, one logit a kind: only in training
     type   = type_head(h)                        the road type, a logit a type of road_types.ROAD_TYPES: only in training
+    users  = users_head(h)                       who is on the road and where, a presence and a size a kind and column:
+                                                 only in training
 
 The table is the network's own (build_brain_net's kph, the class_kph buffer, kept in every checkpoint): a class a km/h from
 1 to 200 since 8 Nov 2026 (brain_targets.SPEED_CLASSES), a class every 5 km/h before. A brain of before keeps its own: its
@@ -25,6 +27,20 @@ brain_targets.road_kinds) teach the memory the same way: road_head is one layer 
 binary cross entropy of each kind on its own frames, so each kind weighs as the roadworks do. It is left out of the car's
 network too (TRAINING_ONLY), so the car's brain is the same network with or without it. A kind is a column in the order of
 the kinds when the training started: a kind added later is a new column of the next training.
+
+The road users (users=True, since 12 Nov 2026, his option B): users_head is one layer on h with, for each of
+usernet.KINDS (person, two-wheeler, vehicle) and each of road_users.COLUMNS (8) vertical stripes of the road frame, a
+presence logit and a size (the log of the tallest one's height over the frame's). loss += USERS_LOSS * (binary cross
+entropy of the presence + smooth L1 of the log size where one is there), each kind a mean over its answered cells. The
+answers are brain_targets.users_answers: persons and two-wheelers the COCO detector's on every frame it read (nnslr
+road-users), a vehicle only where a person confirmed a crossing the rule proposed, "nobody" only on a drive whose
+proposals he reviewed whole, and weight 0 everywhere else: a frame or a drive nobody read is unknown, never nobody there.
+pos_weight (brain_train) lifts the rare presences, per kind and column, at most USERS_POS_WEIGHT_MAX times. The point is
+the memory: a person at the kerb, a car about to cross, are what a driver slows for before any sign, and h has to keep
+them to answer here; no road user ever reaches the network's inputs, nor the car: users_head is TRAINING_ONLY.
+Its design limits: 8 stripes of 168 pixels say left, centre and right, not the lane; one size a stripe, the tallest;
+nothing of how far ahead but the size; the detector misses what is under COMPLETE_HEIGHT pixels, and the rule
+proposes only vehicles that move across our path faster than road_users.CROSSING_MPS while we drive straight.
 
 The road type (town, rural, motorway... of the map, with a person's corrections in Speed review: brain_targets.type_answers)
 teaches the memory as well: type_head is one layer with a logit a type, loss += TYPE_LOSS * cross entropy of the type on
@@ -69,18 +85,27 @@ The picture's features go through a LayerNorm, so that they keep the scale of th
 from __future__ import annotations
 
 from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, SPEED_CLASSES, class_kph
+from nnslr_tools.road_users import COLUMNS as _USER_COLUMNS
+from nnslr_tools.usernet import KINDS as _USER_KINDS
 from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_STD, _torch
 
 WORKS_LOSS = 0.3
 ROAD_LOSS = 0.3  # each kind of road
 TYPE_LOSS = 0.3  # the road type
+USERS_LOSS = 0.3  # each kind of road user: its presence and size over the columns
+USERS_POS_WEIGHT_MAX = 10.0  # the most a presence of a rare kind and column is lifted (brain_train.users_pos_weight)
+USERS_MIN_HEIGHT = 1e-3  # the size's floor before its log: a present one has at least this height over the frame's
 SPEED_SIGMA_KPH = 2.0  # the width of the bell around his speed (speed_targets)
 POOLS = ('mean', 'grid')
 GRID_CHANNELS = 32
 GRID_CELLS = 8 * 5  # the encoder's map of a 256 x 144 frame
 BACKBONE_CHANNELS = 576
 # Out of the car's network.
-TRAINING_ONLY = ('works_head.', 'road_head.', 'type_head.')
+TRAINING_ONLY = ('works_head.', 'road_head.', 'type_head.', 'users_head.')
+# users_head's layout: (presence, size) x kinds x columns.
+USER_KINDS = _USER_KINDS
+USER_COLUMNS = _USER_COLUMNS
+USER_OUTPUTS = 2 * len(USER_KINDS) * USER_COLUMNS
 
 
 def training_table() -> list[float]:
@@ -100,14 +125,15 @@ def _table(kph) -> list[float]:
 
 def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool = True, ahead: bool = False,
                     pretrained: bool = True, features: int = FEATURES, hidden: int = HIDDEN, kph=None, road_kinds: int = 0,
-                    road_types: int = 0):
+                    road_types: int = 0, users: bool = False):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
     forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
     training) also next logits (B, T, classes + 1) and metres (B, T); with road=True asked of
     forward, then the logits of the kinds of road (B, T, road_kinds), or None for a network built without them; with
-    types=True, last, the logits of the road type (B, T, road_types), or None for a network built without them
-    (outputs reads them by name).
+    types=True, the logits of the road type (B, T, road_types), or None for a network built without them; with users=True,
+    last, users_head's (B, T, 2, kinds, columns): presence logits ([:, :, 0]) and log sizes ([:, :, 1]) of the road
+    users, or None for a network built without it (outputs reads them by name).
     kph: the km/h of each class, in order (a list, or the class_kph buffer of a checkpoint): the heads have as many classes,
     and a number in force falls on the class within half the table's step of it. None: the table of today's training."""
     torch = _torch()
@@ -143,6 +169,7 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             self.works_head = nn.Linear(hidden, 1) if works else None
             self.road_head = nn.Linear(hidden, road_kinds) if road_kinds else None
             self.type_head = nn.Linear(hidden, road_types) if road_types else None
+            self.users_head = nn.Linear(hidden, USER_OUTPUTS) if users else None
             self.ahead = ahead
             if ahead:
                 self.next_head = nn.Linear(hidden, classes + 1)
@@ -181,7 +208,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
                 return extra_input.new_zeros(extra_input.shape[:-1])
             return extra_input[..., distance_at]
 
-        def forward(self, images, extra_input, state=None, ahead: bool = False, road: bool = False, types: bool = False):
+        def forward(self, images, extra_input, state=None, ahead: bool = False, road: bool = False, types: bool = False,
+                    users: bool = False):
             b, t = images.shape[:2]
             extra_input = extra_input.to(images.dtype)
             x = torch.cat([self.encode(images.flatten(0, 1)).view(b, t, -1), extra_input], dim=-1)
@@ -198,13 +226,16 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
                 found += (None if self.road_head is None else self.road_head(out),)
             if types:
                 found += (None if self.type_head is None else self.type_head(out),)
+            if users:
+                found += (None if self.users_head is None else
+                          self.users_head(out).view(b, t, 2, len(USER_KINDS), USER_COLUMNS),)
             return found
 
     return BrainNet()
 
 
-def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool = False) -> dict:
-    """What forward gave, asked so, by name: speed, works, state, and next, metres, road, types where asked."""
+def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool = False, users: bool = False) -> dict:
+    """What forward gave, asked so, by name: speed, works, state, and next, metres, road, types, users where asked."""
     found = dict(zip(('speed', 'works', 'state'), said[:3]))
     rest = list(said[3:])
     if ahead:
@@ -213,6 +244,8 @@ def outputs(said: tuple, *, ahead: bool = False, road: bool = False, types: bool
         found['road'] = rest.pop(0)
     if types:
         found['types'] = rest.pop(0)
+    if users:
+        found['users'] = rest.pop(0)
     return found
 
 
@@ -229,13 +262,18 @@ def speed_targets(speed, kph=None, sigma_kph: float = SPEED_SIGMA_KPH):
 
 
 def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
-               frames: int | None = None, kph=None, road: tuple | None = None, types: tuple | None = None):
+               frames: int | None = None, kph=None, road: tuple | None = None, types: tuple | None = None,
+               users: tuple | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
     A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
     The speed's answer is speed_targets' bell over the table kph (the network's class_kph; None: today's training's).
     frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one.
     road: (road logits, road answers, road_weight), (B, T, kinds), of a network with the kinds of road: ROAD_LOSS a kind.
-    types: (type logits (B, T, types), the type's class (B, T), -1 none, type_weight), of a network with the road type."""
+    types: (type logits (B, T, types), the type's class (B, T), -1 none, type_weight), of a network with the road type.
+    users: (users_head's (B, T, 2, kinds, columns), presence, height over the frame's, weight, each (B, T, kinds, columns),
+    pos_weight (kinds, columns) or None), of a network with the road users: USERS_LOSS a kind, the presence's binary cross
+    entropy over its answered cells and the log size's smooth L1 over those with one there; with frames, each kind is
+    divided by frames x columns, so that a frame with every column answered weighs as a frame of a kind of road."""
     torch = _torch()
     from torch.nn import functional
 
@@ -257,10 +295,24 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
         type_logits, answers, type_weight = types
         errors = functional.cross_entropy(type_logits.flatten(0, 1), answers.flatten().clamp_min(0), reduction='none')
         total = total + TYPE_LOSS * mean(errors, type_weight.flatten())
+    if users is not None and users[0] is not None:
+        said, presence, height, user_weight, pos_weight = users
+        columns = said.shape[-1]
+        found = functional.binary_cross_entropy_with_logits(said[:, :, 0], presence, pos_weight=pos_weight,
+                                                            reduction='none')
+        there = user_weight * (presence > 0).to(user_weight.dtype)
+        size = functional.smooth_l1_loss(said[:, :, 1], height.clamp_min(USERS_MIN_HEIGHT).log(), reduction='none')
+
+        def cells(errors, weight):
+            return (errors * weight).sum() / ((frames * columns) if frames else weight.sum().clamp_min(1))
+
+        for kind in range(said.shape[3]):
+            total = total + USERS_LOSS * (cells(found[..., kind, :], user_weight[..., kind, :])
+                                          + cells(size[..., kind, :], there[..., kind, :]))
     return total
 
 
 def car_weights(model) -> dict:
-    """The weights that go to the car: all but works_head, road_head and type_head (the heads of the limit ahead, of a
-    brain that has them, go too)."""
+    """The weights that go to the car: all but works_head, road_head, type_head and users_head (the heads of the limit
+    ahead, of a brain that has them, go too)."""
     return {name: value for name, value in model.state_dict().items() if not name.startswith(TRAINING_ONLY)}

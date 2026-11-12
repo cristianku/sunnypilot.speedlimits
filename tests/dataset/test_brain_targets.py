@@ -633,6 +633,42 @@ def test_with_the_road_types_only_the_seconds_with_one_answer_and_a_person_s_typ
     assert (plain['road_type'] == drive['road_type']).all()
 
 
+def test_a_drive_nobody_read_for_road_users_answers_nothing_and_never_nobody_there(tmp_path, monkeypatch):
+    """No derived/road_users of the drive: every second, kind and column has weight 0 (unknown), never a presence of 0
+    with a weight (\"nobody there\"); answers that exist are dropped where the frame is unusable or, with the road types,
+    where the second has no type, like the other heads' answers."""
+    import numpy as np
+    from nnslr_tools.usernet import KINDS
+    from nnslr_tools import road_users
+    targets = _targets()
+    write_drive(tmp_path, ROUTE, [(0, i) for i in range(40)])
+    label_db(tmp_path, works=[(ROUTE, 5 * NS, 15 * NS)])
+    road_type_lines(tmp_path, ROUTE, ['town'] * 20 + [None] * 10 + ['motorway'] * 10)
+    merged = {'frames': encoded(40, missing=(60,)), 'series': {'v_ego': [[3 * NS, 77.0]]}, 'meta': {}, 'span': [0, 40 * NS]}
+    split = {'cells': {}, 'partitions': {}, 'frame_keys': {}}
+    labels = targets.read_labels(tmp_path)[ROUTE]
+    drive = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True)
+    assert drive['users_weight'].shape == (40, len(KINDS), road_users.COLUMNS)
+    assert not drive['users_weight'].any() and not drive['users'].any()
+    assert drive['users_reviewed'] is False and drive['users_proposed'] is None
+    found = targets.summary([drive])
+    assert found['users']['drives'] == 0 and found['users']['seconds'] == {kind: 0 for kind in KINDS}
+
+    def everywhere(root, route, frames):
+        shape = (len(frames), len(KINDS), road_users.COLUMNS)
+        return {'presence': np.zeros(shape, np.float32), 'height': np.zeros(shape, np.float32),
+                'weight': np.ones(shape, np.float32), 'read': np.ones(len(frames), bool), 'reviewed': True,
+                'confirmed': 0, 'proposed': 0}
+    monkeypatch.setattr(targets, 'users_answers', everywhere)
+    typed = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False, types=True)
+    assert typed['users_weight'][5].all() and not typed['users_weight'][3].any() and not typed['users_weight'][21].any()
+    plain = targets.drive_targets(tmp_path, ROUTE, labels, merged, split, inputs=False)
+    assert plain['users_weight'][21].all() and not plain['users_weight'][3].any()
+    counted = targets.summary([plain])['users']
+    assert counted['drives'] == 1 and counted['reviewed_drives'] == 1 and counted['seconds']['vehicle'] == 39
+    assert 'Road users: answers on 1 drives' in targets.users_counts_text(counted)
+
+
 def test_a_drive_the_map_was_never_asked_about_has_no_road_type(tmp_path):
     targets = _targets()
     write_drive(tmp_path, ROUTE, [(0, i) for i in range(10)])

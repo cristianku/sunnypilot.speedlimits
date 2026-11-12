@@ -64,7 +64,9 @@ def brain_script(checkout):
                       'echo "road types: $NNSLR_BRAIN_TYPES"\n'
                       'echo "driver: ${NNSLR_BRAIN_DRIVER-unset}"\n'
                       'echo "init=${NNSLR_BRAIN_INIT_FROM:-fresh}"\n'
-                      'echo "signs: ${NNSLR_BRAIN_CUTTER-unset} ${NNSLR_BRAIN_CLASSIFIER-unset} ${NNSLR_BRAIN_DECIDER-unset}"\n')
+                      'echo "signs: ${NNSLR_BRAIN_CUTTER-unset} ${NNSLR_BRAIN_CLASSIFIER-unset} ${NNSLR_BRAIN_DECIDER-unset}"\n'
+                      'echo "users: ${NNSLR_BRAIN_USERS-unset}"\n'
+                      'echo "routes from: ${NNSLR_BRAIN_ROUTES_FROM-unset}"\n')
     script.chmod(0o755)
     return script
 
@@ -104,6 +106,24 @@ def test_the_progress_follows_the_steps_and_the_seeds_not_the_dry_run():
     assert [(point['epoch'], point['val_error_kph'], point['val_accuracy']) for point in points] == [
         (1, 11.32, 0.412), (2, 9.75, 0.5012)]
     assert points[0]['train_loss'] == 2.5 and points[0]['seconds'] == 4
+
+
+def test_the_road_users_are_a_step_of_a_log_of_seven_and_of_none_before():
+    """Since 12 Nov 2026 the script has seven steps, the road users the fourth; off ("road users:   off"), and in a log
+    of six of before, there is no such step."""
+    seven = ('== Brain ==\nrun:          r\nseeds:        0\nroad users:   on\n'
+             '== 1/7 Check the labels, the split and the training (CPU-only) ==\n== 2/7 Explicit CUDA smoke test ==\n'
+             '== 3/7 Read the signs of the drives as the car does today ==\n== 4/7 Read the road users ==\n')
+    result = progress('train_brain', 'running', seven)
+    assert [(step['key'], step['state']) for step in result['steps']] == [
+        ('checks', 'done'), ('signs', 'done'), ('users', 'current'), ('brain_s0', 'todo')]
+    result = progress('train_brain', 'running', seven + '== 5/7 Train seed 0 ==\n'
+                      'brain_s0 epoch 1/40 train_loss 2.5000 val_error_kph 11.32 val_accuracy 0.4120 on 357 frames '
+                      '(always 120: 31.2, the sign: 12.4), says [80, 120] 4s\n')
+    assert [(step['key'], step['state']) for step in result['steps']] == [
+        ('checks', 'done'), ('signs', 'done'), ('users', 'done'), ('brain_s0', 'current')]
+    off = seven.replace('road users:   on', 'road users:   off') + 'skip: road users off (NNSLR_BRAIN_USERS=0)\n'
+    assert [step['key'] for step in progress('train_brain', 'running', off)['steps']] == ['checks', 'signs', 'brain_s0']
 
 
 def test_the_seeds_have_a_curve_each_and_a_seed_without_a_measure_still_counts():
@@ -242,6 +262,54 @@ def test_what_it_learns_reaches_the_script_and_is_shown_on_the_job(root, checkou
     assert _settings_of(log, 'train_brain') == ['40 epochs']
 
 
+def kept_drives(root, name, routes, *, seed=None, at=None):
+    """An earlier brain run that kept its drives (brain_train.ROUTES): runs/NAME/routes.json, or with seed a seed's
+    runs/NAME-sN/routes.json alone; at, its time (seconds)."""
+    folder = root / 'runs' / (name if seed is None else f'{name}-s{seed}')
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'routes.json').write_text(json.dumps(routes))
+    if at is not None:
+        import os
+        os.utime(folder / 'routes.json', (at, at))
+
+
+def test_the_road_users_and_the_drives_of_an_earlier_brain_reach_the_script(root, checkout, monkeypatch):
+    """Road users on unless turned off (NNSLR_BRAIN_USERS); Drives every dashcam drive unless an earlier brain run that
+    kept its drives is chosen (NNSLR_BRAIN_ROUTES_FROM), its seeds counted as that run, newest first; the job says
+    "no road users" when they are off."""
+    panel = Panel(root, repo=checkout)
+    brain_script(checkout)
+    scanned(root)
+    monkeypatch.setattr(panel, 'activities', lambda: [])
+    assert panel.brain_route_runs() == []
+    kept_drives(root, 'b1', ['00000001--abcdef0123', '00000002--abcdef0123'], at=1000)
+    kept_drives(root, 'b1', ['00000001--abcdef0123'], seed=0, at=1001)
+    kept_drives(root, 'b2', ['00000003--abcdef0123'], seed=1, at=2000)
+    # Not a brain run that kept its drives: no routes.json, an empty one, a broken one.
+    (root / 'runs' / 'old-brain-s0').mkdir(parents=True)
+    kept_drives(root, 'empty', [])
+    (root / 'runs' / 'broken').mkdir()
+    (root / 'runs' / 'broken' / 'routes.json').write_text('{')
+    assert [(run['run'], run['drives']) for run in panel.brain_route_runs()] == [('b2', 1), ('b1', 2)]
+
+    def told(options):
+        job = panel.start('train_brain', options)
+        finished(panel, job['id'])
+        time.sleep(1.1)  # a job's log is named by its second
+        return {line for line in full_log(panel, job['id']).splitlines() if line.startswith(('users:', 'routes from:'))}
+
+    assert told({}) == {'users: 1', 'routes from: unset'}
+    assert told({'users': 'off', 'routes_from': 'b2'}) == {'users: 0', 'routes from: b2'}
+    assert told({'users': 'on', 'routes_from': ''}) == {'users: 1', 'routes from: unset'}
+    for name in ('old-brain', 'empty', 'broken', 'b1-s0'):
+        with pytest.raises(PanelError) as refused:
+            panel.start('train_brain', {'routes_from': name})
+        assert refused.value.reason == 'bad_option', name
+    log = root / 'brain.log'
+    log.write_text('== scripts/run_brain.sh r\nrun:          r\nsettings:     --epochs 40 --pool grid --no-users\n')
+    assert _settings_of(log, 'train_brain') == ['40 epochs', 'no road users']
+
+
 def test_the_drivers_inputs_are_refused_and_a_page_of_before_still_starts(root, checkout, monkeypatch):
     """No brain takes the pedals nor the car's speed since 10 Nov 2026: "on" is refused before any job, alone or in a
     pipeline; "off", what a page loaded before sends, starts as usual, and the script is not told about them."""
@@ -262,7 +330,8 @@ def test_the_drivers_inputs_are_refused_and_a_page_of_before_still_starts(root, 
 
 
 @pytest.mark.parametrize('options', [{'works': 'x'}, {'road': 'no'}, {'driver': 'maybe'}, {'pool': 'max'}, {'works': ['on']},
-                                     {'road': ['off']}, {'pool': {'a': 1}}])
+                                     {'road': ['off']}, {'pool': {'a': 1}}, {'users': 'maybe'}, {'users': True},
+                                     {'routes_from': 'no-such-run'}, {'routes_from': '../runs'}, {'routes_from': 3}])
 def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, options):
     panel = Panel(root, repo=checkout)
     brain_script(checkout)
@@ -274,7 +343,8 @@ def test_bad_choices_are_refused_before_it_starts(root, checkout, monkeypatch, o
     assert panel.jobs() == []
 
 
-@pytest.mark.parametrize('key,value', [('works', 'off'), ('road', 'off'), ('driver', 'off'), ('pool', 'mean')])
+@pytest.mark.parametrize('key,value', [('works', 'off'), ('road', 'off'), ('driver', 'off'), ('pool', 'mean'),
+                                       ('users', 'off'), ('routes_from', 'b1')])
 def test_its_choices_are_refused_on_another_training(root, checkout, key, value):
     with pytest.raises(PanelError) as refused:
         Panel(root, repo=checkout).start('train_decider', {key: value})
@@ -439,7 +509,7 @@ def test_the_labels_say_the_drives_to_read_again_and_a_problem_is_words(root, ch
     def broken(*args, **kwargs):
         raise OSError('the sunnypilot clone is missing')
     monkeypatch.setattr(brain_targets, 'dataset', broken)
-    assert panel.brain_labels() == {'problem': 'the sunnypilot clone is missing'}
+    assert panel.brain_labels() == {'problem': 'the sunnypilot clone is missing', 'same_drives': []}
 
 
 def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypatch):
@@ -464,6 +534,17 @@ def test_the_labels_and_the_choices_go_through_the_site(root, checkout, monkeypa
         status, _, data = server.request('GET', '/api/panel/brain-labels')
         assert status == 200 and json_of(data)['to_read'] == 0
         assert json_of(data)['training'] == {'drives': 1, 'hours': 0.01, 'sunnypilot_on': 0}
+        # The road users and the drives of an earlier brain go through the site (review.py's list of options).
+        time.sleep(1.1)  # a job's log is named by its second
+        kept_drives(root, 'b1', ['00000001--abcdef0123'])
+        assert [run['run'] for run in json_of(server.request('GET', '/api/panel/brain-labels')[2])['same_drives']] == ['b1']
+        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'users': 'off', 'routes_from': 'b1'})
+        assert status == 200, data
+        job = json_of(data)['id']
+        finished(server.app.panel, job)
+        assert {'users: 0', 'routes from: b1'} <= set(full_log(server.app.panel, job).splitlines())
+        status, _, data = server.request('POST', '/api/panel/run/train_brain', body={'routes_from': 'nope'})
+        assert status == 400 and json_of(data)['error'] == 'bad_option'
     finally:
         server.close()
 

@@ -82,6 +82,10 @@ export interface ActionOptions {
   types?: 'on' | 'off';
   pool?: 'mean' | 'grid';
   seeds?: 'all' | 'one';
+  /** The brain's road users head (train_brain, on when not given; off: --no-users), and the drives of an earlier brain
+   * run it takes instead of every dashcam drive (BrainLabels.same_drives). */
+  users?: 'on' | 'off';
+  routes_from?: string;
   /** The networks that read the brain's signs (train_brain, sign-networks.ts): ids of Models, a SignNet the comma runs,
    * a classifier with “not a sign”, an applicability network; the server takes the one in use for one not given. */
   sign_cutter?: string;
@@ -1744,6 +1748,14 @@ export interface BrainLabels {
   to_read?: number;
   /** Missing from a server older than 9 Nov 2026. */
   training?: BrainTraining;
+  /** The earlier brain runs whose drives the next one can take (Drives); missing from a server older than 12 Nov 2026. */
+  same_drives?: BrainRouteRun[];
+}
+/** An earlier brain run that kept its drives (panel.brain_route_runs): its NAME, how many drives, when (seconds). */
+export interface BrainRouteRun {
+  run: string;
+  drives: number;
+  at: number;
 }
 /** The drives the brain learns from (brain_targets.training_counts): every dashcam drive and their hours from the start of
  * their logs to the end; sunnypilot_on: the drives read with sunnypilot on, never learnt. */

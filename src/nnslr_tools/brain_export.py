@@ -14,7 +14,7 @@ and output.road_types as well (below), so its file and contract are no longer th
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
-works_head and road_head stay out (brain_net.car_weights). A brain that learnt the road type also gives road_type (1,
+works_head, road_head and users_head stay out (brain_net.car_weights). A brain that learnt the road type also gives road_type (1,
 types), the logits of output.road_types: the car only shows it on the screen, the speed is the same with or without it. What comes out of the export is checked twice: against PyTorch
 with onnxruntime on random inputs, and along a whole real drive against what training measured (brain_train.predict), the
 memory fed back as on the car. The contract keeps the hash of the car's file of the inputs: the car refuses a network made with another.
@@ -44,7 +44,7 @@ TIE = 1e-3
 
 
 def load_brain(checkpoint: Path):
-    """(the network on the CPU in eval mode, without works_head and road_head, with type_head when it learnt the road
+    """(the network on the CPU in eval mode, without works_head, road_head and users_head, with type_head when it learnt the road
     type; what the checkpoint says of itself). The network has the table of its checkpoint (class_kph): a brain of 5 km/h
     classes stays one. A checkpoint with the limit ahead (its 'ahead': the brains of 7 to 11 Nov 2026) keeps those heads."""
     torch = _torch()

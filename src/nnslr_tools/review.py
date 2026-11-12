@@ -72,7 +72,7 @@ PUBLIC_AUTH_ROUTES = ('/api/auth/login', '/api/auth/setup/check', '/api/auth/set
 AUTH_ROUTES = PUBLIC_AUTH_ROUTES + ('/api/auth/logout', '/api/auth/logout-all', '/api/auth/password')
 # The pages a browser opens: without a session they show the sign-in page instead.
 PAGE_RE = re.compile(r'/(index\.html|routes|prepare|dataset|roads|train|evaluate|models|drive|regression|publish|reviewers|reviews|panoramica|prepara|allena|pannello|stato|account|'
-                     r'settings|review|drive-review|speed-review|sign-distance|route/[^/]+(/(index\.html)?)?)?')
+                     r'settings|review|drive-review|speed-review|sign-distance|crossings|route/[^/]+(/(index\.html)?)?)?')
 # [site-login] - END
 # [sign-review-retired] - START
 # A drive Speed review opens (its addresses take only these): where the page of Sign review of a route leads.
@@ -990,6 +990,12 @@ def make_handler(app: ReviewApp):
                 self._speed_review_get(path)
                 return
             # [speed-review] - END
+            # [road-users] - START
+            # The crossings the rule proposed and a person's verdicts (nnslr_tools.road_users): the drives, a drive.
+            if path.startswith('/api/road-users/'):
+                self._road_users_get(path)
+                return
+            # [road-users] - END
             # [regression] - START
             # Models › Regression (nnslr_tools.regression): the drives and the models, a drive's curves.
             if path.startswith('/api/regression/'):
@@ -1843,6 +1849,58 @@ def make_handler(app: ReviewApp):
                 self._problem(exc.status, exc.reason, exc.message, True)
         # [simulation] - END
 
+        # [road-users] - START
+        def _road_users_get(self, path):
+            """The vehicles the crossing rule proposed, for a person's review (nnslr_tools.road_users), reading only:
+            /api/road-users/drives (each drive with proposals: proposed, reviewed, confirmed crossings) and
+            /api/road-users/drives/<route> (its events with their verdicts and the drive's revision; each event's start,
+            end and boxes with their segment, frame and seconds in the drive's video, the boxes in 1344 x 760 pixels)."""
+            from nnslr_tools import road_users
+            if path == '/api/road-users/drives':
+                self._json(200, {'ok': True, 'drives': road_users.drives_list(app.root)})
+                return
+            match = re.fullmatch(r'/api/road-users/drives/([0-9a-f]{8}--[0-9a-f]{10})', path)
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            try:
+                self._json(200, road_users.drive_view(app.root, match.group(1)))
+            except road_users.RoadUsersError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+
+        def _road_users_post(self, path):
+            """A person's verdict on a proposed crossing (/api/road-users/drives/<route>/verdicts: {"event", "verdict":
+            "crossing", "not_crossing" or "clear", "base_revision"}): same origin, JSON, a person signed in on the site
+            (never the access token alone: an agent never gives a verdict) and a panel that is not read-only; a
+            base_revision the drive has passed is refused (409)."""
+            from nnslr_tools import road_users
+            if not self._same_origin():
+                self._problem(403, 'cross_origin', 'Request from another origin refused.', True)
+                return
+            content_type = self.headers.get('Content-Type', '')
+            if content_type.split(';')[0].strip().lower() != 'application/json':
+                self._problem(415, 'unsupported_media_type', 'Only JSON data is accepted.', True)
+                return
+            match = re.fullmatch(r'/api/road-users/drives/([0-9a-f]{8}--[0-9a-f]{10})/verdicts', path)
+            self._require_person()
+            if not app.panel.actions_enabled:
+                raise PanelError(403, 'actions_disabled', 'The panel is read-only on this server.')
+            if match is None:
+                self._problem(404, 'not_found', 'Not found.', True)
+                return
+            body = self._read_json()
+            who, _via = self._who()
+            reviewer = who or 'local'
+            try:
+                answer = road_users.save_verdict(app.root, match.group(1), body, reviewer)
+            except road_users.RoadUsersError as exc:
+                self._problem(exc.status, exc.reason, exc.message, True)
+                return
+            print(f'Road users: {match.group(1)} {answer["event"]} {answer["verdict"]["verdict"] if answer["verdict"] else "cleared"} '
+                  f'revision {answer["revision"]} ({terminal_text(reviewer)})', flush=True)
+            self._json(200, answer)
+        # [road-users] - END
+
         def _speed_review_post(self, path):
             """A person's block on a drive (/blocks: {"start_ns", "end_ns", "kph", "note", "base_revision"}, kph null
             to leave the moments out, "from_start_ns" to move the block that started there to these ends; {"remove":
@@ -1994,6 +2052,11 @@ def make_handler(app: ReviewApp):
                 self._speed_review_post(path)
                 return
             # [speed-review] - END
+            # [road-users] - START
+            if path.startswith('/api/road-users/'):
+                self._road_users_post(path)
+                return
+            # [road-users] - END
             # [regression] - START
             if path.startswith('/api/regression/'):
                 self._regression_post(path)
@@ -2037,15 +2100,16 @@ def make_handler(app: ReviewApp):
                     # cutter's size and signs ({"size", "families"}), the SignNet sent to the car ({"signnet": run}, {"rebuild": "on"}),
                     # the classifier's or the cutter's Mapillary signs ({"mapillary": "on", "region": "europe",
                     # "share": "5"}), the classifier that reads the signs for the scene network and its board input
-                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool", "seeds"}; "driver"
-                    # only "off", from a page of before) and the networks that read its signs ({"sign_cutter",
-                    # "sign_classifier", "sign_decider"}), the models of a regression ({"openpilot", "brains"}), the route, provider,
+                    # ({"classifier", "boards"}), what the brain learns ({"works", "road", "types", "pool", "seeds",
+                    # "users"}; "driver" only "off", from a page of before), the drives it takes ({"routes_from": an
+                    # earlier brain run}) and the networks that read its signs ({"sign_cutter", "sign_classifier",
+                    # "sign_decider"}), the models of a regression ({"openpilot", "brains"}), the route, provider,
                     # save and limit of an AI action, the drive and the networks of a replay ({"route", "set",
                     # "certified"}), all checked by Panel.start.
                     options = {key: body[key] for key in ('start', 'run', 'size', 'families', 'proposer', 'package',
                                                           'signnet', 'mapillary', 'region', 'share', 'cutter',
                                                           'classifier', 'boards', 'works', 'road', 'types', 'driver', 'pool',
-                                                          'seeds', 'rebuild',
+                                                          'seeds', 'users', 'routes_from', 'rebuild',
                                                           'openpilot',
                                                           'brains', 'sign_cutter', 'sign_classifier', 'sign_decider')
                                if isinstance(body, dict) and isinstance(body.get(key), str)}

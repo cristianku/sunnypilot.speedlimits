@@ -54,7 +54,7 @@ def test_the_limit_ahead_has_none_after_the_last_speed(tmp_path, monkeypatch):
     assert shapes['speed'] == [1, 200] and shapes['next'] == [1, 201] and shapes['metres'] == [1, 1]
 
 
-def saved_brain(path, kph=None, ahead=True, road_kinds=()):
+def saved_brain(path, kph=None, ahead=True, road_kinds=(), users=False):
     """A checkpoint as brain_train writes it, works_head (and road_head with road_kinds) and its table of the speeds among
     the weights."""
     import torch
@@ -62,7 +62,7 @@ def saved_brain(path, kph=None, ahead=True, road_kinds=()):
     from nnslr_tools.brain_net import build_brain_net
     torch.manual_seed(0)
     model = build_brain_net(GROUPS, pool='grid', works=True, ahead=ahead, pretrained=False, kph=kph,
-                            road_kinds=len(road_kinds))
+                            road_kinds=len(road_kinds), users=users)
     torch.save({'weights': model.state_dict(), 'epoch': 0, 'groups': GROUPS, 'pool': 'grid', 'works': True,
                 'road_kinds': list(road_kinds), 'features': 128, 'hidden': 128, 'ahead': ahead, 'rate_hz': 4.0,
                 'picture': 'brain', 'split': 'x', 'reader': None, 'inputs_sha256': inputs_sha256()}, path)
@@ -88,6 +88,30 @@ def test_a_brain_that_learnt_the_kinds_of_road_goes_to_the_car_as_one_that_did_n
     assert all(torch.equal(weights[name], kept[name]) for name in weights)
     contracts = []
     for path in (with_road, without):
+        brain_export.export_brain_onnx(path, path.parent / 'brain.onnx')
+        contract = json.loads((path.parent / 'brain.onnx.contract.json').read_text())
+        contracts.append((contract['inputs'], contract['outputs'], contract['output']))
+    assert contracts[0] == contracts[1]
+
+
+def test_a_brain_that_learnt_the_road_users_goes_to_the_car_as_one_that_did_not(tmp_path):
+    # users_head is only in training (brain_net.TRAINING_ONLY): the car's network, weights and contract are the same.
+    import torch
+
+    from nnslr_tools.brain_net import car_weights
+    with_users, without = tmp_path / 'users' / 'brain-last.pt', tmp_path / 'plain' / 'brain-last.pt'
+    with_users.parent.mkdir()
+    without.parent.mkdir()
+    trained = saved_brain(with_users, users=True)
+    assert 'users_head.weight' in torch.load(with_users, weights_only=False)['weights']
+    saved_brain(without)
+    model, _saved = brain_export.load_brain(with_users)
+    assert model.users_head is None
+    weights, kept = car_weights(model), car_weights(trained)
+    assert set(weights) == set(kept) and not [name for name in kept if name.startswith('users_head')]
+    assert all(torch.equal(weights[name], kept[name]) for name in weights)
+    contracts = []
+    for path in (with_users, without):
         brain_export.export_brain_onnx(path, path.parent / 'brain.onnx')
         contract = json.loads((path.parent / 'brain.onnx.contract.json').read_text())
         contracts.append((contract['inputs'], contract['outputs'], contract['output']))

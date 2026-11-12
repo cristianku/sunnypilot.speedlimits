@@ -80,17 +80,24 @@ DECIDER_STEPS = (
     ('experiment_b_crop_geom', 'Crop, position and speed', 32),
     ('experiment_b_full', 'Crop, position and the scene', 32),
 )
-# scripts/run_brain.sh: the signs of every drive it learns from as the car reads them today, then its three seeds (their
-# epoch lines name them: brain_s0, brain_s1, brain_s2).
+# scripts/run_brain.sh: the signs of every drive it learns from as the car reads them today, the road users (since 12 Nov
+# 2026: a log of seven steps, "== 4/7 Read the road users =="; the logs of before have six, without it), then its three
+# seeds (their epoch lines name them: brain_s0, brain_s1, brain_s2).
 BRAIN_STEPS = (
     ('checks', 'Checks and GPU smoke test', 6),
     ('signs', 'Read the signs of the drives', 22),
+    ('users', 'Read the road users', 10),
     ('brain_s0', 'Seed 0', 24),
     ('brain_s1', 'Seed 1', 24),
     ('brain_s2', 'Seed 2', 24),
 )
 # Its seeds, from its header ("seeds:        0"): seed 0 alone (Train › Brain's Seeds) has no steps for the others.
 BRAIN_SEEDS = re.compile(r'^seeds:\s+([0-2](?: [0-2])*)\s*$', re.M)
+# Its road users, from its header ("road users:   on"): off, or a log of before 12 Nov 2026 without the line, has no
+# step for them.
+BRAIN_USERS_ON = re.compile(r'^road users:\s+on\s*$', re.M)
+# The numbered steps of its log of before 12 Nov 2026 (six, no road users): read as well as those of today (seven).
+BRAIN_PIPELINE_SIX = {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}
 PREPARE_STEPS = (('link', 'Link the videos', 5), ('frames', 'Extract the frames and propose the signs', 95))
 # scripts/run_regression.sh: each step goes drive by drive ("regression item openpilot 2/7 <route>"), the driving models
 # also segment by segment ("SEGMENT 3/33 <folder>", evaluation/route_speed.py of openpilot.distill).
@@ -184,7 +191,8 @@ CUTTER_TITLES = ((re.compile(r'Validate the training'), 'checks'), (re.compile(r
 DECIDER_PIPELINE = {1: 'checks', 2: 'checks', 3: 'experiment_b_crop', 4: 'experiment_b_crop_geom', 5: 'experiment_b_full'}
 SUBSTEPS = {'train_classifier': (7, CLASSIFIER_PIPELINE), 'train_cutter': (None, CUTTER_PIPELINE),
             'train_decider': (5, DECIDER_PIPELINE),
-            'train_brain': (6, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'brain_s0', 5: 'brain_s1', 6: 'brain_s2'}),
+            'train_brain': (7, {1: 'checks', 2: 'checks', 3: 'signs', 4: 'users', 5: 'brain_s0', 6: 'brain_s1',
+                                7: 'brain_s2'}),
             'train_users': (3, {1: 'checks', 2: 'checks', 3: 'usernet'}),
             'regression': (3, {1: 'openpilot', 2: 'signs', 3: 'brains'}),
             'simulate': (2, {1: 'networks', 2: 'replay'}),
@@ -377,6 +385,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
     if action == 'train_brain' and (seeds := BRAIN_SEEDS.search(text)):
         trained = {'brain_s' + seed for seed in seeds.group(1).split()}
         steps = tuple(step for step in steps if not step[0].startswith('brain_s') or step[0] in trained)
+    if action == 'train_brain' and not BRAIN_USERS_ON.search(text):
+        steps = tuple(step for step in steps if step[0] != 'users')
     keys = [key for key, _, _ in steps]
     current = keys[0] if keys else ''
     done: set[str] = set()
@@ -429,7 +439,8 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
             if count is None:
                 step = next((step for pattern, step in TITLES.get(action, ()) if pattern.match(title)), None)
             else:
-                step = pipeline.get(number) if int(match.group(2)) == count else None
+                step = pipeline.get(number) if int(match.group(2)) == count else \
+                    BRAIN_PIPELINE_SIX.get(number) if action == 'train_brain' and int(match.group(2)) == 6 else None
             if step in keys:
                 current = step
                 substep = (number, title)

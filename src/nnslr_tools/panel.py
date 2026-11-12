@@ -102,6 +102,12 @@ USERNET_STAGES = ('bdd', 'drives')
 BRAIN_WORKS = {'on': '1', 'off': '0'}
 BRAIN_ROAD = {'on': '1', 'off': '0'}
 BRAIN_TYPES = {'on': '1', 'off': '0'}
+# Train › Brain's Road users (option B, #75, 12 Nov 2026): the brain also learns where the road users are and how big,
+# a head only the training has (brain_net.users_head; nnslr road-users reads them first); off: --no-users.
+BRAIN_USERS = {'on': '1', 'off': '0'}
+# Train › Brain's Drives: every dashcam drive (none given), or the drives of an earlier brain run, by its NAME (its
+# routes.json, in runs/NAME/ or in a seed's runs/NAME-sN/): two trainings on the same drives, compared fairly in Models.
+BRAIN_SEED_RUN = re.compile(r'(.+)-s[0-9]')
 BRAIN_POOLS = ('grid', 'mean')
 # Train › Brain's Seeds: the three (NAME-s0, -s1, -s2, to compare in Models) or seed 0 alone, a third of the time.
 BRAIN_SEEDS = {'all': '0 1 2', 'one': '0'}
@@ -205,7 +211,7 @@ BRAIN_SIGN_NETWORKS = {'sign_cutter': ('cutter', 'NNSLR_BRAIN_CUTTER'),
 QWEN_GPU_MB = 18 * 1024
 ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', 'share'), 'train_decider': ('start',),
                   'train_brain': ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'start', 'sign_cutter',
-                                  'sign_classifier', 'sign_decider'),
+                                  'sign_classifier', 'sign_decider', 'users', 'routes_from'),
                   'train_users': ('stage', 'start'),
                   'regression': ('openpilot', 'brains'),
                   'simulate': ('route', 'set', 'certified'),
@@ -338,6 +344,8 @@ def _settings_of(log: Path, action: str) -> list[str]:
         chips.append('no kinds of road')
     if '--no-road-types' in flags:
         chips.append('no road types')
+    if '--no-users' in flags:
+        chips.append('no road users')
     if '--driver' in flags:
         chips.append('driver’s inputs')
     elif '--no-driver' in flags:
@@ -1677,7 +1685,8 @@ class Panel:
         brain_targets.summary, with the drives the next training reads again first (to_read: not read by the networks in
         use as the car reads them, applicability included (sign_networks: every drive while those three are not exported
         yet), or without the brain's pictures) and
-        the names of the kinds of road (road_labels). Without the inputs, which it does not show: about 10 s over every
+        the names of the kinds of road (road_labels), and the earlier brain runs whose drives the next one can take
+        (same_drives: brain_route_runs). Without the inputs, which it does not show: about 10 s over every
         drive, asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
@@ -1695,8 +1704,8 @@ class Panel:
             labels = brain_targets.road_labels(self.root)
             training = brain_targets.training_counts(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
-            return {'problem': str(exc)}
-        return {**found, 'road_labels': labels, 'training': training,
+            return {'problem': str(exc), 'same_drives': self.brain_route_runs()}
+        return {**found, 'road_labels': labels, 'training': training, 'same_drives': self.brain_route_runs(),
                 'to_read': sum(folder is None or not row['reader_current'] or not row.get('pictures', True)
                                for row in found['drives'])}
 
@@ -2306,14 +2315,51 @@ class Panel:
             raise PanelError(400, 'bad_option', 'The brain no longer takes the driver’s inputs: with the car’s speed in, '
                                                 'it followed your speed. Reload the page.')
         works, road, types = options.get('works', 'on'), options.get('road', 'on'), options.get('types', 'on')
-        pool, seeds = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all')
-        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds)) or works not in BRAIN_WORKS \
-                or road not in BRAIN_ROAD or types not in BRAIN_TYPES or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS:
-            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road and the road types are on or off, the '
-                                                'picture mean or grid, the seeds all or one.')
-        return {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
-                'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
-                'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], **self._brain_sign_networks(options, check_only)}
+        pool, seeds, users = options.get('pool', BRAIN_POOLS[0]), options.get('seeds', 'all'), options.get('users', 'on')
+        if not all(isinstance(value, str) for value in (works, road, types, pool, seeds, users)) \
+                or works not in BRAIN_WORKS or road not in BRAIN_ROAD or types not in BRAIN_TYPES \
+                or pool not in BRAIN_POOLS or seeds not in BRAIN_SEEDS or users not in BRAIN_USERS:
+            raise PanelError(400, 'bad_option', 'Roadworks, the kinds of road, the road types and the road users are on '
+                                                'or off, the picture mean or grid, the seeds all or one.')
+        found = {'NNSLR_BRAIN_WORKS': BRAIN_WORKS[works], 'NNSLR_BRAIN_ROAD': BRAIN_ROAD[road],
+                 'NNSLR_BRAIN_TYPES': BRAIN_TYPES[types], 'NNSLR_BRAIN_POOL': pool,
+                 'NNSLR_BRAIN_SEEDS': BRAIN_SEEDS[seeds], 'NNSLR_BRAIN_USERS': BRAIN_USERS[users],
+                 **self._brain_sign_networks(options, check_only)}
+        routes_from = options.get('routes_from')
+        if routes_from not in (None, ''):
+            if not isinstance(routes_from, str) \
+                    or routes_from not in {run['run'] for run in self.brain_route_runs()}:
+                raise PanelError(400, 'bad_option', 'Same drives as an earlier brain: choose one of the list (a brain '
+                                                    'run that kept its drives, routes.json).')
+            found['NNSLR_BRAIN_ROUTES_FROM'] = routes_from
+        return found
+
+    def brain_route_runs(self) -> list[dict]:
+        """The earlier brain runs a training can take the drives of (Train › Brain's Drives, scripts/run_brain.sh's
+        NNSLR_BRAIN_ROUTES_FROM), newest first: one per run NAME, its seeds runs/NAME-s0, -s1, -s2 counted as that run,
+        each with a routes.json (brain_train.ROUTES, the drives it took; the brains before 12 Nov 2026 kept none and are
+        not here): {run: NAME, drives: how many, at: when its routes.json was written}."""
+        runs = self.root / 'runs'
+        found: dict[str, dict] = {}
+        if not runs.is_dir():
+            return []
+        for entry in runs.iterdir():
+            routes = entry / 'routes.json'
+            if not RUN_NAME.fullmatch(entry.name) or not routes.is_file():
+                continue
+            seed = BRAIN_SEED_RUN.fullmatch(entry.name)
+            name = seed.group(1) if seed else entry.name
+            try:
+                drives = json.loads(routes.read_text(encoding='utf-8'))
+                at = routes.stat().st_mtime
+            except (OSError, ValueError):
+                continue
+            if not isinstance(drives, list) or not drives:
+                continue
+            # The run's own routes.json first (the one scripts/run_brain.sh reads), else a seed's.
+            if name not in found or entry.name == name:
+                found[name] = {'run': name, 'drives': len(drives), 'at': at}
+        return sorted(found.values(), key=lambda run: run['at'], reverse=True)
 
     def _brain_sign_networks(self, options: dict, check_only: bool = False) -> dict:
         """The variables of the networks that read the brain's signs (BRAIN_SIGN_NETWORKS): a finished version of
@@ -2509,7 +2555,7 @@ class Panel:
             start_env.update(self._classifier_start((options or {}).get('start')))
         if action in NETWORK_STARTS:
             start_env.update(self._network_start(action, (options or {}).get('start')))
-        for key in ('works', 'road', 'types', 'driver', 'pool', 'seeds', *BRAIN_SIGN_NETWORKS):
+        for key in ('works', 'road', 'types', 'driver', 'pool', 'seeds', 'users', 'routes_from', *BRAIN_SIGN_NETWORKS):
             if (options or {}).get(key) is not None and action != 'train_brain':
                 raise PanelError(400, 'bad_option', 'Only "Train the brain" takes ' + key + '.')
         if action == 'train_brain':

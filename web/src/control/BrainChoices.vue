@@ -1,16 +1,19 @@
 <script setup lang="ts">
 // The choices of the brain's training (brain-choices.ts) in one short row, in Train › Brain above its flow (which follows
 // them) and in its step of Train › Pipeline: the three heads only the training has as switches that light up when on, the
-// picture's features as Mean or Grid, its seeds as Three or One.
+// picture's features as Mean or Grid, its seeds as Three or One, and its drives (every dashcam drive or those of an
+// earlier brain run, runs: BrainLabels.same_drives; no choice while there is none).
 import {POOL_OPTIONS, SEEDS_OPTIONS, type BrainChoice} from './brain-choices';
+import type {BrainRouteRun} from '../common/panel-types';
 import Segmented from './Segmented.vue';
 
-const props = defineProps<{choices: BrainChoice; id: string}>();
-type Switch = 'works' | 'road' | 'types';
+const props = defineProps<{choices: BrainChoice; id: string; runs?: readonly BrainRouteRun[]}>();
+type Switch = 'works' | 'road' | 'types' | 'users';
 const SWITCHES: {key: Switch; label: string; title: string}[] = [
   {key: 'works', label: 'Roadworks', title: 'The brain also learns the roadworks on the road, a head only the training has'},
   {key: 'road', label: 'Road conditions', title: 'The brain also learns the road conditions you mark in Speed review: narrow, country, gravel, potholes…'},
   {key: 'types', label: 'Road type (map)', title: 'The brain also learns the road type of the map (motorway, rural, town…), corrected in Speed review; only the seconds that have one count'},
+  {key: 'users', label: 'Road users', title: 'The brain also learns where the persons, the two-wheelers and the vehicles that cross our path are (the crossings you confirm), a head only the training has; read first with a detector on the GPU'},
 ];
 function flip(key: Switch): void {
   props.choices[key] = props.choices[key] === 'on' ? 'off' : 'on';
@@ -25,5 +28,10 @@ function flip(key: Switch): void {
       <Segmented v-model="choices.pool" :options="POOL_OPTIONS" label="The picture’s features: Grid keeps where things are, Mean only what is in it"/></span>
     <span class="bc-pick" :title="choices.seedsNote"><span>Seeds</span>
       <Segmented v-model="choices.seeds" :options="SEEDS_OPTIONS" label="The seeds: seed 0 alone, or three to compare in Models"/></span>
+    <label v-if="runs?.length" class="bc-pick" :title="choices.drivesNote"><span>Drives</span>
+      <select v-model="choices.routesFrom" :id="id + '-drives'">
+        <option value="">All dashcam drives</option>
+        <option v-for="run in runs" :key="run.run" :value="run.run">Same drives as {{ run.run }} ({{ run.drives }})</option>
+      </select></label>
   </div>
 </template>
