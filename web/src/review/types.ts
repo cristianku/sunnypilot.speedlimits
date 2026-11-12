@@ -177,6 +177,8 @@ export interface ServerReview {
   site_group: string | null;
   encounter_id: string | null;
   country?: string | null;
+  /** "Road users complete": every person and two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed. */
+  users_complete?: boolean;
 }
 
 /** GET /api/route/<id>/reviews */
@@ -249,6 +251,8 @@ export interface FrameEdit {
   encounter_id?: string | null | undefined;
   /** The country picked for the frame; undefined: the one its GPS gives (FrameRow.country_proposed). */
   country?: string | null | undefined;
+  /** "Road users complete" ticked on this frame (J): every road user from the size rule has its box. */
+  users_complete?: boolean | undefined;
   server_confirmed?: boolean | undefined;
   base?: ConfirmedCopy | null | undefined;
 }

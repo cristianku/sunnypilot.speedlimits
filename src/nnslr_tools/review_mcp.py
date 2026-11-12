@@ -125,12 +125,13 @@ class ReviewTools:
 
     def save_frame_review(self, route_id, frame_key, *, run_id, base_revision, reviewer, detections,
                           confirmed=True, site_group=None, encounter_id=None, override_human_review=False,
-                          country=None) -> dict:
+                          country=None, users_complete=False) -> dict:
         if self.read_only:
             raise ReviewRejected(403, 'read_only', 'Read-only MCP server: saving is disabled.')
         body = {'run_id': run_id, 'base_revision': base_revision, 'reviewer': reviewer, 'reviewer_kind': 'ai',
                 'confirmed': confirmed, 'detections': detections, 'site_group': site_group,
-                'encounter_id': encounter_id, 'override_human_review': override_human_review}
+                'encounter_id': encounter_id, 'override_human_review': override_human_review,
+                'users_complete': users_complete}
         # Omitted: the country the GPS position of the frame gives.
         if country is not None:
             body['country'] = country
@@ -412,6 +413,10 @@ def build_server(service, *, client: str, read_only: bool = False):
                 country: Annotated[str | None, Field(pattern='^[A-Z]{2}$', description=(
                     'ISO code of the country of the frame ("CH", "IT", "PL"); omit to keep country_proposed, '
                     'from the GPS position of the frame.'))] = None,
+                users_complete: Annotated[bool, Field(description=(
+                    '"Road users complete": true only when every road user from the size rule has its box on '
+                    'this frame (each person and two-wheeler at least 24 px tall, each vehicle at least 40 px '
+                    'tall, in pixels of the original image). Not carried by apply_previous_frame.'))] = False,
                 override_human_review: Annotated[bool, Field(description='Change a frame confirmed by a human: '
                                                                          'only when the owner asked for it.')] = False,
         ) -> SaveResult:
@@ -421,7 +426,8 @@ def build_server(service, *, client: str, read_only: bool = False):
             report was rebuilt: read it again."""
             return call(tools.save_frame_review, route_id, frame_key, run_id=run_id, base_revision=base_revision,
                         reviewer=reviewer, detections=detections, confirmed=confirmed, site_group=site_group,
-                        encounter_id=encounter_id, override_human_review=override_human_review, country=country)
+                        encounter_id=encounter_id, override_human_review=override_human_review, country=country,
+                        users_complete=users_complete)
 
     return server
 

@@ -39,9 +39,10 @@ const hours = computed<[string, string]>(() => {
   const [from = '', to = ''] = props.detection?.plate_hours?.split('-') ?? [];
   return props.detection?.plate_hours ? [from, to] : halfHours.value;
 });
-// O X U, G P R on a keyboard (use-keyboard.ts).
+// O X U, G P R E M and the road users W Y K on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
-const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M'};
+const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M',
+  road_user_person: 'W', road_user_bicycle: 'Y', road_user_car: 'K'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
 const fittingThis = computed(() => fitting.key === props.row.frame_key && fitting.index === state.selected);
 const canFitHere = computed(() => props.detection !== null && canFitLocally());
@@ -221,7 +222,8 @@ function booleanChanged(key: BooleanField, event: Event): void {
         <span class="kind-group-label">{{ group.label }}</span>
         <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
-                :data-kind="kind.id" @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
+                :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
+                @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
       </div>
       <!-- On or off, with any kind: the children's triangle with "SCHULE" is Children, painted. -->
       <div class="kind-group" role="group" aria-label="Where">

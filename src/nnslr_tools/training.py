@@ -268,7 +268,10 @@ def reviewed_frames(rows: list[dict[str, Any]], assignments: dict[str, Any]) -> 
             "image_path": row.get("image_path"), "image_sha256": key, "width": row.get("width"),
             "height": row.get("height"), "route_id": row.get("route_id"), "segment_index": row.get("segment_index"),
             "output_index": row.get("output_index"), "split": None, "kept": [], "rejected": [],
-            "label_bases": set(), "reviewed_at": None})
+            "label_bases": set(), "reviewed_at": None, "users_complete": False})
+        # Ticked "road users complete" in review: every row of the frame says so (annotations._canonical).
+        if row.get("users_complete") is True:
+            frame["users_complete"] = True
         if row.get("review_state") in ELIGIBLE_REVIEW_STATES:
             split = assignments.get(row.get("annotation_id"))
             if isinstance(split, str):
@@ -939,6 +942,8 @@ def prepare_detector_training(
             "annotation_ids": [],
             "explicit_negative": False,
             "label_basis": _label_basis(row),
+            # Every road user from the size rule is boxed on this frame (the reviewer's tick): UserNet's frames.
+            "users_complete": False,
         })
         if (
             frame["image_path"] != row["image_path"]
@@ -950,6 +955,8 @@ def prepare_detector_training(
         if frame["label_basis"] != _label_basis(row):
             # The same image confirmed by different kinds of reviewer: it counts as neither.
             frame["label_basis"] = "mixed"
+        if row.get("users_complete") is True:
+            frame["users_complete"] = True
 
         family = row["sign_family"]
         if row["bbox_xyxy"] is None and family == "not_a_sign":

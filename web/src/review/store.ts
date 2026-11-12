@@ -83,6 +83,8 @@ export interface ReviewState {
   /** The digits of a speed being typed on the keyboard ("8" before "80"), empty when none. */
   typing: string;
   drawing: boolean;
+  /** The kind the box being drawn will have (W Y K pressed while drawing: a road user); null: "Unreadable". */
+  drawKind: string | null;
   drag: Drag | null;
   /** The rectangle being drawn on the photo (image pixels), while drawing. */
   draft: {x: number; y: number; width: number; height: number} | null;
@@ -129,6 +131,7 @@ export const state: ReviewState = reactive({
   selectedByUser: false,
   typing: '',
   drawing: false,
+  drawKind: null,
   drag: null,
   draft: null,
   ignoreClickUntil: 0,
@@ -357,7 +360,7 @@ export function resetStore(): void {
   hintsByFrame = {};
   Object.assign(state, {
     edits: {}, suspicious: {}, currentKey: null, selected: -1, selectedByUser: false, typing: '', drawing: false,
-    drag: null, draft: null, filterNote: '', reviewerNeeded: false, valueError: false, exportMessage: null,
+    drawKind: null, drag: null, draft: null, filterNote: '', reviewerNeeded: false, valueError: false, exportMessage: null,
     inFlight: new Set<string>(), notice: null, storageWarning: '', serverWarning: '', retrying: false,
     withdrawArmed: null, duplicateAsked: null, saveCount: 0, lastSave: null, server: 'offline', busy: null,
     newestSave: null,

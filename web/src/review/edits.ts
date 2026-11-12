@@ -109,6 +109,28 @@ export function setKind(id: string): void {
   });
 }
 
+/** W Y K: a person, a bicycle, a car. With a box selected its kind, as G P R E M; while drawing, the kind the box
+ * about to be drawn takes. */
+export function setUserKind(id: string): void {
+  if (state.selected < 0 && state.drawing) {
+    state.drawKind = id;
+    return;
+  }
+  const d = selectedDetection();
+  if (d && d.family === 'other_sign' && d.sign_type === id) return;
+  setKind(id);
+}
+
+/** J, "Road users complete": every person and two-wheeler from 24 px tall and every vehicle from 40 px tall has its
+ * box on this frame. A property of the frame, saved with its boxes; Apply previous never carries it. */
+export function toggleUsersComplete(): void {
+  const row = currentRow();
+  if (!row || refuseChange()) return;
+  const work = workOf(row);
+  work.users_complete = work.users_complete !== true;
+  changed(row);
+}
+
 /** Painted on the road, on or off: the box becomes an "Other sign" and keeps its kind (the children's triangle with
  * "SCHULE" is "Children", painted). */
 export function togglePainted(): void {
@@ -225,6 +247,7 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
   if (refuseChange()) return;
   const work = workOf(row);
   pushBox(work, box, family, value, signType, panel, hours);
+  state.drawKind = null;
   state.selected = work.detections.length - 1;
   state.selectedByUser = true;
   state.drawing = false;
@@ -281,6 +304,7 @@ export function selectBox(index: number): void {
 export function toggleDrawing(): void {
   if (!state.drawing && refuseChange()) return;
   state.drawing = !state.drawing;
+  state.drawKind = null;
   state.selected = -1;
 }
 
@@ -292,5 +316,6 @@ export function toggleHints(): void {
 /** Esc: no drawing, no box selected. */
 export function cancelAll(): void {
   state.drawing = false;
+  state.drawKind = null;
   state.selected = -1;
 }

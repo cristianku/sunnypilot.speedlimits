@@ -16,6 +16,7 @@ interface ReviewedFrame extends FrameRow {
   source_proposals: Detection[] | undefined;
   detections: Detection[];
   country: string | null;
+  users_complete?: true;
   reviewer_kind?: 'ai';
   review_channel?: string | undefined;
 }
@@ -51,6 +52,8 @@ export function exportJsonl(): void {
         ...d, review_state: 'reviewed', value_state: d.value_kph == null ? 'unknown' : 'reviewed',
       })),
     };
+    // Only a ticked frame has it, as the server stores it.
+    if (s.users_complete === true) line.users_complete = true;
     // A frame an AI confirmed keeps its provenance (label_basis, reviewer_kind, channel), as the server stores it.
     if (s.reviewer_kind === 'ai') {
       line.label_basis = 'ai_review';

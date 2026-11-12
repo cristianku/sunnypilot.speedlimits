@@ -44,13 +44,16 @@ FIELDS = set(ENUMS) | {
     "capture_mono_ns", "image_path", "image_sha256", "width", "height", "bbox_xyxy", "value_kph",
     "temporary", "variable_display", "proposal_source", "proposal_score", "reviewer", "review_timestamp", "notes",
     "source_video_sha256", "source_log_sha256", "provenance", "site_group", "encounter_id",
-    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours",
+    "country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours", "users_complete",
 }
 # Added later, so rows imported before them may miss them: the country of the frame (ISO code, from its GPS
 # position or the reviewer), where the car was ({latitude, longitude, speed_mps, bearing_deg}, nnslr_tools.gps)
 # the kind of an "Other sign" (nnslr_tools.sign_types) and whether it is painted on the road. The split by place
 # uses gps. The hours read on a plate (nnslr_tools.sign_types.PLATE_HOURS) are there only when read.
-OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours"}
+# users_complete (true) is on every row of a frame the reviewer ticked "road users complete": every person and
+# two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed there; the rows of other frames have none.
+OPTIONAL_FIELDS = {"country", "gps", "sign_type", "painted", "sign_value", "sign_unit", "plate_hours",
+                   "users_complete"}
 COUNTRY_CODE = re.compile(r"[A-Z]{2}")
 # Label fields of a reviewed box: a box whose labels all equal the proposal is
 # "accepted", otherwise "corrected". The review server copies the same fields.
@@ -205,6 +208,7 @@ def validate_annotation(row: dict, root: Path, *, dataset_kind: str = 'gold',
                 or (sign_type in NOT_A_SIGN_TYPES and row['sign_family'] == 'not_a_sign'), "invalid_schema", "sign_type")
     painted = row.get('painted')
     require(painted is None or (painted is True and row['sign_family'] == 'other_sign'), "invalid_schema", "painted")
+    require('users_complete' not in row or type(row['users_complete']) is bool, "invalid_schema", "users_complete")
     from nnslr_tools.sign_types import plate_hours_problem
     require(plate_hours_problem({**row, 'family': row['sign_family']}) is None, "invalid_schema", "plate_hours")
     require(_hash(row['image_sha256']), "missing_provenance", "image_sha256")
@@ -411,6 +415,7 @@ def _canonical(frame: dict, detection: dict | None, original: dict | None, sourc
         'sign_type': d.get('sign_type') if family == 'other_sign'
                      or (family == 'not_a_sign' and d.get('sign_type') == 'on_vehicle') else None,
         'painted': True if family == 'other_sign' and d.get('painted') is True else None,
+        **({'users_complete': True} if frame.get('users_complete') is True else {}),
         'alignment_status': frame.get('alignment_status', 'unresolved'),
         'capture_time_provenance': frame.get('capture_time_provenance', 'unknown'),
         'provenance': provenance,

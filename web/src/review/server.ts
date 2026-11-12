@@ -88,6 +88,7 @@ export async function send(key: string): Promise<boolean> {
       site_group: s.site_group === undefined ? null : s.site_group,
       encounter_id: s.encounter_id === undefined ? null : s.encounter_id,
       country: countryOf(rowOf(key) ?? {country_proposed: null} as FrameRow, s),
+      users_complete: s.users_complete === true,
       base_revision: s.revision || 0,
     });
     if (report.runId !== runId) return true;

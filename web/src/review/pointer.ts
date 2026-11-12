@@ -144,7 +144,9 @@ export function finishDrag(event: PointerEvent, surface: Surface): void {
       Math.max(drag.start[0], p[0]), Math.max(drag.start[1], p[1]),
     ];
     if (box[2] - box[0] < 2 || box[3] - box[1] < 2) return;
-    addManualBox(row, box, 'unreadable', null);
+    // W Y K pressed while drawing: the box is that road user at once; else "Unreadable" until a type is picked.
+    if (state.drawKind) addManualBox(row, box, 'other_sign', null, state.drawKind);
+    else addManualBox(row, box, 'unreadable', null);
     return;
   }
   if (drag.moved) {

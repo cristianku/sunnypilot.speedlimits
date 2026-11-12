@@ -1079,6 +1079,11 @@ def review_schema() -> dict:
                           f'relevant sign. A proposal left out of the list is recorded as rejected',
             'country': 'ISO 3166-1 alpha-2 code of the country of the frame ("CH", "IT", "PL"...), or null; '
                        'omitted: country_proposed of the frame, from its GPS position',
+            'users_complete': 'boolean, default false ("road users complete"). true only when every road user '
+                              'from the size rule has its box on this frame: each person on foot and each '
+                              'two-wheeler (bicycle, motorcycle) at least 24 px tall and each vehicle (car, van, '
+                              'truck, bus, tram) at least 40 px tall, in pixels of the original image (the height '
+                              'of bbox_xyxy). apply_previous does not carry it: send it for each frame',
             'site_group': 'string or null (optional)',
             'encounter_id': 'string or null (optional)',
             'override_human_review': 'boolean, default false. An AI review never changes or withdraws a frame a '
@@ -1143,6 +1148,10 @@ def review_schema() -> dict:
             'not to take them for limits. Logos, advertising and shop signs stay out of detections. Duplicates '
             'on the same sign: keep one box with the right value.',
             'A frame without traffic signs is confirmed with detections [] (negative examples matter).',
+            'Road users (family other_sign, sign_type road_user_*) get a box when they matter for the speed: a '
+            'person crossing or about to cross, a two-wheeler on our road, a vehicle crossing or entering our '
+            'path; not parked cars, the opposite lane or the vehicle ahead. On a frame saved with users_complete '
+            'true every road user from the size rule has its box, whether it matters or not.',
             'Look at the image before saving; model proposals and the second reading are only hints. Save only '
             'when the owner authorized saving for this route.',
             'A saved confirmation is final, by a person or by an AI (no second approval): the next dataset import '

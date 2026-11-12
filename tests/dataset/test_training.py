@@ -200,6 +200,38 @@ def test_a_road_user_is_an_ignore_box_of_the_detector_plan_and_a_class_of_the_cl
     assert _classifier_label(car) == "other_sign:road_user_car"
 
 
+def test_a_frame_ticked_road_users_complete_says_so_in_the_training_frames(tmp_path, capsys):
+    """"Road users complete" (the tick of Sign review): every frame export says it, false on every other frame; the
+    cutter's plan is otherwise the same (the road user an ignore box)."""
+    from nnslr_tools.training import reviewed_frames
+    rows = []
+    for index in range(6):
+        row = reviewed(tmp_path, f"{index + 1:08x}--abcdef1234", index=index, negative=index == 1)
+        if index == 0:  # a car boxed, every road user of the frame boxed
+            row["detections"][0].update(family="other_sign", sign_type="road_user_car", value_kph=None, value_state="unknown")
+            row["users_complete"] = True
+        if index == 1:  # no box at all, ticked: no road user on it
+            row["users_complete"] = True
+        rows.append(row)
+    source = write(tmp_path, rows)
+    code, out = invoke(capsys, "import-annotations", str(source), "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    code, out = invoke(capsys, "build-splits", "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    dataset = load_jsonl(tmp_path / "annotations" / "objects.jsonl")
+    assert {row["route_id"][:8] for row in dataset if row.get("users_complete") is True} == {"00000001", "00000002"}
+    assert all("users_complete" not in row for row in dataset if row["route_id"][:8] not in ("00000001", "00000002"))
+    plan = prepare_detector_training(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json", tmp_path)
+    by_route = {frame["route_id"][:8]: frame for frame in plan["frames"]}
+    assert by_route["00000001"]["users_complete"] is True and by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]]
+    assert by_route["00000001"]["boxes"] == []
+    assert by_route["00000002"]["users_complete"] is True and by_route["00000002"]["explicit_negative"] is True
+    assert all(frame["users_complete"] is False for route, frame in by_route.items() if route not in ("00000001", "00000002"))
+    frames = reviewed_frames(dataset, {row["annotation_id"]: "train" for row in dataset})
+    assert {frame["route_id"][:8] for frame in frames if frame["users_complete"]} == {"00000001", "00000002"}
+    assert sum(1 for frame in frames if frame["users_complete"] is False) == 4
+
+
 def test_prepare_detector_training_groups_full_frames_without_torch(tmp_path, capsys):
     dataset, frozen, latest = _training_fixture(tmp_path, capsys)
     assert "torch" not in sys.modules

@@ -9,6 +9,7 @@ import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
 import {carAskOf, carDetection, carSignLeft} from './car';
 import {carried} from './carry';
+import {signKindOf} from './catalog';
 import {selectedBox} from './current';
 import {coarsePointer} from './dom';
 import {drawAi, drawCar, drawStage, sceneScale, WET_TAG} from './overlay';
@@ -142,7 +143,7 @@ const inset = computed(() => {
             :width="state.draft?.width" :height="state.draft?.height"></rect>
     </svg>
     <ZoomInset v-if="inset && selectedBox" :style="inset" :row="row" :detection="selectedBox"/>
-    <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box · Shift: a square</span></div>
+    <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box{{ state.drawKind ? ': ' + (signKindOf(state.drawKind)?.chip ?? '') : '' }} · Shift: a square</span></div>
     <!-- After A: the boxes carried, not saved yet; A again saves and goes on (carry.ts). -->
     <div class="stage-hint carry-hint" id="carryHint" :hidden="state.drawing || carried !== row.frame_key"><span>Press A to confirm</span></div>
   </div>

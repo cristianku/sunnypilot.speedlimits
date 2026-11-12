@@ -103,6 +103,7 @@ export async function confirmFrame(): Promise<void> {
       site_group: s.site_group === undefined ? null : s.site_group,
       encounter_id: s.encounter_id === undefined ? null : s.encounter_id,
       country: countryOf(row, s),
+      users_complete: s.users_complete === true,
       reviewer: s.reviewer,
       review_timestamp: s.review_timestamp,
     };
@@ -176,6 +177,7 @@ export function discardChanges(): void {
         site_group: s.base.site_group === undefined ? null : s.base.site_group,
         encounter_id: s.base.encounter_id === undefined ? null : s.base.encounter_id,
         country: s.base.country ?? null,
+        users_complete: s.base.users_complete === true,
         reviewer: s.base.reviewer,
         review_timestamp: s.base.review_timestamp,
         saved: true,

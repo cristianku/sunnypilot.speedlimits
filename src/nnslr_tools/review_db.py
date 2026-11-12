@@ -652,6 +652,8 @@ def public_review(review: dict) -> dict:
         'encounter_id': payload.get('encounter_id'),
         # Missing in reviews saved before the country existed: the page then shows the GPS proposal.
         **({'country': payload['country']} if 'country' in payload else {}),
+        # Every road user from the size rule boxed on this frame (the reviewer's tick); false in reviews saved before it.
+        'users_complete': payload.get('users_complete') is True,
     }
 
 
@@ -712,7 +714,16 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
     if country is not None and (not isinstance(country, str) or not COUNTRY_CODE.fullmatch(country)):
         raise ReviewRejected(400, 'invalid_country',
                              'country must be a two-letter ISO 3166-1 code in capitals ("CH", "IT", "PL"), or null.')
+    # "Road users complete": every person and two-wheeler from 24 px tall and every vehicle from 40 px tall is boxed on
+    # this frame (UserNet learns from these frames). Only a ticked frame has the field, so the reviews saved before it
+    # and the frames left unticked keep exactly their line.
+    users_complete = body.get('users_complete', False)
+    if type(users_complete) is not bool:
+        raise ReviewRejected(400, 'invalid_schema', 'users_complete must be true or false.')
     frame = copy.deepcopy(report_row)
+    frame.pop('users_complete', None)
+    if users_complete:
+        frame['users_complete'] = True
     frame['country'] = country
     frame['reviewer'] = reviewer
     frame['review_timestamp'] = timestamp

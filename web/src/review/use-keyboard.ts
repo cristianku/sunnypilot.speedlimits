@@ -2,7 +2,8 @@
 // with one key (2 = 20 … 9 = 90, 1 = 100, "1 2" = 120, 0 = not readable; typed whole, "5 0", it works too; on a frame in the US
 // two keys in mph, "3 5" = 35, one alone and a pause its tens, 3 = 30), O X U the road (ours, another, unclear), S other
 // sign for our road, V on a vehicle (not a sign), L variable speed limit (a lit display) or back, G give way, P stop, R roundabout, E something else, M main road (a direction has no
-// key, only its button), Enter confirm, B or N new box, C fit the box picked to its sign on the server
+// key, only its button), W person, Y bicycle, K car (on the selected box, or while drawing on the box about to be drawn),
+// J road users complete (the frame's tick: every road user from the size rule is boxed), Enter confirm, B or N new box, C fit the box picked to its sign on the server
 // (every box of the frame when none was picked; Shift+C the same with the AI), A apply previous, I ask the AI, T the car's
 // networks on the frame (car.ts), H second reading, D removes every
 // box of the frame, Del removes a box the reviewer selected (on the one the page opened on it says to click it
@@ -13,8 +14,8 @@ import {askAi, fitBox, fitLocal} from './ai';
 import {toggleCar} from './car';
 import {applyPrevious} from './carry';
 import {confirmFrame} from './confirm';
-import {cancelAll, removeAllBoxes, removeSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setValue, toggleDrawing,
-  toggleHints, toggleVariable} from './edits';
+import {cancelAll, removeAllBoxes, removeSelected, squareSelected, selectBox, setField, setKind, setOnVehicle, setOtherOurs, setUserKind, setValue,
+  toggleDrawing, toggleHints, toggleUsersComplete, toggleVariable} from './edits';
 import {signStyleOf} from './catalog';
 import {countryOf, currentRow, workOf} from './frames';
 import {stepSecond} from './navigation';
@@ -33,6 +34,9 @@ function usFrame(): boolean {
 
 // G P R E M: the kind of an other sign.
 const KIND_KEYS: Record<string, string> = {g: 'give_way', p: 'stop', r: 'roundabout', e: 'other', m: 'main_road'};
+
+// W Y K: a road user, on the selected box or on the box being drawn (only those that matter for the speed get one).
+const USER_KEYS: Record<string, string> = {w: 'road_user_person', y: 'road_user_bicycle', k: 'road_user_car'};
 
 // O X U: the road of the selected box (A is Apply previous).
 const ROAD_KEYS: Record<string, string> = {o: 'own_road', x: 'other_road', u: 'unresolved'};
@@ -222,6 +226,13 @@ export function useKeyboard(): void {
         return;
       }
     }
+    // W person, Y bicycle, K car: the selected box, else the box about to be drawn.
+    const user = event.shiftKey ? undefined : USER_KEYS[event.key.toLowerCase()];
+    if (user && (state.selected >= 0 || state.drawing)) {
+      event.preventDefault();
+      setUserKind(user);
+      return;
+    }
     switch (event.key) {
       case 'ArrowUp':
         event.preventDefault();
@@ -293,6 +304,12 @@ export function useKeyboard(): void {
       case 'D':
         event.preventDefault();
         removeAllBoxes();
+        break;
+      case 'j':
+      case 'J':
+        // Road users complete, on or off: the frame's tick.
+        event.preventDefault();
+        toggleUsersComplete();
         break;
       case 'Delete':
         // Only a box the reviewer selected: never the one the page opened on, never with Backspace.

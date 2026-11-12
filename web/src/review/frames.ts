@@ -119,6 +119,7 @@ export function fromServer(item: ConfirmedCopy): FrameEdit {
     encounter_id: item.encounter_id,
     // A review saved before the country existed has none: the GPS proposal stands.
     country: item.country,
+    users_complete: item.users_complete === true,
     revision: item.revision,
     saved: true,
     error: null,
@@ -133,6 +134,7 @@ export function sameAsServer(s: FrameEdit | undefined): boolean {
   if (JSON.stringify(s.detections) !== JSON.stringify(s.base.detections || [])) return false;
   if ((s.site_group ?? null) !== (s.base.site_group ?? null)) return false;
   if (s.country !== undefined && (s.country ?? null) !== (s.base.country ?? null)) return false;
+  if ((s.users_complete === true) !== (s.base.users_complete === true)) return false;
   return (s.encounter_id ?? null) === (s.base.encounter_id ?? null);
 }
 

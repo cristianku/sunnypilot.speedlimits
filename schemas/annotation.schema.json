@@ -480,6 +480,10 @@
       ],
       "description": "an other_sign box painted on the road (true), its sign_type still what it means; optional"
     },
+    "users_complete": {
+      "type": "boolean",
+      "description": "true on every row of a frame ticked \"road users complete\" in review: every person and two-wheeler from 24 px tall and every vehicle from 40 px tall (box height in pixels of the original image) is boxed there; absent on the rows of other frames; optional"
+    },
     "sign_value": {
       "description": "Original written number. value_kph is a legacy alias, never a conversion.",
       "type": [
