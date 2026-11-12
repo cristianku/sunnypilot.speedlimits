@@ -294,11 +294,6 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
   </div>
   <p class="intro rise">These numbers are offline, for the brain on the car now. On validation it's 23.2&nbsp;% and 10.4&nbsp;km/h on 2,695 seconds. Where a sign is in force, simply copying it still does better on test: 42.4&nbsp;% against 24.2&nbsp;%, 11.1&nbsp;km/h of error against 11.4. When I swap the number on the test signs, 50 for 60 and so on, its answer moves on only 173 of 1,662 seconds. On the training drives it gets 69.6&nbsp;%, so it still knows the roads it has seen far better than new ones. In the seconds before a limit changes, it names the next limit on 17&nbsp;% of them on test, against 99&nbsp;% on train.</p>
   <p class="intro rise">On the road there's little so far. This brain went on the car on 8 November and ran on one 14-minute drive on 9 November, with sunnypilot off, so the car didn't act on it. It gave a speed for 819 of the drive's 819.5 seconds. The server now has 29 dashcam drives, 10.4 hours.</p>
-  <div class="links rise">
-    <a href="https://github.com/cristianku/sunnypilot.speedlimits"><b>sunnypilot.speedlimits</b><span>The portal, the training, the tools</span></a>
-    <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
-    <a href="https://github.com/cristianku/openpilot/tree/psa-torque-sunny-testing"><b>openpilot, psa-torque-sunny-testing</b><span>What runs on my comma</span></a>
-  </div>
   <div class="join rise" id="join">
     <p>I need help confirming the speed signs. If you'd like to join, leave your email and a line about yourself, and I'll set up an account for you. I only use your address to answer you.</p>
     <p class="done" id="sent">Thanks, your message reached me. I'll answer by email.</p>
@@ -310,9 +305,14 @@ footer p{max-width:var(--wide);margin:auto;border-top:1px solid var(--line);padd
       <button type="submit">Sign up</button>
     </form>
   </div>
+  <div class="links rise">
+    <a href="https://github.com/cristianku/sunnypilot.speedlimits"><b>sunnypilot.speedlimits</b><span>The portal, the training, the tools</span></a>
+    <a href="https://github.com/cristianku/sunnypilot/tree/speed-limits"><b>sunnypilot, speed-limits</b><span>The code on the car</span></a>
+    <a href="https://github.com/cristianku/openpilot/tree/psa-torque-sunny-testing"><b>openpilot, psa-torque-sunny-testing</b><span>What runs on my comma</span></a>
+  </div>
 </div></section>
 
-<footer><p>Built by Cristian (<a href="https://cristianku.com/">cristianku</a>, the story on <a href="https://cristianku.com/2026/11/06/smartspeed/">my blog</a>) on top of sunnypilot and openpilot. Not made by comma.ai or the sunnypilot team.</p></footer>
+<footer><p>Built by Cristian (<a href="https://cristianku.com/">cristianku.com</a>) on top of sunnypilot and openpilot. Not made by comma.ai or the sunnypilot team.</p></footer>
 
 <script>
 if (matchMedia('(prefers-reduced-motion: no-preference)').matches && 'IntersectionObserver' in window) {
