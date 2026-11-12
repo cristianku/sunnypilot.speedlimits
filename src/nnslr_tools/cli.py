@@ -1684,9 +1684,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                    "(sunnypilot off) with its logs read and its frames, each whole: "
                                                    "per partition and per drive the frames "
                                                    "with a speed (the driver's own, or a block's of Speed review), "
-                                                   "with an answer on roadworks and with the next limit (the signs our "
-                                                   "networks in use read, Sign review's over them where the frames "
-                                                   "are confirmed), "
+                                                   "and with an answer on roadworks, "
                                                    "and why the others are out. Reads only: it writes nothing and "
                                                    "trains nothing")
     p_brain.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the brain "
@@ -1715,27 +1713,8 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="an applicability network's id (default: in use; one is required)")
     p_brain_networks.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
     p_brain_networks.set_defaults(func=_cmd_brain_networks)
-    p_brain_signs = sub.add_parser("brain-signs", help="read every drive the brain learns from with our networks in use "
-                                                       "(cutter, classifier and applicability, Models tab) on its "
-                                                       "pictures at 1 a second, on the GPU: derived/brain_signs/<route>"
-                                                       ".jsonl, the next limit and its metres the brain is taught where "
-                                                       "nobody confirmed the frames in Sign review. A drive already read "
-                                                       "by these networks is not read again; nothing in Sign review "
-                                                       "changes")
-    p_brain_signs.add_argument("--route", action="append", help="route id; repeat for more. Default: every drive the "
-                                                                "brain learns from (every dashcam drive)")
-    p_brain_signs.add_argument("--jobs", type=int, default=0,
-                               help="drives read at once, each by a worker of its own (default: one per 4 cores)")
-    p_brain_signs.add_argument("--gpus", type=_cards, default=None,
-                               help="the cards the workers run on, in turn, by nvidia-smi's numbers: 0,1 (default: "
-                                    "every worker on the first card this process sees)")
-    p_brain_signs.add_argument("--sign-networks", default=None,
-                               help="a run's networks.json (nnslr brain-networks): read with those three networks "
-                                    "instead of those in use")
-    p_brain_signs.add_argument("--data-root", help="default: NNSLR_DATA_ROOT or <repo>/data")
-    p_brain_signs.set_defaults(func=_cmd_brain_signs)
-    p_borrow = sub.add_parser("borrow-cards", help="scripts/run_brain.sh, step 3 (#36): prints the cards its readings "
-                                                   "of the signs run on (0,1), --own first, then every other card no "
+    p_borrow = sub.add_parser("borrow-cards", help="scripts/run_brain.sh, step 3 (#36): prints the cards its reading "
+                                                   "of the signs runs on (0,1), --own first, then every other card no "
                                                    "compute process is on and no running job of the panel holds. In "
                                                    "a job of the panel (NNSLR_JOB_RECORD) they are written to its "
                                                    "record, so the panel names them as the brain's and starts nothing "
@@ -1773,8 +1752,7 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "each whole (GPU, "
                                                      ".venv-gpu): the speed to hold, the driver's own corrected by the "
                                                      "blocks of Speed review, with the roadworks and the kinds of road "
-                                                     "as tasks of the same network and the next limit of the signs our "
-                                                     "networks in use read (nnslr brain-signs), Sign review's over them, "
+                                                     "as tasks of the same network, "
                                                      "measured on "
                                                      "sites it never learned. Writes brain-last.pt and result.json "
                                                      "into --run-dir")
@@ -2843,38 +2821,6 @@ def _cmd_brain_networks(args: argparse.Namespace) -> int:
                                    classifier=args.classifier or None, decider=args.decider or None,
                                    log=lambda line: print(line, flush=True))
     print(json.dumps({part: chosen[part] for part in sign_networks.PARTS}), flush=True)
-    return 0
-
-
-def _cmd_brain_signs(args: argparse.Namespace) -> int:
-    from nnslr_tools import brain_signs
-    from nnslr_tools.brain_targets import training_routes
-    from nnslr_tools.preannotate import PreannotationError, resolve_data_root
-    if args.jobs < 0:
-        raise ValueError("--jobs must be 0 (the default) or more")
-    root = resolve_data_root(Path(args.data_root) if args.data_root else None)
-    routes = list(args.route or []) or training_routes(root)
-    if not routes:
-        print("nnslr brain-signs: no drive to learn from (sunnypilot off, its logs read to the end and its frames: "
-              "Read the logs in Data › Speed review)", file=sys.stderr)
-        return 2
-    chosen = _sign_networks(args)
-    try:
-        setup = brain_signs.reader_setup(root, {part: chosen[part] for part in brain_signs.PARTS} if chosen else None)
-    except PreannotationError as exc:
-        # The training goes on: its next limit is taught from Sign review alone (brain_targets.reviewed_signs).
-        print(f"WARNING: no drive read by our networks, the next limit is taught from Sign review alone: {exc}", flush=True)
-        return 0
-    try:
-        found = brain_signs.read_drives(root, routes, setup=setup, log=lambda line: print(line, flush=True),
-                                        jobs=args.jobs or None, gpus=args.gpus)
-    except PreannotationError as exc:
-        print(f"nnslr brain-signs: {exc}", file=sys.stderr)
-        return 1
-    missed = [route for route, state in found.items() if state not in ('read', 'current')]
-    print(f"brain signs: {sum(state == 'read' for state in found.values())} drives read, "
-          f"{sum(state == 'current' for state in found.values())} already read, {len(missed)} without pictures",
-          flush=True)
     return 0
 
 

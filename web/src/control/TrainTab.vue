@@ -4,7 +4,7 @@
 // in a switcher with a dot on the one training: the cutter (scripts/run_signnet.sh: SignNet, the cutter the comma runs,
 // at the car's band; the signs it finds, its Mapillary switch and the cut of its windows), the classifier with "not a sign" (scripts/run_classifier.sh), the decider (in preparation:
 // experiment B), the brain (scripts/run_brain.sh: its three seeds, from every dashcam drive with its logs read, each whole: his own speed with
-// the blocks of Speed review, the next limit of the signs our networks read with his Sign review over them, which it says before the click), the pipeline (PipelineSection: those trainings one
+// the blocks of Speed review, which it says before the click), the pipeline (PipelineSection: those trainings one
 // after the other; the first one, helpers/3_train.sh, folded under it). Each has the same place for its work:
 // the Train button, or its training running (or failed) with its steps, its Settings for the next training
 // (TrainSettingsSection), then its curves and its latest version
@@ -197,8 +197,7 @@ const BRAIN_ACTIONS = computed((): [ActionName, string][] => {
     + starts.brain.words + signNetworks.words
     + (one ? ', about 3 minutes on the GPU' : ', one after the other, about 3 minutes each on the GPU')
     + ', after reading the signs of the drives as the car does '
-    + '(the applicability network leaves out those of another road), and with the same networks those they have not read '
-    + 'yet (the next limit). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
+    + '(the applicability network leaves out those of another road). Then you ' + (one ? 'find it' : 'choose one') + ' in Models and Publish it.']];
 });
 /** The classifier's choices (classifier-choices.ts), the same in its section and in the pipeline. */
 const choices = useClassifierChoices(toRef(props, 'status'), versionsOf);
@@ -226,8 +225,7 @@ const charted = computed((): {progress: Progress; running: boolean} | null => {
   return shown ? {progress: value.progress, running: value.state === 'running'} : null;
 });
 /** What every dashcam drive with its logs read, each whole, gives the brain
- * today (his speed, the blocks of Speed review as its corrections, the
- * next limit of the signs our networks read, his Sign review over them), asked when its section opens and when a training of it ends (about 10 s on the server:
+ * today (his speed, the blocks of Speed review as its corrections), asked when its section opens and when a training of it ends (about 10 s on the server:
  * never with the status). */
 const brainLabels = shallowRef<BrainLabels | null>(null);
 watch([section, () => jobFor('brain')?.state], async ([value]) => {
@@ -388,11 +386,8 @@ const numbers = computed(() => {
           {{ plural(brainLabels.drives?.length ?? 0, 'drive') }} (one whose logs show openpilot driving, or whose frames changed, stays out), the blocks of Speed review as its corrections:
           <strong>{{ thousands(brainLabels.partitions.train.speed) }}</strong> seconds to learn from,
           <strong>{{ thousands(brainLabels.partitions.validation.speed) }}</strong> to watch it on,
-          <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test. The signs our networks read, yours of Sign review over
-          them, answer the next limit on <strong>{{ thousands(brainLabels.partitions.train.next) }}</strong> of the seconds to learn from.<template
+          <strong>{{ thousands(brainLabels.partitions.test.speed) }}</strong> for the test.<template
           v-if="brainLabels.to_read"> First it reads the signs of {{ plural(brainLabels.to_read, 'drive') }} as the car does today.</template><template
-          v-if="brainLabels.signs_to_read"> Our networks in use read {{ plural(brainLabels.signs_to_read, 'drive') }} first for the next limit.</template><template
-          v-else-if="brainLabels.signs_to_read === null"> Our networks are not whole in Models: the next limit comes from your Sign review alone.</template><template
           v-if="brainLabels.types"> With Road type (map) on, only the seconds with a road type (the map’s, from Read the map in Data › Prepare, with your corrections over it) count:
           <strong>{{ thousands(brainUntyped.seconds) }}</strong> seconds with your speed and none stay out<template
           v-if="brainUntyped.drives">, {{ plural(brainUntyped.drives, 'drive') }} without any</template>.</template><template

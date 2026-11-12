@@ -29,9 +29,9 @@ import {isGuest} from '../common/guest';
 import {signsHref} from '../common/sign-link';
 import {pictureCache} from '../composables/pictures';
 import {toast} from '../composables/toast';
-import {aheadAt, clockOf, EYE_ICON, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
+import {clockOf, EYE_ICON, FPS, kphText, limitOf, logTimeOf, NO_LOGS, previousChange, rawFrameOf, readText,
   REASON_LABEL, type ScanState, scanText, secondOf, setSpeedOf, signReviewHref, type SyncSegment, type Timeline, valueAt, videoTimeOf,
-  type VideoState, visionAtSign} from './drive-review';
+  type VideoState} from './drive-review';
 import DriveReviewLanes from './DriveReviewLanes.vue';
 import {ROAD_LABEL} from './roads';
 import Segmented from './Segmented.vue';
@@ -602,12 +602,9 @@ function missing(name: string): string {
   const first = series(name)?.[0]?.[0];
   return first !== undefined && first > cursor.value ? 'not yet' : 'not in the log';
 }
-/** The vision limit from its sign on, and the one waiting for its sign (visionAtSign). */
-const atSign = computed(() => view.value ? visionAtSign(view.value.series) : null);
 const now = computed(() => {
   if (!hasLogs.value) return null;
-  const vision = limitOf(valueAt(atSign.value?.limit, cursor.value));
-  const visionAhead = aheadAt(atSign.value?.ahead ?? [], cursor.value);
+  const vision = limitOf(at('vis_limit'));
   const mapValid = at('map_valid');
   const mapLimit = limitOf(at('map_limit'));
   const resolver = limitOf(at('res_limit'));
@@ -626,11 +623,8 @@ const now = computed(() => {
       : read + (typeof confidence === 'number' ? ' · ' + Math.round(confidence * 100) + '%' : '')
       + (at('vis_raw_taken') === true ? ' · taken' : ' · dropped'),
     signAhead: typeof signDistance === 'number' && signDistance > 0 ? Math.round(signDistance) + ' m' : '',
-    vision: (vision === undefined ? missing('vis_limit') : vision === null ? 'none held' : vision + ' km/h')
-      + (visionAhead ? ' · then ' + visionAhead.kph + ' km/h in ' + Math.round(visionAhead.metres) + ' m' : ''),
+    vision: vision === undefined ? missing('vis_limit') : vision === null ? 'none held' : vision + ' km/h',
     visionKph: vision ?? null,
-    // The limit the brain read, with the metres to its sign, under the one still in force.
-    visionAhead: visionAhead ? visionAhead.kph + ' · ' + Math.round(visionAhead.metres) + ' m' : '',
     model: typeof at('vis_model') === 'string' ? String(at('vis_model')) : '',
     map: mapValid === undefined || mapValid === null ? missing('map_valid') : mapValid === false ? 'no valid limit' : kphText(mapLimit ?? null, 'none'),
     mapKph: mapValid === true ? mapLimit ?? null : null,
@@ -648,7 +642,7 @@ const now = computed(() => {
       : String(at('sd_state')) + (at('long_active') === true ? ' · speed and steering' : at('lat_active') === true ? ' · steering' : ''),
   };
 });
-const change = computed(() => previousChange(atSign.value?.limit, cursor.value));
+const change = computed(() => previousChange(series('vis_limit'), cursor.value));
 const lanes = useTemplateRef<InstanceType<typeof DriveReviewLanes>>('lanes');
 const stage = useTemplateRef<HTMLDivElement>('stage');
 /** The picture made bigger with the grip: the drive leaves the page's width, its side under the lanes when they no longer fit. */
@@ -851,9 +845,8 @@ watch(() => props.route, () => {
             : video.state === 'failed' ? 'The video could not be made: ' + (video.reason ?? 'unknown error') + '.'
             : 'No video of this drive on the server.' }}</div>
           <div v-if="now" class="dr-hud" aria-hidden="true">
-            <span v-if="limits" class="dr-box dr-box-vision" :class="{empty: now.visionKph === null, ahead: !!now.visionAhead}"><svg viewBox="0 0 24 17">
-              <path :d="HUD_ICONS.eye" fill="currentColor" fill-rule="evenodd"/></svg><b>{{ now.visionKph ?? '–' }}</b>
-              <small v-if="now.visionAhead" class="dr-box-ahead">{{ now.visionAhead }}</small></span>
+            <span v-if="limits" class="dr-box dr-box-vision" :class="{empty: now.visionKph === null}"><svg viewBox="0 0 24 17">
+              <path :d="HUD_ICONS.eye" fill="currentColor" fill-rule="evenodd"/></svg><b>{{ now.visionKph ?? '–' }}</b></span>
             <span v-if="limits" class="dr-box dr-box-map"><small>MAP</small><b>{{ now.mapKph ?? '–' }}</b></span>
             <span class="dr-box dr-box-car"><svg viewBox="2 4 20 18"><path :d="HUD_ICONS.car" fill="currentColor"/></svg>
               <b>{{ (ownSpeed ? carKph : now.carKph) ?? '–' }}</b></span>

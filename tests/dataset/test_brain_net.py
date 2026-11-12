@@ -67,12 +67,30 @@ def test_the_network_says_a_speed_and_works_on_every_frame():
 
 
 def test_the_table_of_today_is_a_class_a_km_h_with_none_ahead_after_it():
-    from nnslr_tools.brain_targets import NONE_AHEAD, SPEED_CLASSES
+    # The heads of the limit ahead are built only for a checkpoint that has them (7 to 11 Nov 2026).
+    from nnslr_tools.brain_targets import SPEED_CLASSES
     model = net(ahead=True)
-    assert SPEED_CLASSES == 200 and NONE_AHEAD == 200
+    assert SPEED_CLASSES == 200
     assert model.class_kph.tolist() == [float(kph) for kph in range(1, 201)]
     assert (model.speed_head.out_features, model.next_head.out_features) == (200, 201)
     assert model.near_kph == pytest.approx(0.5)
+
+
+def test_a_brain_of_today_says_the_speed_and_has_no_limit_ahead():
+    import inspect
+
+    from nnslr_tools import brain_net
+    model = net()
+    assert not model.ahead
+    assert not [name for name in model.state_dict() if name.startswith(('next_head.', 'trust_next.', 'metres_head.',
+                                                                         'metres_gate.'))]
+    # Nothing teaches a next limit or its metres: the loss takes no such answer.
+    assert 'ahead' not in inspect.signature(brain_net.brain_loss).parameters
+    assert not hasattr(brain_net, 'NEXT_LOSS') and not hasattr(brain_net, 'METRES_LOSS')
+    # A checkpoint that has the heads still gets them, and its next limit and metres beside the speed.
+    old = net(ahead=True)
+    said = brain_net.outputs(old(*batch(), ahead=True), ahead=True)
+    assert said['next'].shape == (1, T, 201) and said['metres'].shape == (1, T)
 
 
 def test_a_brain_of_5_km_h_classes_keeps_its_table():

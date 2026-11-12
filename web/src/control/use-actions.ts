@@ -64,8 +64,7 @@ function question(name: ActionName, state: ActionState, start: TrainingStart | n
     const works = options?.works === 'off' ? ' Without the roadworks.' : '';
     const mean = options?.pool === 'mean' ? ' With the picture as a mean.' : '';
     return {title: 'Train the brain?', action: 'Start training',
-      text: 'First it reads the signs of every drive with sunnypilot off and its logs read as the car does today, and our networks in use '
-        + 'read the drives they have not read yet for the next limit (about 40 s a drive), then it trains '
+      text: 'First it reads the signs of every drive with sunnypilot off and its logs read as the car does today, then it trains '
         + (options?.seeds === 'one' ? 'seed 0 on the GPU: about 5 minutes. One new version in Models; '
           : 'three seeds on the GPU: about 15 minutes. Three new versions in Models; ')
         + 'nothing goes to the car until you choose one and Publish.' + works + mean};

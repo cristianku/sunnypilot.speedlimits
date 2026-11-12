@@ -12,7 +12,7 @@
 // begins and ends (scrub), so that the player asks for no frame at full definition on the way.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef, watchEffect} from 'vue';
 import {combine, indexAt, limitOf, readText, REASON_LABEL, runsOf, secondOf, type Series, setSpeedOf, type Timeline,
-  type Value, visionAtSign} from './drive-review';
+  type Value} from './drive-review';
 
 const props = defineProps<{view: Timeline; from: number; to: number; cursorAt: () => number; simple?: boolean; pickMap?: boolean}>();
 const emit = defineEmits<{seek: [seconds: number]; scrub: [on: boolean]; pickMap: [from: number, to: number, kph: number]}>();
@@ -51,8 +51,9 @@ const limitStep = (value: Value): [string, string] => {
   return limit === undefined ? ['dr-gap', ''] : limit === null ? ['dr-none', '–'] : ['dr-known', String(limit)];
 };
 
-// A new limit of the brain from its sign on, as the map's (visionAtSign): the tick on top is where it was read.
-const vision = computed(() => steps(visionAtSign(props.view.series).limit, limitStep));
+// The vision limit as the comma logged it: a brain lowers its speed itself before a sign, so its new limit starts
+// where it said it. The tick on top is where a sign was read.
+const vision = computed(() => steps(series('vis_limit'), limitStep));
 const signs = computed(() => props.view.events.filter((event) => event[1] === 'sign' && event[0] >= props.from && event[0] <= props.to)
   .map((event) => ({at: event[0], text: typeof event[2] === 'number' && event[2] > 0 ? String(Math.round(event[2])) : '–'})));
 // What the vision read and why it holds its limit: every sign read (solid: the limit was set from it, hollow: dropped,

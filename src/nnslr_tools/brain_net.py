@@ -45,17 +45,16 @@ road. The network still decides: trust comes from the memory and can be 0 or bel
 speed_head can say any speed. It is all comparisons, which export as they are. A comparison with no signs among the groups
 has no number and no such path.
 
-The limit ahead (ahead=True, the brains since 7 Nov 2026): two more heads on the same h, so that sunnypilot slows down for
-the next limit as for the map's (brain_targets.reviewed_signs and ahead_from_signs):
+The limit ahead (ahead=True, the brains of 7 to 11 Nov 2026 only): two more heads on the same h,
 
     next   = next_head(h) + trust_next(h) * number   the next limit: a class of the speed's table, or the last one, none
-    metres = metres_head(h) + metres_gate(h) * sign  the metres to it, over METRES_SCALE
+    metres = metres_head(h) + metres_gate(h) * sign  the metres to it, over brain_targets.METRES_SCALE
 
-The number is the one read, and a sign is read some way before it: on the way to it the number is the next limit, so it
-goes straight to next as to the speed, and the memory decides which of the two it is (sign_distance among its inputs).
-sign is vision.SignDistance's metres to the sign ahead, the same scale: metres can be that, or anything the memory says.
-loss += NEXT_LOSS * cross entropy(next) + METRES_LOSS * smooth L1(metres), each on its own frames. The next limit is a sign's
-number, exact: its answer is one class, no bell.
+with sign vision.SignDistance's metres to the sign ahead (sign_distance among the inputs). No brain is trained with them
+since 12 Nov 2026, his rule: the speed to hold is the brain's only word to openpilot, and it lowers that speed itself
+before a sign. So they have no answer and no loss here, and a new brain is built without them. They are still built for a
+checkpoint that has them (its 'ahead'), so that such a brain loads, replays and exports as it was (brain_export): the
+car leaves the two outputs unread.
 
 The picture's features. pool 'mean' is the road-type network's: the mean of the 8 x 5 map keeps what is in a frame and loses
 most of where, and a truck in the lane beside ours is a matter of where. pool 'grid' keeps the map: a 1 x 1 convolution to
@@ -75,9 +74,6 @@ from nnslr_tools.road_type_net import FEATURES, HIDDEN, IMAGENET_MEAN, IMAGENET_
 WORKS_LOSS = 0.3
 ROAD_LOSS = 0.3  # each kind of road
 TYPE_LOSS = 0.3  # the road type
-NEXT_LOSS = 0.5
-METRES_LOSS = 1.0
-METRES_BETA = 0.1  # smooth L1 within 10 m (over METRES_SCALE), then linear
 SPEED_SIGMA_KPH = 2.0  # the width of the bell around his speed (speed_targets)
 POOLS = ('mean', 'grid')
 GRID_CHANNELS = 32
@@ -107,7 +103,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
                     road_types: int = 0):
     """The network (torch.nn.Module): forward(images (B, T, 3, H, W) float 0..1, extra (B, T, inputs of the groups), state
     (B, hidden) or None) -> (speed logits (B, T, classes), works logit (B, T) or None, state); with ahead=True asked of
-    forward (a network built with ahead) also next logits (B, T, classes + 1) and metres (B, T); with road=True asked of
+    forward (a network built with ahead: only for a checkpoint of 7 to 11 Nov 2026 that has those heads, never for a
+    training) also next logits (B, T, classes + 1) and metres (B, T); with road=True asked of
     forward, then the logits of the kinds of road (B, T, road_kinds), or None for a network built without them; with
     types=True, last, the logits of the road type (B, T, road_types), or None for a network built without them
     (outputs reads them by name).
@@ -178,7 +175,8 @@ def build_brain_net(groups: tuple[str, ...], *, pool: str = 'grid', works: bool 
             return (near & held).to(extra_input.dtype)
 
         def sign_metres(self, extra_input):
-            """(B, T, inputs) -> (B, T): vision.SignDistance's metres over METRES_SCALE, 0 without a sign or the input."""
+            """(B, T, inputs) -> (B, T): vision.SignDistance's metres over METRES_SCALE, 0 without a sign or the input:
+            what the metres head of a brain with the limit ahead adds to."""
             if distance_at is None:
                 return extra_input.new_zeros(extra_input.shape[:-1])
             return extra_input[..., distance_at]
@@ -231,13 +229,11 @@ def speed_targets(speed, kph=None, sigma_kph: float = SPEED_SIGMA_KPH):
 
 
 def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weight, *, works_share: float = WORKS_LOSS,
-               frames: int | None = None, ahead: tuple | None = None, kph=None, road: tuple | None = None,
-               types: tuple | None = None):
+               frames: int | None = None, kph=None, road: tuple | None = None, types: tuple | None = None):
     """The error of a batch, (B, T) answers and weights of brain_targets: each task a mean over its own frames, 0 with none.
     A frame of weight 0 gives no gradient: not examined is not an answer, and an unmarked stretch is not "no works".
     The speed's answer is speed_targets' bell over the table kph (the network's class_kph; None: today's training's).
     frames: divide by this many instead, so that a frame weighs the same in a piece with one answer as in a full one.
-    ahead: (next logits, metres, next, next_weight, metres answers, metres_weight) of a network with the limit ahead.
     road: (road logits, road answers, road_weight), (B, T, kinds), of a network with the kinds of road: ROAD_LOSS a kind.
     types: (type logits (B, T, types), the type's class (B, T), -1 none, type_weight), of a network with the road type."""
     torch = _torch()
@@ -252,12 +248,6 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
     if works_logit is not None:
         total = total + works_share * mean(functional.binary_cross_entropy_with_logits(works_logit, works, reduction='none'),
                                            works_weight)
-    if ahead is not None:
-        next_logits, metres, following, next_weight, target, metres_weight = ahead
-        errors = functional.cross_entropy(next_logits.flatten(0, 1), following.flatten(), reduction='none')
-        total = total + NEXT_LOSS * mean(errors, next_weight.flatten())
-        total = total + METRES_LOSS * mean(functional.smooth_l1_loss(metres, target, reduction='none', beta=METRES_BETA),
-                                           metres_weight)
     if road is not None and road[0] is not None:
         road_logits, answers, road_weight = road
         errors = functional.binary_cross_entropy_with_logits(road_logits, answers, reduction='none')
@@ -271,6 +261,6 @@ def brain_loss(speed_logits, works_logit, speed, speed_weight, works, works_weig
 
 
 def car_weights(model) -> dict:
-    """The weights that go to the car: all but works_head, road_head and type_head (the heads of the limit ahead go
-    too)."""
+    """The weights that go to the car: all but works_head, road_head and type_head (the heads of the limit ahead, of a
+    brain that has them, go too)."""
     return {name: value for name, value in model.state_dict().items() if not name.startswith(TRAINING_ONLY)}

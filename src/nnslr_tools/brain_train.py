@@ -56,15 +56,12 @@ moved counts the answers that changed by more than RIGHT_KPH: the network reads 
 
 The brain steps at RATE_HZ, every reading of the car (brain_targets): its pictures are those vision.BrainInput makes on the
 car, kept while the signs are read. Each measure counts one frame a second, the frames of the old 1 Hz brains, so that the
-numbers of a brain of today and of one before read the same. ahead, the limit ahead on frames with its answer: right (none
-included), changes (of the frames before a change, those that say its speed), false_ahead (of the frames with none, those
-that say a limit), metres_error (mean, where the limit is right). The next limit is a sign's number: right is its class,
-exact. changes_read and changes_read_right: the frames before a change whose number the signs input already holds (the
-number confirmed or the last single reading), the ones it can say from what it was given; the rest only the picture can.
+numbers of a brain of today and of one before read the same.
 
-Nine frames in ten have none ahead: weighed the same, the head learns to say none always (seed 0 of 8 Nov 2026 said none on
-432 of the 515 frames whose number it already had). next_balance weighs the frames with a number ahead as much, all together,
-as those with none: each half of what they weighed before, so the head's share of the error stays the same.
+No limit ahead since 12 Nov 2026: the brain says the speed to hold and nothing else (brain_net), so a training has no
+next limit, no metres to it, no weight for them (next_balance) and no measure of them. The result.json of a brain of 7
+to 11 Nov 2026 keeps its 'ahead' measures, which nothing here makes any more. predict still gives the next limit and the
+metres of such a brain, for the check of its export along a drive (brain_export.drive_rollout).
 
 With types (the usual since 8 Nov 2026, his rule) only the seconds with a road type teach anything (brain_targets'
 types): the measure is on those too, so a brain with types and one without measure different frames.
@@ -90,8 +87,7 @@ import numpy as np
 
 from nnslr_tools import road_type_data as data
 from nnslr_tools.brain_net import brain_loss, build_brain_net, outputs
-from nnslr_tools.brain_targets import (BRAIN_INPUTS, INPUT_SIZES, LEFT_OUT, METRES_SCALE, NONE_AHEAD, NO_TYPE, NS, RATE_HZ,
-                                       ahead_weights,
+from nnslr_tools.brain_targets import (INPUT_SIZES, LEFT_OUT, METRES_SCALE, NO_TYPE, NS, RATE_HZ,
                                        check_drives, class_kph, dataset, epoch_drives, hours_in_train, inputs_sha256,
                                        learning_pieces, loss_weights, night_frames, pack_inputs, plates_in_train, read_split,
                                        road_weights, sign_kph, swap_passages, swapped, training_counts,
@@ -111,7 +107,6 @@ ROUTES = 'routes.json'
 END_WINDOW_S = 60
 OWN_SPEED_GAP_KPH = 20
 RIGHT_KPH = 2  # a speed said this near the answer is right (the site says "within 2 km/h")
-SIGN_KPH_SCALE = BRAIN_INPUTS.SIGN_KPH_SCALE  # the signs input's km/h are over this
 AFTER_PERCENTILE = 90  # the speed he reaches after the end of works (_site)
 DRY_FRAMES = 12
 DRY_STEPS = 2
@@ -132,28 +127,9 @@ def _same_augment(torch, images, seed: int, device):
         return _augment(torch, images)
 
 
-def next_balance(drives: list[dict]) -> float:
-    """How much more a frame with a number ahead weighs than one with none in train: as many with none as with one, 1
-    without either."""
-    counts = [0.0, 0.0]
-    for drive in drives:
-        weights = ahead_weights(drive, 'train')
-        if weights is not None:
-            counts[0] += float(weights[0][drive['next'] == NONE_AHEAD].sum())
-            counts[1] += float(weights[0][drive['next'] != NONE_AHEAD].sum())
-    return counts[0] / counts[1] if counts[0] and counts[1] else 1.0
-
-
-def _balanced(weights: tuple | None, drive: dict, balance: float) -> tuple | None:
-    """ahead_weights with next_balance: the frames with none at half, those with a number at half the balance."""
-    if weights is None:
-        return None
-    return weights[0] * np.where(drive['next'] == NONE_AHEAD, 0.5, 0.5 * balance).astype(np.float32), weights[1]
-
-
 def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chunk: int, rng: random.Random, device,
-                augment: bool = True, steps: int | None = None, balance: float = 1.0) -> float:
-    """One pass over the train frames: the mean error of its steps. balance: next_balance of the drives."""
+                augment: bool = True, steps: int | None = None) -> float:
+    """One pass over the train frames: the mean error of its steps."""
     torch = _torch()
     model.train()
     errors = []
@@ -161,7 +137,6 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
         speed_weight, works_weight = loss_weights(drive, 'train')
         if model.works_head is None:
             works_weight = np.zeros_like(works_weight)
-        ahead = _balanced(ahead_weights(drive, 'train'), drive, balance) if getattr(model, 'ahead', False) else None
         road = road_weights(drive, 'train') if getattr(model, 'road_head', None) is not None else None
         typed = type_weights(drive, 'train') if getattr(model, 'type_head', None) is not None else None
         look, state = rng.getrandbits(32), None
@@ -170,8 +145,6 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
             images, extra = _piece(drive, first, last, store, device)
             images = _same_augment(torch, images, look, device) if augment else images
             answers = speed_weight[first:last].sum() + works_weight[first:last].sum()
-            if ahead is not None:
-                answers += ahead[0][first:last].sum() + ahead[1][first:last].sum()
             if road is not None:
                 answers += road[first:last].sum()
             if typed is not None:
@@ -184,18 +157,14 @@ def train_epoch(model, optimizer, drives: list[dict], store: FrameStore, *, chun
             def piece(values):
                 return torch.from_numpy(values[first:last])[None].to(device)
 
-            asked = {'ahead': ahead is not None, 'road': road is not None, 'types': typed is not None}
+            asked = {'road': road is not None, 'types': typed is not None}
             said = outputs(model(images, extra, state, **asked), **asked)
             speed_logits, works_logit, state = said['speed'], said['works'], said['state']
-            found = None if ahead is None else (said['next'], said['metres'], *(piece(values) for values in
-                                                                                 (drive['next'], ahead[0],
-                                                                                  drive['metres'].astype(np.float32),
-                                                                                  ahead[1])))
             kinds = None if road is None else (said['road'], piece(drive['road']), piece(road))
             types = None if typed is None else (said['types'], piece(drive['road_type']), piece(typed))
             loss = brain_loss(speed_logits, works_logit,
                               *(piece(values) for values in (drive['speed'], speed_weight, drive['works'], works_weight)),
-                              frames=chunk, ahead=found, kph=model.class_kph, road=kinds, types=types)
+                              frames=chunk, kph=model.class_kph, road=kinds, types=types)
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), CLIP)
@@ -212,9 +181,10 @@ def _stretches_out_of_train(partitions: list[str]) -> set[int]:
 def predict(model, drive: dict, store: FrameStore, *, chunk: int, device, cold: bool = False) -> dict:
     """What the network says along a whole drive, as on the car: {'kph': per frame, the km/h of its class in the network's
     own table (class_kph), 'works': chance per frame, or None, 'road': chance per frame and kind of road, or None, 'types':
-    chance per frame and road type (road_types.ROAD_TYPES), or None}; a network with the limit ahead also 'next' (a class of
-    that table per frame, 'none' for none: the last one, len(class_kph)) and 'metres'. cold: the memory also starts again
-    where a stretch out of train begins."""
+    chance per frame and road type (road_types.ROAD_TYPES), or None}; a network with the limit ahead (a brain of 7 to 11
+    Nov 2026, loaded from its checkpoint: brain_export.load_brain) also 'next' (a class of that table per frame, 'none'
+    for none: the last one, len(class_kph)) and 'metres'. cold: the memory also starts again where a stretch out of
+    train begins."""
     torch = _torch()
     model.eval()
     asked = {'ahead': getattr(model, 'ahead', False), 'road': getattr(model, 'road_head', None) is not None,
@@ -306,51 +276,9 @@ def _in_force(signs: np.ndarray) -> np.ndarray:
     return (signs[:, 1] > 0) & (signs[:, 6] == 0)
 
 
-def _number_given(drive: dict, classes: np.ndarray) -> np.ndarray:
-    """Per frame: the signs input holds the km/h of classes there, as the number confirmed or the last single reading."""
-    signs = drive.get('inputs', {}).get('signs')
-    if signs is None:
-        return np.zeros(len(classes), dtype=bool)
-    kph = class_kph(np.asarray(classes))
-    confirmed = (signs[:, 1] > 0) & (np.abs(signs[:, 0] * SIGN_KPH_SCALE - kph) < 0.5)
-    single = (signs[:, 9] > 0) & (np.abs(signs[:, 8] * SIGN_KPH_SCALE - kph) < 0.5)
-    return (classes != NONE_AHEAD) & (confirmed | single)
-
-
 def _measured(drive: dict) -> np.ndarray:
     """The frames a measure counts: one a second."""
     return drive.get('measured', np.ones(len(drive['frames']), dtype=bool))
-
-
-def _ahead_measure(drives: list[dict], answers: list[dict], partition: str) -> dict | None:
-    """The limit ahead: see the module's text. None for a network without it."""
-    said, truth, metres, said_metres, other, read = [], [], [], [], [], []
-    for drive, answer in zip(drives, answers):
-        weights = ahead_weights(drive, partition)
-        if 'next' not in answer or weights is None:
-            continue
-        asked = (weights[0] > 0) & _measured(drive)
-        said.append(answer['next'][asked])
-        truth.append(drive['next'][asked])
-        read.append(_number_given(drive, drive['next'])[asked])
-        # Its none is the last class of the network's table (predict); the speed said is no limit to compare it with: it is
-        # his speed, the next limit a sign's number.
-        other.append(answer['next'][asked] != answer.get('none', NONE_AHEAD))
-        timed = (weights[1] > 0) & _measured(drive) & (answer['next'] == drive['next'])
-        metres.append(drive['metres'][timed] * METRES_SCALE)
-        said_metres.append(answer['metres'][timed])
-    if not said:
-        return None
-    said, truth, metres, said_metres, other, read = (np.concatenate(part) for part in (said, truth, metres, said_metres, other,
-                                                                                       read))
-    change, none = truth != NONE_AHEAD, truth == NONE_AHEAD
-    given = change & read
-    return {'frames': int(len(truth)), 'right': float((said == truth).mean()) if len(truth) else None,
-            'changes': int(change.sum()), 'changes_right': float((said[change] == truth[change]).mean()) if change.any() else None,
-            'changes_read': int(given.sum()),
-            'changes_read_right': float((said[given] == truth[given]).mean()) if given.any() else None,
-            'false_ahead': float(other[none].mean()) if none.any() else None,
-            'metres_error': float(np.abs(said_metres - metres).mean()) if len(metres) else None}
 
 
 def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
@@ -400,9 +328,7 @@ def measure(drives: list[dict], answers: list[dict], partition: str) -> dict:
     free, works_frames, blocked = (np.concatenate(part or [[]]).astype(bool) for part in (free, works_frames, blocked))
     road_frames = {kind: np.concatenate(part or [[]]).astype(bool) for kind, part in road_frames.items()}
     type_all = np.concatenate(type_all or [[]]).astype(np.int64)
-    ahead = _ahead_measure(drives, answers, partition)
-    return {**({'ahead': ahead} if ahead else {}),
-            'speed': _speed_measure(said_all, truth_all), 'speeds_said': sorted({int(kph) for kph in said_all}),
+    return {'speed': _speed_measure(said_all, truth_all), 'speeds_said': sorted({int(kph) for kph in said_all}),
             'one_speed': _one_speed(truth_all), 'follow_the_sign': _follow_the_sign(said_all, truth_all, number_all),
             'no_gas': _speed_measure(said_all[free], truth_all[free]),
             'far_from_own_speed': _far_from_own_speed(said_all, truth_all, own_all),
@@ -461,8 +387,7 @@ def _short(drive: dict, length: int) -> dict:
     cut = {name: drive[name][part] for name in ('frames', 'ns', 'partitions', 'cells', 'speed', 'speed_out', 'speed_weight',
                                                 'works', 'works_weight', 'road', 'road_weight', 'road_type',
                                                 'type_weight', 'typed_by_person', 'own_kph', 'measured',
-                                                'next', 'next_weight',
-                                                'metres', 'metres_weight', 'blocked') if name in drive}
+                                                'blocked') if name in drive}
     return {**drive, **cut, 'inputs': {name: value[part] for name, value in drive['inputs'].items()},
             'cuts': {at - first for at in drive['cuts'] if first < at < first + length}}
 
@@ -591,9 +516,10 @@ def _group_sizes(groups) -> list[tuple[str, int]]:
 
 def brain_start(torch, model, path: Path, source: dict) -> dict:
     """The weights of an earlier brain (its brain-last.pt, nnslr train-brain --init-from) in this fresh one: every layer of
-    the same name and shape; the rows of the speed and next heads by km/h, of the road and type heads by name (one the
+    the same name and shape; the rows of the speed head by km/h, of the road and type heads by name (one the
     start lacks keeps the fresh row); the memory's input by group, an input the start lacks at zero and one it took and
-    this one does not left out, so the network starts saying what the start said. A head the start has not stays fresh.
+    this one does not left out, so the network starts saying what the start said. A head the start has not stays fresh,
+    and a head only the start has is not taken: the next limit and the metres of a brain of 7 to 11 Nov 2026.
     Refuses a start stepped otherwise (rate, picture, pool, features, memory), learnt on another split, or whose inputs
     are not as wide as its groups say. Returns what result.json records of it: its file and sha256, run, epoch, split,
     the layers left fresh, the inputs added and left out, and whether the car's file of the inputs was the same."""
@@ -623,7 +549,6 @@ def brain_start(torch, model, path: Path, source: dict) -> dict:
     table = [int(round(value)) for value in weights['class_kph'].tolist()] if 'class_kph' in weights else []
     own = [int(round(value)) for value in model.class_kph.tolist()]
     rows = {'speed_head.': ({kph: row for row, kph in enumerate(table)}, own),
-            'next_head.': ({**{kph: row for row, kph in enumerate(table)}, None: len(table)}, own + [None]),
             'road_head.': ({kind: row for row, kind in enumerate(saved.get('road_kinds') or [])}, source['road_kinds']),
             'type_head.': ({kind: row for row, kind in enumerate(saved.get('road_types') or [])}, source['road_types'])}
     fresh, added = [], []
@@ -687,8 +612,8 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     the ones still in training_routes; None, every drive of training_routes. init_from: an earlier brain-last.pt whose
     weights it goes on from (brain_start; the dry run checks it), else ImageNet and random weights. sign_networks: the
     networks its signs were read with (sign_networks.load: the cutter, classifier and applicability network chosen in
-    Train › Brain, for its inputs and its labels), recorded in result.json; None, the car's release of the sunnypilot
-    clone and Our networks in use."""
+    Train › Brain, for its inputs), recorded in result.json; None, the car's release of the sunnypilot
+    clone."""
     torch = _torch()
     root, run_dir = Path(data_root), Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -736,7 +661,7 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     if types:
         _types_in_train(drives, log)
     store = FrameStore(_pictures(root, drives, dry_run=dry_run, log=log), device)
-    model = build_brain_net(groups, pool=pool, works=works, ahead=True, pretrained=not dry_run, road_kinds=len(kinds),
+    model = build_brain_net(groups, pool=pool, works=works, pretrained=not dry_run, road_kinds=len(kinds),
                             road_types=len(ROAD_TYPES) if types else 0).to(device)
     optimizer = torch.optim.AdamW([value for value in model.parameters() if value.requires_grad], lr=LEARNING_RATE,
                                   weight_decay=WEIGHT_DECAY)
@@ -744,9 +669,10 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     hours = 'plate_hours' in groups and hours_in_train(drives)
     wet = 'plate_wet' in groups and wet_in_train(drives)
     # rate_hz and picture: how the car steps it (brain_export); a checkpoint without them is a 1 Hz brain of PIL pictures.
+    # No 'ahead': only the checkpoints of 7 to 11 Nov 2026 have it, with their heads of the limit ahead.
     source = {'groups': groups, 'pool': pool, 'works': works, 'road_kinds': kinds,
               'road_types': list(ROAD_TYPES) if types else [], 'features': FEATURES, 'hidden': HIDDEN, 'plates': plates,
-              'hours': hours, 'wet': wet, 'ahead': getattr(model, 'ahead', False),
+              'hours': hours, 'wet': wet,
               'rate_hz': drives[0].get('rate', 1.0), 'picture': 'brain' if drives[0].get('rate', 1.0) == RATE_HZ else 'road_type',
               'split': read_split(root)['sha256'], 'reader': drives[0]['reader'], 'inputs_sha256': inputs_sha256()}
     start = None
@@ -755,13 +681,11 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
         log(_start_text(start))
     log(f'Frames with a night answer: {sum(int(night_frames(drive)[0].sum()) for drive in drives)}')
     history = []
-    balance = next_balance(drives)
-    log(f'The next limit: a frame with a number ahead weighs {balance:.1f} of one with none.')
     name = 'dry_run' if dry_run else f'brain_s{seed}'
     for epoch in range(epochs):
         started = time.monotonic()
         error = train_epoch(model, optimizer, epoch_drives(drives, groups, rng), store, chunk=chunk, rng=rng, device=device,
-                            steps=DRY_STEPS if dry_run else None, balance=balance)
+                            steps=DRY_STEPS if dry_run else None)
         answers = [predict(model, drive, store, chunk=chunk, device=device) for drive in drives]
         validation = measure(drives, answers, 'validation')
         score = validation['speed']['mean_error_kph']
@@ -779,12 +703,12 @@ def train_brain(data_root: Path, run_dir: Path, merged_of, *, pool: str = 'grid'
     cold = [predict(model, drive, store, chunk=chunk, device=device, cold=True) for drive in drives]
     swapped_measure = partial(_swapped_measure, model, drives, answers, groups=groups, store=store, chunk=chunk, device=device)
     table = [int(round(value)) for value in model.class_kph.tolist()]
-    # rate_hz, ahead, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
+    # rate_hz, hidden and kph: how the car steps it and what it says, for Models (model_roles.brain_digest).
     result = {'groups': list(groups), 'pool': pool, 'works': works, 'road_kinds': kinds,
-              'road_types': list(ROAD_TYPES) if types else [], 'rate_hz': source['rate_hz'], 'ahead': source['ahead'],
+              'road_types': list(ROAD_TYPES) if types else [], 'rate_hz': source['rate_hz'],
               'hidden': HIDDEN, 'kph': {'from': table[0], 'to': table[-1], 'step': table[1] - table[0] if len(table) > 1 else 0},
               'plates': plates, 'hours': hours, 'wet': wet, 'dry_run': dry_run,
-              'seed': seed, 'right_kph': RIGHT_KPH, 'history': history, 'next_balance': balance,
+              'seed': seed, 'right_kph': RIGHT_KPH, 'history': history,
               'split_sha256': source['split'], 'start': start,
               'sign_networks': {part: sign_networks[part] for part in ('cutter', 'classifier', 'decider')}
               if sign_networks is not None else None,

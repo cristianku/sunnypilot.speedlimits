@@ -14,10 +14,10 @@ INPUTS · 4 times/second
                                                ↓
                                            GRU memory
                                                ↓
-                              ┌────────────────┴───────────────┐
-                              ↓                                ↓
-                       Speed to hold                 Next limit + metres
+                                         Speed to hold
 ```
+
+The speed to hold is the brain's only output on the car since 12 Nov 2026: no next limit and no metres to it.
 
 The visual layout must show **MobileNetV3 before the GRU**, not as two parallel modules. Other inputs join the **visual features before the GRU**; they do not pass through MobileNetV3. Check actual selected groups against the current brain contract instead of hard-coding outdated input claims. Pedals and car speed are **never** inputs (`brain_targets.LEFT_OUT`, since 10 Nov 2026: a brain with them followed his speed on the road).
 
@@ -27,7 +27,6 @@ Under the main flow, add one compact **ONLY DURING TRAINING** section:
 - **Roadworks** — an auxiliary prediction taught by Speed Review labels.
 - **Road characteristics** — auxiliary predictions from reviewed road-kind labels.
 - **Correct speed** — the training target from the recorded driver's speed, corrected/filtered in Speed Review (not an input).
-- **Next limit / metres** — training targets from reviewed/read sign events (the corresponding predictions *are* outputs on the car).
 
 Explain in a single sentence: **“Extra labels teach the shared network during training; they are not inputs and are not needed in the car.”**
 

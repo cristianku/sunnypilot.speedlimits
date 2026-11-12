@@ -39,7 +39,7 @@ export const ROLE_TEXT: Record<ModelRole, {what: string; today: string; empty: s
     today: 'Today: only the prototypes of experiment B.',
     empty: 'No applicability network trained yet: experiment B is the first prototype.',
     emptyMore: 'Its variants appear here once scripts/run_experiment_b.sh has trained them.',
-    uses: 'The one in use says whom each speed sign applies to in Prepare’s Our networks and in the signs the brain’s training reads for the next limit; it never goes to the car.',
+    uses: 'The one in use says whom each speed sign applies to in Prepare’s Our networks and in the signs the brain’s training reads; it never goes to the car.',
   },
   brain: {
     what: 'Says the speed to hold from the camera, the signs read, the car ahead, the hour and the country. '

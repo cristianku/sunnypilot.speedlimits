@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Train › Brain, how the next training's brain is built, as one short flow that reads top to bottom on a phone too: the
 // picture goes through MobileNetV3-small, the other inputs join its features, all of them go into the memory (GRU), and the
-// memory gives two groups of outputs: the car's three, and those only the training has (by its switches), which teach the
+// memory gives two groups of outputs: the car's one, the speed to hold, and those only the training has (by its switches), which teach the
 // shared weights through their losses and are dropped from the car's file. Under each group, the correct labels it is
 // compared with: the map only offline, for the road type. The inputs are the groups of brain-card.ts the training gives (the
 // car's; never the driver's pedals nor the car's speed): tests/review/test_brain_card.py keeps them those of the code. A tap
 // on a block opens what it is under the flow.
 import {computed, nextTick, onBeforeUnmount, onMounted, ref, watch} from 'vue';
+import {plural} from '../common/format';
 import type {BrainChoice} from './brain-choices';
 import {BRAIN_GROUPS, BRAIN_OUT, BRAIN_OUTPUTS, BRAIN_PICTURE, type BrainFact} from './brain-card';
 
@@ -37,11 +38,10 @@ const inputs = computed<Block[]>(() => [
     note: 'Never your pedals nor the car’s speed: the answer is your own speed, and a brain that had them followed it.'},
 ]);
 const memory: Block = {id: 'memory', title: 'GRU memory', sub: 'one step every ¼ s', kind: 'net', facts: [BRAIN_PICTURE[1]!],
-  note: 'The image features and every other input go into it at each step; both outputs read its state.'};
+  note: 'The image features and every other input go into it at each step; every output reads its state.'};
 const outputs: Block[] = [
-  {id: 'speed', title: 'Speed to hold', sub: '1–200 km/h', kind: 'car', facts: [BRAIN_OUTPUTS[0]!]},
-  {id: 'next', title: 'Next limit', sub: 'or none', kind: 'car', facts: [BRAIN_OUTPUTS[1]!]},
-  {id: 'metres', title: 'Distance to it', sub: 'metres', kind: 'car', facts: [BRAIN_OUTPUTS[2]!]},
+  {id: 'speed', title: 'Speed to hold', sub: '1–200 km/h', kind: 'car', facts: [BRAIN_OUTPUTS[0]!],
+    note: 'All the car reads of the brain: it lowers this speed itself before a sign. No next limit and no metres to it.'},
 ];
 /** The outputs only the training has, by its switches: each teaches the shared weights through its own loss and is dropped
  * from the file the car gets (brain_export). source: where its correct labels come from. */
@@ -66,7 +66,7 @@ const pin = (block: Block): void => { pinned.value = pinned.value === block.id ?
 const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') pinned.value = null; };
 
 // -- the lines, from where the blocks are: each input into a rail on the right, the rail into the memory, the memory to
-// both outputs ---------------------------------------------------------------------------------------------------------
+// the outputs ----------------------------------------------------------------------------------------------------------
 const main = ref<HTMLElement | null>(null);
 const size = ref({w: 0, h: 0});
 interface Line {key: string; d: string; arrow: boolean; compare?: boolean}
@@ -173,7 +173,7 @@ onBeforeUnmount(() => {
       <div class="bd-outs">
         <div class="bd-side">
           <section class="bd-group bd-group-car" data-block="group-car">
-            <h5>On the car · {{ outputs.length }} outputs</h5>
+            <h5>On the car · {{ plural(outputs.length, 'output') }}</h5>
             <button v-for="block in outputs" :key="block.id" type="button" class="bf-block bf-car" :class="{on: pinned === block.id}"
               :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
               <span class="bf-title">{{ block.title }}</span>
@@ -184,13 +184,12 @@ onBeforeUnmount(() => {
             <h5>Compared with</h5>
             <ul>
               <li><strong>Your speed</strong> recorded on dashcam drives, corrected in Speed review</li>
-              <li><strong>The signs read</strong> by our networks, your Sign review over them</li>
             </ul>
           </div>
         </div>
         <div v-if="extras.length" class="bd-side">
           <section class="bd-group bd-group-train" data-block="group-train">
-            <h5>Only in training · {{ extras.length }} outputs</h5>
+            <h5>Only in training · {{ plural(extras.length, 'output') }}</h5>
             <button v-for="block in extras" :key="block.id" type="button" class="bf-block bf-train" :class="{on: pinned === block.id}"
               :data-block="block.id" :aria-expanded="pinned === block.id" @click="pin(block)">
               <span class="bf-title">{{ block.title }}</span>
@@ -213,7 +212,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <p class="bd-sum">In training every output’s error updates the shared weights (the image projection and the GRU; MobileNetV3
-      itself stays frozen). For the comma 4 the training-only outputs are dropped: the car runs {{ outputs.length }}, with no map.</p>
+      itself stays frozen). For the comma 4 the training-only outputs are dropped: the car runs the speed to hold alone, with no map.</p>
     <details class="bd-out">
       <summary>{{ out.length }} kinds of second answer nothing</summary>
       <ul><li v-for="reason in out" :key="reason.name">{{ reason.what }}</li></ul>

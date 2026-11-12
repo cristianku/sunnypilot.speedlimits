@@ -92,20 +92,15 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
         + (version.plates ? '' : ' This version did not learn the plates: the car gives it plate unknown and no hours.')} : {})});
   }
   const outputs: FlowBlock[] = [
-    {id: 'speed', title: 'Speed to hold', sub: `${kph.from ?? '?'}–${kph.to ?? '?'} km/h, every ${kph.step ?? '?'}` + (version.ahead ? '' : ' · no next limit'), kind: 'car',
+    {id: 'speed', title: 'Speed to hold', sub: `${kph.from ?? '?'}–${kph.to ?? '?'} km/h, every ${kph.step ?? '?'}`, kind: 'car',
       column: 2, facts: [{name: 'speed', what: 'one score for each speed; the car takes the highest'}],
-      note: 'It is the vision limit, speedLimit of speedVisionSP, for Smartspeed.' + (version.ahead ? '' : ' This version says '
-        + 'nothing else: no next limit and no metres to it (it was trained before those heads, 8 Nov 2026), and with a brain the '
-        + 'car no longer runs the rules’ LimitAhead, so speedLimitAhead stays 0.')},
+      // The speed is the brain's only word to openpilot (12 Nov 2026): a version trained from 7 to 11 Nov still has the
+      // outputs of the next limit and its metres in its file, which the car leaves unread.
+      note: 'It is the vision limit, speedLimit of speedVisionSP, for Smartspeed, and all the car reads of the brain: it '
+        + 'lowers this speed itself before a sign. With a brain the car does not run the rules’ LimitAhead, so '
+        + 'speedLimitAhead stays 0.' + (version.ahead ? ' This version’s file also gives a next limit and the metres to it '
+        + '(it was trained with those outputs, 7 to 11 Nov 2026): the car does not read them.' : '')},
   ];
-  if (version.ahead) {
-    outputs.push(
-      {id: 'next', title: 'Next limit', sub: 'or none', kind: 'car', column: 2,
-        facts: [{name: 'next', what: 'the limit of the sign ahead, speedLimitAhead'}]},
-      {id: 'metres', title: 'Metres to it', sub: 'counted down between steps', kind: 'car', column: 2,
-        facts: [{name: 'metres', what: 'speedLimitAheadDistance, less the metres driven since the step'}]},
-    );
-  }
   // The outputs only its training had, each on its row under a line, its correct labels beside it: they taught the shared
   // weights through their losses and were dropped from the file the car gets (brain_export).
   const extras = [

@@ -109,6 +109,10 @@ SERIES = (('vis_limit', 'speedLimit', 3.6, 2), ('vis_ahead', 'speedLimitAhead', 
           ('vis_raw_conf', 'rawSignConfidence', 1, 2), ('vis_raw_taken', 'rawSignTaken', None, None),
           ('vis_raw_seen', 'rawSignSeen', None, None), ('vis_raw_road', 'rawSignRoad', None, None),
           ('vis_sign_dist', 'signDistance', 1, 4), ('vis_sign_size', 'signSize', 1, 1))
+# The limit ahead is the rules' (vision.LimitAhead, a release without a brain): a brain says the speed to hold and
+# nothing else, so the result of a set with a brain has no such series, whatever its speedLimitAhead columns hold (those
+# of a replay made before 12 Nov 2026 hold the next limit its brain said then).
+RULES_SERIES = ('vis_ahead', 'vis_ahead_dist')
 META_SUFFIX = '.meta.json'  # beside a result: what the lists show without reading its rows
 REGRESSION_SUFFIX = '.regression.json'  # beside a result: how it stands next to the certified one (compare's counts)
 # What a result's meta keeps of it (the rows aside); COMPARE_VERSION: of compare()'s counts kept beside a result, made
@@ -472,12 +476,15 @@ def _steps(times: list[float], values: list, gap: float = HOLE_SECONDS) -> list[
 
 def view(record: dict, t0_ns: int) -> dict:
     """A result as the page draws it: the series of the squares (seconds from t0_ns, the start of the drive's logs, as
-    the timeline's), the readings that pulse (events, as the timeline's 'sign') and SignNet's boxes by frame read:
-    [time, boxes, minute, frame k of the minute]."""
+    the timeline's; the limit ahead, RULES_SERIES, only for a set without a brain), the readings that pulse (events, as
+    the timeline's 'sign') and SignNet's boxes by frame read: [time, boxes, minute, frame k of the minute]."""
     times = [_seconds(t_ns, t0_ns) for t_ns in record['frames']['t_ns']]
     out = record['out']
+    with_brain = any(one.get('role') == 'brain' for one in record.get('networks') or [])
     series = {}
     for name, field, scale, decimals in SERIES:
+        if with_brain and name in RULES_SERIES:
+            continue
         column = out[field]
         series[name] = _steps(times, [round(value * scale, decimals) for value in column] if scale else column)
     kph = series_values(out['speedLimit'])

@@ -42,19 +42,15 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'engaged', size: 7, use: 'never', what: 'openpilot on or off (selfdriveState.enabled)'},
 ];
 
-/** What it says on the car (the heads the car's network keeps). */
+/** What it says on the car (the head the car's network keeps): the speed to hold and nothing else, since 12 Nov 2026. */
 export const BRAIN_OUTPUTS: BrainFact[] = [
   {name: 'speed = speed_head(h) + trust(h) · number', what: 'the speed to hold, a class from 1 to 200 km/h; number is the limit confirmed of signs'},
-  {name: 'next = next_head(h) + trust_next(h) · number', what: 'the next limit, or none'},
-  {name: 'metres = metres_head(h) + metres_gate(h) · sign', what: 'the metres to it; sign is sign_distance'},
 ];
 
 /** The answers its training compares with what it says: never inputs, none of them reaches the car. */
 export const BRAIN_ANSWERS: BrainFact[] = [
   {name: 'speed', what: 'your dashboard speed, driver_speed (vEgoCluster, or vEgo + the car’s offset), on every second of the dashcam '
     + 'drives; the kph of your blocks of Speed review where you set one'},
-  {name: 'next, metres', what: 'from the signs our networks in use (cutter, classifier, applicability) read on every picture of the '
-    + 'drive, yours of Sign review over them where you confirmed the frames; passed where Sign distance reaches zero'},
   {name: 'works_head', what: 'the roadworks on the road, where they are marked in Speed review (Roadworks on)'},
   {name: 'road_head', what: 'the kinds of road (narrow, country, gravel, potholes…), where they are marked in Speed review (Road conditions on)'},
   {name: 'type_head', what: 'the road type of the map (Read the map in Data › Prepare), corrected in Speed review where it is wrong (Road type (map) on)'},

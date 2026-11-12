@@ -3,12 +3,10 @@ the comma runs), the classifier and the applicability network, those in use on t
 
 The brain is given the signs the car takes. On the car speedvisiond reads them with the networks of its release and lets
 the applicability network leave out those of another road (applicability.taken): a 60 at an exit never reaches the
-brain. The brain's training does the same with the three networks chosen here, for its inputs and for its labels:
-
-- its inputs (road_type_signs): the car's own vision.py and applicability.py, with the three networks exported as
-  Publish exports them (ONNX, contracts, speed_limits.json with the car's settings of today), into
-  derived/road_type_signs/sets/<key>/, one folder per choice (set_key);
-- its labels (brain_signs): the same three networks under PyTorch, Our networks with these instead of those in use.
+brain. The brain's training does the same with the three networks chosen here, for its inputs (road_type_signs): the
+car's own vision.py and applicability.py, with the three networks exported as Publish exports them (ONNX, contracts,
+speed_limits.json with the car's settings of today), into derived/road_type_signs/sets/<key>/, one folder per choice
+(set_key). They read nothing else since 12 Nov 2026: the second reading, for the answers of the next limit, is gone.
 
 scripts/run_brain.sh writes the choice into its run (FILE, networks.json: the three ids and the exported folder), every
 step reads it from there, and the brain's result.json records the ids. An applicability network is required: without one

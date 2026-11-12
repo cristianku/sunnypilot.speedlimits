@@ -67,7 +67,7 @@ def run(request: dict) -> None:
     # The progress of a training lives in logs/progress.json: this worker reports in its log lines only.
     chain.report_progress = lambda *args, **kwargs: None
     if request.get('require_gpu') and not torch.cuda.is_available():
-        # The brain's signs (nnslr_tools.brain_signs) are read on a card, never on the CPU.
+        # A caller that asks for a card (require_gpu) is never served on the CPU.
         raise RuntimeError(f"no card for this worker (CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r})")
     device = _device(torch, 'cuda' if torch.cuda.is_available() else 'cpu')
     proposer = request['model']
@@ -85,7 +85,7 @@ def run(request: dict) -> None:
     print(f"Proposals with our networks on {device}: cutter {proposer['cutter']} ({kind}), classifier {proposer['classifier']}, "
           f"decider {proposer['decider']}", file=sys.stderr, flush=True)
     output = Path(request['output'])
-    # The brain's signs (nnslr_tools.brain_signs) want the boxes only: no preview pictures.
+    # A caller that wants the boxes only asks for no preview pictures.
     previews = request.get('previews', True)
     if previews:
         (output / 'images').mkdir()

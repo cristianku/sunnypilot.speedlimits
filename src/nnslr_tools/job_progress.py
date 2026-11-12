@@ -225,9 +225,8 @@ LABELER_DRIVE_LINE = {
 # "drive i/N" line).
 LABELER_MINUTE = {'simulate': re.compile(r'^minute (\d+)/(\d+):')}
 # scripts/run_brain.sh, step 3: the segments read as the car does ("road-type signs: 125/400 segments", nnslr
-# road-type-signs), then the drives our networks read ("brain signs 3/12 <route>: ...", nnslr brain-signs), half each.
+# road-type-signs).
 BRAIN_SEGMENTS = re.compile(r'^road-type signs: (\d+)/(\d+) segments$')
-BRAIN_SIGN_DRIVE = re.compile(r'^brain signs (\d+)/(\d+) ')
 SUBSTEP = re.compile(r'^== (\d+)/(\d+) ')
 REGRESSION_ITEM = re.compile(r'^regression item (\w+) (\d+)/(\d+)(?: (\S+))?')
 REGRESSION_SEGMENT = re.compile(r'^SEGMENT (\d+)/(\d+) ')
@@ -480,11 +479,9 @@ def progress(action: str, state: str, text: str, preparation: dict | None = None
         match = REGRESSION_SEGMENT.match(line) if action == 'regression' else None
         if match:
             item_share = (int(match.group(1)) - 1) / max(int(match.group(2)), 1)
-        if action == 'train_brain' and (match := BRAIN_SEGMENTS.match(line) or BRAIN_SIGN_DRIVE.match(line)):
+        if action == 'train_brain' and (match := BRAIN_SEGMENTS.match(line)):
             reached, total = int(match.group(1)), max(int(match.group(2)), 1)
-            brain_signs = ((min(reached / total, 1.0) / 2, f'as the car reads · {reached} of {total} segments')
-                           if match.re is BRAIN_SEGMENTS else
-                           (0.5 + min(reached / total, 1.0) / 2, f'our networks · {reached} of {total} drives'))
+            brain_signs = (min(reached / total, 1.0), f'as the car reads · {reached} of {total} segments')
         if action in LABELER_DRIVE_LINE:
             match = LABELER_DRIVES.match(line)
             if match:

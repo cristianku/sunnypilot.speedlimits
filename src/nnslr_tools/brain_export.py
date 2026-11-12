@@ -6,8 +6,10 @@ and hidden (1, hidden), zeros at the start -> speed (1, classes) logits and hidd
 step. The speed said is contract['output']['kph'][argmax(speed)]; no softmax, nothing is read from how sure it is. The table
 is the network's own (its class_kph, kept in the checkpoint): 200 classes of a km/h for the brains since 8 Nov 2026, 40 of 5
 km/h for those before, which load and export as they were. The GRU is written out with matrix products as the road-type
-network's (gru_step): no GRU node in the graph the comma compiles. A brain with the limit ahead also gives next (1, classes +
-1), kph[argmax] or none for the last class, and metres (1, 1), the metres to it over output.metres_scale. The contract's
+network's (gru_step): no GRU node in the graph the comma compiles. A brain with the limit ahead (trained from 7 to 11 Nov
+2026; none since, brain_net) also gives next (1, classes + 1), kph[argmax] or none for the last class, and metres (1,
+1), the metres to it over output.metres_scale: the car no longer reads the two, and they stay in the export so that such
+a brain exported again is the file that was published, its contract the same. The contract's
 step says how the car steps it: rate_hz, clock ("schedule": on the grid of the rate, as the training's frames) and picture
 ("brain": vision.BrainInput; "road_type": the PIL picture).
 
@@ -33,7 +35,7 @@ from nnslr_tools.road_type_net import FrameStore, _torch, gru_step
 BRAIN_FILE = 'brain.onnx'
 INPUT_NAMES = ['image', 'extra', 'hidden']
 OUTPUT_NAMES = ['speed', 'hidden_out']
-AHEAD_OUTPUT_NAMES = ['speed', 'next', 'metres', 'hidden_out']
+AHEAD_OUTPUT_NAMES = ['speed', 'next', 'metres', 'hidden_out']  # of a checkpoint with the limit ahead, as it was published
 RTOL, ATOL = 1e-4, 1e-4
 # Along a drive PyTorch runs the memory in chunks on a V100 and ONNX one frame at a time on the CPU: two classes whose
 # scores stand closer than this are a tie, and either may win by the last bits of the float.
@@ -43,7 +45,7 @@ TIE = 1e-3
 def load_brain(checkpoint: Path):
     """(the network on the CPU in eval mode, without works_head and road_head, with type_head when it learnt the road
     type; what the checkpoint says of itself). The network has the table of its checkpoint (class_kph): a brain of 5 km/h
-    classes stays one."""
+    classes stays one. A checkpoint with the limit ahead (its 'ahead': the brains of 7 to 11 Nov 2026) keeps those heads."""
     torch = _torch()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=False)
     table = saved['weights'].get('class_kph')
@@ -69,7 +71,7 @@ def output_names(model) -> list[str]:
 
 
 def step_module(model):
-    """A step of the car: (image, extra, hidden) -> (speed logits, hidden_out), with the limit ahead (speed logits, next
+    """A step of the car: (image, extra, hidden) -> (speed logits, hidden_out), of a brain with the limit ahead (speed logits, next
     logits, metres, hidden_out), with the road type its logits just before hidden_out: the numbers of BrainNet.forward."""
     torch = _torch()
     from torch import nn
@@ -110,8 +112,8 @@ def table_of(model) -> list[int]:
 
 def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu', log=None) -> dict:
     """A whole drive by step_run(image, extra, hidden) -> the step's outputs (speed logits first, hidden_out last), numpy,
-    against brain_train.predict: the frames and how many of them say another speed, or another limit ahead (a frame
-    where ONNX scores both classes within TIE is a tie, counted apart). The memory
+    against brain_train.predict: the frames and how many of them say another speed, or, for a brain that has it, another
+    limit ahead (a frame where ONNX scores both classes within TIE is a tie, counted apart). The memory
     starts again where the car's does (drive['cuts']). log, when given, hears the drive and every tenth of it.
     The frames go one at a time, so PyTorch runs on one thread meanwhile: its pool waited on onnxruntime's at every
     frame, 67 ms a frame instead of 2 (a drive of 11040 frames at 4 Hz: 12 minutes instead of 22 seconds)."""

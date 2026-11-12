@@ -1397,8 +1397,7 @@ class Panel:
                 reason = gpu_reason
             elif name == 'train_brain':
                 # Its labels are his own speed on every dashcam drive with its logs read, each whole (the blocks of
-                # Speed review correct it): no frame needs a confirmation; the next limit is our networks' reading, his
-                # Sign review over it.
+                # Speed review correct it): no frame needs a confirmation.
                 pass
             elif name in ROAD_LABELER_ACTIONS and (missing := self._road_labeler_missing(name)):
                 reason = missing
@@ -1641,17 +1640,17 @@ class Panel:
     def brain_labels(self) -> dict:
         """Train › Brain, what a training gets today from every drive it learns from (training_routes: every dashcam
         drive, each whole; training: brain_targets.training_counts, their number and hours): his speed with the blocks of
-        Speed review, the roadworks, the next limit of our networks' signs with his Sign review over them, as
+        Speed review and the roadworks, as
         brain_targets.summary, with the drives the next training reads again first (to_read: not read by the networks in
         use as the car reads them, applicability included (sign_networks: every drive while those three are not exported
-        yet), or without the brain's pictures; signs_to_read: not read by our networks in use, brain_signs.unread) and
+        yet), or without the brain's pictures) and
         the names of the kinds of road (road_labels). Without the inputs, which it does not show: about 10 s over every
         drive, asked when the section opens, never by the status."""
         from nnslr_tools.drive_review import DriveReviewStore
         store = DriveReviewStore(self.root)
         try:
             # It loads the car's brain_inputs.py from the sunnypilot clone.
-            from nnslr_tools import brain_signs, brain_targets, sign_networks
+            from nnslr_tools import brain_targets, sign_networks
             used = sign_networks.in_use(self.root)
             folder = sign_networks.exported(self.root, used) if all(used.get(part) for part in sign_networks.PARTS) \
                 else None
@@ -1661,11 +1660,10 @@ class Panel:
                                                                 need_pictures=False, inputs=False, types=True,
                                                                 networks={**used, 'models': folder} if folder else None))
             labels = brain_targets.road_labels(self.root)
-            signs_to_read = brain_signs.unread(self.root, [row['route'] for row in found['drives']])
             training = brain_targets.training_counts(self.root)
         except (ImportError, OSError, ValueError, sqlite3.Error) as exc:
             return {'problem': str(exc)}
-        return {**found, 'road_labels': labels, 'signs_to_read': signs_to_read, 'training': training,
+        return {**found, 'road_labels': labels, 'training': training,
                 'to_read': sum(folder is None or not row['reader_current'] or not row.get('pictures', True)
                                for row in found['drives'])}
 

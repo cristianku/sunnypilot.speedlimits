@@ -39,7 +39,7 @@ def test_a_label_is_a_class_of_one_kilometre_and_below_one_there_is_none():
     assert targets.class_kph(targets.speed_class(123)) == 123
     assert targets.speed_class(np.array([0, 1, 1.4, 50, 300, np.nan])).tolist() == [-1, 0, 0, 49, 199, -1]
     assert targets.class_kph(np.arange(3)).tolist() == [1, 2, 3]
-    assert targets.SPEED_CLASSES == 200 and targets.NONE_AHEAD == 200 and not hasattr(targets, 'GRID_KPH')
+    assert targets.SPEED_CLASSES == 200 and not hasattr(targets, 'GRID_KPH')
 
 
 def test_the_kph_of_the_classes_come_out_of_a_tensor_too():
@@ -545,8 +545,6 @@ def test_from_the_database_to_the_answers_of_a_drive(tmp_path, monkeypatch):
     # gives it.
     assert {kph for kph in drive['own_kph'].tolist() if kph == kph} == {80.0} and drive['ns'][23] == -1
     assert drive['inputs']['speed'][10].tolist() == _np().float32(targets.BRAIN_INPUTS.speed_row(77 / 3.6)).tolist()
-    # No Sign review: no next limit to learn, and nothing to trace.
-    assert not drive['next_weight'].any() and drive['sign_review']['fingerprint'] is None
     # Seconds with his speed and no picture: 22 and 30 without one, 23 without its time.
     assert drive['no_picture_s'] == 3
     found = targets.summary([drive])
@@ -777,323 +775,21 @@ def test_a_second_of_a_drive_is_its_frame_and_the_readings_after_it(tmp_path):
         targets.brain_frames(tmp_path, [{**frames[0], 'decoded': 7}], ['train'], [None], merged, None)
 
 
-RUN = '20261108T120000Z-0123abcd'
-
-
-def sign_box(family='maximum_speed', kph=None, where='own_road', panel='none', sign_type=None):
-    return {'family': family, 'value_kph': kph, 'applicability': where, 'supplementary_panel': panel,
-            'sign_type': sign_type, 'bbox_xyxy': [0, 0, 10, 10]}
-
-
-def frame_review(second, *boxes, read=False, reviewer='cristian', kind='human', run=RUN, confirmed=1, revision=1):
-    """A frame of Sign review: a 1 Hz picture at a whole second, or a reading of the comma (read) at any step."""
-    decoded = int(round(second * 20))
-    output = 1000 + decoded if read else int(second)
-    payload = {'segment_index': 0, 'output_index': output, 'decoded_frame_index': decoded, 'detections': list(boxes)}
-    return (ROUTE, run, f'0/{output}', 0, output, json.dumps(payload), reviewer, confirmed, revision,
-            '2026-11-08T10:00:00', kind, 'web')
-
-
-def sign_review_db(root, rows, run=RUN):
-    from nnslr_tools.review_db import SCHEMA_STATEMENTS, db_path
-    report = root / 'derived' / 'preannotations' / ROUTE
-    (report / run).mkdir(parents=True, exist_ok=True)
-    (report / run / 'index.html').write_text('<html></html>', encoding='utf-8')
-    (report / 'latest.json').write_text(json.dumps({'run_id': run}), encoding='utf-8')
-    db_path(root).parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_path(root))
-    for statement in SCHEMA_STATEMENTS:
-        connection.execute(statement)
-    connection.executemany('INSERT OR REPLACE INTO frame_reviews VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', rows)
-    connection.commit()
-    connection.close()
-
-
-def distance_marks(root, lines):
-    folder = root / 'annotations' / 'sign_distance'
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / f'{ROUTE}.jsonl').write_text(''.join(json.dumps(line) + '\n' for line in lines), encoding='utf-8')
-
-
-def zero_at(second, sign='999'):
-    return {'sign': sign, 'mark': 'zero', 'segment': 0, 'frame': int(second * 20), 't_ns': int(second * NS),
-            'sign_t_ns': None, 'sync': None, 'reviewer': 'a', 'at': '2026-11-08T10:00:00+01:00'}
-
-
-def sign_merged(seconds_long=120, kph=36.0):
-    return {'frames': encoded(seconds_long), 'series': {'v_ego': [[0, kph]]}, 'span': [0, seconds_long * NS], 'meta': {},
-            'gps': []}
-
-
-def reviewed_drive(root):
-    """A drive gone through in Sign review from 0 to 61 s, but for 30 s, which the site's AI reviewer still holds."""
-    special = {
-        10: [sign_box(kph=60)], 11: [sign_box(kph=60)], 12: [sign_box(kph=60)],
-        20: [sign_box(kph=50)], 21: [sign_box(kph=50), sign_box(kph=70, where='other_road')],
-        40: [sign_box('cancellation')], 41: [sign_box('cancellation')],
-        50: [sign_box('zone', 30)], 51: [sign_box('zone', 30)],
-        55: [sign_box(kph=80, panel='time')],
-        58: [sign_box('other_sign', sign_type='town_entry')],
-    }
-    rows = [frame_review(second, *special.get(second, [])) for second in range(61) if second != 30]
-    rows += [frame_review(30, sign_box(kph=80), reviewer='ai/llama/qwen', kind='ai'),
-             frame_review(61, sign_box(kph=100), reviewer='ai/Claude Code', kind='ai'),
-             frame_review(12.25, sign_box(kph=60), read=True),
-             frame_review(45, sign_box(kph=90), run='20261101T120000Z-0123abcd'),
-             frame_review(62, sign_box(kph=120), confirmed=0)]
-    sign_review_db(root, rows)
-    # A zero mark of Sign distance just after the 50, and one taken back by an Undo after the end.
-    distance_marks(root, [zero_at(21.8), zero_at(41.2, '777'), {'sign': '777', 'mark': 'undo', 'undoes': 1,
-                                                                 'reviewer': 'a', 'at': '2026-11-08T10:01:00+01:00'}])
-
-
-def test_the_signs_of_a_drive_are_the_ones_a_person_confirmed_on_its_current_run(tmp_path):
-    targets = _targets()
-    reviewed_drive(tmp_path)
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    # The 60 passed half a second after its last box (a reading of the comma's), the 50 at its zero mark, the end of
-    # the limit with no mark in effect, and the 100 of an AI assistant: the site's AI reviewer, another run, a draft and
-    # another road's sign are not there.
-    assert found['signs'] == [(12_750_000_000, 60), (21_800_000_000, 50), (41_500_000_000, None), (61_500_000_000, 100)]
-    assert found['masked'] == [(50 * NS, 51_500_000_000), (55 * NS, 55_500_000_000), (58 * NS, 58_500_000_000)]
-    # The pictures gone through: the one still waiting for a person breaks them.
-    assert found['covered'] == [(0, 29 * NS), (31 * NS, 61 * NS)]
-    assert isinstance(found['fingerprint'], str) and len(found['fingerprint']) == 16
-    again = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert again == found
-    distance_marks(tmp_path, [zero_at(22.0)])
-    moved = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert moved['signs'][1] == (22 * NS, 50) and moved['fingerprint'] != found['fingerprint']
-
-
-def test_two_numbers_on_one_sign_are_two_signs_and_a_mark_goes_to_one_sign(tmp_path):
-    targets = _targets()
-    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=60)), frame_review(11, sign_box(kph=50)),
-                              frame_review(12, sign_box(kph=50)), frame_review(13, sign_box(kph=None))])
-    # A mark long after the sign is not its passing.
-    distance_marks(tmp_path, [zero_at(19.0)])
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert found['signs'] == [(10_500_000_000, 60), (12_500_000_000, 50)] and found['masked'] == []
-    # A sign nobody could read the number of says a limit with no number: its approach is masked.
-    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=None)), frame_review(11, sign_box('unreadable')),
-                              frame_review(12, sign_box(kph=None)), frame_review(13, sign_box(kph=None))])
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert found['signs'] == [] and found['masked'] == [(10 * NS, 13_500_000_000), (11 * NS, 11_500_000_000)]
-
-
-def test_no_sign_review_is_no_sign_and_nothing_gone_through(tmp_path):
-    empty = {'signs': [], 'covered': [], 'masked': [], 'fingerprint': None, 'read_by': None}
-    assert _targets().reviewed_signs(tmp_path, ROUTE, sign_merged()) == empty
-    sign_review_db(tmp_path, [frame_review(10, sign_box(kph=60))])
-    (tmp_path / 'derived' / 'preannotations' / ROUTE / 'latest.json').unlink()
-    assert _targets().reviewed_signs(tmp_path, ROUTE, sign_merged()) == empty
-
-
-def test_reading_sign_review_changes_nothing(tmp_path):
-    from nnslr_tools.review_db import db_path
-    reviewed_drive(tmp_path)
-    before = db_path(tmp_path).read_bytes()
-    _targets().reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert db_path(tmp_path).read_bytes() == before
-
-
-NETWORKS = {part: {'id': f'{part}:run/x', 'size': 1, 'mtime_ns': 1} for part in ('cutter', 'classifier', 'decider')}
-
-
-def net_box(family='maximum_speed', kph=None, where='own_road', panel='unknown', label=None):
-    """A box of our networks as their worker writes it (_chain_proposer): its class in model_label, no sign_type."""
-    return {'family': family, 'value_kph': kph, 'applicability': where, 'supplementary_panel': panel,
-            'model_label': label or (family if kph is None else f'{family}:{kph}'), 'bbox_xyxy': [0, 0, 10, 10]}
-
-
-def network_read(root, boxes, monkeypatch, last=119, in_use=NETWORKS):
-    """The drive read by our networks (brain_signs) on its pictures from 0 to last s, with boxes {second: [box, ...]};
-    in_use: the networks in use now (brain_signs.stamp_in_use)."""
-    from nnslr_tools import brain_signs
-    monkeypatch.setattr(brain_signs, 'stamp_in_use', lambda _root: in_use)
-    path = brain_signs.cache_path(root, ROUTE)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    head = {'version': brain_signs.CACHE_VERSION, 'pictures': 'p1', 'confidence': 0.1, 'networks': NETWORKS}
-    rows = [{'frame_key': f'0/{second}', 'segment_index': 0, 'decoded_frame_index': second * 20, 'output_index': second,
-             'detections': boxes.get(second, [])} for second in range(last + 1)]
-    path.write_text(''.join(json.dumps(line) + '\n' for line in [head, *rows]), encoding='utf-8')
-
-
-def test_without_sign_review_the_signs_are_what_our_networks_read_on_the_whole_drive(tmp_path, monkeypatch):
-    targets = _targets()
-    network_read(tmp_path, {
-        10: [net_box(kph=60)], 11: [net_box(kph=60)],
-        # One sign: the applicability network gave it our road on a picture.
-        15: [net_box(kph=40, where='unresolved')], 16: [net_box(kph=40)],
-        30: [net_box(kph=80, where='other_road')],
-        50: [net_box(kph=50, where='unresolved')],
-        70: [net_box(kph=30, panel='time', label='maximum_speed_hours:30')],
-        # Too far to read, then a 70: the 70's.
-        78: [net_box('unreadable', where='unresolved')], 80: [net_box(kph=70)],
-        86: [net_box('unreadable', where='unresolved')],
-        90: [net_box('other_sign', where='unresolved', label='other_sign:town_entry')],
-        95: [net_box('other_sign', where='unresolved', label='other_sign:direction')],
-        100: [net_box('cancellation')]}, monkeypatch)
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    # Another road's sign is not ours; one whose road the applicability network could not tell, a number with hours,
-    # a sign nobody could read and a town's entry say a limit nobody knows: their approach is masked.
-    assert found['signs'] == [(11_500_000_000, 60), (16_500_000_000, 40), (80_500_000_000, 70), (100_500_000_000, None)]
-    assert found['masked'] == [(50 * NS, 50_500_000_000), (70 * NS, 70_500_000_000), (86 * NS, 86_500_000_000),
-                               (90 * NS, 90_500_000_000)]
-    assert found['covered'] == [(0, 119 * NS)]
-    assert found['read_by'] == {'cutter': 'cutter:run/x', 'classifier': 'classifier:run/x', 'decider': 'decider:run/x'}
-    assert isinstance(found['fingerprint'], str)
-
-
-def test_a_reading_by_networks_no_longer_in_use_is_not_used(tmp_path, monkeypatch):
-    targets = _targets()
-    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch,
-                 in_use={**NETWORKS, 'classifier': {'id': 'classifier:run/y', 'size': 1, 'mtime_ns': 2}})
-    assert targets.reviewed_signs(tmp_path, ROUTE, sign_merged())['read_by'] is None
-    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch, in_use=None)
-    assert targets.reviewed_signs(tmp_path, ROUTE, sign_merged()) == {'signs': [], 'covered': [], 'masked': [],
-                                                                      'fingerprint': None, 'read_by': None}
-
-
-def test_where_he_confirmed_the_frames_his_signs_replace_the_networks(tmp_path, monkeypatch):
-    targets = _targets()
-    # He went through 0 to 25 s and 60 to 80 s: a 60 at 10-12, a 70 of another road at 24-25 and a 50 at 78-80.
-    his = {10: [sign_box(kph=60)], 11: [sign_box(kph=60)], 12: [sign_box(kph=60)],
-           24: [sign_box(kph=70, where='other_road')], 25: [sign_box(kph=70, where='other_road')],
-           78: [sign_box(kph=50)], 79: [sign_box(kph=50)], 80: [sign_box(kph=50)]}
-    sign_review_db(tmp_path, [frame_review(second, *his.get(second, [])) for second in [*range(26), *range(60, 81)]])
-    network_read(tmp_path, {
-        11: [net_box(kph=50)],                  # a frame he confirmed: his
-        26: [net_box(kph=70)], 27: [net_box(kph=70)],  # his 70 is another road's
-        40: [net_box(kph=100)], 41: [net_box(kph=100)],  # nobody went through it: the networks'
-        81: [net_box(kph=50)], 82: [net_box(kph=80)]}, monkeypatch)  # his 50 longer to 81 s, then misread
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert found['signs'] == [(12_500_000_000, 60), (41_500_000_000, 100), (81_500_000_000, 50)]
-    assert found['masked'] == [] and found['covered'] == [(0, 119 * NS)]
-    alone = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert alone == found
-    (tmp_path / 'derived' / 'brain_signs' / f'{ROUTE}.jsonl').unlink()
-    mine = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    assert mine['signs'] == [(12_500_000_000, 60), (80_500_000_000, 50)] and mine['read_by'] is None
-    assert mine['covered'] == [(0, 25 * NS), (60 * NS, 80 * NS)] and mine['fingerprint'] != found['fingerprint']
-
-
-def test_the_networks_answer_the_next_limit_where_nobody_went_through_the_frames(tmp_path, monkeypatch):
-    targets = _targets()
-    network_read(tmp_path, {40: [net_box(kph=100)], 41: [net_box(kph=100)]}, monkeypatch)
-    found = targets.reviewed_signs(tmp_path, ROUTE, sign_merged())
-    ns = seconds(5, 35, 60)
-    following, weight, metres, _metres_weight = targets.ahead_from_signs(
-        ns, found, targets.metres_driven([[0, 36.0]]), _np().ones(3, dtype=bool))
-    # At 36 km/h: 65 m before the 100 its number; far before it and after it, none.
-    assert following.tolist() == [targets.NONE_AHEAD, targets.speed_class(100), targets.NONE_AHEAD]
-    assert weight.tolist() == [1, 1, 1] and round(float(metres[1]) * targets.METRES_SCALE) == 65
-
-
-def ahead(times, signs=(), covered=((0, 100 * NS),), masked=(), asked=None):
-    """The next limit at these seconds, at 36 km/h: 10 m a second."""
-    targets = _targets()
-    ns = seconds(*times)
-    reviewed = {'signs': list(signs), 'covered': list(covered), 'masked': list(masked)}
-    asked = _np().ones(len(ns), dtype=bool) if asked is None else _np().array(asked)
-    return targets.ahead_from_signs(ns, reviewed, targets.metres_driven([[0, 36.0]]), asked)
-
-
-def test_within_a_hundred_metres_the_next_sign_and_its_metres_beyond_the_margin_none():
-    targets = _targets()
-    following, weight, metres, metres_weight = ahead((10, 15, 18, 19, 21, 25, 29, 31, 60, 95), signs=[(30 * NS, 60)])
-    none = targets.NONE_AHEAD
-    assert following.tolist() == [none, none, none, none, 59, 59, 59, none, none, none]
-    assert weight.tolist() == [1, 1, 0, 0, 1, 1, 1, 1, 1, 0]
-    assert metres.tolist() == pytest.approx([0, 0, 0, 0, .9, .5, .1, 0, 0, 0])
-    assert metres_weight.tolist() == [0, 0, 0, 0, 1, 1, 1, 0, 0, 0]
-
-
-def test_an_end_ahead_has_no_number_to_learn():
-    following, weight, _metres, metres_weight = ahead((10, 18, 21), signs=[(30 * NS, None)])
-    assert weight.tolist() == [1, 0, 0] and not metres_weight.any() and following[0] == _targets().NONE_AHEAD
-
-
-def test_none_ahead_only_where_a_person_went_through_the_metres_ahead():
-    _following, weight, _metres, _metres_weight = ahead((5, 10, 25), covered=[(0, 20 * NS)])
-    assert weight.tolist() == [1, 0, 0]
-
-
-def test_a_masked_sign_ahead_says_nothing_and_neither_does_a_sign_behind_it():
-    _following, weight, _metres, _metres_weight = ahead((31, 38, 45, 55, 68), masked=[(40 * NS, 50 * NS)])
-    assert weight.tolist() == [1, 0, 0, 1, 1]
-    following, weight, _metres, metres_weight = ahead((46, 51), signs=[(55 * NS, 80)], masked=[(40 * NS, 50 * NS)])
-    assert weight.tolist() == [0, 1] and metres_weight.tolist() == [0, 1] and following[1] == 79
-
-
-def test_a_frame_not_asked_learns_no_next_limit():
-    _following, weight, _metres, metres_weight = ahead((21, 25), signs=[(30 * NS, 60)], asked=[False, True])
-    assert weight.tolist() == [0, 1] and metres_weight.tolist() == [0, 1]
-    numpy, targets = _np(), _targets()
-    found = targets.ahead_from_signs(numpy.array([-1, 21 * NS]), {'signs': [(30 * NS, 60)], 'covered': [(0, 40 * NS)],
-                                                                 'masked': []},
-                                     targets.metres_driven([[0, 36.0]]), numpy.ones(2, dtype=bool))
-    assert found[1].tolist() == [0, 1]
-
-
-def test_a_repeat_of_the_limit_in_force_is_no_next_and_the_change_after_it_is():
-    targets = _targets()
-    following, weight, metres, metres_weight = ahead((25, 32, 44, 52), signs=[(20 * NS, 50), (30 * NS, 50),
-                                                                              (40 * NS, 50), (55 * NS, 80)])
-    # Past the first 50 the next 50s, 50 and 80 m on, are repeats: none ahead, then the margin, then the 80 30 m on.
-    assert following.tolist() == [targets.NONE_AHEAD] * 3 + [targets.speed_class(80)] and metres[-1] == pytest.approx(.3)
-    assert weight.tolist() == [1, 1, 0, 1] and metres_weight.tolist() == [0, 0, 0, 1]
-    # An end is always a next, after it the first sign of all is, whatever its number, and past that one its repeat is not.
-    following, weight, _metres, _metres_weight = ahead((12, 22, 32), signs=[(10 * NS, 50), (15 * NS, None), (25 * NS, 50),
-                                                                              (35 * NS, 50)])
-    assert weight.tolist() == [0, 1, 1] and following.tolist()[1:] == [targets.speed_class(50), targets.NONE_AHEAD]
-
-
-def test_a_masked_sign_passed_leaves_nothing_in_force():
-    targets = _targets()
-    following, weight, _metres, _metres_weight = ahead((18, 32), signs=[(10 * NS, 50), (40 * NS, 50)],
-                                                       masked=[(14 * NS, 15 * NS)])
-    # Before the masked sign the 50 is a repeat; past it nothing is in force and the 50 is the next.
-    assert weight.tolist() == [1, 1] and following[0] == targets.NONE_AHEAD and following[1] == targets.speed_class(50)
-
-
-def test_a_number_ahead_needs_a_person_through_the_way_to_it_and_back_to_the_limit_in_force():
-    targets = _targets()
-    # The way from the frame to the 60 crosses frames nobody confirmed: no number.
-    _following, weight, _metres, metres_weight = ahead((25,), signs=[(30 * NS, 60)], covered=[(0, 27 * NS)])
-    assert weight.tolist() == [0] and metres_weight.tolist() == [0]
-    # A gap since the 50 in force: the 50 ahead may be a change, nothing is said of it.
-    _following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (30 * NS, 50)],
-                                                        covered=[(0, 10 * NS), (20 * NS, 100 * NS)])
-    assert weight.tolist() == [0]
-    # Without the gap it is a repeat, and with no other sign within the margin the answer is none.
-    following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (30 * NS, 50)])
-    assert weight.tolist() == [1] and following[0] == targets.NONE_AHEAD
-    # Not known what is in force, and no sign at all within the margin: none is still sure.
-    following, weight, _metres, _metres_weight = ahead((25,), signs=[(5 * NS, 50), (60 * NS, 50)],
-                                                       covered=[(0, 10 * NS), (20 * NS, 100 * NS)])
-    assert weight.tolist() == [1] and following[0] == targets.NONE_AHEAD
-
-
-def test_a_drive_takes_its_next_limit_from_sign_review(tmp_path):
+def test_a_drive_has_no_answer_of_a_limit_ahead(tmp_path):
+    # The speed to hold is the brain's only word (12 Nov 2026): no next limit, no metres to it, no second reading of the
+    # signs to make them from.
     targets = _targets()
     write_drive(tmp_path, ROUTE, [(0, i) for i in range(70)])
-    reviewed_drive(tmp_path)
-    merged = sign_merged(70)
+    merged = {'frames': encoded(70), 'series': {'v_ego': [[0, 36.0]]}, 'span': [0, 70 * NS], 'meta': {}, 'gps': []}
     drive = targets.drive_targets(tmp_path, ROUTE, targets.NO_LABELS, merged, {'cells': {}, 'partitions': {},
                                                                               'frame_keys': {}})
-    assert drive['next'][5] == targets.speed_class(60) and drive['metres'][5] == pytest.approx(.775)
-    assert drive['next_weight'][5] == drive['metres_weight'][5] == 1
-    assert drive['next'][14] == targets.speed_class(50) and drive['next_weight'][14] == 1
-    # 127.5 m from the 60: in the margin. 40 m from the end of what a person went through: nothing said of what is beyond.
-    assert drive['next_weight'][0] == 0 and drive['next_weight'][25] == 0
-    assert drive['sign_review']['fingerprint'] is not None
-    found = targets.summary([drive])['drives'][0]
-    assert found['signs'] == 4 and found['covered_s'] == 59 and found['next'] == int(drive['next_weight'].sum())
-    # Without vEgo the car drives no metres: no frame has a limit ahead.
-    merged['series'] = {'v_ego_cluster': [[0, 36.0]]}
-    assert not targets.drive_targets(tmp_path, ROUTE, targets.NO_LABELS, merged,
-                                     {'cells': {}, 'partitions': {}, 'frame_keys': {}})['next_weight'].any()
+    assert not {'next', 'next_weight', 'metres', 'metres_weight', 'sign_review'} & set(drive)
+    found = targets.summary([drive])
+    assert not {'next', 'signs', 'covered_s', 'networks_read'} & set(found['drives'][0])
+    assert all('next' not in part for part in found['partitions'].values())
+    assert 'next' not in targets.summary_text(found)
+    for gone in ('reviewed_signs', 'ahead_from_signs', 'ahead_weights', 'NONE_AHEAD'):
+        assert not hasattr(targets, gone)
 
 
 GROUPS = ('signs', 'plate', 'hour', 'lead', 'country')
@@ -1398,27 +1094,6 @@ def test_a_passage_with_a_block_of_speed_review_stays():
     drive['blocked'] = np.array([False, True, False, False])
     assert passages(drive) == [[2, 3]]
     assert answers(all_swapped(drive)) == [100, 100, 50, 50]
-
-
-def test_the_next_limit_of_the_number_moves_with_it_and_another_stays():
-    np, targets = _np(), _targets()
-    drive = numbered([100, 100, 100, 0], [100, 100, 100, 90])
-    drive['next'] = np.array([targets.speed_class(100), targets.speed_class(80), targets.NONE_AHEAD,
-                              targets.speed_class(100)])
-    seen = all_swapped(drive)
-    assert seen['next'].tolist() == [targets.speed_class(120), targets.speed_class(80), targets.NONE_AHEAD,
-                                     targets.speed_class(100)]
-    assert drive['next'][0] == targets.speed_class(100)
-
-
-def test_a_next_limit_of_the_other_number_is_a_repeat_once_swapped_and_says_nothing():
-    np, targets = _np(), _targets()
-    drive = numbered([100, 100, 0], [100, 100, 90])
-    drive['next'] = np.array([targets.speed_class(120), targets.speed_class(80), targets.speed_class(120)])
-    drive['next_weight'], drive['metres_weight'] = np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32)
-    seen = all_swapped(drive)
-    assert seen['next_weight'].tolist() == [0, 1, 1] and seen['metres_weight'].tolist() == [0, 1, 1]
-    assert drive['next_weight'].tolist() == [1, 1, 1]
 
 
 def test_a_number_with_hours_gives_its_number_and_its_plate():

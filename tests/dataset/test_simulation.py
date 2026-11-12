@@ -49,6 +49,22 @@ def test_the_page_reads_the_squares_as_the_timelines_series():
     assert (view['set'], view['label'], view['frames'], view['frame']) == ('in-use', 'In use', 3, [1344, 760])
 
 
+def test_only_a_set_without_a_brain_has_a_limit_ahead():
+    # The rules (vision.LimitAhead) say the next limit and the metres to it; a brain says the speed to hold alone.
+    made = record([50, 50, 50])
+    made['out']['speedLimitAhead'] = [0.0, 30 / 3.6, 30 / 3.6]
+    made['out']['speedLimitAheadDistance'] = [0.0, 80.0, 60.0]
+    series = simulation.view(made, T0)['series']
+    assert series['vis_ahead'] == [[1.0, 0.0], [1.2, 30.0]]
+    assert series['vis_ahead_dist'] == [[1.0, 0.0], [1.2, 80.0], [1.4, 60.0]]
+    # The same columns in the result of a set with a brain (one replayed before 12 Nov 2026, when its brain still said
+    # them): not a series of the page.
+    made['networks'] = made['networks'] + [{'role': 'brain', 'file': 'brain.onnx', 'id': 'brain:x', 'sha256': 'b' * 64}]
+    series = simulation.view(made, T0)['series']
+    assert 'vis_ahead' not in series and 'vis_ahead_dist' not in series
+    assert series['vis_limit'] == [[1.0, 50.0]]
+
+
 def test_a_result_is_written_whole_with_what_the_lists_show_beside_it(tmp_path):
     made = record([50, 50])
     path = simulation.write_result(tmp_path, made)

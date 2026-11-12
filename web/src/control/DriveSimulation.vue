@@ -187,7 +187,8 @@ const now = computed(() => {
   const metres = pyRound(shown.distance);
   return {
     hold: shown.limitKph ? shown.limitKph + ' km/h' : 'none',
-    // Only a replay says the limit read ahead of its sign; the comma's log of that day does not keep it.
+    // Only a replay of a set without a brain has a limit ahead, the rules' (vision.LimitAhead): a brain says the speed
+    // to hold and nothing else, and the comma's log of that day does not keep it.
     ahead: all['vis_ahead'] === undefined ? null : aheadKph > 0 ? aheadKph + ' km/h'
       + (typeof aheadMetres === 'number' && aheadMetres > 0 ? ' in ' + Math.round(aheadMetres) + ' m' : '') : 'none',
     // The confidence and the metres as the reading square rounds them (Python's round, a half to the even one).

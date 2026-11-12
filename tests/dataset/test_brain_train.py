@@ -321,56 +321,17 @@ def test_a_site_of_another_partition_is_not_here():
     assert measure([drive], [said([100] * 10)], 'test')['sites'] == []
 
 
-def test_the_limit_ahead_is_right_on_its_class_and_false_where_none_is_ahead_and_it_says_one():
+def test_no_limit_ahead_is_measured_or_weighed():
+    # The speed to hold is the brain's only word (12 Nov 2026): an answer with a next limit (a brain of 7 to 11 Nov,
+    # as predict still gives it for the export's check) is measured on its speed alone.
     import numpy
-    from nnslr_tools.brain_targets import NONE_AHEAD, speed_class
-    from nnslr_tools.brain_train import measure
+    from nnslr_tools import brain_train
     drive = fake_drive(['test'] * 6)
-    drive['next'] = numpy.array([speed_class(80)] * 3 + [NONE_AHEAD] * 3)
-    drive['next_weight'] = numpy.ones(6, dtype=numpy.float32)
-    drive['metres'] = numpy.array([.5, .4, .3, 0, 0, 0], dtype=numpy.float32)
-    drive['metres_weight'] = numpy.array([1, 1, 1, 0, 0, 0], dtype=numpy.float32)
-    answer = {**said([100] * 6), 'next': numpy.array([speed_class(80), speed_class(80), speed_class(50), NONE_AHEAD,
-                                                      NONE_AHEAD, speed_class(100)]),
-              'metres': numpy.array([50.0, 30.0, 0, 0, 0, 0]), 'none': NONE_AHEAD}
-    found = measure([drive], [answer], 'test')['ahead']
-    assert found['frames'] == 6 and found['right'] == pytest.approx(4 / 6)
-    assert found['changes'] == 3 and found['changes_right'] == pytest.approx(2 / 3)
-    assert found['false_ahead'] == pytest.approx(1 / 3)
-
-
-def test_the_changes_read_are_those_whose_number_the_signs_input_already_holds():
-    import numpy
-    from nnslr_tools.brain_targets import INPUT_SIZES, NONE_AHEAD, speed_class
-    from nnslr_tools.brain_train import SIGN_KPH_SCALE, measure
-    drive = fake_drive(['test'] * 4)
-    drive['next'] = numpy.array([speed_class(80)] * 3 + [NONE_AHEAD])
-    drive['next_weight'] = numpy.ones(4, dtype=numpy.float32)
-    drive['metres'] = drive['metres_weight'] = numpy.zeros(4, dtype=numpy.float32)
-    signs = numpy.zeros((4, INPUT_SIZES['signs']), dtype=numpy.float32)
-    signs[0, :2] = 80 / SIGN_KPH_SCALE, 1  # confirmed
-    signs[1, 8:10] = 80 / SIGN_KPH_SCALE, 1  # read once
-    signs[2, :2] = 50 / SIGN_KPH_SCALE, 1  # still the one in force
-    drive['inputs']['signs'] = signs
-    answer = {**said([100] * 4), 'next': numpy.array([speed_class(80), NONE_AHEAD, NONE_AHEAD, NONE_AHEAD]),
-              'metres': numpy.zeros(4), 'none': NONE_AHEAD}
-    found = measure([drive], [answer], 'test')['ahead']
-    assert found['changes'] == 3 and found['changes_read'] == 2 and found['changes_read_right'] == pytest.approx(1 / 2)
-
-
-def test_a_number_ahead_weighs_as_much_all_together_as_none():
-    import numpy
-    from nnslr_tools.brain_targets import NONE_AHEAD, speed_class
-    from nnslr_tools.brain_train import _balanced, next_balance
-    drive = fake_drive(['train'] * 10)
-    drive['next'] = numpy.array([speed_class(80)] * 2 + [NONE_AHEAD] * 8)
-    drive['next_weight'] = numpy.ones(10, dtype=numpy.float32)
-    drive['metres_weight'] = numpy.ones(10, dtype=numpy.float32)
-    balance = next_balance([drive])
-    assert balance == pytest.approx(4)
-    weights = _balanced((drive['next_weight'], drive['metres_weight']), drive, balance)[0]
-    assert weights[:2].sum() == pytest.approx(weights[2:].sum()) and weights.sum() == pytest.approx(8)
-    assert next_balance([fake_drive(['train'] * 3)]) == 1.0
+    answer = {**said([100] * 6), 'next': numpy.zeros(6, dtype=numpy.int64), 'metres': numpy.zeros(6), 'none': 200}
+    found = brain_train.measure([drive], [answer], 'test')
+    assert 'ahead' not in found and found['speed']['frames'] == 6
+    for gone in ('next_balance', '_balanced', '_ahead_measure', '_number_given'):
+        assert not hasattr(brain_train, gone)
 
 
 def test_no_frames_is_no_measure():
@@ -604,6 +565,9 @@ def test_cold_starts_the_memory_again_where_a_stretch_out_of_train_begins():
     assert (plain == other).all()
 
 
+BUILT = []  # what the last run_training asked of build_brain_net
+
+
 def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: None):
     """Every epoch's validation scores what scores says: nothing may follow from it."""
     from nnslr_tools import brain_train
@@ -614,7 +578,12 @@ def run_training(torch, tmp_path, monkeypatch, scores, change=lambda _drive: Non
     monkeypatch.setattr(brain_train, 'read_split', lambda _root: {'sha256': 'split'})
     monkeypatch.setattr(brain_train, '_pictures', lambda *_args, **_options: {drive['route']: pictures(drive)})
     model = tiny(torch, groups=brain_train.LEARNED_INPUTS)
-    monkeypatch.setattr(brain_train, 'build_brain_net', lambda *_args, **_options: model)
+
+    def build(*_args, **options):
+        BUILT[:] = [options]
+        return model
+
+    monkeypatch.setattr(brain_train, 'build_brain_net', build)
     real, left = brain_train.measure, list(scores)
 
     def scripted(drives, answers, partition):
@@ -639,6 +608,20 @@ def test_the_epoch_kept_is_the_last_whatever_validation_says_and_the_checkpoint_
     assert {'validation_cold', 'test_cold'} <= set(result)
     assert saved['weights']['class_kph'].tolist() == [float(kph) for kph in range(1, 201)]
     assert result['right_kph'] == 2 and 'in_blocks' in result['test']
+
+
+def test_a_training_teaches_and_keeps_no_limit_ahead(tmp_path, monkeypatch):
+    torch = torch_or_skip()
+    result, saved, _model = run_training(torch, tmp_path, monkeypatch, [1.0])
+    # The network is asked without the heads of the next limit and its metres, and nothing of them is kept or measured.
+    assert not BUILT[0].get('ahead')
+    assert 'ahead' not in saved and 'ahead' not in result and 'next_balance' not in result
+    assert not [name for name in saved['weights'] if name.startswith(('next_head.', 'trust_next.', 'metres_head.',
+                                                                      'metres_gate.'))]
+    assert all('ahead' not in result[part] for part in ('train', 'validation', 'test', 'validation_cold', 'test_cold'))
+    # And the step exported for the car says the speed alone.
+    from nnslr_tools.brain_export import load_brain, output_names
+    assert output_names(load_brain(tmp_path / 'run' / 'brain-last.pt')[0]) == ['speed', 'hidden_out']
 
 
 def test_a_brain_never_learns_the_driver(tmp_path, monkeypatch):
@@ -1039,22 +1022,25 @@ def said_by(torch, model, groups, drive, array):
     model.eval()
     images = torch.from_numpy(array).permute(0, 3, 1, 2).float()[None] / 255
     with torch.no_grad():
-        speed, _works, _state, following, _metres, road = model(
-            images, torch.from_numpy(pack_inputs(drive['inputs'], groups))[None], ahead=True, road=True)
-    return speed, following, road
+        speed, _works, _state, road = model(images, torch.from_numpy(pack_inputs(drive['inputs'], groups))[None], road=True)
+    return speed, road
 
 
 def test_a_brain_going_on_from_another_says_what_it_said_without_the_inputs_it_drops_and_with_those_it_adds(tmp_path):
     from nnslr_tools.brain_train import brain_start
     torch = torch_or_skip()
+    # The start has the heads of the limit ahead (a brain of 7 to 11 Nov 2026); the new one, as every brain since, not.
     old = tiny(torch, ahead=True, road_kinds=1)
     for value in old.parameters():  # not the fresh numbers both start from
         value.data.add_(torch.randn_like(value) * 0.05)
-    path = start_file(torch, tmp_path, old)
+    path = start_file(torch, tmp_path, old, ahead=True)
     # Without the driver's pedals and speed, with an input of its own the start never took.
     groups = tuple(name for name in GROUPS if name not in ('pedals', 'speed')) + ('engaged',)
-    new = tiny(torch, groups=groups, ahead=True, road_kinds=1)
+    new = tiny(torch, groups=groups, road_kinds=1)
     start = brain_start(torch, new, path, source_of(groups))
+    # The start's next limit and metres are simply not taken: nothing of them in the new brain, nothing left fresh.
+    assert not [name for name in new.state_dict() if name.startswith(('next_head.', 'trust_next.', 'metres_head.',
+                                                                       'metres_gate.'))]
     assert (start['run'], start['epoch'], start['split_sha256'], start['fresh']) == ('b1-s1', 39, 'a' * 64, [])
     assert (start['inputs_added'], start['inputs_left_out'], start['same_inputs_file']) == (['engaged'], ['pedals', 'speed'], True)
     drive = fake_drive(['train'] * T)
@@ -1075,15 +1061,12 @@ def test_the_speeds_go_on_by_km_h_and_a_speed_the_start_lacks_starts_fresh(tmp_p
     from nnslr_tools.brain_train import brain_start
     torch = torch_or_skip()
     old = tiny(torch, ahead=True, kph=[10, 20, 30], road_kinds=1)
-    path = start_file(torch, tmp_path, old)
-    new = tiny(torch, ahead=True, kph=[20, 30, 40], road_kinds=1)
+    path = start_file(torch, tmp_path, old, ahead=True)
+    new = tiny(torch, kph=[20, 30, 40], road_kinds=1)
     start = brain_start(torch, new, path, source_of(GROUPS))
-    assert sorted(start['fresh']) == ['next_head.bias (40)', 'next_head.weight (40)', 'speed_head.bias (40)',
-                                      'speed_head.weight (40)']
+    assert sorted(start['fresh']) == ['speed_head.bias (40)', 'speed_head.weight (40)']
     weights = old.state_dict()
     assert torch.equal(new.speed_head.weight[:2], weights['speed_head.weight'][1:])
-    # The next head's last row is "none ahead", the start's own.
-    assert torch.equal(new.next_head.weight[-1], weights['next_head.weight'][-1])
     assert new.class_kph.tolist() == [20, 30, 40]
 
 
@@ -1094,7 +1077,7 @@ def test_a_start_stepped_otherwise_or_on_another_split_is_refused(tmp_path, chan
     torch = torch_or_skip()
     path = start_file(torch, tmp_path, tiny(torch, ahead=True, road_kinds=1), **changed)
     with pytest.raises(ValueError, match=words):
-        brain_start(torch, tiny(torch, ahead=True, road_kinds=1), path, source_of(GROUPS))
+        brain_start(torch, tiny(torch, road_kinds=1), path, source_of(GROUPS))
 
 
 def test_a_file_that_is_not_a_brain_is_refused(tmp_path):
@@ -1103,4 +1086,4 @@ def test_a_file_that_is_not_a_brain_is_refused(tmp_path):
     path = tmp_path / 'brain-last.pt'
     torch.save({'state_dict': {}}, path)
     with pytest.raises(ValueError, match='not a brain'):
-        brain_start(torch, tiny(torch, ahead=True), path, source_of(GROUPS))
+        brain_start(torch, tiny(torch), path, source_of(GROUPS))

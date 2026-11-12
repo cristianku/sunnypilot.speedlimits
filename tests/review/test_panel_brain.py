@@ -125,7 +125,7 @@ def test_an_epoch_says_the_road_type_named_right_in_all_and_on_each_type():
     assert points[2]['val_error_kph'] == 9.1 and 'val_type' not in points[0]
 
 
-def test_the_reading_of_the_signs_moves_with_the_segments_then_the_drives():
+def test_the_reading_of_the_signs_moves_with_the_segments():
     head = LOG[:LOG.index('== 4/6')]
     result = progress('train_brain', 'running', head)
     # Nothing read yet: the 6 of the checks.
@@ -133,13 +133,11 @@ def test_the_reading_of_the_signs_moves_with_the_segments_then_the_drives():
     log = head + 'road-type signs: 100/400 segments\n'
     result = progress('train_brain', 'running', log)
     assert result['step_progress']['text'] == 'as the car reads · 100 of 400 segments'
-    # A quarter of the first half of its 22.
-    assert result['percent'] == pytest.approx(6 + 22 * 0.125, abs=0.1)
-    log += ('road-type signs: 400/400 segments\nbrain signs: 3 drives to read, 2 at a time, on the cards 0, 1\n'
-            'brain signs 1/4 00000001--aaaaaaaaaa: read by these networks already\n'
-            'brain signs 2/4 00000002--bbbbbbbbbb: 900 pictures read, 12 boxes of our road, card 1\n')
+    # A quarter of its 22: the reading as the car does is the whole step, no second reading after it.
+    assert result['percent'] == pytest.approx(6 + 22 * 0.25, abs=0.1)
+    log += 'road-type signs: 300/400 segments\n'
     result = progress('train_brain', 'running', log)
-    assert result['step_progress']['text'] == 'our networks · 2 of 4 drives'
+    assert result['step_progress']['text'] == 'as the car reads · 300 of 400 segments'
     assert result['percent'] == pytest.approx(6 + 22 * 0.75, abs=0.1)
     # The seeds after it: the step is done whatever its last line said.
     assert progress('train_brain', 'running', log + LOG[LOG.index('== 4/6'):])['percent'] == pytest.approx(29.2)

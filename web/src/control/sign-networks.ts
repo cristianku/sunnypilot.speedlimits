@@ -1,8 +1,7 @@
 // The networks that read the signs the next brain learns from (#31), kept once for Train › Brain and for its step of
 // Train › Pipeline (the same choice in both): the cutter (a SignNet the comma runs), the classifier and the applicability
 // network, which leaves out the signs of another road as the car does. Those in use until others are chosen; the same
-// three read the brain's inputs (as the car, nnslr_tools.road_type_signs) and the next limit it learns
-// (nnslr_tools.brain_signs), and its result records them (Models).
+// three read the brain's inputs (as the car, nnslr_tools.road_type_signs), and its result records them (Models).
 import {computed, reactive, ref} from 'vue';
 import {isoWhen} from '../common/format';
 import type {ActionOptions, ModelRole, ModelVersion} from '../common/panel-types';
@@ -78,8 +77,7 @@ export function useSignNetworks(versionsOf: (role: ModelRole) => readonly ModelV
     const before = SIGN_PARTS.filter(({part}) => trained.includes(part)).map(({part}) => WORD[part]);
     return {text: (before.length ? 'Its signs are read with the ' + listed(before) + ' trained just before. ' : '')
       + 'The signs the brain learns from are read as the car reads them: the applicability network leaves out those of '
-      + 'another road (an exit, a side road). The same three for its inputs and for the next limit; a drive not read by '
-      + 'these three is read again first.', warn: false};
+      + 'another road (an exit, a side road). A drive not read by these three is read again first.', warn: false};
   };
   const missing = computed(() => missingOf());
   const option = computed(() => optionOf());
