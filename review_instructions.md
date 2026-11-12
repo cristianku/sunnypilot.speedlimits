@@ -76,6 +76,7 @@ Un agente che ha a disposizione il **server MCP** della revisione (strumenti `li
   - sotto, l'origine: "modello · 92%", "modello 40 → 60" (cioè hai cambiato il valore proposto) oppure "aggiunto a mano";
   - **"stesso cartello di N"** in arancione: è un doppione di un altro riquadro;
   - **✕**: elimina quel riquadro.
+- **Road users complete** (key **J**), the small toggle right under the boxes: ticked (✓), it says that every road user of this frame has its box by the size rule of section 5. Confirm saves it with the boxes; Apply previous never carries it to the next frame.
 - **Riquadro N**, quando un riquadro è selezionato:
   - lo zoom sul cartello, con gli angoli gialli per ridimensionare;
   - i cartelli rapidi **10 20 30 40 50 60 70 80 100 120** e **?** (numero non leggibile);
@@ -117,6 +118,13 @@ La foto e il pulsante Conferma non si spostano mai da soli: avvisi ed errori com
 - I doppioni sullo stesso cartello ("stesso cartello di N", per esempio 40 e 80 sullo stesso disco) si eliminano con **✕**. Si tiene un solo riquadro, con il valore giusto. "Stesso cartello di N" compare solo sul secondo riquadro della coppia e non dice quale dei due sia sbagliato: deciderlo guardando.
 - Controllare anche i riquadri piccoli contenuti in uno più grande.
 - Un fotogramma senza cartelli pertinenti si conferma comunque, con **Conferma · nessun cartello**: anche gli esempi negativi servono.
+
+**Road users** (a person on foot, a bicycle or motorcycle, a car, truck, bus or tram, another road user). Their boxes teach the road-user detector (UserNet); SignNet ignores them and they never count as signs.
+- Box a road user only when it matters for the speed: a person crossing the road or about to step onto it, a bicycle or motorcycle on our road, a vehicle crossing our path or entering it (from a side road, a driveway, a roundabout). Do not box parked cars, traffic on the opposite lane, or the vehicle ahead of us in our lane.
+- One box for the whole road user: a bicycle or a motorcycle together with its rider.
+- Keys: **W** person, **Y** bicycle, **K** car. They set the kind of the selected box; pressed after **+ Riquadro** (or **B**/**N**) and before the drag, they give it to the box about to be drawn, and the photo says so ("Drag on the image to draw the box: Person"). Every road user, these three included, is also a chip in the **Road user** row of the box's kinds; motorcycle, truck, bus, tram and other user have no key.
+- **Road users complete** (key **J**) is the exception to "only those that matter": tick it only on a frame where every person on foot and every two-wheeler at least **24 px** tall, and every vehicle at least **40 px** tall, has its box, whether it matters for the speed or not, parked cars and the opposite lane included. The height is the height of the box in pixels of the original image (`bbox_xyxy`), not of the screen. Smaller ones may be boxed or left out. A frame with no road user that big is ticked with no road-user box. Leave it unticked when only those that matter are boxed: an unticked frame says nothing about the road users it does not box.
+- **Apply previous** (A) carries the boxes but never the tick: on the next frame look at every road user again before ticking it.
 
 Esempi visti nelle route reali:
 - una fine limite generale 50 proposta come 40;
@@ -160,7 +168,8 @@ Esempi visti nelle route reali:
 - **Invio** conferma il fotogramma, anche subito dopo un clic su una freccia o su + Riquadro;
 - **Canc** e **Backspace** eliminano il riquadro selezionato;
 - le frecce **← →** cambiano fotogramma;
-- **N** avvia il disegno, **H** nasconde la seconda lettura, **Esc** toglie la selezione.
+- **N** avvia il disegno, **H** nasconde la seconda lettura, **Esc** toglie la selezione;
+- **W**, **Y** and **K** make the selected box (or the box about to be drawn) a person, a bicycle or a car, and **J** ticks or unticks **Road users complete** (section 5).
 
 Dentro **Altro valore** e **Note**, invece, **Invio** registra il valore e non conferma.
 
@@ -307,6 +316,7 @@ Il server MCP (`/mcp` del sito, oppure `helpers/mcp.sh` via ssh) e la REST API `
    - cartello mancante: un riquadro nuovo senza `detection_id`, con `bbox_xyxy` in pixel dell'immagine originale, `family` e `value_kph`;
    - numero non leggibile: `value_kph: null`; tipo non riconoscibile: `family: "unreadable"` con `notes`;
    - nessun cartello pertinente: `detections: []`.
+   - road users: a box with `family: "other_sign"`, its `sign_type` (`road_user_person`, `road_user_bicycle`, `road_user_car`, ...) and `value_kph: null`, only for those that matter for the speed (section 5). Send `users_complete: true` only when every road user from the size rule of section 5 has its box in this save; left out, it is `false`. A save says the whole frame, so a later save without it unticks the frame, and `apply_previous_frame` never carries it.
 5. **Salvare**, solo se autorizzati e dopo aver guardato l'immagine: la conferma è definitiva e diventa un dato di training al prossimo import, senza un'altra approvazione. Usare `save_frame_review` con `run_id` e `base_revision` esattamente come letti (`frame.save`) e `reviewer` con il nome dell'agente (per esempio `Claude Code`): il server lo salva come `ai/Claude Code`, tipo `ai`. Con la REST API indicare anche `reviewer_kind: "ai"`. Mai il nome di una persona.
 6. Leggere l'esito:
    - riuscito: `review.revision`, `confirmed_count`, `next_unreviewed_frame_key`;

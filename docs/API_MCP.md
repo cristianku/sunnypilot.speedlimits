@@ -144,6 +144,7 @@ Corpo del `POST .../review`:
 | `confirmed` | sì | `true` salva i riquadri; `false` ritira la conferma |
 | `detections` | con `confirmed: true` | tutti i riquadri da tenere; `[]` = nessun cartello pertinente |
 | `site_group`, `encounter_id` | no | stringa o `null` |
+| `users_complete` | no | `true` or `false` (default `false`): every person on foot and two-wheeler at least 24 px tall and every vehicle at least 40 px tall (box height in pixels of the original image) has its box in this save ("Road users complete" in Sign review, key J). Not carried by `apply_previous`; read back as `review.users_complete` |
 | `override_human_review` | no | vedi sezione 3 |
 
 Ogni riquadro:
