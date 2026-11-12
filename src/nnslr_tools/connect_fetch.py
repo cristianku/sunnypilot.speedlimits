@@ -40,8 +40,8 @@ LOG_NAME = 'rlog.zst'
 CHUNK = 1 << 20
 TIMEOUT = 60
 # How the owner shares a drive, for the message of a drive that is not public or not uploaded.
-HOW_TO_SHARE = ('In comma connect (connect.comma.ai), open the drive, choose "Upload all files" in its menu and wait '
-                'until the upload is done with the comma on Wi-Fi, then switch the drive to public and send its link.')
+HOW_TO_SHARE = ('In comma connect (connect.comma.ai), open the drive, open its Files menu, press upload next to "All files" '
+                'and wait until the upload is done with the comma on Wi-Fi, then switch the drive to public and send its link.')
 
 _DONGLE = r'[0-9a-f]{16}'
 _ROUTE = r'[0-9a-f]{8}--[0-9a-f]{10}'

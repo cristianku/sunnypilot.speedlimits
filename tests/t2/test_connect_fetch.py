@@ -115,7 +115,7 @@ def test_missing_files_are_named(roots):
     report = fetch(f"{DONGLE}|{ROUTE}", videos_dir=videos, data_root=root, dry_run=True, say=lines.append,
                    api=fake_api(files=files), download=fake_download([]))
     assert report["missing"] == ["2/ecamera.hevc", "2/rlog"]
-    assert "Upload all files" in lines[-1]
+    assert '"All files"' in lines[-1]
     assert not (root / "raw").exists() and list(videos.iterdir()) == []
 
 

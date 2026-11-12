@@ -5,7 +5,7 @@
 # (helpers/1_prepare.sh or Data on the site): it goes to Sign review, never to the brain or Speed review, whose answer is
 # Cristian's speed (data/raw/connect/<route>.json marks it as a drive of another car).
 #
-# The owner first uploads every file of the drive in connect (open the drive, "Upload all files", the comma on Wi-Fi;
+# The owner first uploads every file of the drive in connect (open the drive, Files menu, upload "All files", the comma on Wi-Fi;
 # by default a comma uploads only qcamera and qlog), switches the drive to public and sends the link.
 #
 # usage: helpers/fetch_connect_route.sh <link> [--segments=all|0-3|0,2,4-6] [--dry-run]
