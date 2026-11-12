@@ -117,6 +117,17 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'traffic_light_green', label: 'Traffic light: green', chip: 'Green', short: 'light green'},
     {id: 'traffic_light_off', label: 'Traffic light: off (no lamp lit)', chip: 'Off', short: 'light off'},
   ]},
+  // Who is on the road: one box around the whole of it; a bicycle or a motorcycle with its rider.
+  {label: 'Road user', kinds: [
+    {id: 'road_user_person', label: 'Person on foot', chip: 'Person', short: 'person'},
+    {id: 'road_user_bicycle', label: 'Bicycle, with its rider', chip: 'Bicycle', short: 'bicycle'},
+    {id: 'road_user_motorcycle', label: 'Motorcycle, with its rider', chip: 'Motorcycle', short: 'motorcycle'},
+    {id: 'road_user_car', label: 'Car or van', chip: 'Car', short: 'car'},
+    {id: 'road_user_truck', label: 'Truck', chip: 'Truck', short: 'truck'},
+    {id: 'road_user_bus', label: 'Bus', chip: 'Bus', short: 'bus'},
+    {id: 'road_user_tram', label: 'Tram', chip: 'Tram', short: 'tram'},
+    {id: 'road_user_other', label: 'Another road user (animal, tractor, scooter)', chip: 'Other user', short: 'user'},
+  ]},
   {label: 'Other', kinds: [{id: 'other', label: 'Something else', chip: 'Something else', short: 'other'}]},
 ];
 

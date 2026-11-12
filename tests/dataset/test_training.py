@@ -171,6 +171,35 @@ def test_off_displays_are_ignore_boxes_of_the_detector_plan(tmp_path, capsys):
     assert all(frame["ignore_boxes"] == [] for route, frame in by_route.items() if route != "00000001")
 
 
+def test_a_road_user_is_an_ignore_box_of_the_detector_plan_and_a_class_of_the_classifier(tmp_path, capsys):
+    from nnslr_tools.sign_types import ROAD_USERS, is_road_user
+    from nnslr_tools.training import ELIGIBLE_REVIEW_STATES, _classifier_label
+    assert 'road_user_person' in ROAD_USERS and 'road_user_car' in ROAD_USERS and 'give_way' not in ROAD_USERS
+    assert is_road_user({"sign_family": "other_sign", "sign_type": "road_user_car"})
+    assert not is_road_user({"sign_family": "other_sign", "sign_type": "give_way"})
+    assert not is_road_user({"sign_family": "not_a_sign", "sign_type": "road_user_car"})
+    rows = []
+    for index in range(6):
+        row = reviewed(tmp_path, f"{index + 1:08x}--abcdef1234", index=index)
+        if index == 0:  # a car, boxed by the reviewer
+            row["detections"][0].update(family="other_sign", sign_type="road_user_car", value_kph=None, value_state="unknown")
+        rows.append(row)
+    source = write(tmp_path, rows)
+    code, out = invoke(capsys, "import-annotations", str(source), "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    code, out = invoke(capsys, "build-splits", "--data-root", str(tmp_path))
+    assert code == 0, out.err + out.out
+    plan = prepare_detector_training(tmp_path / "annotations" / "objects.jsonl", tmp_path / "splits" / "latest.json", tmp_path)
+    by_route = {frame["route_id"][:8]: frame for frame in plan["frames"]}
+    # The cutter does not learn road users yet: neither a sign to find nor background.
+    assert by_route["00000001"]["boxes"] == [] and by_route["00000001"]["ignore_boxes"] == [[1, 2, 15, 20]]
+    assert sum(plan["ignore_boxes_by_split"].values()) == 1 and sum(plan["boxes_by_split"].values()) == 5
+    # The classifier names it as any other kind.
+    car = {"sign_family": "other_sign", "sign_type": "road_user_car", "bbox_xyxy": [1, 2, 15, 20],
+           "review_state": sorted(ELIGIBLE_REVIEW_STATES)[0]}
+    assert _classifier_label(car) == "other_sign:road_user_car"
+
+
 def test_prepare_detector_training_groups_full_frames_without_torch(tmp_path, capsys):
     dataset, frozen, latest = _training_fixture(tmp_path, capsys)
     assert "torch" not in sys.modules

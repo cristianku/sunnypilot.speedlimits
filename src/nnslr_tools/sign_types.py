@@ -11,7 +11,17 @@ with pictograms (motor vehicles, motorcycles, lorries, bicycles...): the sign th
 A traffic light is a kind too, one for what is lit in the picture: ``traffic_light_red`` (red, also red with amber),
 ``traffic_light_amber``, ``traffic_light_green``, ``traffic_light_off`` (no lamp lit). One box around the whole light of
 our lane. A flashing amber is amber on one frame and off on the next: each frame says what it shows, and the brain
-learns the flashing from the sequence. Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
+learns the flashing from the sequence.
+
+The review is no longer of signs alone (12 Nov 2026): a road user gets a box too, with a kind of its own (ROAD_USERS):
+``road_user_person`` (on foot, also with a pushchair or a wheelchair), ``road_user_bicycle`` and
+``road_user_motorcycle`` (one box around the vehicle with its rider), ``road_user_car`` (a van too),
+``road_user_truck``, ``road_user_bus``, ``road_user_tram``, ``road_user_other`` (an animal, a tractor, a scooter). One
+box around the whole of it, as much as is seen. The classifier learns them as it learns the other kinds
+(``other_sign:road_user_car``) and the brain gets them with every other kind it reads. The cutter does not learn them
+yet: until it does, their boxes are ignore boxes of its training (training.prepare_detector_training), neither a sign
+to find nor background, so the frames reviewed before, where no road user has a box, do not teach it the opposite.
+Only a box of family ``other_sign`` has a kind; ``None`` means not said (older reviews, or not chosen).
 
 A box of family ``not_a_sign`` may say what it is instead (NOT_A_SIGN_TYPES): ``on_vehicle``, a sign-like
 disc or panel on a vehicle, such as the top-speed sticker on the back of a truck. It stays "not a sign" for
@@ -44,7 +54,13 @@ SIGN_TYPES = (
     'other',
     # Traffic lights, by what is lit (added 12 Nov 2026, after 'other': the kinds before keep their place)
     'traffic_light_red', 'traffic_light_amber', 'traffic_light_green', 'traffic_light_off',
+    # Road users (added 12 Nov 2026): ROAD_USERS
+    'road_user_person', 'road_user_bicycle', 'road_user_motorcycle', 'road_user_car', 'road_user_truck',
+    'road_user_bus', 'road_user_tram', 'road_user_other',
 )
+ROAD_USER_PREFIX = 'road_user_'
+# The kinds that are no sign: who is on the road.
+ROAD_USERS = tuple(kind for kind in SIGN_TYPES if kind.startswith(ROAD_USER_PREFIX))
 # What a "not a sign" box is, when said.
 NOT_A_SIGN_TYPES = ('on_vehicle',)
 # The kind of a classifier's class for a speed limit with a plate of hours under it (maximum_speed_hours:30): one box
@@ -60,6 +76,11 @@ PLATE_CLASSES = {HOURS_CLASS: 'time', WET_CLASS: 'wet'}
 # one spelling, because they end the class (maximum_speed_hours:30:22-6). A plate with days, minutes or two ranges, or
 # one too small to read, says none: its class is the number alone (maximum_speed_hours:30).
 PLATE_HOURS = re.compile(r'([0-9]|1[0-9]|2[0-3])-([0-9]|1[0-9]|2[0-3])')
+
+
+def is_road_user(row: dict) -> bool:
+    """Whether a review row is a road user: family other_sign with a kind of ROAD_USERS."""
+    return row.get('sign_family') == 'other_sign' and row.get('sign_type') in ROAD_USERS
 
 
 def class_parts(label: Any) -> tuple[str, str, str | None]:

@@ -45,7 +45,7 @@ from nnslr_tools.media import FRAME_SIZE, full_picture
 from nnslr_tools.progress import report as report_progress
 from nnslr_tools.annotations import load_jsonl, validate_dataset, written_sign_value
 from nnslr_tools.sign_types import (HOURS_CLASS, NOT_A_SIGN_TYPES, SIGN_TYPES, WET_CLASS, class_hours, class_parts, holds_hours,
-                                     holds_plate, without_hours)
+                                     holds_plate, is_road_user, without_hours)
 
 # The kind of a "not a sign" box on a vehicle.
 ON_VEHICLE = NOT_A_SIGN_TYPES[0]
@@ -866,7 +866,8 @@ def prepare_detector_training(
     detector negative only when it has an explicit whole-frame not_a_sign
     review. other_sign rows alone are not silently promoted to
     whole-frame negatives. A switched-off variable display (off_display) is an ignore box of its frame
-    (ignore_boxes): SignNet neither learns it as a sign nor as background and is not measured on it; the cutter
+    (ignore_boxes), and so is the box of a road user (sign_types.ROAD_USERS: a person, a car...), which the cutter does
+    not learn yet: SignNet neither learns it as a sign nor as background and is not measured on it; the cutter
     reads boxes only, so for it the panel is background.
 
     mapillary: the windows file of nnslr mapillary-windows (nnslr_tools.mtsd_windows), whose train windows of the
@@ -954,7 +955,7 @@ def prepare_detector_training(
         if row["bbox_xyxy"] is None and family == "not_a_sign":
             frame["explicit_negative"] = True
             frame["annotation_ids"].append(annotation_id)
-        elif row["bbox_xyxy"] is not None and family in positive_families and off_display(row):
+        elif row["bbox_xyxy"] is not None and (is_road_user(row) or family in positive_families and off_display(row)):
             frame["ignore_boxes"].append(list(row["bbox_xyxy"]))
             frame["annotation_ids"].append(annotation_id)
         elif row["bbox_xyxy"] is not None and family in positive_families:
