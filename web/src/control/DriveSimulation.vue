@@ -148,7 +148,7 @@ const outOfDate = computed((): string[] | null => {
 });
 
 // -- on the picture ---------------------------------------------------------------------------------------------------------
-const screen = computed(() => shownSeries.value ? screenAt(shownSeries.value, reads.value, seconds.value) : null);
+const screen = computed(() => shownSeries.value ? screenAt(shownSeries.value, seconds.value) : null);
 const frame = computed(() => view.value?.frame ?? FRAME);
 /** The stage's size, followed as it changes: the comma's screen goes on the picture inside it, not on its bars. */
 const overlay = useTemplateRef<HTMLDivElement>('overlay');
@@ -314,7 +314,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
   // What was read over its tick when there is room for it, kept whole at the ends of the lane.
   let lastX = -Infinity;
   const ticks = all === null ? [] : times.filter((at) => at >= from && at <= to).map((at): Tick => {
-    const shown = screenAt(all, [], at);
+    const shown = screenAt(all, at);
     const text = readingWords(shown.rawClass, shown.rawValue) || '?';
     const other = valueAt(all['vis_raw_road'], at) === 'other_road';
     const room = x(at) - lastX >= text.length * 6 + 6;
@@ -372,7 +372,7 @@ function lanesIn(from: number, to: number, width: number, x: (seconds: number) =
           </g>
         </svg>
       </div>
-      <div v-if="shownSeries" class="dr-lane" title="Every sign read, where the reading square pulses, with what was read; dashed: a sign of another road">
+      <div v-if="shownSeries" class="dr-lane" title="Every sign read, where the comma beeps, with what was read; dashed: a sign of another road">
         <span class="dr-lane-name">Signs<small>read</small></span>
         <svg :width="width" height="18" :viewBox="`0 0 ${width} 18`" aria-hidden="true">
           <g v-for="tick in lanesIn(from, to, width, x).ticks" :key="tick.at" :class="['dr-read', {dropped: tick.other}]">

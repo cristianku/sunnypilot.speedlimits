@@ -218,13 +218,13 @@ export interface Screen {
   distance: number;
   /** The kind of road the network sees; '' without one. */
   road: string;
-  /** The pulse of a sign read, 0 to 1. */
+  /** The blink of the reading square while a sign is ahead, 0 to 1. */
   pulse: number;
 }
 const numberOf = (value: Value | undefined): number => typeof value === 'number' ? value : 0;
 const textOf = (value: Value | undefined): string => typeof value === 'string' ? value : '';
 
-/** The reading square pulses this long after a sign read, up and back (sign_reading.PULSE_SECONDS). */
+/** While a sign is ahead the reading square blinks, up and back, every so long (sign_reading.PULSE_SECONDS). */
 const PULSE_SECONDS = 0.6;
 /** The index of the last of count sorted times at or before s, -1 before the first. */
 function lastAt(count: number, time: (index: number) => number, s: number): number {
@@ -244,10 +244,30 @@ function lastAt(count: number, time: (index: number) => number, s: number): numb
 }
 /** The pulse at a time, from the times of the signs read: it follows the time shown, so it moves with the video and
  * stands still with it. */
-export function pulseAt(reads: readonly number[], s: number): number {
-  const index = lastAt(reads.length, (at) => reads[at]!, s);
-  const since = index < 0 ? Infinity : s - reads[index]!;
-  return since < PULSE_SECONDS ? Math.sin(Math.PI * since / PULSE_SECONDS) : 0;
+/** Whether a sign is ahead at s: in view, or seen and not passed yet, the metres to it over 0 (sign_reading.sign_ahead).
+ * A log from before rawSignSeen gives a sign with a size on the camera instead. */
+function aheadAt(series: Record<string, Series>, s: number): boolean {
+  const seen = series['vis_raw_seen'] ? valueAt(series['vis_raw_seen'], s) === true
+    : numberOf(valueAt(series['vis_sign_size'], s)) > 0;
+  return seen || numberOf(valueAt(series['vis_sign_dist'], s)) > 0;
+}
+/** The reading square's blink at s, 0 to 1 (sign_reading.blink): a pulse every PULSE_SECONDS from the moment the
+ * network saw the sign to the moment the car passes it, 0 without a sign ahead. The start is the first change of the
+ * two series since which a sign has been ahead without a break. */
+export function blinkAt(series: Record<string, Series>, s: number): number {
+  if (!aheadAt(series, s)) return 0;
+  const lanes = [series['vis_raw_seen'] ?? series['vis_sign_size'] ?? [], series['vis_sign_dist'] ?? []];
+  const at = lanes.map((lane) => lastAt(lane.length, (index) => lane[index]![0], s));
+  let start = s;
+  for (;;) {
+    const times = lanes.map((lane, which) => at[which]! >= 0 ? lane[at[which]!]![0] : -Infinity);
+    const time = Math.max(...times);
+    if (time === -Infinity) break;
+    start = time;
+    if (!aheadAt(series, time - 1e-6)) break;
+    times.forEach((one, which) => { if (one === time) at[which]! -= 1; });
+  }
+  return Math.sin(Math.PI * ((s - start) % PULSE_SECONDS) / PULSE_SECONDS);
 }
 /** The times of the signs read (speedVisionSP.signRead), from the events of a replay or of the timeline. */
 export function readTimes(events: readonly (readonly [number, string, unknown])[]): number[] {
@@ -257,7 +277,7 @@ export function readTimes(events: readonly (readonly [number, string, unknown])[
 /** The screen at a time, from the series of a replay or of the comma's log. A log from before the car sent the number
  * as written and whether the sign is in view (rawSignValue, rawSignSeen) gives its speed in km/h and a sign with a size
  * on the camera instead. Where the frames stop (null) the squares are empty, as without speedvisiond. */
-export function screenAt(series: Record<string, Series>, reads: readonly number[], s: number): Screen {
+export function screenAt(series: Record<string, Series>, s: number): Screen {
   const valueOf = (name: string, time: number): Value | undefined => valueAt(series[name], time);
   const at = (name: string): Value | undefined => valueOf(name, s);
   const kph = pyRound(numberOf(at('vis_limit')));
@@ -284,7 +304,7 @@ export function screenAt(series: Record<string, Series>, reads: readonly number[
     // What the car's own message says (speedVisionSP.roadType): with a brain, the type its ONNX names, for one exported
     // since 12 Nov 2026; an older export says none, and the screen shows none, as the car does.
     road: textOf(at('vis_road')),
-    pulse: pulseAt(reads, s),
+    pulse: blinkAt(series, s),
   };
 }
 
