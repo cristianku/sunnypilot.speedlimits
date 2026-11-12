@@ -147,6 +147,20 @@ def test_along_a_drive_the_step_of_a_brain_of_before_says_its_own_km_h(tmp_path)
     # Wherever PyTorch ran the drive, the network is back on the CPU for the step's other checks.
     assert next(model.parameters()).device.type == 'cpu'
 
+    # A frame where ONNX gives another class a hair more than PyTorch's speed is a tie, not another speed.
+    def nudged(by):
+        def run_nudged(image, extra, memory):
+            outputs = run(image, extra, memory)
+            scores = outputs[0].reshape(-1)
+            scores[(int(scores.argmax()) + 1) % len(scores)] = scores.max() + by
+            return outputs
+        return run_nudged
+
+    found = brain_export.drive_rollout(model, nudged(brain_export.TIE / 10), drive, FrameStore({'r': pictures}, 'cpu'))
+    assert found['other_speed'] == 0 and found['tied_speed'] == frames
+    found = brain_export.drive_rollout(model, nudged(1.0), drive, FrameStore({'r': pictures}, 'cpu'))
+    assert found['other_speed'] == frames and found['tied_speed'] == 0
+
 
 def test_the_checks_onnxruntime_runs_on_one_thread_not_spinning(tmp_path):
     import onnxruntime

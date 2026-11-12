@@ -33,6 +33,9 @@ INPUT_NAMES = ['image', 'extra', 'hidden']
 OUTPUT_NAMES = ['speed', 'hidden_out']
 AHEAD_OUTPUT_NAMES = ['speed', 'next', 'metres', 'hidden_out']
 RTOL, ATOL = 1e-4, 1e-4
+# Along a drive PyTorch runs the memory in chunks on a V100 and ONNX one frame at a time on the CPU: two classes whose
+# scores stand closer than this are a tie, and either may win by the last bits of the float.
+TIE = 1e-3
 
 
 def load_brain(checkpoint: Path):
@@ -92,7 +95,8 @@ def table_of(model) -> list[int]:
 
 def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str = 'cpu', log=None) -> dict:
     """A whole drive by step_run(image, extra, hidden) -> the step's outputs (speed logits first, hidden_out last), numpy,
-    against brain_train.predict: the frames and how many of them say another speed, or another limit ahead. The memory
+    against brain_train.predict: the frames and how many of them say another speed, or another limit ahead (a frame
+    where ONNX scores both classes within TIE is a tie, counted apart). The memory
     starts again where the car's does (drive['cuts']). log, when given, hears the drive and every tenth of it.
     The frames go one at a time, so PyTorch runs on one thread meanwhile: its pool waited on onnxruntime's at every
     frame, 67 ms a frame instead of 2 (a drive of 11040 frames at 4 Hz: 12 minutes instead of 22 seconds)."""
@@ -105,6 +109,9 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
     hidden = np.zeros((1, model.gru.hidden_size), dtype=np.float32)
     said = np.zeros(len(expected['kph']), dtype=np.int64)
     ahead = np.zeros(len(expected['kph']), dtype=np.int64)
+    index = {kph: number for number, kph in reversed(list(enumerate(table)))}
+    gap = np.zeros(len(said), dtype=np.float32)  # ONNX's best score less its score of PyTorch's speed
+    gap_ahead = np.zeros(len(said), dtype=np.float32)
     tenth = max(1, len(said) // 10)
     if log:
         log(f"brain check along {drive['route']}: {len(said)} frames, one at a time as on the car")
@@ -117,16 +124,26 @@ def drive_rollout(model, step_run, drive: dict, store: FrameStore, device: str =
             image = store.batch([(drive['route'], [frame])])[0].cpu().numpy()
             outputs = step_run(image, drive['extra'][frame:frame + 1], hidden)
             hidden = outputs[-1]
-            said[frame] = table[int(np.argmax(outputs[0]))]
-            ahead[frame] = int(np.argmax(outputs[1])) if 'next' in expected else 0
+            scores = outputs[0].reshape(-1)
+            said[frame] = table[int(np.argmax(scores))]
+            gap[frame] = scores.max() - scores[index[int(expected['kph'][frame])]]
+            if 'next' in expected:
+                scores = outputs[1].reshape(-1)
+                ahead[frame] = int(np.argmax(scores))
+                gap_ahead[frame] = scores.max() - scores[int(expected['next'][frame])]
             if log and (frame + 1) % tenth == 0 and frame + 1 < len(said):
                 log(f'brain check: {frame + 1} of {len(said)} frames')
     finally:
         torch.set_num_threads(threads)
-    found = {'route': drive['route'], 'frames': len(said), 'other_speed': int((said != expected['kph']).sum()),
+    other = said != expected['kph']
+    found = {'route': drive['route'], 'frames': len(said), 'other_speed': int((other & (gap > TIE)).sum()),
+             'tied_speed': int((other & (gap <= TIE)).sum()), 'widest_gap': float(gap.max()),
              'said': sorted({int(v) for v in said})}
     if 'next' in expected:
-        found['other_ahead'] = int((ahead != expected['next']).sum())
+        other = ahead != expected['next']
+        found['other_ahead'] = int((other & (gap_ahead > TIE)).sum())
+        found['tied_ahead'] = int((other & (gap_ahead <= TIE)).sum())
+        found['widest_gap_ahead'] = float(gap_ahead.max())
     return found
 
 
