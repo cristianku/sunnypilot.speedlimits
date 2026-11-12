@@ -11,7 +11,6 @@ import pytest
 
 from nnslr_tools import connect_fetch
 from nnslr_tools.connect_fetch import ConnectError, fetch, outside_drive, parse_link, route_files
-from nnslr_tools.speed_review import _brain_drive
 
 DONGLE = "0123456789abcdef"
 ROUTE = "0000012a--3f9c1e0b2d"
@@ -166,14 +165,3 @@ def test_download_repacks_bz2_as_zstd(tmp_path, monkeypatch):
         connect_fetch._download(f"{BLOB}/0/rlog.bz2{SIG}", tmp_path / "other.zst", True)
     assert sorted(path.name for path in tmp_path.iterdir()) == ["rlog.zst"]
 
-
-def test_outside_drives_are_not_brain_drives(tmp_path):
-    class Drives:
-        root = tmp_path
-
-        def summary(self, route):
-            return {"meta": {"car": {"passive": True}}, "coverage": {"engaged": False}}
-    assert _brain_drive(Drives(), ROUTE) is True
-    (tmp_path / "raw" / "connect").mkdir(parents=True)
-    (tmp_path / "raw" / "connect" / f"{ROUTE}.json").write_text(json.dumps({"route": ROUTE}))
-    assert _brain_drive(Drives(), ROUTE) is False

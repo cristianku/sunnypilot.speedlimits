@@ -7,8 +7,9 @@ and sync.link_videos links them into raw/routes, so the drive is prepared like o
 connect keeps as rlog.bz2 is re-packed as rlog.zst, the only log the readers take. The driver camera stays out.
 
 The record of where a drive comes from, raw/connect/<route>.json (dongle, car, software, link, time), is written before
-the first file and marks it as a drive of another car (outside_drive): the brain and Speed review leave it out, since
-their answer is Cristian's speed; Sign review takes it. Nothing of the owner's account, VIN or position is kept.
+the first file and marks it as a drive of another car (outside_drive). It goes where a drive of our comma goes: Sign
+review, and the brain and Speed review when it is a dashcam drive (sunnypilot off the whole way; Cristian, 12 Nov
+2026). Nothing of the owner's account, VIN or position is kept.
 
 Network: api.commadotai.com and the signed blob links its /files answer gives. The query of a blob link is a signature:
 it is never printed, logged or stored (_safe). A link that has expired is asked again once.

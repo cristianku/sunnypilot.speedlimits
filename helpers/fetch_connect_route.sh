@@ -2,8 +2,8 @@
 # A drive someone shared in comma connect, downloaded into the shared folder of the comma files and linked into data/
 # like a drive fetched from our comma (nnslr_tools.connect_fetch): the road camera, the wide camera and the rlog of every
 # segment (an rlog.bz2 is re-packed as rlog.zst). The driver camera stays out. Then prepare it as usual
-# (helpers/1_prepare.sh or Data on the site): it goes to Sign review, never to the brain or Speed review, whose answer is
-# Cristian's speed (data/raw/connect/<route>.json marks it as a drive of another car).
+# (helpers/1_prepare.sh or Data on the site): it goes to Sign review, and to the brain and Speed review when sunnypilot
+# was off the whole drive, as for a drive of ours (data/raw/connect/<route>.json says where it comes from).
 #
 # The owner first uploads every file of the drive in connect (open the drive, Files menu, upload "All files", the comma on Wi-Fi;
 # by default a comma uploads only qcamera and qlog), switches the drive to public and sends the link.

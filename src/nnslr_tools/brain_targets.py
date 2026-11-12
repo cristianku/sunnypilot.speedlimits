@@ -12,8 +12,9 @@ went again, since the signs the brain is given are the networks' anyway and get 
 (speed_review.dashcam_drive) is one where openpilot was passive in every carParams (sunnylink › Toggles › "Enable
 sunnypilot" off, or dashcamOnly) and never engaged: he drove alone, so his speed is his. Any other drive is left out
 whole, with its reason in dataset's log, and so is one whose logs show openpilot, MADS or controlsd on anyway
-(speed_review.engaged_series), and a drive of another car downloaded from comma connect (connect_fetch.outside_drive,
-OUTSIDE): its driver's speed is not his. The sign classifier learns from every drive. A drive is labelled by being driven: one
+(speed_review.engaged_series). A drive of another car downloaded from comma connect (connect_fetch) is taken the same
+way, when it is a dashcam drive: its driver's speed is the answer (Cristian, 12 Nov 2026). The sign classifier learns
+from every drive. A drive is labelled by being driven: one
 without a block or a mark is a drive like the others.
 
 A drive here is its frames in drive order, each on the comma's clock by the encode index (drive_logs.frame_time): labels
@@ -179,7 +180,6 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import drive_logs, drive_review
-from nnslr_tools.connect_fetch import outside_drive
 from nnslr_tools.drive_extract import GAP_SECONDS
 from nnslr_tools.gps import frame_country, load_positions
 from nnslr_tools.media import FRAME_SIZE
@@ -266,7 +266,6 @@ def class_kph(index):
 
 # Why a scanned drive is not one the brain learns from (training_routes' left_out).
 SUNNYPILOT_ON = 'sunnypilot was on (no dashcam drive)'
-OUTSIDE = 'drive of another car (comma connect)'
 
 
 def _connect_read_only(path: Path) -> sqlite3.Connection:
@@ -328,8 +327,7 @@ def road_kinds(root: Path) -> tuple[str, ...]:
 def _dashcam_spans(root: Path, left_out: dict | None = None) -> dict[str, tuple[int, int]]:
     """{route: (t0_ns, end_ns)} of every dashcam drive (speed_review.dashcam_drive) with a finished scan (its start and its
     end on the comma's clock, in drive_review.sqlite, read only) and its frames (derived/frames). left_out, when given,
-    gets SUNNYPILOT_ON for each scanned drive that is no dashcam drive and OUTSIDE for each drive of another car, by
-    route."""
+    gets SUNNYPILOT_ON for each scanned drive that is no dashcam drive, by route."""
     path = drive_review.db_path(root)
     if not path.is_file():
         return {}
@@ -351,10 +349,6 @@ def _dashcam_spans(root: Path, left_out: dict | None = None) -> dict[str, tuple[
             if left_out is not None:
                 left_out[row['route']] = SUNNYPILOT_ON
             continue
-        if outside_drive(root, row['route']) is not None:
-            if left_out is not None:
-                left_out[row['route']] = OUTSIDE
-            continue
         if any((Path(root) / FRAMES_RELATIVE / row['route']).glob('*/frames.jsonl')):
             found[row['route']] = (summary['t0_ns'], span[-1])
     return found
@@ -362,8 +356,8 @@ def _dashcam_spans(root: Path, left_out: dict | None = None) -> dict[str, tuple[
 
 def training_routes(root: Path, left_out: dict | None = None) -> list[str]:
     """The drives the brain learns from, in order, each whole: every dashcam drive with a finished scan and its frames
-    (_dashcam_spans). left_out, when given, gets SUNNYPILOT_ON for each scanned drive that is no dashcam drive and
-    OUTSIDE for each drive of another car, by route."""
+    (_dashcam_spans). left_out, when given, gets SUNNYPILOT_ON for each scanned drive that is no dashcam drive, by
+    route."""
     return sorted(_dashcam_spans(root, left_out))
 
 

@@ -742,6 +742,21 @@ def test_the_brain_learns_only_from_dashcam_drives_and_says_why_it_leaves_the_ot
     assert all(any(route in line and 'sunnypilot was on' in line for line in said) for route in (engaged, unknown, older))
 
 
+def test_a_dashcam_drive_of_another_car_is_learnt_as_one_of_ours(tmp_path):
+    """A drive downloaded from comma connect (raw/connect/<route>.json) goes into the brain when it is a dashcam drive,
+    and stays out when sunnypilot was on, like a drive of ours (Cristian, 12 Nov 2026)."""
+    targets = _targets()
+    on = '00000004--abcdef0123'
+    for route in (ROUTE, on):
+        write_drive(tmp_path, route, [(0, i) for i in range(3)])
+        (tmp_path / 'raw' / 'connect').mkdir(parents=True, exist_ok=True)
+        (tmp_path / 'raw' / 'connect' / f'{route}.json').write_text(json.dumps({'route': route}))
+    scanned(tmp_path, ROUTE)
+    scanned(tmp_path, on, {'t0_ns': 0, 'span_ns': [0, 40 * NS], 'meta': {'car': {'passive': False}}})
+    left_out = {}
+    assert targets.training_routes(tmp_path, left_out) == [ROUTE]
+    assert left_out == {on: targets.SUNNYPILOT_ON}
+
 def test_every_dashcam_drive_is_learnt_each_whole_with_nothing_to_mark(tmp_path):
     """The switch "OK for brain training" went on the evening of 9 Nov 2026: every dashcam drive is learnt, whole, with
     or without a review, even with the switch's old tables in the file; the log and the page count them and their hours,
