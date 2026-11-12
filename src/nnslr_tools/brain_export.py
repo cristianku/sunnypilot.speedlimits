@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import road_type_data as data
+from nnslr_tools import onnx_device
 from nnslr_tools.brain_net import build_brain_net, car_weights
 from nnslr_tools.brain_targets import BRAIN_INPUTS, INPUT_SIZES, METRES_SCALE, dataset, inputs_sha256, pack_inputs
 from nnslr_tools.brain_train import CHECKPOINT, CHUNK, _pictures, predict
@@ -182,12 +183,12 @@ def _export(step, example: tuple, output: Path, names: list[str] = OUTPUT_NAMES)
 
 
 def check_session(onnxruntime, path: Path):
-    """onnxruntime for the checks: one thread, not spinning. The step is small and goes one frame at a time between
+    """onnxruntime for the checks, on the GPU (onnx_device.check_providers): one thread, not spinning. The step is small and goes one frame at a time between
     PyTorch's operations; a pool of a thread per core spinning after each run only takes the cores from PyTorch."""
     options = onnxruntime.SessionOptions()
     options.intra_op_num_threads = options.inter_op_num_threads = 1
     options.add_session_config_entry('session.intra_op.allow_spinning', '0')
-    return onnxruntime.InferenceSession(str(path), options, providers=['CPUExecutionProvider'])
+    return onnxruntime.InferenceSession(str(path), options, providers=onnx_device.check_providers(onnxruntime))
 
 
 def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None = None, merged_of=None,
@@ -228,7 +229,7 @@ def export_brain_onnx(checkpoint: Path, output: Path, *, data_root: Path | None 
         for wanted, got in zip(expected, run(*(value.numpy() for value in inputs))):
             worst = max(worst, float(np.abs(wanted - got).max()))
             passed = passed and bool(np.allclose(got, wanted, rtol=RTOL, atol=ATOL))
-    verification = {'passed': passed, 'max_abs_error': worst, 'rtol': RTOL, 'atol': ATOL, 'provider': 'CPUExecutionProvider'}
+    verification = {'passed': passed, 'max_abs_error': worst, 'rtol': RTOL, 'atol': ATOL, 'provider': session.get_providers()[0]}
     if not passed:
         raise ValueError(f'brain ONNX differs from PyTorch: max abs error {worst}')
     if data_root is not None:

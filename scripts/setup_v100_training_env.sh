@@ -52,7 +52,11 @@ fi
 "$VENV/bin/python" -m pip install   torch==2.14.0   torchvision==0.29.0   --index-url https://download.pytorch.org/whl/cu126
 
 # OpenCV: the crops of the box refiner of Fit box (nnslr_tools.box_fit.refiner_train), as the review site makes them.
-"$VENV/bin/python" -m pip install 'Pillow>=11,<13' onnx onnxscript onnxruntime 'opencv-python-headless>=4.10,<6'
+# onnxruntime-gpu: the checks of an export (Publish) run the ONNX on the V100 (onnx_device.check_providers). Below 1.27:
+# from 1.27 it is built for CUDA 13, which has no Volta. cuDNN stays the one of torch cu126 (9.27 has no V100 kernels).
+"$VENV/bin/python" -m pip uninstall -y onnxruntime 2>/dev/null || true
+"$VENV/bin/python" -m pip install 'Pillow>=11,<13' onnx onnxscript 'onnxruntime-gpu>=1.21,<1.27' \
+  'nvidia-cudnn-cu12==9.10.2.21' 'opencv-python-headless>=4.10,<6'
 # The "training" extra of pyproject.toml adds wandb (training-run tracking).
 "$VENV/bin/python" -m pip install -e "${ROOT_DIR}[training]"
 
@@ -68,7 +72,7 @@ print("torch:", torch.__version__)
 print("torchvision:", torchvision.__version__)
 print("onnx:", onnx.__version__)
 print("onnxscript:", onnxscript.__version__)
-print("onnxruntime:", onnxruntime.__version__)
+print("onnxruntime:", onnxruntime.__version__, onnxruntime.get_available_providers())
 print("wandb:", wandb.__version__)
 print("torch CUDA runtime:", torch.version.cuda)
 print("CUDA available:", torch.cuda.is_available())

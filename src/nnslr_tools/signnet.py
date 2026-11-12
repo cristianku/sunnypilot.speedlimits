@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from nnslr_tools import synthetic_signs
+from nnslr_tools import onnx_device
 
 BAND_WIDTH = 1344
 BAND_HEIGHT = 416
@@ -1026,12 +1027,12 @@ def export_signnet_onnx(checkpoint_path: Path, output_path: Path, *, verify: boo
         import numpy as np
         with torch.no_grad():
             expected = wrapped(example).numpy()
-        session = ort.InferenceSession(str(output_path), providers=['CPUExecutionProvider'])
+        session = ort.InferenceSession(str(output_path), providers=onnx_device.check_providers(ort))
         actual = session.run(['out'], {'images': example.numpy()})[0]
         max_abs_error = float(np.max(np.abs(expected - actual)))
         passed = bool(np.allclose(expected, actual, rtol=1e-4, atol=1e-5))
         verification = {'enabled': True, 'passed': passed, 'max_abs_error': max_abs_error, 'rtol': 1e-4, 'atol': 1e-5,
-                        'provider': 'CPUExecutionProvider'}
+                        'provider': session.get_providers()[0]}
         if not passed:
             raise ValueError(f'onnx_parity_failed: max_abs_error={max_abs_error}')
     contract = {

@@ -80,3 +80,17 @@ def create_session(ort, path, probe_shape=None):
 def on_gpu(session) -> bool:
     return session.get_providers()[0] == CUDA
 # [preannotation] - END
+
+
+def check_providers(ort) -> list:
+    """onnxruntime for the checks of an export (Publish, the networks' ONNX against PyTorch): the GPU, never the CPU on
+    its own. No onnxruntime-gpu: it stops and says so. NNSLR_CHECK_DEVICE=cpu: the tests, a machine with no card."""
+    if os.environ.get('NNSLR_CHECK_DEVICE') == 'cpu':
+        return [CPU]
+    if CUDA not in ort.get_available_providers():
+        raise RuntimeError('this environment has no onnxruntime for the GPU (onnxruntime-gpu): the checks of an export '
+                           'run on a V100, never on the CPU')
+    if hasattr(ort, 'preload_dlls'):
+        ort.preload_dlls()
+    # The networks are small: the memory they ask for and no more, beside whatever else holds the card.
+    return [(CUDA, {'device_id': 0, 'arena_extend_strategy': 'kSameAsRequested', 'cudnn_conv_algo_search': 'HEURISTIC'})]

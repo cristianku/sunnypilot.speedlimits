@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nnslr_tools import onnx_device
 from nnslr_tools.checkpoints import (DETECTOR_ANCHOR_MAX_RATIO, detector_anchor_min_ratio, detector_input_size,
                                      load_detector, safe_torch_load)
 from nnslr_tools.training import _require_detector_stack, _require_training_stack
@@ -231,7 +232,7 @@ def export_detector_onnx(
             raise ValueError("onnxruntime_missing") from exc
         with torch.no_grad():
             expected = wrapper(example)
-        session = ort.InferenceSession(str(output_path), providers=["CPUExecutionProvider"])
+        session = ort.InferenceSession(str(output_path), providers=onnx_device.check_providers(ort))
         actual = session.run(["boxes", "scores", "labels"], {"images": example.numpy()})
         import numpy as np
         expected_np = [tensor.detach().cpu().numpy() for tensor in expected]
@@ -249,7 +250,7 @@ def export_detector_onnx(
             "boxes_match": bool(boxes_match),
             "scores_match": bool(scores_match),
             "labels_match": bool(labels_match),
-            "provider": "CPUExecutionProvider",
+            "provider": session.get_providers()[0],
             "input": "a frame of the dataset" if example_image is not None else "random values",
         }
         if not passed:
@@ -314,7 +315,7 @@ def export_reader_onnx(
             raise ValueError("onnxruntime_missing") from exc
         with torch.no_grad():
             expected = model(example).detach().cpu().numpy()
-        session = ort.InferenceSession(str(output_path), providers=["CPUExecutionProvider"])
+        session = ort.InferenceSession(str(output_path), providers=onnx_device.check_providers(ort))
         actual = session.run(["logits"], {"images": example.numpy()})[0]
         import numpy as np
         max_abs_error = float(np.max(np.abs(expected - actual)))
@@ -325,7 +326,7 @@ def export_reader_onnx(
             "max_abs_error": max_abs_error,
             "rtol": 1e-4,
             "atol": 1e-5,
-            "provider": "CPUExecutionProvider",
+            "provider": session.get_providers()[0],
         }
         if not passed:
             raise ValueError(f"onnx_parity_failed: max_abs_error={max_abs_error}")
@@ -462,7 +463,7 @@ def export_decider_onnx(checkpoint_path: Path, output_path: Path, *, verify: boo
         except ImportError as exc:
             raise ValueError("onnxruntime_missing") from exc
         import numpy as np
-        session = ort.InferenceSession(str(output_path), providers=["CPUExecutionProvider"])
+        session = ort.InferenceSession(str(output_path), providers=onnx_device.check_providers(ort))
         worst = 0.0
         passed = True
         for boxes in (1, 5):
@@ -475,7 +476,7 @@ def export_decider_onnx(checkpoint_path: Path, output_path: Path, *, verify: boo
                 worst = max(worst, float(np.max(np.abs(want - got))))
                 passed = passed and want.shape == got.shape and bool(np.allclose(want, got, rtol=1e-3, atol=1e-4))
         verification = {"enabled": True, "passed": passed, "max_abs_error": worst, "rtol": 1e-3, "atol": 1e-4,
-                        "boxes_tried": [1, 5], "provider": "CPUExecutionProvider"}
+                        "boxes_tried": [1, 5], "provider": session.get_providers()[0]}
         if not passed:
             raise ValueError(f"onnx_parity_failed: decider max_abs_error={worst}")
 
@@ -621,7 +622,7 @@ def export_decider_car_onnx(checkpoint_path: Path, output_path: Path, *, boxes: 
         comma = car_decider_module(car_module)
         options = ort.SessionOptions()
         options.intra_op_num_threads = options.inter_op_num_threads = 1
-        session = ort.InferenceSession(str(output_path), options, providers=["CPUExecutionProvider"])
+        session = ort.InferenceSession(str(output_path), options, providers=onnx_device.check_providers(ort))
         generator = torch.Generator().manual_seed(31)
         worst, passed, tried = 0.0, True, []
         width, height = FRAME_SIZE  # the size of every frame of the decider's training
@@ -653,7 +654,7 @@ def export_decider_car_onnx(checkpoint_path: Path, output_path: Path, *, boxes: 
             tried.append(count)
         verification = {"enabled": True, "passed": passed, "max_abs_error": worst, "rtol": 1e-3, "atol": 1e-4,
                         "boxes_tried": tried, "reference": "PyTorch with torchvision roi_align",
-                        "provider": "CPUExecutionProvider"}
+                        "provider": session.get_providers()[0]}
         if not passed:
             raise ValueError(f"onnx_parity_failed: car decider max_abs_error={worst}")
 

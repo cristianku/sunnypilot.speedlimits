@@ -58,6 +58,7 @@ from pathlib import Path
 import numpy as np
 
 from nnslr_tools import car_motion as motion_data
+from nnslr_tools import onnx_device
 from nnslr_tools import road_type_data as data
 from nnslr_tools import road_type_signs as signs_data
 from nnslr_tools.car_motion import MOTION_INPUTS, NO_MOTION
@@ -2030,8 +2031,7 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         print(f'torch.export could not export the road-type step ({type(exc).__name__}); using TorchScript', flush=True)
         torch.onnx.export(step, example, str(output), input_names=names_in, output_names=names_out, dynamo=False,
                           opset_version=17)
-    verification = {'enabled': verify, 'passed': None, 'max_abs_error': None, 'rtol': 1e-4, 'atol': 1e-5,
-                    'provider': 'CPUExecutionProvider'}
+    verification = {'enabled': verify, 'passed': None, 'max_abs_error': None, 'rtol': 1e-4, 'atol': 1e-5}
     if verify:
         import onnx
         import onnxruntime
@@ -2043,7 +2043,8 @@ def export_road_type_onnx(checkpoint: Path, output: Path, *, verify: bool = True
         taken = [i.name for i in graph.input]
         if taken != names_in:
             raise ValueError(f'road-type ONNX inputs {taken}, expected {names_in}')
-        session = onnxruntime.InferenceSession(str(output), providers=['CPUExecutionProvider'])
+        session = onnxruntime.InferenceSession(str(output), providers=onnx_device.check_providers(onnxruntime))
+        verification['provider'] = session.get_providers()[0]
         generator = torch.Generator().manual_seed(0)
         worst, passed = 0.0, True
         for _ in range(4):
