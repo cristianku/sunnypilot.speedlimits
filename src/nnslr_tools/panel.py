@@ -966,11 +966,13 @@ class Panel:
 
     def running(self) -> dict:
         """What runs now, for the dots of the busy tabs on the pages outside the panel (GET /api/panel/system): the
-        running jobs of the site (id, action, label, state, gpus) and the work started from a terminal."""
+        running jobs of the site (id, action, label, state, gpus), the work started from a terminal and the Review with
+        AI at work (ai_live: Speed review marks its drive in the list)."""
         activities = self.activities()
+        every = self.jobs(activities)
         jobs = [{key: job[key] for key in ('id', 'action', 'label', 'state', 'gpus')}
-                for job in self.jobs(activities) if job['state'] == 'running']
-        return {'jobs': jobs, 'activities': activities}
+                for job in every if job['state'] == 'running']
+        return {'jobs': jobs, 'activities': activities, 'ai_live': self.ai_live(every)}
 
     def jobs(self, activities: list[dict] | None = None) -> list[dict]:
         """The last actions started from the panel, newest first."""

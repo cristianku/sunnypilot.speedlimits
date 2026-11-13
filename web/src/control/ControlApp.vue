@@ -7,7 +7,8 @@
 // server pill and the dots of the busy tabs from the light /api/panel/system every 4 s, as on the other pages.
 import {computed, onBeforeUnmount, onMounted, provide, ref, watch} from 'vue';
 import {poll} from '../common/api';
-import type {Activity, Job, SystemInfo} from '../common/panel-types';
+import type {Activity, AiLive, Job, SystemInfo} from '../common/panel-types';
+import {aiLive} from '../composables/ai-live';
 import {markBusy} from '../composables/busy';
 import {showConnection} from '../composables/connection';
 import {usePanelStatus} from '../composables/panel-status';
@@ -37,7 +38,7 @@ const STATUS_MS = 4000;
 const LIGHT_STATUS_MS = 60000;
 const hidden = ref(document.hidden);
 const light = computed(() => LIGHT_TABS.has(currentTab.value));
-const {status, refresh} = usePanelStatus((value) => recordMachine(value.system),
+const {status, refresh} = usePanelStatus((value) => { recordMachine(value.system); aiLive.value = value.ai_live ?? null; },
   () => light.value || hidden.value ? LIGHT_STATUS_MS : STATUS_MS);
 // Back on a tab that shows the status, or on the browser tab: a fresh one now.
 watch([light, hidden], ([isLight, isHidden], [wasLight, wasHidden]) => {
@@ -53,10 +54,13 @@ onBeforeUnmount(() => document.removeEventListener('visibilitychange', onVisibil
 usePoll(async () => {
   if (hidden.value || (!light.value && status.value !== null)) return;
   try {
-    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]}}>(
+    const answer = await poll<{system: SystemInfo; running?: {jobs: Pick<Job, 'action' | 'state'>[]; activities: Activity[]; ai_live?: AiLive | null}}>(
       '/api/panel/system');
     recordMachine(answer.system);
-    if (answer.running) markBusy(busyTabs(answer.running.jobs, answer.running.activities));
+    if (answer.running) {
+      markBusy(busyTabs(answer.running.jobs, answer.running.activities));
+      aiLive.value = answer.running.ai_live ?? null;
+    }
     showConnection(null);
   } catch (error) {
     showConnection(error);

@@ -42,6 +42,7 @@ let showing: Group | null = GROUPS.some((group) => group.key === asked) ? asked 
 // (brain_targets.training_routes): there is nothing to mark for it.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, watch} from 'vue';
 import {api, messageOf} from '../common/api';
+import {aiLive} from '../composables/ai-live';
 import {isGuest} from '../common/guest';
 import {plural, thousands} from '../common/format';
 import {signsHref} from '../common/sign-link';
@@ -191,6 +192,12 @@ onMounted(() => {
   void reload();
   void loadSigns();
 });
+// The AI done with a drive: its counts and its AI REVIEW badge again.
+watch(() => aiLive.value?.route ?? null, (now, before) => {
+  if (before !== null && now === null && tabDrive.value === null) void loadSigns();
+});
+/** The drive the AI reviews now, for the line of the banner that opens it. */
+const liveRow = computed(() => rows.value.find((row) => row.route === aiLive.value?.route) ?? null);
 onBeforeUnmount(() => window.clearTimeout(timer));
 </script>
 
@@ -210,6 +217,10 @@ onBeforeUnmount(() => window.clearTimeout(timer));
         <span class="rv-bar" aria-hidden="true"><span :style="{width: glance.people + '%'}"></span><span v-if="glance.ai" class="ai"
           :style="{width: glance.aiShare + '%'}"></span></span>
         <p v-if="glance.ai" class="rv-notes">{{ thousands(glance.confirmed - glance.ai) }} by you · <span class="sr-ai-word">{{ thousands(glance.ai) }} by the AI</span></p>
+        <p v-if="aiLive" class="sr-ai-live" id="sr-ai-live"><a :href="signsHref(aiLive.route)"><i class="sr-ai-square" aria-hidden="true"></i>The AI is
+          {{ aiLive.saving ? 'reviewing' : 'trying' }} {{ liveRow ? titleOf(liveRow) : aiLive.route }}<template v-if="aiLive.total"> ·
+          {{ thousands(aiLive.done) }} of {{ thousands(aiLive.total) }} frames</template><template v-if="aiLive.seconds_left"> · about
+          {{ Math.ceil(aiLive.seconds_left / 60) }} min left</template> ›</a></p>
         <div class="rv-tiles" role="group" aria-label="Show only">
           <button v-for="tile in glance.tiles" :key="tile.key" type="button" class="rv-tile" :class="tile.key" :id="'sr-show-' + tile.key"
                   :aria-pressed="show === tile.key" :disabled="!tile.count && show !== tile.key"
@@ -227,7 +238,8 @@ onBeforeUnmount(() => window.clearTimeout(timer));
           <a class="rt-open" :href="row.speed ? hrefOf(row.speed) : signsUrl(row.signs!)">
             <div class="rt-name">
               <strong>{{ titleOf(row) }} <b v-if="row.speed?.dashcam" class="dashcam-badge">DASHCAM MODE</b>
-                <b v-if="row.signs && byAi(row.signs)" class="ai-badge" :title="thousands(byAi(row.signs)) + ' frames of its signs reviewed by the AI'"><i class="sr-ai-square" aria-hidden="true"></i>AI REVIEW</b></strong>
+                <b v-if="aiLive?.route === row.route" class="ai-badge live" :title="(aiLive.saving ? 'The AI is reviewing this drive now' : 'The AI is trying this drive now, nothing saved') + (aiLive.seconds_left ? ' · about ' + Math.ceil(aiLive.seconds_left / 60) + ' min left' : '')"><i class="sr-ai-square" aria-hidden="true"></i>AI {{ aiLive.saving ? 'REVIEWING' : 'TRYING' }}<template v-if="aiLive.total"> · {{ thousands(aiLive.done) }}/{{ thousands(aiLive.total) }}</template></b>
+                <b v-else-if="row.signs && byAi(row.signs)" class="ai-badge" :title="thousands(byAi(row.signs)) + ' frames of its signs reviewed by the AI'"><i class="sr-ai-square" aria-hidden="true"></i>AI REVIEW</b></strong>
               <span>{{ whenOf(row) }}</span>
             </div>
             <p v-if="row.speed" class="dr-drive-state" :class="{'dr-muted': !marked(row.speed)}">{{ stateOf(row.speed) }}</p>

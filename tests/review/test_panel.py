@@ -409,7 +409,7 @@ def test_panel_page_status_and_run_over_http(served):
     # The machine and what runs, for the server pill and the dots of the busy tabs of the other pages.
     machine = json_of(served.request('GET', '/api/panel/system')[2])
     assert set(machine) == {'system', 'running'} and 'memory' in machine['system'] and 'disk' in machine['system']
-    assert machine['running'] == {'jobs': [], 'activities': []}
+    assert machine['running'] == {'jobs': [], 'activities': [], 'ai_live': None}
 
     status, response, data = served.request('POST', '/api/panel/run/prepare', body={})
     assert status == 200, data

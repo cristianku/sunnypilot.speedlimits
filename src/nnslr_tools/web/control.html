@@ -1724,6 +1724,10 @@ transition:background .15s,box-shadow .15s,transform .1s}
 .sr-ai-square{display:inline-block;width:9px;height:9px;border-radius:2px;background:#af52de;margin-right:6px;vertical-align:baseline}
 .ai-badge{display:inline-flex;align-items:center;flex:none;margin-left:4px;padding:2px 8px;border-radius:6px;background:#3a1f4d;color:#e0b8ff;font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;box-shadow:inset 0 0 0 1px #af52de}
 .ai-badge .sr-ai-square{margin-right:5px}
+.ai-badge.live .sr-ai-square,.sr-ai-live .sr-ai-square{animation:ai-blink 1s ease-in-out infinite}
+@keyframes ai-blink{50%{opacity:.12}}
+.sr-ai-live{margin:2px 0 0;font-size:13.5px;font-weight:600}.sr-ai-live a{color:#af52de;text-decoration:none;font-variant-numeric:tabular-nums}.sr-ai-live a:hover{text-decoration:underline}
+@media (prefers-reduced-motion:reduce){.ai-badge.live .sr-ai-square,.sr-ai-live .sr-ai-square{animation:none}}
 :root[data-theme="light"] .ai-badge{background:#f3e8fd;color:#8e3dbd}
 @media (prefers-color-scheme:light){:root[data-theme="auto"] .ai-badge{background:#f3e8fd;color:#8e3dbd}}
 .loop-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.loop-chips a{padding:3px 9px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:inherit;font-size:12.5px;font-weight:600;text-decoration:none;font-variant-numeric:tabular-nums}.loop-chips a:hover{background:var(--surface-3)}.loop-chips a.ai{color:#af52de}.loop-chips .sr-ai-square{width:8px;height:8px;margin-right:5px}
