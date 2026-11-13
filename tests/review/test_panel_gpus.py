@@ -580,6 +580,25 @@ def test_without_nvidia_smi_as_before(panel, checkout, monkeypatch):  # noqa: F8
     assert refused(panel, 'train_cutter')[:2] == (409, 'busy')
 
 
+def test_without_a_card_here_a_training_runs_through_the_gpu_runner(panel, checkout, monkeypatch):  # noqa: F811
+    """#77: the site on serverone2 has no card; with scripts/gpu_remote.sh in the checkout a training goes through it
+    (to serverone-ai's V100s), and its log still starts with its own command, which the page reads its run from."""
+    signnet_script(checkout, GPU_SCRIPT)
+    runner = checkout / 'scripts' / 'gpu_remote.sh'
+    runner.write_text('#!/usr/bin/env bash\necho "through the runner: $*"\n"$@"\n')
+    runner.chmod(0o755)
+    cutter = panel.start('train_cutter')
+    assert said(panel, cutter, 'through the runner: ') == 'through the runner: scripts/run_signnet.sh ' + cutter_run(panel, cutter)
+    assert full_log(panel, cutter['id']).splitlines()[0] == '== scripts/run_signnet.sh ' + cutter_run(panel, cutter)
+    finished(panel, cutter['id'])
+    # A preparation is never sent there: it writes into the review databases.
+    assert 'prepare' not in panel_module.REMOTE_GPU_ACTIONS and 'train_brain' in panel_module.REMOTE_GPU_ACTIONS
+
+
+def cutter_run(panel, job):
+    return panel_module._run_of(panel.logs / (job['id'] + '.log'), 'train_cutter')
+
+
 def test_the_progress_file_of_a_job(tmp_path, monkeypatch):
     monkeypatch.setenv('NNSLR_DATA_ROOT', str(tmp_path / 'data'))
     assert progress_module.progress_path() == tmp_path / 'data' / 'logs' / 'progress.json'

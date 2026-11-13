@@ -98,6 +98,21 @@ CUDA_DEVICE_ORDER=PCI_BUS_ID .venv-gpu/bin/nnslr env --gpu-smoke --gpu-device 1 
 
 First it installs, with `apt-get` as root, the headers of the Python it uses (`python3.X-dev`, here `python3.13-dev`) when they are missing: triton, inside torch, compiles a small C helper with `gcc` and `Python.h` the first time it runs a kernel of its own (torch 2.14 sends some ops to it, such as the backward of the Fit box rankers), and without them that training stops with `fatal error: Python.h: No such file or directory`. Not root, it stops and says what to install. Then it installs `torch==2.14.0` and `torchvision==0.29.0` from the CUDA 12.6 index (the last line that still supports the Tesla V100, sm_70), `onnx`, `onnxscript`, `onnxruntime-gpu` below 1.27 with cuDNN 9.10.2.21 (it removes a plain `onnxruntime` first: the checks of an export, Publish, run the ONNX on the V100 and stop when there is no onnxruntime for the GPU) and the `training` extra (`wandb`). On a newer GPU you can install the default PyPI `torch` instead. `--gpu-device` is nvidia-smi's number of the card (here `0` = bus 81:00.0, `1` = C1:00.0); `CUDA_DEVICE_ORDER=PCI_BUS_ID` makes CUDA count the cards the same way, as the training scripts do.
 
+### The GPU runner: the V100s from the site's machine (#77)
+
+Since 13 Nov 2026 the site runs on CT 1310 (serverone2, no card) and the V100s are on CT 131 (serverone-ai), which is off between jobs. The panel sends GPU jobs there through `scripts/gpu_remote.sh` ([GUIDE.md](GUIDE.md), "Scripts"). It needs:
+
+- on CT 131: `/root/sunnypilot.speedlimits` with its `.venv-gpu` (above), its `.venv` and `data/`. The runner writes only in `/root/gpu-runner/jobs/<job>/` and that `data/`;
+- on serverone2, by cluster-admin: `scripts/gpu_host.sh` as `/usr/local/sbin/gpu_host.sh`, with CT 1310's root key in root's `authorized_keys`:
+
+  ```text
+  command="/usr/local/sbin/gpu_host.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA... root@speedlimits-site
+  ```
+
+  serverone2's root must reach `root@10.10.10.110` (serverone-ai) by ssh without a password.
+
+Check from CT 1310 with `scripts/gpu_remote.sh --status`: it reads the state and wakes nothing.
+
 ### The road users' detector (for the brain's training)
 
 `nnslr road-users` (step 4 of `scripts/run_brain.sh`) reads the road users with torchvision's Faster R-CNN ResNet-50 FPN v2 on its COCO weights (`fasterrcnn_resnet50_fpn_v2_coco-dd69338a.pth`, about 167 MB). The first run downloads them from download.pytorch.org into torch's hub cache (`~/.cache/torch/hub/checkpoints/`); to have them there before, with their checksum checked:

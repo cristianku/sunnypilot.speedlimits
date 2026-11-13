@@ -617,6 +617,11 @@ DRY_ON_CPU = ('road_labeler_train', 'road_labeler_predict', 'box_fit_train')
 # The proposers of Prepare that run on the GPU (every one today): a preparation with one of them takes the card with the
 # most free memory, shared with what else runs there.
 GPU_PROPOSERS = ('vietnam', 'ours', 'qwen')
+# The GPU runner (#77): on a machine without a card (the site on serverone2 since 13 Nov 2026) these jobs run on CT 131,
+# serverone-ai's V100s, through it (it wakes the host, sends the code and the data, brings the results back). The
+# preparations, which write into the review databases, and setup_vlm, which installs, stay here.
+REMOTE_GPU_SCRIPT = 'scripts/gpu_remote.sh'
+REMOTE_GPU_ACTIONS = tuple(action for action in EXCLUSIVE_GPU if action != 'setup_vlm') + tuple(SHARED_GPU)
 # The lock of openpilot.distill's GPU work (its helpers and its training take it): its holder is on a card too.
 GPU_LOCK = '/run/lock/v100-gpu.lock'
 # A card used by a program that is neither a job of the panel nor work it knows from a terminal (another container,
@@ -2746,6 +2751,11 @@ class Panel:
             if action == 'train_cutter':
                 # NAME: one SignNet, at the car's band, on a run of its own.
                 command.append(self.new_run_name('cutter'))
+            # No card here: the job runs on serverone-ai's V100s through the runner, never on this CPU. Its log still
+            # starts with the job's own command (RUN_LINES).
+            launched = command
+            if takes_card and not cards and action in REMOTE_GPU_ACTIONS and (self.repo / REMOTE_GPU_SCRIPT).is_file():
+                launched = [REMOTE_GPU_SCRIPT] + command
             # Temporary files in the data root, not in /tmp: the service has a private /tmp (PrivateTmp)
             # that systemd empties at every restart, which broke a pip download of a running training.
             temporary = self.root / 'tmp'
@@ -2781,7 +2791,7 @@ class Panel:
                 log.flush()
                 # A new session: the action outlives this server and can be stopped as a group. At a lower CPU
                 # priority (nice runs bash in its place, same pid): a job on every core leaves this site answering.
-                process = subprocess.Popen(['nice', '-n', str(JOB_NICE), 'bash', '-c', WRAPPER, 'panel', *command],
+                process = subprocess.Popen(['nice', '-n', str(JOB_NICE), 'bash', '-c', WRAPPER, 'panel', *launched],
                                            cwd=self.repo, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                                            env=environment, start_new_session=True)
             self._processes[job_id] = process
