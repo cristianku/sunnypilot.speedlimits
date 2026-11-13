@@ -2,7 +2,7 @@
 
 You are a senior ML engineer with experience in driver-assistance perception and sequence models trained on small, real
 driving datasets. Read this whole page and the code it points at in this repository
-(`github.com/cristianku/sunnypilot.speedlimits`, branch `main`), then answer the question at the end. I want concrete,
+(`github.com/cristianku/sunnypilot.smartspeed`, branch `main`), then answer the question at the end. I want concrete,
 ranked advice, not a survey.
 
 ## 1. The project, from the beginning

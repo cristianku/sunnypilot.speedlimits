@@ -201,7 +201,7 @@ def model_card(manifest: dict) -> str:
         f'# Speed-limit networks {manifest["name"]}', '',
         'Three small networks that find speed signs on the narrow road camera of a comma device, read them and say '
         'whether they apply to the car, for sunnypilot\'s Speed Limit Assist '
-        '([sunnypilot.speedlimits](https://github.com/cristianku/sunnypilot.speedlimits)).', '',
+        '([sunnypilot.speedlimits](https://github.com/cristianku/sunnypilot.smartspeed)).', '',
         '**Experimental.** A help, never a guarantee: the driver always stays responsible for the speed.', '',
         '| Network | What it does | File | Version |', '|---|---|---|---|',
         cutter_row,

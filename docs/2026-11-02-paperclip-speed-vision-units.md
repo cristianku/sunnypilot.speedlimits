@@ -181,8 +181,8 @@ La preparazione di questo documento non ha modificato il codice applicativo. Non
 - [Runtime: publisher e conversione attuale](https://github.com/cristianku/sunnypilot/blob/8d37cf946ac8088ee503a60ba755bcb5a2445f77/openpilot/sunnypilot/speed_limits/speedvisiond.py#L95).
 - [Resolver vision](https://github.com/cristianku/sunnypilot/blob/8d37cf946ac8088ee503a60ba755bcb5a2445f77/openpilot/sunnypilot/selfdrive/controls/lib/speed_limit/speed_limit_resolver.py#L120).
 - [Schema SpeedVisionSP e unità dei log](https://github.com/cristianku/sunnypilot/blob/8d37cf946ac8088ee503a60ba755bcb5a2445f77/openpilot/cereal/custom.capnp#L488).
-- [Training: costruzione della classe](https://github.com/cristianku/sunnypilot.speedlimits/blob/936491a340ff97fda947d4ffcc1a68ef86510cef/src/nnslr_tools/training.py#L100).
-- [GPS e confini nel progetto offline](https://github.com/cristianku/sunnypilot.speedlimits/blob/936491a340ff97fda947d4ffcc1a68ef86510cef/src/nnslr_tools/gps.py#L192).
+- [Training: costruzione della classe](https://github.com/cristianku/sunnypilot.smartspeed/blob/936491a340ff97fda947d4ffcc1a68ef86510cef/src/nnslr_tools/training.py#L100).
+- [GPS e confini nel progetto offline](https://github.com/cristianku/sunnypilot.smartspeed/blob/936491a340ff97fda947d4ffcc1a68ef86510cef/src/nnslr_tools/gps.py#L192).
 - [Mapd: conversione del tag](https://github.com/pfeiferj/mapd/blob/46cd71ade6f630f1564c83bf1763f9d949a9ff30/speed_limit.go#L8).
 - [Mapd: conversione nella generazione offline](https://github.com/pfeiferj/mapd/blob/46cd71ade6f630f1564c83bf1763f9d949a9ff30/generate_offline.go#L152).
 - [Sunny: lettura MapSpeedLimit](https://github.com/sunnypilot/sunnypilot/blob/a86979d2b2b176413a7f3e5cccf8c807596a7def/openpilot/sunnypilot/mapd/live_map_data/osm_map_data.py#L46).

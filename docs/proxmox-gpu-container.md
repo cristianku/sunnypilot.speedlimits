@@ -88,7 +88,7 @@ working, since they are on the container disk.
 
 ```bash
 cd ~
-git clone https://github.com/cristianku/sunnypilot.speedlimits.git
+git clone https://github.com/cristianku/sunnypilot.smartspeed.git
 cd ~/sunnypilot.speedlimits
 ```
 

@@ -244,7 +244,7 @@ On the machine, as root, once the copy account and its folder exist:
 
 ```sh
 apt-get install -y git python3-venv rsync ffmpeg
-git clone https://github.com/cristianku/sunnypilot.speedlimits /opt/speedlimits
+git clone https://github.com/cristianku/sunnypilot.smartspeed /opt/speedlimits
 /opt/speedlimits/scripts/install_review_box.sh --proxy-ips <proxy> --public-hosts <public address>
 ```
 

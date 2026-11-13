@@ -56,7 +56,7 @@ mcp = ["mcp>=2.3,<3"]
 nnslr = "nnslr_tools.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/cristianku/sunnypilot.speedlimits"
+Homepage = "https://github.com/cristianku/sunnypilot.smartspeed"
 
 [tool.setuptools.packages.find]
 where = ["src"]
