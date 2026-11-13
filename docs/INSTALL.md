@@ -100,18 +100,12 @@ First it installs, with `apt-get` as root, the headers of the Python it uses (`p
 
 ### The GPU runner: the V100s from the site's machine (#77)
 
-Since 13 Nov 2026 the site runs on CT 1310 (serverone2, no card) and the V100s are on CT 131 (serverone-ai), which is off between jobs. The panel sends GPU jobs there through `scripts/gpu_remote.sh` ([GUIDE.md](GUIDE.md), "Scripts"). It needs:
+Since 13 Nov 2026 the site runs on CT 1310 (serverone2, no card) and the V100s are on CT 131 (serverone-ai). The panel sends GPU jobs there through `scripts/gpu_remote.sh` ([GUIDE.md](GUIDE.md), "Scripts"). The runner only connects to CT 131 when it is already up: it never powers serverone-ai or CT 131 on or off. Cristian or cluster-admin start them before a GPU job and stop them after (Cristian, 13 Nov 2026). It needs:
 
 - on CT 131: `/root/sunnypilot.speedlimits` with its `.venv-gpu` (above), its `.venv` and `data/`. The runner writes only in `/root/gpu-runner/jobs/<job>/` and that `data/`;
-- on serverone2, by cluster-admin: `scripts/gpu_host.sh` as `/usr/local/sbin/gpu_host.sh`, with CT 1310's root key in root's `authorized_keys`:
+- CT 1310's root key in CT 131 root's `authorized_keys` (the two share the key pair since the copy).
 
-  ```text
-  command="/usr/local/sbin/gpu_host.sh",no-port-forwarding,no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAAA... root@speedlimits-site
-  ```
-
-  serverone2's root must reach `root@10.10.10.110` (serverone-ai) by ssh without a password.
-
-Check from CT 1310 with `scripts/gpu_remote.sh --status`: it reads the state and wakes nothing.
+Check from CT 1310 with `scripts/gpu_remote.sh --status`: it says whether CT 131 answers, and starts nothing.
 
 ### The road users' detector (for the brain's training)
 

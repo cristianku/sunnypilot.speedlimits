@@ -3,11 +3,14 @@ set -uo pipefail
 
 # The GPU runner (#77, 13 Nov 2026): runs one GPU job of the panel on CT 131 (serverone-ai, the two V100s) while the site
 # lives on CT 1310 (serverone2, no GPU). The panel puts it in front of the job's own command when this machine has no
-# card (panel.REMOTE_GPU_SCRIPT); a job never falls back to the CPU here: when serverone-ai cannot be reached it stops
+# card (panel.REMOTE_GPU_SCRIPT); a job never falls back to the CPU here: when CT 131 cannot be reached it stops
 # with the reason.
 #
-#   1. wakes serverone-ai and starts CT 131 when it is off (ssh to serverone2, whose forced command is
-#      scripts/gpu_host.sh: wake), 3-4 minutes;
+# It never powers anything on or off (Cristian, 13 Nov 2026): serverone-ai and CT 131 are started and stopped only by
+# Cristian or cluster-admin. The runner only connects to CT 131 when it is already up.
+#
+#   1. checks that CT 131 answers by ssh; when it does not, the job does not start and says to ask Cristian or
+#      cluster-admin to start serverone-ai and CT 131;
 #   2. copies the code as it is here (git stash create: the commit plus the changes not committed yet, never the
 #      untracked files) into /root/gpu-runner/jobs/JOB/code on CT 131, with the .venv and .venv-gpu of
 #      /root/sunnypilot.speedlimits there (PYTHONPATH puts this code's src before their editable install);
@@ -16,28 +19,22 @@ set -uo pipefail
 #   4. takes a card nothing computes on there (or the one the panel named), runs the job under setsid with the job's
 #      environment, its paths turned into CT 131's, and streams its log here; the progress file comes back every
 #      5 s; Stop in the panel (TERM) stops the job there too;
-#   5. brings the results back (rsync --update, never --delete): everything but annotations/, logs/ and tmp/;
-#   6. arms gpu-idle-off, a timer of systemd: 30 minutes after the last job, serverone-ai is turned off (gpu_host.sh off,
-#      which refuses while a job of ours still runs there).
+#   5. brings the results back (rsync --update, never --delete): everything but annotations/, logs/ and tmp/.
 #
 # usage: scripts/gpu_remote.sh COMMAND [ARGUMENTS...]     the job, as the panel would run it here
-#        scripts/gpu_remote.sh --idle-off                  what the timer runs
-#        scripts/gpu_remote.sh --status                    whether serverone-ai and CT 131 are up
+#        scripts/gpu_remote.sh --status                    whether CT 131 answers (reads only)
 #
-# Exit code: the job's own; 75 when serverone-ai, CT 131 or a free card cannot be had.
+# Exit code: the job's own; 75 when CT 131 or a free card cannot be had.
 #
 # Environment: NNSLR_DATA_ROOT (data/), NNSLR_PROGRESS_FILE, NNSLR_JOB_RECORD, NNSLR_GPU_INDEX (the panel's), and:
-# NNSLR_GPU_HOST_CMD (root@10.10.10.102, serverone2 with gpu_host.sh as forced command), NNSLR_GPU_CT
-# (root@10.10.10.213, CT 131), NNSLR_GPU_REMOTE_REPO (/root/sunnypilot.speedlimits on CT 131: its .venv-gpu, .venv and
-# data/), NNSLR_GPU_RUNNER_DIR (/root/gpu-runner on CT 131), NNSLR_GPU_IDLE_MINUTES (30).
+# NNSLR_GPU_CT (root@10.10.10.213, CT 131), NNSLR_GPU_REMOTE_REPO (/root/sunnypilot.speedlimits on CT 131: its
+# .venv-gpu, .venv and data/), NNSLR_GPU_RUNNER_DIR (/root/gpu-runner on CT 131).
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
-HOST_CMD=${NNSLR_GPU_HOST_CMD:-root@10.10.10.102}
 CT=${NNSLR_GPU_CT:-root@10.10.10.213}
 REMOTE_REPO=${NNSLR_GPU_REMOTE_REPO:-/root/sunnypilot.speedlimits}
 REMOTE_DATA=$REMOTE_REPO/data
 RUNNER=${NNSLR_GPU_RUNNER_DIR:-/root/gpu-runner}
-IDLE_MINUTES=${NNSLR_GPU_IDLE_MINUTES:-30}
 DATA=${NNSLR_DATA_ROOT:-$REPO/data}
 UNAVAILABLE=75
 
@@ -45,15 +42,13 @@ log() { echo "[gpu runner $(date +%H:%M:%S)] $*"; }
 
 SSH_BASE=(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=4)
 
-idle_off() {
-    log "serverone-ai idle for $IDLE_MINUTES minutes: turning it off"
-    "${SSH_BASE[@]}" "$HOST_CMD" off
-}
+OFF_MESSAGE="CT 131 (serverone-ai, the V100s) is off: ask Cristian or cluster-admin to start serverone-ai and CT 131, then start the job again"
 
 case "${1:-}" in
-    --idle-off) idle_off; exit $? ;;
-    --status) "${SSH_BASE[@]}" "$HOST_CMD" status; exit $? ;;
-    '') echo "usage: $0 COMMAND [ARGUMENTS...] | --idle-off | --status" >&2; exit 2 ;;
+    --status)
+        if "${SSH_BASE[@]}" "$CT" true 2>/dev/null; then echo "CT 131 answers"; exit 0; fi
+        echo "$OFF_MESSAGE"; exit 1 ;;
+    '') echo "usage: $0 COMMAND [ARGUMENTS...] | --status" >&2; exit 2 ;;
 esac
 
 # The job: its id from its progress file (progress-<job id>.json), else the time.
@@ -67,25 +62,9 @@ CONTROL=$WORK/ssh.sock
 SSH=("${SSH_BASE[@]}" -o ControlMaster=auto -o "ControlPath=$CONTROL" -o ControlPersist=120)
 on_ct() { "${SSH[@]}" "$CT" "$@"; }
 
-# 1. CT 131 up. The idle timer of an earlier job is stopped first: it must not turn the host off under this one.
-systemctl stop gpu-idle-off.timer >/dev/null 2>&1 || true
-if ! on_ct true 2>/dev/null; then
-    log "CT 131 does not answer: waking serverone-ai (3-4 minutes)"
-    "${SSH_BASE[@]}" "$HOST_CMD" wake || { log "serverone-ai could not be woken: the job does not start"; exit $UNAVAILABLE; }
-    for _ in $(seq 1 30); do on_ct true 2>/dev/null && break; sleep 10; done
-    on_ct true 2>/dev/null || { log "CT 131 does not answer after the wake: the job does not start"; exit $UNAVAILABLE; }
-fi
+# 1. CT 131 must already be up: the runner never starts it.
+on_ct true 2>/dev/null || { log "$OFF_MESSAGE"; exit $UNAVAILABLE; }
 log "CT 131 answers"
-
-finish_idle() {
-    # The timer of the host's shutdown, again from now. Started by systemd, apart from this job and from the site.
-    systemctl stop gpu-idle-off.timer >/dev/null 2>&1 || true
-    systemd-run --quiet --unit=gpu-idle-off --collect --on-active="${IDLE_MINUTES}min" \
-        "$REPO/scripts/gpu_remote.sh" --idle-off >/dev/null 2>&1 \
-        || log "could not arm the idle timer: serverone-ai stays on"
-}
-# 6. However this ends from here on: serverone-ai off after the idle time.
-trap 'rm -rf "$WORK"; finish_idle' EXIT
 
 # 2. The code as it is here, with the venvs of CT 131.
 revision=$(git -C "$REPO" stash create 2>/dev/null); revision=${revision:-HEAD}
@@ -113,7 +92,7 @@ remote_path() { local value=${1//$DATA/$REMOTE_DATA}; echo "${value//$REPO/$JOBD
     echo "export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     while IFS='=' read -r name _; do
         case "$name" in
-            NNSLR_GPU_HOST_CMD|NNSLR_GPU_CT|NNSLR_GPU_REMOTE_REPO) ;;
+            NNSLR_GPU_CT|NNSLR_GPU_REMOTE_REPO) ;;
             NNSLR_*|CUDA_*|HF_*|TMPDIR|PYTHONUNBUFFERED) printf 'export %s=%q\n' "$name" "$(remote_path "${!name}")" ;;
         esac
     done < <(env)
@@ -205,5 +184,4 @@ rsync -a --update --rsh="${SSH[*]}" --exclude=/logs/ --exclude=/tmp/ --exclude=/
 on_ct "rm -rf '$JOBDIR/code'" 2>/dev/null || true
 "${SSH[@]}" -O exit "$CT" 2>/dev/null || true
 
-log "serverone-ai turns off in $IDLE_MINUTES minutes unless another job starts"
 exit "$code"
