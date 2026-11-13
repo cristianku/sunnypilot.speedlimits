@@ -16,7 +16,7 @@ The new regression tests live in `tests/units/` in this repository.
 Read-only applicability check **for a clean checkout at the pinned base only**:
 
 ```sh
-git -C /root/sunnypilot apply --check /root/sunnypilot.speedlimits/patches/speed-limits-unit-normalization/runtime.patch
+git -C /root/sunnypilot apply --check /root/smartspeed/patches/speed-limits-unit-normalization/runtime.patch
 ```
 
 From this repository, `.venv/bin/python -m pytest tests/units -o addopts='' -q`

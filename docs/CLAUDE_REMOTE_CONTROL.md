@@ -1,13 +1,12 @@
 # Claude Code Remote Control as a systemd service
 
-How to keep `claude remote-control` running permanently on the `openpilot-distill` server (Debian 13, user `root`), so the repositories can be driven from claude.ai/code or the Claude mobile app.
+How to keep `claude remote-control` running permanently on the `speedlimits-site` server (CT 1310, 10.10.10.215 on serverone2, Debian 13, user `root`; until 13 Nov 2026 on `openpilot-distill`, CT 131), so the repositories can be driven from claude.ai/code or the Claude mobile app.
 
-Two instances run from one systemd template unit, one per repository:
+One instance runs from a systemd template unit, one per repository (distill and perception are not in use and stay off, 12 Nov 2026):
 
 | Instance | Working directory | Session name on claude.ai/code |
 | --- | --- | --- |
-| `claude-rc@openpilot.distill` | `/root/openpilot.distill` | `openpilot.distill` |
-| `claude-rc@sunnypilot.speedlimits` | `/root/sunnypilot.speedlimits` | `sunnypilot.speedlimits` |
+| `claude-rc@smartspeed` | `/root/smartspeed` | `smartspeed` |
 
 The official Claude Code docs do not include a service installer, so this unit is our own wrapper around `claude remote-control`.
 
@@ -22,9 +21,8 @@ The official Claude Code docs do not include a service installer, so this unit i
 On its first run in a directory, `claude remote-control` asks whether to trust the folder and whether to enable Remote Control. systemd has no terminal to answer those questions, so run it by hand once in each directory and answer `y`. Stop it with Ctrl+C afterwards.
 
 ```bash
-ssh openpilot-distill
-cd /root/openpilot.distill && claude remote-control
-cd /root/sunnypilot.speedlimits && claude remote-control
+ssh root@10.10.10.215
+cd /root/smartspeed && claude remote-control
 ```
 
 ## 2. Install the template unit
@@ -50,7 +48,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now claude-rc@openpilot.distill claude-rc@sunnypilot.speedlimits
+systemctl enable --now claude-rc@smartspeed
 ```
 
 `%i` is the instance name, which is the same as the directory name under `/root`. To add another repository `/root/<dir>`, do the first run by hand there (step 1), then run `systemctl enable --now claude-rc@<dir>`.
@@ -59,17 +57,18 @@ systemctl enable --now claude-rc@openpilot.distill claude-rc@sunnypilot.speedlim
 
 ```bash
 systemctl status 'claude-rc@*'
-journalctl -u claude-rc@openpilot.distill -f
-journalctl -u claude-rc@sunnypilot.speedlimits -f
+journalctl -u claude-rc@smartspeed -f
 ```
 
-The two sessions should appear on claude.ai/code under their instance names.
+The session should appear on claude.ai/code under its instance name.
+
+On a copy of the machine (as CT 1310 is of CT 131), remove `remoteControlMachineId` from `/root/.claude.json` before the first start, so the copy registers as its own machine, and keep `claude-rc@*` disabled on the original.
 
 ## Operations
 
 ```bash
-systemctl restart claude-rc@openpilot.distill      # after updating Claude Code
-systemctl stop claude-rc@sunnypilot.speedlimits    # stop one instance
+systemctl restart claude-rc@smartspeed    # after updating Claude Code
+systemctl stop claude-rc@smartspeed       # stop one instance
 systemctl disable --now claude-rc@<dir>            # remove one instance
 ```
 
