@@ -67,14 +67,18 @@ export function activityTab(activity: Pick<Activity, 'group' | 'label'>): string
   return activity.group === 'fetch' || activity.group === 'prepare' ? '/prepare' : activity.group === 'train' ? '/train' : null;
 }
 
-/** The addresses of the tabs with work running: the running jobs of the site, and the work started from a terminal. */
-export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[], activities: readonly Pick<Activity, 'group' | 'label'>[]): Set<string> {
+/** The addresses of the tabs with work running: the running jobs of the site, and the work started from a terminal. A
+ * process of a site job (its activity names the job) counts only through its action: Import sign reviews runs the
+ * helper of the trainings, and lit Training besides Data. */
+export function busyTabs(jobs: readonly Pick<Job, 'action' | 'state'>[],
+                         activities: readonly Pick<Activity, 'group' | 'label' | 'job'>[]): Set<string> {
   const tabs = new Set<string>();
   for (const job of jobs) {
     const tab = job.state === 'running' ? ACTION_TAB[job.action] : null;
     if (tab) tabs.add(tab);
   }
   for (const activity of activities) {
+    if (activity.job) continue;
     const tab = activityTab(activity);
     if (tab) tabs.add(tab);
   }
