@@ -114,6 +114,16 @@ function booleanChanged(key: BooleanField, event: Event): void {
 <template>
   <section id="editor" :hidden="detection === null">
     <div class="section-head"><h2 id="editorTitle">Box {{ state.selected + 1 }}</h2></div>
+    <!-- The traffic lights first, right under the heading: a button makes the box an "Other sign" of that light. -->
+    <div class="kinds lights" id="lightKinds">
+      <div v-for="group in LIGHT_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
+        <span class="field-label">{{ group.label }}</span>
+        <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
+                :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
+                :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
+                @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
+      </div>
+    </div>
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
       <div class="fit-chips">
@@ -136,16 +146,6 @@ function booleanChanged(key: BooleanField, event: Event): void {
       <button v-for="item in recent" :key="item.key" type="button" class="chip recent" :aria-pressed="item.key === labelNow"
               :title="item.title" @click="applyLabel(item.label); releaseFocus($event)"><span v-if="item.disc !== null"
               class="mini-sign">{{ item.disc }}</span>{{ item.text }}</button>
-    </div>
-    <!-- The traffic lights first: a button makes the box an "Other sign" of that light. -->
-    <div class="kinds lights" id="lightKinds">
-      <div v-for="group in LIGHT_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
-        <span class="field-label">{{ group.label }}</span>
-        <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
-                :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
-                :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
-                @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
-      </div>
     </div>
     <!-- Asked for nearly every box: right under the box's heading. -->
     <p class="field-label">Road</p>
