@@ -90,6 +90,13 @@ class RouteStatusTests(unittest.TestCase):
         row = self.row()
         self.assertEqual((row["state"], row["confirmed"], row["new_reviews"]), ("importare", 120, 120))
 
+    def test_a_cut_off_download_does_not_hold_the_drive(self):
+        self.shared(1, 2)
+        (self.videos / f"{ROUTE}--2" / "ecamera.hevc.part").write_bytes(b"")
+        self.linked(1)
+        row = self.row()
+        self.assertEqual((row["state"], row["unlinked"], row["segments"]), ("estrarre", 0, 1))
+
     def test_reviews_after_the_import_are_new(self):
         self.shared(1)
         self.linked(1)

@@ -51,13 +51,15 @@ def videos_dir() -> Path:
 
 def shared_segments(videos: Path) -> dict[str, set[int]]:
     """Segments with a front camera video of every route in the shared folder (only real
-    folders, as nnslr link-videos)."""
+    folders, as nnslr link-videos; a folder still holding a *.part file, a download running
+    or cut off, is left out as link-videos leaves it out)."""
     found: dict[str, set[int]] = {}
     if not videos.is_dir():
         return found
     for entry in videos.iterdir():
         match = SEGMENT_DIR.match(entry.name)
-        if match and entry.is_dir() and not entry.is_symlink() and (entry / "fcamera.hevc").is_file():
+        if (match and entry.is_dir() and not entry.is_symlink() and (entry / "fcamera.hevc").is_file()
+                and not any(item.name.endswith(".part") for item in entry.iterdir())):
             found.setdefault(match[1], set()).add(int(match[2]))
     return found
 
