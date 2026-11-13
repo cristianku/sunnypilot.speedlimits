@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A PUBLIC comma connect drive downloaded on a computer with a free internet line (Cristian's Mac), into
-~/Downloads/connect/<route>--<segment>/ with fcamera.hevc, ecamera.hevc and rlog.bz2: the layout of the shared folder
+~/Downloads/connect/<route>--<segment>/ with fcamera.hevc, ecamera.hevc and the rlog (rlog.zst, or rlog.bz2 on older drives): the layout of the shared folder
 of the comma files. Standard library only, no account. Files already there are kept (run it again after a cut).
 The folders reach the server by USB stick, by hand; on the server, helpers/fetch_connect_route.sh is the same download.
 usage: python3 helpers/mac_fetch_connect.py <dongle> <route>
@@ -13,7 +13,7 @@ dongle, route = sys.argv[1], sys.argv[2]
 api = 'https://api.commadotai.com/v1/route/' + urllib.parse.quote(f'{dongle}|{route}', safe='') + '/files'
 files = json.load(urllib.request.urlopen(api, timeout=60))
 out = Path.home() / 'Downloads' / 'connect'
-names = {'fcamera.hevc', 'ecamera.hevc', 'rlog.bz2'}
+names = {'fcamera.hevc', 'ecamera.hevc', 'rlog.zst', 'rlog.bz2'}  # connect keeps the rlog as zst now, bz2 before
 jobs = []
 for kind in ('cameras', 'ecameras', 'logs'):
     for url in files.get(kind) or ():
