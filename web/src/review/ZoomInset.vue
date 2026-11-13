@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The zoom of the selected box, inside the photo (Stage.vue places it in the top corner on the other side from the box):
+// The zoom of the selected box, inside the photo (Stage.vue places it in the bottom right corner):
 // its corners and inside move the box too, with what the classifier gets in its corner. A click elsewhere on the photo
 // clears the selection and closes it (pointer.ts onSceneClick).
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';

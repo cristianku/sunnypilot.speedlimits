@@ -3,7 +3,7 @@
 // the selected box, the boxes of the second reading, the AI suggestion not applied yet and what the car's networks
 // read (car.ts; neither takes the pointer) and the box being drawn. The frame's country and what the comma had at that moment are in the bar above
 // it (CarMoment.vue). Under it, the grip that makes it lower on a computer (PhotoGrip.vue). Inside it, the zoom of the
-// selected box (ZoomInset.vue), in the top corner on the other side from the box.
+// selected box (ZoomInset.vue), always in the bottom right corner.
 // The boxes of a frame wait for its photo: they are never drawn on the previous one.
 import {computed, ref, useTemplateRef, watch} from 'vue';
 import {ai} from './ai';
@@ -58,7 +58,8 @@ const carBoxes = computed(() => {
 const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.kind === 'move') && state.drag.svg === 'scene');
 
 // The zoom of the selected box: inside the photo (the picture shown in the picture's frame, which may leave bands
-// around it), in its top corner on the other side from the box; about a third of the photo wide, half on a phone.
+// around it), always in its bottom right corner, so it never jumps while a box is worked on; about a third of the
+// photo wide, half on a phone.
 const INSET_GAP = 8;
 const inset = computed(() => {
   const d = selectedBox.value;
@@ -74,12 +75,15 @@ const inset = computed(() => {
   const inner = svg.getBoundingClientRect();
   const left = inner.left - outer.left - frame.clientLeft + (width - photoWidth) / 2;
   const top = inner.top - outer.top - frame.clientTop + (height - photoHeight) / 2;
-  // Under what the page puts over the top of the photo (Speed review: the comma's limits, --zoom-inset-top).
-  const y = Math.max(top + INSET_GAP, parseFloat(getComputedStyle(frame).getPropertyValue('--zoom-inset-top')) || 0);
+  // Between what the page puts over the top of the photo (Speed review: the comma's limits, --zoom-inset-top) and
+  // over its bottom (Speed review: the video bar, --zoom-inset-bottom).
+  const style = getComputedStyle(frame);
+  const minTop = Math.max(top + INSET_GAP, parseFloat(style.getPropertyValue('--zoom-inset-top')) || 0);
+  const bottom = top + photoHeight - Math.max(INSET_GAP, parseFloat(style.getPropertyValue('--zoom-inset-bottom')) || 0);
   const w = Math.min(Math.max(photoWidth * (photoWidth < 640 ? 0.5 : 0.34), 170), 440, photoWidth - 2 * INSET_GAP);
-  const h = Math.max(Math.min(w * 0.6, photoHeight * 0.6, top + photoHeight - INSET_GAP - y), 60);
-  const onLeft = (d.bbox_xyxy[0] + d.bbox_xyxy[2]) / 2 < props.row.width / 2;
-  const x = onLeft ? left + photoWidth - INSET_GAP - w : left + INSET_GAP;
+  const h = Math.max(Math.min(w * 0.6, photoHeight * 0.6, bottom - minTop), 60);
+  const y = bottom - h;
+  const x = left + photoWidth - INSET_GAP - w;
   return {left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px'};
 });
 </script>
