@@ -97,6 +97,9 @@ remote_path() { local value=${1//$DATA/$REMOTE_DATA}; echo "${value//$REPO/$JOBD
         esac
     done < <(env)
     echo "export NNSLR_DATA_ROOT=$REMOTE_DATA TMPDIR=$REMOTE_DATA/tmp PYTHONPATH=$JOBDIR/code/src"
+    # The comma's videos (Prepare): the same path on CT 131 (/root/comma-videos); left unset, the helper would look for
+    # them next to the job's code.
+    printf 'export COMMA_VIDEOS_DIR=%q\n' "${COMMA_VIDEOS_DIR:-$(dirname "$REPO")/comma-videos}"
     printf 'cmd=('; for argument in "$@"; do printf '%q ' "$(remote_path "$argument")"; done; echo ')'
 } > "$WORK/env"
 on_ct "cat > '$JOBDIR/env'" < "$WORK/env" || { log "cannot write the job's environment"; exit $UNAVAILABLE; }
