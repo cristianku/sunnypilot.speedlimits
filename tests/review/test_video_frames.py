@@ -131,6 +131,13 @@ def test_the_gop_json_answers_once_its_first_frame_is_decoded_and_a_frame_shown_
     video_frames.read_ahead(root, ROUTE, 0, 32)
     assert video_frames.settle()
     assert cached(root) == list(range(20, 60)) and started == [(40, {'ahead': True})]
+    # Stepping back from 32 to 31, past the first third of GOP 20..39: the GOP before is decoded ahead too, first.
+    video_frames.prune(root, budget=0)
+    assert video_frames.preview(root, ROUTE, 0, 31).is_file() and video_frames.settle()
+    started.clear()
+    video_frames.read_ahead(root, ROUTE, 0, 31)
+    assert video_frames.settle()
+    assert cached(root) == list(range(60)) and started == [(0, {'ahead': True}), (40, {'ahead': True})]
 
 
 def test_requests_for_a_gop_being_decoded_share_its_decode_and_a_failed_decode_is_tried_again(drive, monkeypatch):

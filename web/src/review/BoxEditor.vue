@@ -41,6 +41,9 @@ const hours = computed<[string, string]>(() => {
 });
 // O X U, G P R E M and the road users W Y K on a keyboard (use-keyboard.ts).
 const ROAD_KEYS: Record<string, string> = {own_road: 'O', other_road: 'X', unresolved: 'U'};
+/** The traffic lights, the kind given most: at the top of the editor, the other kinds under Type. */
+const LIGHT_GROUPS = SIGN_KIND_GROUPS.filter((group) => group.label === 'Traffic light');
+const KIND_GROUPS = SIGN_KIND_GROUPS.filter((group) => group.label !== 'Traffic light');
 const KIND_KEYS: Record<string, string> = {give_way: 'G', stop: 'P', roundabout: 'R', other: 'E', main_road: 'M',
   road_user_person: 'W', road_user_bicycle: 'Y', road_user_car: 'K'};
 const canFit = computed(() => props.detection !== null && aiBlocker() === '');
@@ -134,6 +137,16 @@ function booleanChanged(key: BooleanField, event: Event): void {
               :title="item.title" @click="applyLabel(item.label); releaseFocus($event)"><span v-if="item.disc !== null"
               class="mini-sign">{{ item.disc }}</span>{{ item.text }}</button>
     </div>
+    <!-- The traffic lights first: a button makes the box an "Other sign" of that light. -->
+    <div class="kinds lights" id="lightKinds">
+      <div v-for="group in LIGHT_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
+        <span class="field-label">{{ group.label }}</span>
+        <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
+                :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"
+                :data-kind="kind.id" :title="kind.label + (KIND_KEYS[kind.id] ? ' (' + KIND_KEYS[kind.id] + ')' : '')"
+                @click="setKind(kind.id); releaseFocus($event)">{{ kind.chip }}<kbd v-if="KIND_KEYS[kind.id]" class="key-hint">{{ KIND_KEYS[kind.id] }}</kbd></button>
+      </div>
+    </div>
     <!-- Asked for nearly every box: right under the box's heading. -->
     <p class="field-label">Road</p>
     <div class="segmented" id="roads" role="group" aria-label="Which road it applies to">
@@ -218,7 +231,7 @@ function booleanChanged(key: BooleanField, event: Event): void {
     </div>
     <!-- Other signs by kind: a button makes the box an "Other sign" of that kind. -->
     <div class="kinds" id="signKinds">
-      <div v-for="group in SIGN_KIND_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
+      <div v-for="group in KIND_GROUPS" :key="group.label" class="kind-group" role="group" :aria-label="group.label">
         <span class="kind-group-label">{{ group.label }}</span>
         <button v-for="kind in group.kinds" :key="kind.id" type="button" class="chip kind"
                 :aria-pressed="detection?.family === 'other_sign' && detection?.sign_type === kind.id"

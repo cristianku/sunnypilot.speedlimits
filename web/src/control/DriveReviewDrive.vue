@@ -196,11 +196,15 @@ let tickFrame = -1;
 function clamp(seconds: number): number {
   return Math.min(Math.max(0, seconds), end.value || seconds);
 }
+/** The video's time a seek of the page (a step, a tap on the strip) goes to, until the next pause: the HD frame
+ * of it is asked for at once, while the video seeks, not after it (one wait instead of two, over a slow network). */
+const seekTarget = ref<number | null>(null);
 function seek(seconds: number): void {
   cursor.value = clamp(seconds);
   const element = player.value;
   if (!element) return;
   const at = plainVideo.value ? cursor.value : videoTime.value;
+  seekTarget.value = at;
   if (at !== null) {
     element.currentTime = at;
     // The frame of that time at once, should a browser not call back for a seek while paused.
@@ -275,6 +279,7 @@ function play(): void {
   frame = requestAnimationFrame(tick);
 }
 function pause(): void {
+  seekTarget.value = null;
   playing.value = false;
   cancelAnimationFrame(frame);
   player.value?.pause();
@@ -345,9 +350,10 @@ function onStill(event?: Event): void {
  * have its GOP decoded on the server), only the one it ends on. */
 const scrubbing = ref(false);
 const sharpFrame = computed(() => {
-  if (!props.sharp || !sharpOn.value || playing.value || scrubbing.value || stillAt.value === null
+  const at = seekTarget.value ?? stillAt.value;
+  if (!props.sharp || !sharpOn.value || playing.value || scrubbing.value || at === null
     || (!plainVideo.value && videoTime.value === null)) return null;
-  return rawFrameOf(video.value?.index, stillAt.value);
+  return rawFrameOf(video.value?.index, at);
 });
 const sharpUrl = (segment: number, frame: number): string =>
   '/api/speed-review/drives/' + encodeURIComponent(props.route) + '/frames/' + segment + '/' + frame + '.jpg';

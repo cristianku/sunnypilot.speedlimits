@@ -398,12 +398,17 @@ def gop_started(root: Path, route: str, segment: int, decoded: int, *, wide: boo
 _ahead: dict[tuple[str, int], tuple] = {}
 _ahead_ready = threading.Condition()
 _ahead_state = {'thread': None, 'busy': False}
+# The last frame given of each video (its cache folder): a frame before it is a step back.
+_last_given: dict[str, int] = {}
+LAST_GIVEN_KEPT = 64
 
 
 def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool = False) -> None:
     """After a page was given a frame: the next GOP of its video decoded in the background (niced), and the one before
-    while the frame is in the first third of its GOP, so that a step into either finds its frames ready. Only GOPs the
-    cache does not have; nothing is waited for."""
+    while the frame is in the first third of its GOP or the page steps back (a frame before the last one given of the
+    video), so that a step into either finds its frames ready: stepping back, the GOP before had only the first third of
+    a GOP (6 frames) to be decoded in and the step waited for it. The GOP in the direction of the steps is decoded
+    first. Only GOPs the cache does not have; nothing is waited for."""
     root = Path(root)
     try:
         video = wide_video_of(root, route, segment) if wide else video_of(root, route, segment)
@@ -412,11 +417,18 @@ def read_ahead(root: Path, route: str, segment: int, decoded: int, *, wide: bool
         folder = _cache_dir(root, route, segment, video, wide)
     except (VideoFrameError, OSError):
         return
+    with _ahead_ready:
+        before = _last_given.pop(str(folder), None)
+        _last_given[str(folder)] = decoded
+        while len(_last_given) > LAST_GIVEN_KEPT:
+            del _last_given[next(iter(_last_given))]
+    back = before is not None and decoded < before
+    # The newest queued is decoded first (_ahead_loop): the GOP the steps go to last.
     wanted = []
-    if decoded - first < (last - first + 1) / 3 and first > 0:
-        wanted.append(gop_of(video, first - 1))
     if last + 1 < count:
         wanted.append(gop_of(video, last + 1))
+    if first > 0 and (back or decoded - first < (last - first + 1) / 3):
+        wanted.insert(len(wanted) if back else 0, gop_of(video, first - 1))
     with _ahead_ready:
         for gop in wanted:
             if _gop_cached(folder, *gop):
