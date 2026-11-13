@@ -13,7 +13,8 @@ set -uo pipefail
 #      cluster-admin to start serverone-ai and CT 131;
 #   2. copies the code as it is here (git stash create: the commit plus the changes not committed yet, never the
 #      untracked files) into /root/gpu-runner/jobs/JOB/code on CT 131, with the .venv and .venv-gpu of
-#      /root/sunnypilot.speedlimits there (PYTHONPATH puts this code's src before their editable install);
+#      /root/sunnypilot.speedlimits there (PYTHONPATH puts this code's src before their editable install), and the
+#      car's speed_limits package of the sunnypilot clone here into JOB/sunnypilot (NNSLR_SUNNYPILOT_CLONE);
 #   3. sends the data root (rsync, never --delete): everything but logs/, tmp/ and the live databases, which go as a
 #      consistent copy (sqlite backup) into annotations/ there;
 #   4. takes a card nothing computes on there (or the one the panel named), runs the job under setsid with the job's
@@ -72,6 +73,14 @@ log "code: $(git -C "$REPO" rev-parse --short HEAD)$( [ "$revision" != HEAD ] &&
 on_ct "rm -rf '$JOBDIR' && mkdir -p '$JOBDIR/code'" || { log "cannot write $JOBDIR on CT 131"; exit $UNAVAILABLE; }
 git -C "$REPO" archive --format=tar "$revision" | on_ct "tar -x -C '$JOBDIR/code' && ln -s '$REMOTE_REPO/.venv-gpu' '$REMOTE_REPO/.venv' '$JOBDIR/code/'" \
     || { log "the code could not be copied"; exit $UNAVAILABLE; }
+# The car's speed_limits package as it is here (brain_inputs.py, vision.py, models/...): the server loads it by its path
+# (NNSLR_SUNNYPILOT_CLONE), so a job on CT 131 must not read that machine's own, older clone.
+CAR_CLONE=${NNSLR_SUNNYPILOT_CLONE:-/root/sunnypilot}
+CAR_PACKAGE=openpilot/sunnypilot/speed_limits
+[ -d "$CAR_CLONE/$CAR_PACKAGE" ] || { log "no car package in $CAR_CLONE/$CAR_PACKAGE"; exit 1; }
+log "car package: $(git -C "$CAR_CLONE" rev-parse --short HEAD 2>/dev/null) of $CAR_CLONE -> $JOBDIR/sunnypilot"
+tar -C "$CAR_CLONE" --exclude=__pycache__ -cf - "$CAR_PACKAGE" | on_ct "mkdir -p '$JOBDIR/sunnypilot' && tar -x -C '$JOBDIR/sunnypilot'" \
+    || { log "the car package could not be copied"; exit $UNAVAILABLE; }
 
 # 3. The data. The databases the site writes go as a consistent copy.
 log "sending the data root (rsync, only what changed)"
@@ -96,7 +105,7 @@ remote_path() { local value=${1//$DATA/$REMOTE_DATA}; echo "${value//$REPO/$JOBD
             NNSLR_*|CUDA_*|HF_*|TMPDIR|PYTHONUNBUFFERED) printf 'export %s=%q\n' "$name" "$(remote_path "${!name}")" ;;
         esac
     done < <(env)
-    echo "export NNSLR_DATA_ROOT=$REMOTE_DATA TMPDIR=$REMOTE_DATA/tmp PYTHONPATH=$JOBDIR/code/src"
+    echo "export NNSLR_DATA_ROOT=$REMOTE_DATA TMPDIR=$REMOTE_DATA/tmp PYTHONPATH=$JOBDIR/code/src NNSLR_SUNNYPILOT_CLONE=$JOBDIR/sunnypilot"
     # The comma's videos (Prepare): the same path on CT 131 (/root/comma-videos); left unset, the helper would look for
     # them next to the job's code.
     printf 'export COMMA_VIDEOS_DIR=%q\n' "${COMMA_VIDEOS_DIR:-$(dirname "$REPO")/comma-videos}"
@@ -184,7 +193,7 @@ rm -f "${NNSLR_PROGRESS_FILE:-/nonexistent}.part"
 log "job ended with code $code on CT 131: bringing the results back"
 rsync -a --update --rsh="${SSH[*]}" --exclude=/logs/ --exclude=/tmp/ --exclude=/annotations/ "$CT:$REMOTE_DATA/" "$DATA/" \
     || { log "the results could not be brought back: they stay in $REMOTE_DATA on CT 131"; [ "$code" = 0 ] && code=1; }
-on_ct "rm -rf '$JOBDIR/code'" 2>/dev/null || true
+on_ct "rm -rf '$JOBDIR/code' '$JOBDIR/sunnypilot'" 2>/dev/null || true
 "${SSH[@]}" -O exit "$CT" 2>/dev/null || true
 
 exit "$code"
