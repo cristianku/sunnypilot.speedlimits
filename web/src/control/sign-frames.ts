@@ -119,3 +119,43 @@ export function signRuns(placed: readonly PlacedFrame[]): SignRun[] {
 export function frameHref(route: string, frame: SignFrame): string {
   return signsHref(route, {segment: frame.segment, second: frame.second}, frame.frame_key);
 }
+
+/** A frame the site's AI reviewer saved (reviewer ai/<provider>/<model>), final or waiting for a person. */
+export const isAiFrame = (frame: SignFrame): boolean => frame.reviewer_kind === 'ai' && (frame.confirmed || !!frame.needs_person);
+
+/** A stretch of the drive the AI reviewed: its frames a few seconds apart at most, for the Signs lane's violet bar. */
+export interface AiRun {
+  from: number;
+  to: number;
+  count: number;
+}
+export function aiRuns(frames: readonly PlacedFrame[], gap = 2.5): AiRun[] {
+  const runs: AiRun[] = [];
+  for (const frame of frames) {
+    const last = runs[runs.length - 1];
+    if (last && frame.at - last.to <= gap) {
+      last.to = frame.at;
+      last.count += 1;
+    } else runs.push({from: frame.at, to: frame.at, count: 1});
+  }
+  return runs;
+}
+
+/** The index of the last frame before s (step -1) or the first after it (step 1), more than a twentieth of a second
+ * away; -1 when there is none. The frames are in time order. */
+export function stepFrame(frames: readonly PlacedFrame[], s: number, step: -1 | 1): number {
+  let low = 0;
+  let high = frames.length;
+  const edge = step > 0 ? s + 0.05 : s - 0.05;
+  // The first frame after edge.
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (frames[middle]!.at <= edge) low = middle + 1;
+    else high = middle;
+  }
+  if (step > 0) return low < frames.length ? low : -1;
+  // The last frame before edge.
+  let index = low - 1;
+  while (index >= 0 && frames[index]!.at >= edge) index -= 1;
+  return index;
+}

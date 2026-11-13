@@ -1694,6 +1694,8 @@ font-family:var(--font-ui);font-weight:700}
 .dr-lanes .sr-sign-tick line{stroke:var(--bad);stroke-width:1.5}
 .dr-lanes .sr-sign-tick text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--bad)}
 .dr-lanes .sr-sign-tick:hover line{stroke-width:2.5}
+.dr-lanes .sr-ai-bar{fill:#af52de;cursor:pointer}.dr-lanes .sr-ai-bar:hover{fill:#7b5cff}
+.sr-ai-nav{align-items:center;margin:6px 0}.sr-ai-nav .btn{color:#af52de;font-weight:600}.sr-ai-count{font-size:12.5px;font-weight:600;color:#af52de;font-variant-numeric:tabular-nums;min-width:5.5em;text-align:center}
 .sr-panel{display:flex;width:100%}.sr-panel button{flex:1 1 0;min-width:0}
 /* The Signs side already opens Sign review on this frame: the player's own link under it would say it twice. */
 .sr-signs-on .dr-signs{display:none}
@@ -1769,7 +1771,7 @@ border-top:1px solid var(--line);border-radius:0 0 14px 14px;padding-bottom:max(
 .sr-row{flex-direction:row;align-items:stretch;gap:10px}.sr-row>.rt-open{flex:1;min-width:0}
 .sr-signs{align-self:center;flex:none;padding:7px 14px;border-radius:999px;background:var(--accent-soft,var(--surface-2));color:var(--accent);font-size:13.5px;font-weight:600;text-decoration:none;white-space:nowrap}
 .sr-signs:hover{filter:brightness(.95)}.sr-signs-done{background:var(--surface-2);color:var(--muted)}
-.sr-ai-row{align-self:center;flex:none;white-space:nowrap}
+.sr-ai-row{align-self:center;flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 14px 7px 11px;border:0;border-radius:999px;background:linear-gradient(135deg,#7b5cff,#af52de);color:#fff;font:inherit;font-size:13.5px;font-weight:600;white-space:nowrap;cursor:pointer;box-shadow:0 1px 3px rgba(123,92,255,.35);transition:filter .15s,box-shadow .15s}.sr-ai-row .icon{width:15px;height:15px}.sr-ai-row:hover{filter:brightness(1.07);box-shadow:0 2px 8px rgba(123,92,255,.45)}.sr-ai-row:disabled,.sr-ai-row[aria-disabled=true]{background:var(--surface-2);color:var(--muted);box-shadow:none;cursor:default}
 .sd-files{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);font-family:var(--font-data);overflow-wrap:anywhere}
 .sd-files-note{list-style:none;margin-left:-18px;font-family:var(--font-ui)}
 .dr-banner .sd-files{flex:1 1 100%}
