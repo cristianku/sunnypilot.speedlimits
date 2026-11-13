@@ -197,7 +197,7 @@ def test_a_group_has_the_size_it_says():
             'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row(),
             'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0),
             'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0),
-            'sign_boxes': sign_boxes().row(10.0)}
+            'sign_boxes': sign_boxes().row(10.0), 'light_boxes': light_boxes().row(10.0)}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 
@@ -518,6 +518,74 @@ def test_the_boxes_on_the_car_are_the_ones_of_the_training():
     # a drive not read, or read before the boxes were kept: zeros
     for unread in ((None, None), (readings, None), ([], [])):
         assert not box_inputs(numpy.array(times), *unread).any()
+
+
+# -- the boxes of the traffic lights (BoxInputs, the group light_boxes) -----------------------------------------------------
+def light_boxes():
+    brain, vision = _car()
+    return brain.BoxInputs(vision, len(brain.LIGHTS), brain.light_box_channel)
+
+
+def test_the_lights_are_ninety_eight_numbers_a_channel_for_what_is_lit():
+    brain, _ = _car()
+    assert brain.LIGHTS == ('red', 'amber', 'green', 'off')
+    assert brain.INPUT_SIZES['light_boxes'] == brain.box_size(4) == 98
+    assert not light_boxes().row(10.0).any()
+
+
+@pytest.mark.parametrize('name, channel', [
+    ('other_sign:traffic_light_red', 0), ('other_sign:traffic_light_amber', 1), ('other_sign:traffic_light_green', 2),
+    ('other_sign:traffic_light_off', 3), ('other_sign:traffic_light_blue', None), ('other_sign:stop', None),
+    ('other_sign:road_user_car', None), ('maximum_speed:80', None), ('unreadable', None), ('not_a_sign', None)])
+def test_a_light_goes_to_the_channel_of_what_is_lit_and_its_column_and_nothing_else_goes_there(name, channel):
+    brain, _ = _car()
+    assert brain.light_box_channel(name) == channel
+    lights = light_boxes()
+    lights.add(10.0, [(name, .9, (1008.0, 100.0, 1028.0, 150.0))], *FRAME)
+    row = lights.row(10.0)
+    cells = row[:-2].reshape(len(brain.LIGHTS), brain.BOX_COLUMNS, brain.BOX_NUMBERS)
+    if channel is None:
+        assert not row.any()
+    else:
+        assert cells[channel, 6] == pytest.approx([20 / 1344, 50 / 760, 125 / 760]) and row[-2] == 1
+        assert cells.sum() == pytest.approx(cells[channel, 6].sum())
+
+
+def test_a_light_read_under_the_confidence_is_not_taken_and_a_sign_is_no_light():
+    brain, vision = _car()
+    lights = light_boxes()
+    lights.add(10.0, [('other_sign:traffic_light_red', vision.MIN_CONFIDENCE - .01, (700.0, 100.0, 720.0, 150.0)),
+                      ('maximum_speed:80', .99, (700.0, 200.0, 740.0, 240.0))], *FRAME)
+    assert not lights.row(10.0).any()
+
+
+def test_the_lights_on_the_car_are_the_ones_of_the_training():
+    numpy = pytest.importorskip('numpy')
+    from nnslr_tools.brain_targets import box_inputs
+    times = [n * .25 for n in range(4 * 20)]
+    readings, boxes = [], []
+    for at, now in enumerate(times):
+        read = []
+        if 10 <= at < 50:  # a red light that comes nearer, green from frame 30, and a speed sign the group does not take
+            light = 'other_sign:traffic_light_red' if at < 30 else 'other_sign:traffic_light_green'
+            read.append(([light, .95], [600.0 + 4 * at, 120.0 - at, 620.0 + 5 * at, 160.0 + at]))
+            read.append((['maximum_speed:50', .95], [1100.0, 300.0, 1140.0, 340.0]))
+        if read:
+            readings.append([now, [item[0] for item in read]])
+            boxes.append([item[1] for item in read])
+    found = box_inputs(numpy.array(times), readings, boxes, 'light_boxes')
+    signs = {seconds: [(name, confidence, box) for (name, confidence), box in zip(read, places)]
+             for (seconds, read), places in zip(readings, boxes)}
+    car, said = light_boxes(), []
+    for now in times:
+        car.add(now, signs.get(now, []), *FRAME)
+        said.append(car.row(now))
+    assert numpy.array_equal(found, numpy.array(said))
+    assert found[20][:24].any() and not found[20][24:96].any()  # red: the first channel only
+    assert found[40][48:72].any() and not found[40][:48].any()  # green: the third
+    assert found[-1][-2] == 1 and not found[-1][:-2].any()
+    # the signs' own group is unchanged by the lights
+    assert numpy.array_equal(box_inputs(numpy.array(times), readings, boxes), as_the_car(readings, boxes, times))
 
 
 def test_the_boxes_of_a_real_drive_are_on_the_car_what_they_are_in_the_training():

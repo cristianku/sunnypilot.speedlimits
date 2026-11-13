@@ -96,7 +96,7 @@ The inputs (drive_inputs), one group each so that a comparison can leave one out
 before the frame:
 
 - signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion, road_signs,
-  sign_boxes: what the car has,
+  sign_boxes, light_boxes: what the car has,
   described in sunnypilot/speed_limits/brain_inputs.py. A drive not read yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -112,7 +112,9 @@ before the frame:
   (box_inputs): the record's boxes, which are SignNet's in the pixels of FRAME_SIZE, the car's frame, of the same signs the
   car gives its own (sure enough, of our road). The record keeps only the readings with a sign, and every frame here is a
   frame the reader read: one with no reading in the record had no sign, so its columns are empty, as on the car. Zeros on a
-  drive read before the boxes were kept: check_drives refuses it.
+  drive read before the boxes were kept: check_drives refuses it. light_boxes is the traffic lights of the same readings
+  and boxes through another BoxInputs, a channel for each light (red, amber, green, off): zeros until the drives are read
+  by a cutter and a classifier that know the lights (those of 11 Nov 2026 do not).
 
 They are made by the car's own file, sunnypilot/speed_limits/brain_inputs.py, loaded here by its path (BRAIN_INPUTS): what
 the network learns on is what it gets on the car, and the checkpoint keeps the file's hash.
@@ -693,16 +695,23 @@ def sign_distance_inputs(ns: np.ndarray, merged: dict, readings: list | None, bo
     return rows
 
 
-def box_inputs(seconds: np.ndarray, readings: list | None, boxes: list | None) -> np.ndarray:
-    """The sign_boxes group (frames, size) by the car's own BoxInputs: see the module's text. Readings [[seconds, [[class,
+def _box_memory(group: str):
+    """The car's own BoxInputs of a group of boxes: sign_boxes (sign_box_channel) or light_boxes (light_box_channel)."""
+    if group == 'light_boxes':
+        return BRAIN_INPUTS.BoxInputs(VISION, len(BRAIN_INPUTS.LIGHTS), BRAIN_INPUTS.light_box_channel)
+    return BRAIN_INPUTS.BoxInputs(VISION, BRAIN_INPUTS.SIGN_BOX_CHANNELS, BRAIN_INPUTS.sign_box_channel(VISION))
+
+
+def box_inputs(seconds: np.ndarray, readings: list | None, boxes: list | None, group: str = 'sign_boxes') -> np.ndarray:
+    """The sign_boxes or light_boxes group (frames, size) by the car's own BoxInputs: see the module's text. Readings [[seconds, [[class,
     confidence], ...]], ...] and their boxes in the same order (x1, y1, x2, y2 in the pixels of FRAME_SIZE), each given at
     its time as brain.BrainReader.add_signs gives a frame's; a frame the record has no reading at is given as a reading
     with no sign. None (the drive was not read, or before the boxes were kept): zeros."""
-    rows = np.zeros((len(seconds), INPUT_SIZES['sign_boxes']), dtype=np.float32)
+    rows = np.zeros((len(seconds), INPUT_SIZES[group]), dtype=np.float32)
     if not readings or boxes is None or len(boxes) != len(readings):
         return rows
     ordered = sorted(zip(readings, boxes), key=lambda item: item[0][0])
-    memory = BRAIN_INPUTS.BoxInputs(VISION, BRAIN_INPUTS.SIGN_BOX_CHANNELS, BRAIN_INPUTS.sign_box_channel(VISION))
+    memory = _box_memory(group)
     width, height = FRAME_SIZE
     pointer = 0
     for row, second in enumerate(seconds):
@@ -799,7 +808,8 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'speed': np.array(speed, dtype=np.float32).reshape(len(ns), INPUT_SIZES['speed']),
             'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes),
             'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings),
-            'sign_boxes': box_inputs(seconds, readings, boxes)}
+            'sign_boxes': box_inputs(seconds, readings, boxes),
+            'light_boxes': box_inputs(seconds, readings, boxes, 'light_boxes')}
 
 
 def inputs_sha256() -> str:

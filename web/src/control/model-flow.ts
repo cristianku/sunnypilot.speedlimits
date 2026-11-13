@@ -80,7 +80,7 @@ function brainBlocks(version: BrainModel): FlowBlock[] {
     {id: 'camera', title: 'Road camera', sub: '256 × 144', kind: 'input', column: 0, facts: [BRAIN_PICTURE[0]!], to: ['features']},
   ];
   const sets: [string, string, string[]][] = [
-    ['signs', 'Signs read', has('signs', 'plate', 'plate_hours', 'plate_wet', 'sign_boxes', 'road_signs')],
+    ['signs', 'Signs read', has('signs', 'plate', 'plate_hours', 'plate_wet', 'sign_boxes', 'road_signs', 'light_boxes')],
     ['place', 'The car and the place', has('hour', 'lead', 'country', 'sign_distance')],
     ['motion', 'Your turn signals and steering', has('motion')],
     ['driver', 'Your pedals and speed', has('pedals', 'speed')],

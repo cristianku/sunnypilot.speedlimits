@@ -38,6 +38,10 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'road_signs', size: 98, use: 'car', what: 'every other kind the classifier reads: the other signs (give way, stop, pedestrian '
     + 'crossing, roundabout…), the traffic light by what is lit (red, amber, green, off) and the road users (person, bicycle, car…): '
     + 'for each, confirmed, and the age of its last reading'},
+  {name: 'light_boxes', size: 98, use: 'car', what: 'where the traffic lights of the last frame read are in the picture and how big, '
+    + 'a channel for each of red, amber, green and off: the tallest light of each of the 8 columns (its width, its height and the '
+    + 'height of its centre, over the frame’s); then whether a light was ever seen and the age of the last one (brain_inputs.BoxInputs). '
+    + 'Zeros until the cutter and the classifier know the lights and the drives are read again'},
   {name: 'motion', size: 8, use: 'car', what: 'the car’s turn signals (on in the last second, seconds since last on, left and right), '
     + 'the steering angle and the yaw rate (carState, deviceMotion)'},
   {name: 'pedals', size: 3, use: 'never', what: 'gas and brake pressed in the last second (carState)'},
