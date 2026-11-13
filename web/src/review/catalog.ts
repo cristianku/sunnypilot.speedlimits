@@ -60,8 +60,15 @@ export interface SignKind {
 
 // What an "Other sign" is (sign_type; the same ids as nnslr_tools.sign_types.SIGN_TYPES), in groups of buttons
 // under "Type". Some give a limit without a number (town entry, motorway), some carry numbers that are no speed
-// (weight, height): the model has to know them apart.
+// (weight, height): the model has to know them apart. The traffic lights first, the ones used most.
 export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind[]}[] = [
+  {label: 'Traffic light', kinds: [
+    {id: 'traffic_light_red', label: 'Traffic light: red (also red with amber)', chip: 'Red', short: 'light red'},
+    {id: 'traffic_light_amber', label: 'Traffic light: amber', chip: 'Amber', short: 'light amber'},
+    {id: 'traffic_light_green', label: 'Traffic light: green', chip: 'Green', short: 'light green'},
+    {id: 'traffic_light_off', label: 'Traffic light: off (no lamp lit)', chip: 'Off', short: 'light off'},
+  ]},
+  // Who is on the road: one box around the whole of it; a bicycle or a motorcycle with its rider.
   {label: 'Danger', kinds: [
     {id: 'pedestrian_crossing', label: 'Pedestrian crossing', chip: 'Pedestrian crossing', short: 'crossing'},
     {id: 'children', label: 'Danger: children', chip: 'Children', short: 'children'},
@@ -111,13 +118,6 @@ export const SIGN_KIND_GROUPS: readonly {label: string; kinds: readonly SignKind
     {id: 'motorway_exit', label: 'Motorway exit (gore arrow)', chip: 'Motorway exit', short: 'exit'},
   ]},
   // By what is lit in this picture; a flashing amber is amber on one frame and off on the next.
-  {label: 'Traffic light', kinds: [
-    {id: 'traffic_light_red', label: 'Traffic light: red (also red with amber)', chip: 'Red', short: 'light red'},
-    {id: 'traffic_light_amber', label: 'Traffic light: amber', chip: 'Amber', short: 'light amber'},
-    {id: 'traffic_light_green', label: 'Traffic light: green', chip: 'Green', short: 'light green'},
-    {id: 'traffic_light_off', label: 'Traffic light: off (no lamp lit)', chip: 'Off', short: 'light off'},
-  ]},
-  // Who is on the road: one box around the whole of it; a bicycle or a motorcycle with its rider.
   {label: 'Road user', kinds: [
     {id: 'road_user_person', label: 'Person on foot', chip: 'Person', short: 'person'},
     {id: 'road_user_bicycle', label: 'Bicycle, with its rider', chip: 'Bicycle', short: 'bicycle'},
