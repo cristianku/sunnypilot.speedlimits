@@ -137,9 +137,13 @@ function labelX(left: number, width: number, imageWidth: number, k: number): num
   return Math.max(0, Math.min(left, imageWidth - width - 4 / k));
 }
 
+/** The border of a box the AI made, on the photo and on its card. */
+export const AI_BOX = '#e040c8';
+
 /** Boxes, labels, hints and handles of a frame shown at scale k. */
 export function drawStage(detections: readonly Detection[], selected: number, hints: readonly Hint[],
-  imageHeight: number, k: number, coarse: boolean, imageWidth = Number.POSITIVE_INFINITY): StageDrawing {
+  imageHeight: number, k: number, coarse: boolean, imageWidth = Number.POSITIVE_INFINITY,
+  aiMade: (d: Detection) => boolean = () => false): StageDrawing {
   const fontSize = 14 / k;
   const placed: PlacedLabel[] = [];
   const handleSize = 8 / k;
@@ -161,6 +165,9 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     if (d.model_label) cls += ' proposal';
     if (d.check_position) cls += ' check';
     if (isSelected) cls += ' selected';
+    // Made by the AI: the AI's violet-pink, whatever the class.
+    const byAi = aiMade(d);
+    if (byAi) cls += ' ai';
     const ours = d.applicability === 'own_road';
     const text = boxTitle(d, i);
     const wet = d.supplementary_panel === 'wet';
@@ -172,7 +179,7 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     const y = Math.max(fontSize, freeLabelY(placed, x, Math.max(fontSize, top), width, fontSize, -fontSize));
     placed.push({x, y, w: width, h: fontSize, text});
     boxes.push({
-      index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : boxColor(d),
+      index: i, cls, rect: rectOf(b), stroke: isSelected ? null : d.check_position ? 'var(--warn)' : byAi ? AI_BOX : boxColor(d),
       label: label(text, x + icon, y, fontSize, k), road: ours ? roadIcon(x, y, fontSize) : null, wet,
     });
   }

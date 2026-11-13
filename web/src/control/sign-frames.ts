@@ -115,6 +115,46 @@ export function signRuns(placed: readonly PlacedFrame[]): SignRun[] {
   return runs;
 }
 
+/** A stretch of the drive where the confirmed frames show one kind of thing (a red light, a pedestrian): from its first
+ * frame to its last, frames a second and a half apart at most. */
+export interface MarkRun {
+  from: number;
+  to: number;
+  kind: string;
+  ticks: number[];
+}
+
+/** The confirmed frames joined into runs of the kind each one shows (kindOf: null where it shows none). */
+export function markRuns(placed: readonly PlacedFrame[], kindOf: (frame: PlacedFrame) => string | null, gap = 1.5): MarkRun[] {
+  const runs: MarkRun[] = [];
+  for (const frame of placed) {
+    if (!frame.confirmed) continue;
+    const kind = kindOf(frame);
+    if (kind === null) continue;
+    const last = runs[runs.length - 1];
+    if (last && last.kind === kind && frame.at - last.to <= gap) {
+      last.to = frame.at;
+      last.ticks.push(frame.at);
+    } else runs.push({from: frame.at, to: frame.at, kind, ticks: [frame.at]});
+  }
+  return runs;
+}
+
+/** The traffic lights, the one that matters most first: a red stops the car before an amber, a green, a dark one. */
+export const LIGHTS = ['traffic_light_red', 'traffic_light_amber', 'traffic_light_green', 'traffic_light_off'] as const;
+/** The road users of their lane: people and two-wheelers, the ones the car must see; cars, trucks, buses stay out. */
+export const ROAD_USERS = ['road_user_person', 'road_user_bicycle', 'road_user_motorcycle', 'road_user_other'] as const;
+
+/** The first of the kinds (in their order) that the frame has a box of; boxes of another road left out. */
+function firstKind(kinds: readonly string[], frame: PlacedFrame, otherRoadToo: boolean): string | null {
+  const here = new Set(frame.boxes.filter((box) => otherRoadToo || !isOtherRoad(box)).map((box) => String(box.sign_type ?? '')));
+  return kinds.find((kind) => here.has(kind)) ?? null;
+}
+/** The light of our road on the frame (the red first), else null. */
+export const lightOf = (frame: PlacedFrame): string | null => firstKind(LIGHTS, frame, false);
+/** The road user on the frame (a pedestrian first), on any road: a person crossing is on no road's lane. */
+export const roadUserOf = (frame: PlacedFrame): string | null => firstKind(ROAD_USERS, frame, true);
+
 /** The Signs side of the drive opened on this very frame (common/sign-link.ts). */
 export function frameHref(route: string, frame: SignFrame): string {
   return signsHref(route, {segment: frame.segment, second: frame.second}, frame.frame_key);

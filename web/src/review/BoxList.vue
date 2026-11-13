@@ -18,7 +18,7 @@ const ROAD_TAGS = {ours: 'OURS', another: 'another road', unclear: 'road ?'} as 
 <template>
   <div class="box-list" id="boxList">
     <div v-for="item in items" :key="item.index"
-         :class="['box-row', {selected: item.index === state.selected, check: item.check}]"
+         :class="['box-row', {selected: item.index === state.selected, check: item.check, ai: item.ai}]"
          :data-index="item.index" :data-detection-id="item.detectionId"
          :data-duplicate-of="item.duplicateOf === null ? undefined : item.duplicateOf">
       <button type="button" class="box-main" :aria-pressed="item.index === state.selected" @click="selectBox(item.index); releaseFocus($event)"><span class="n">{{ item.index + 1 }}</span><span class="what"><span class="what-text">{{ item.what }}</span><span :class="['road-tag', item.road]"><svg v-if="item.road === 'ours'" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 11.5L4.6 1M11 11.5L7.4 1M6 11V7.6"/></svg>{{ ROAD_TAGS[item.road] }}</span></span><span class="src">{{ item.source.text }}<span v-if="item.source.changed !== null" class="changed">{{ item.source.changed }}</span><span v-if="item.duplicateOf !== null" class="dup">{{ ' · same sign as ' + (item.duplicateOf + 1) }}</span></span></button>

@@ -23,6 +23,8 @@ export interface BoxItem {
   duplicateOf: number | null;
   /** Which road it is for, as the photo says it: ours, another, or not said yet. */
   road: 'ours' | 'another' | 'unclear';
+  /** Made by the AI: its card and its box on the photo get the AI's violet-pink border. */
+  ai: boolean;
 }
 
 // The proposal a reviewed box comes from, by detection_id; null for a box added by hand.
@@ -39,12 +41,18 @@ const AI_SOURCE: Record<AiAction, string> = {
 
 /** Who added a box no proposal of the model had: an AI suggestion applied here, the AI reviewer that saved the frame
  * (REST API, MCP, Review with AI) when the box is in its saved review, else the reviewer, by hand. */
+/** A box the AI made: an AI suggestion taken, or a box of the frame as the AI saved it (Review with AI). */
+export function madeByAi(work: FrameEdit, d: Detection): boolean {
+  if (d.ai_action) return true;
+  const base = work.base;
+  return base?.reviewer_kind === 'ai' && Boolean(d.detection_id)
+    && (base.detections ?? []).some((saved) => saved.detection_id === d.detection_id);
+}
+
 export function addedBy(work: FrameEdit, d: Detection): string {
   if (d.ai_action) return 'added by the AI suggestion';
   const base = work.base;
-  const byAi = base?.reviewer_kind === 'ai' && Boolean(d.detection_id)
-    && (base.detections ?? []).some((saved) => saved.detection_id === d.detection_id);
-  if (!byAi) return d.detection_id?.startsWith(CAR_BOX) ? 'car networks' : 'added by hand';
+  if (!madeByAi(work, d)) return d.detection_id?.startsWith(CAR_BOX) ? 'car networks' : 'added by hand';
   const name = String(base?.reviewer ?? '').replace(/^ai\//, '');
   return name ? 'added by the AI (' + name + ')' : 'added by the AI';
 }
@@ -92,6 +100,7 @@ export function boxItems(row: FrameRow, work: FrameEdit): BoxItem[] {
     check: d.check_position === true,
     duplicateOf: duplicates[i] ?? null,
     road: d.applicability === 'own_road' ? 'ours' : d.applicability === 'other_road' ? 'another' : 'unclear',
+    ai: madeByAi(work, d),
   }));
 }
 

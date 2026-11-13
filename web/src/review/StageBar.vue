@@ -31,9 +31,11 @@ const pillClass = computed(() => {
 const frameData = computed(() => {
   const row = props.row;
   const proposals = proposalsOf(row).length;
-  // "4:22 into the drive · frame 7/20": where the second has the frames of its video.
+  // "4:22 into the drive · frame 3/22 · 7 of 20 in its second": the frame's key, then where the second has the frames of
+  // its video.
   const place = frameOfSecond(row);
-  let info = framePlace(row) + (place === null ? '' : ' · frame ' + place[0] + '/' + place[1]);
+  let info = framePlace(row) + ' · frame ' + row.frame_key
+    + (place === null ? '' : ' · ' + place[0] + ' of ' + place[1] + ' in its second');
   info += ' · ' + proposals + (proposals === 1 ? ' proposal' : ' proposals');
   if (report.routeHasHints) info += ' · ' + hintsOf(row.frame_key).length + ' in the second reading';
   return info;

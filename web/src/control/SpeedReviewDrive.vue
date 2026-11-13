@@ -57,7 +57,8 @@ import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} fr
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
-import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, nearestFrame, placeFrames, type SignFrames, signRuns, stepFrame} from './sign-frames';
+import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lightOf, type MarkRun, markRuns, nearestFrame, placeFrames, roadUserOf, type SignFrames, signRuns,
+  stepFrame} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, type VideoFrame, type VideoIndex} from './frame-boxes';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
   roadTypeAt, roadTypeLabel, type RoadTypeSource, type RoadTypeStretch, type SpeedDrive, speedAt, speedIndex, typeSource, type Works, worksAt, type WorksTap} from './speed-review';
@@ -563,6 +564,19 @@ function goAi(step: -1 | 1): void {
   const frame = index >= 0 ? aiFrames.value[index] : undefined;
   if (frame) goSign(frame.at);
 }
+/** The traffic lights and the road users of the confirmed frames, each on a lane of its own under the signs: a run per
+ * stretch with the same light (the red first) or the same kind of road user (a pedestrian first), a tap goes to it. */
+const lightRuns = computed(() => markRuns(placed.value, lightOf));
+const userRuns = computed(() => markRuns(placed.value, roadUserOf));
+const MARK_HEIGHT = 14;
+const MARK_WORDS: Record<string, string> = {
+  traffic_light_red: 'Red light', traffic_light_amber: 'Amber light', traffic_light_green: 'Green light',
+  traffic_light_off: 'Light off', road_user_person: 'Pedestrian', road_user_bicycle: 'Bicycle',
+  road_user_motorcycle: 'Motorcycle', road_user_other: 'Other road user',
+};
+const marksIn = (runs: readonly MarkRun[], from: number, to: number): MarkRun[] => runs.filter((run) => run.to >= from && run.from <= to);
+const markTitle = (run: MarkRun): string => (MARK_WORDS[run.kind] ?? run.kind) + ' · '
+  + (run.ticks.length === 1 ? '1 frame' : run.ticks.length + ' frames');
 const aiRunTitle = (run: {from: number; to: number; count: number; trial: boolean}): string => (run.count === 1 ? '1 frame' : run.count + ' frames')
   + (run.trial ? ' the AI tried (a trial, nothing saved), ' : ' reviewed by the AI, ') + clockOf(run.from) + (run.to > run.from ? '–' + clockOf(run.to) : '') + ': a tap goes to the first';
 const signWords = (box: {family: string; score?: number | null}): string => signFrame.value?.confirmed || signFrame.value?.needs_person
@@ -1052,6 +1066,22 @@ function worksIn(from: number, to: number) {
           </g>
           <rect v-for="run in aiIn(from, to)" :key="(run.trial ? 't' : 'ai') + run.from" :x="x(run.from) - 1" y="0" :width="Math.max(3, w(run.from, run.to) + 2)"
                 height="4" rx="1.5" :class="['sr-ai-bar', {trial: run.trial}]" @pointerdown.stop="goSign(run.from)"><title>{{ aiRunTitle(run) }}</title></rect>
+        </svg>
+      </div>
+      <div v-if="lightRuns.length" class="dr-lane sr-mark-lane" title="The traffic lights of our road on the confirmed frames: red, amber, green, grey where off; a tap goes to the frame">
+        <span class="dr-lane-name">Lights<small>review</small></span>
+        <svg :width="width" :height="MARK_HEIGHT" :viewBox="`0 0 ${width} ${MARK_HEIGHT}`" aria-hidden="true">
+          <rect v-for="run in marksIn(lightRuns, from, to)" :key="run.kind + run.from" :x="x(run.from) - 1" y="2"
+                :width="Math.max(3, w(run.from, run.to) + 2)" :height="MARK_HEIGHT - 4" rx="2" :class="['sr-mark', run.kind]"
+                @pointerdown.stop="goSign(run.from)"><title>{{ markTitle(run) }}</title></rect>
+        </svg>
+      </div>
+      <div v-if="userRuns.length" class="dr-lane sr-mark-lane" title="Pedestrians, bicycles, motorcycles on the confirmed frames (cars, trucks and buses left out); a tap goes to the frame">
+        <span class="dr-lane-name">Road users<small>review</small></span>
+        <svg :width="width" :height="MARK_HEIGHT" :viewBox="`0 0 ${width} ${MARK_HEIGHT}`" aria-hidden="true">
+          <rect v-for="run in marksIn(userRuns, from, to)" :key="run.kind + run.from" :x="x(run.from) - 1" y="2"
+                :width="Math.max(3, w(run.from, run.to) + 2)" :height="MARK_HEIGHT - 4" rx="2" :class="['sr-mark', run.kind]"
+                @pointerdown.stop="goSign(run.from)"><title>{{ markTitle(run) }}</title></rect>
         </svg>
       </div>
     </template>

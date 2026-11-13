@@ -7,7 +7,8 @@ import ClassifierView from './ClassifierView.vue';
 import {coarsePointer} from './dom';
 import {boxTitle, handlesOf, sceneScale, WET_TAG, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
-import {state} from './store';
+import {driveTime} from './frames';
+import {report, state} from './store';
 import type {Detection, FrameRow} from './types';
 import {useScreenSize} from './use-layout';
 
@@ -16,6 +17,13 @@ const props = defineProps<{row: FrameRow; detection: Detection; index: number}>(
 // The box's label as on the photo ("6 · light amber · OURS"), in the zoom's top left corner.
 const title = computed(() => boxTitle(props.detection, props.index)
   + (props.detection.supplementary_panel === 'wet' ? WET_TAG : ''));
+
+// Where the frame is, in the zoom's bottom right corner ("00000191 · 1/49 · 1:49"): a screenshot of the zoom alone
+// still names the drive and the frame.
+const where = computed(() => {
+  const time = driveTime(props.row);
+  return [report.routeId.split('--')[0], props.row.frame_key, time].filter(Boolean).join(' · ');
+});
 
 const zoom = useTemplateRef<SVGSVGElement>('zoom');
 const zoomSize = useScreenSize(zoom);
@@ -78,6 +86,7 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
       </g>
     </svg>
     <div class="zoom-title">{{ title }}</div>
+    <div class="zoom-where">{{ where }}</div>
     <ClassifierView ref="net" :row="row" :box="detection.bbox_xyxy"/>
   </div>
 </template>

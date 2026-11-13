@@ -12,6 +12,7 @@ import {carried} from './carry';
 import {signKindOf} from './catalog';
 import {selectedBox} from './current';
 import {coarsePointer} from './dom';
+import {madeByAi} from './boxes';
 import {drawAi, drawCar, drawStage, sceneScale, WET_TAG} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onSceneClick, onTouchStart} from './pointer';
 import PhotoGrip from './PhotoGrip.vue';
@@ -41,7 +42,8 @@ function photoDone(event: Event, failed: boolean): void {
 
 const drawing = computed(() => drawStage(props.work.detections, state.selected,
   state.showHints ? hintsOf(props.row.frame_key) : [], props.row.height,
-  sceneScale(size.value, props.row.width, props.row.height), coarsePointer(), props.row.width));
+  sceneScale(size.value, props.row.width, props.row.height), coarsePointer(), props.row.width,
+  (d) => madeByAi(props.work, d)));
 const aiBoxes = computed(() => {
   const ask = ai.asks[props.row.frame_key];
   if (ask?.phase !== 'ready' || !ask.suggestion) return [];
