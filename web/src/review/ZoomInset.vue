@@ -1,10 +1,10 @@
 <script setup lang="ts">
 // The zoom of the selected box, inside the photo (Stage.vue places it in the bottom right corner):
-// its corners and inside move the box too, with what the classifier gets in its corner. A click elsewhere on the photo
-// clears the selection and closes it (pointer.ts onSceneClick).
+// its corners and inside move the box too, with its size in pixels in the top right corner. A click elsewhere on the
+// photo clears the selection and closes it (pointer.ts onSceneClick).
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
-import ClassifierView from './ClassifierView.vue';
 import {coarsePointer} from './dom';
+import {cropRectangle} from './geometry';
 import {boxTitle, handlesOf, sceneScale, WET_TAG, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
 import {driveTime} from './frames';
@@ -28,27 +28,38 @@ const where = computed(() => {
 const zoom = useTemplateRef<SVGSVGElement>('zoom');
 const zoomSize = useScreenSize(zoom);
 
-// The classifier's square, in the zoom's top right corner: the box is centred in the part of the zoom it leaves free.
-const net = useTemplateRef<InstanceType<typeof ClassifierView>>('net');
-const netSize = useScreenSize(computed(() => (net.value?.$el as Element | undefined) ?? null));
-// Its margin from the zoom's edge and from the box (px).
-const NET_GAP = 6;
+// The box in pixels of the picture the classifier cuts it from, in the zoom's top right corner ("132×36 px"): rounded
+// outwards as on the car (cropRectangle), in the photo's own pixels: twice the frame's on a drive at full definition.
+const natural = ref<[number, number] | null>(null);
+watchEffect(() => {
+  const href = props.row.preview_path;
+  natural.value = null;
+  const image = new Image();
+  image.onload = () => {
+    if (href === props.row.preview_path) natural.value = [image.naturalWidth, image.naturalHeight];
+  };
+  image.src = href;
+});
+const pixels = computed(() => {
+  const c = cropRectangle(props.detection.bbox_xyxy, props.row.width, props.row.height);
+  const [width, height] = natural.value ?? [props.row.width, props.row.height];
+  return Math.round((c[2] - c[0]) * width / props.row.width) + '×' + Math.round((c[3] - c[1]) * height / props.row.height)
+    + ' px';
+});
 
-/** The zoom's view, as wide as the zoom on screen: the box's view centred in the part left of the square. */
-function besideSquare(v: Rect, size: {width: number; height: number}, square: number): Rect {
+/** The zoom's view, as wide as the zoom on screen, the box's view centred in it. */
+function fitted(v: Rect, size: {width: number; height: number}): Rect {
   if (!size.width || !size.height || !v.width || !v.height) return v;
-  const free = Math.max(size.width - (square ? square + 2 * NET_GAP : 0), size.width / 2);
-  const scale = Math.min(free / v.width, size.height / v.height);
-  const height = size.height / scale;
-  return {x: v.x - (free / scale - v.width) / 2, y: v.y - (height - v.height) / 2, width: size.width / scale, height};
+  const scale = Math.min(size.width / v.width, size.height / v.height);
+  const width = size.width / scale, height = size.height / scale;
+  return {x: v.x - (width - v.width) / 2, y: v.y - (height - v.height) / 2, width, height};
 }
 
 // While a corner of the zoom is dragged its view stays still, so the corner stays under the finger.
 const view = ref<Rect | null>(null);
 watchEffect(() => {
   if (state.drag !== null && state.drag.svg === 'zoom') return;
-  view.value = besideSquare(zoomView(props.detection.bbox_xyxy, props.row.width, props.row.height), zoomSize.value,
-                            netSize.value.width);
+  view.value = fitted(zoomView(props.detection.bbox_xyxy, props.row.width, props.row.height), zoomSize.value);
 });
 const viewBox = computed(() => {
   const v = view.value;
@@ -87,6 +98,6 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
     </svg>
     <div class="zoom-title">{{ title }}</div>
     <div class="zoom-where">{{ where }}</div>
-    <ClassifierView ref="net" :row="row" :box="detection.bbox_xyxy"/>
+    <div class="zoom-pixels" id="zoomPixels" title="The box in pixels of the picture the classifier cuts it from">{{ pixels }}</div>
   </div>
 </template>

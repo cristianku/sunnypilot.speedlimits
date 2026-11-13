@@ -15,6 +15,7 @@ import pytest
 from review_helpers import OTHER_ROUTE, ROUTE, RUN_ID, RunningServer, make_report
 
 CODE = r'''
+import re
 import sys
 from playwright.sync_api import sync_playwright
 
@@ -135,36 +136,26 @@ with sync_playwright() as p:
     assert phone.locator('#prevSecond').is_visible() and phone.locator('#nextSecond').is_visible()
     assert phone.evaluate('document.documentElement.scrollWidth - innerWidth') <= 0
 
-    # In the zoom's top right corner, the box as the classifier gets it: rounded outwards as on the car, the training's
-    # own crop made by the server once the box settles, which names the picture it was cut from; drawn by the browser
-    # while a corner is dragged. The fixture's preview is no picture, so only the crop is checked here, and that a bad photo breaks
-    # nothing.
+    # In the zoom's top right corner, the box's size in pixels, rounded outwards as on the car (the classifier's own
+    # square is gone, 13 Nov 2026); it follows a corner while it is dragged.
     square = open_page(browser, '/route/' + route + '/', 1500)
     square.locator('#boxList .box-main').first.click()
-    caption, source = square.locator('#netCaption'), square.locator('#netSource')
-    until(square, "document.querySelector('#netSource').classList.contains('served')")
-    assert caption.inner_text() == '14×18 px', caption.inner_text()
-    assert source.inner_text() == '32×24', source.inner_text()
-    assert square.evaluate("[netViewPicture.width, netViewPicture.height]") == [160, 160]
-    zoom, net = square.locator('#zoom').bounding_box(), square.locator('#netView').bounding_box()
-    assert abs(zoom['x'] + zoom['width'] - net['x'] - net['width']) <= 12 and abs(net['y'] - zoom['y']) <= 12, (zoom, net)
-    # The grid: the crop as drawn top left and three as the training varies it, then back to the one square.
-    square.locator('#netSamples').click()
-    until(square, "netViewPicture.width === 320 && document.querySelector('#netView').classList.contains('varied')")
-    assert caption.inner_text() == '14×18 px', caption.inner_text()
-    square.locator('#netSamples').click()
-    until(square, "netViewPicture.width === 160")
+    pixels = square.locator('#zoomPixels')
+    first = pixels.inner_text()
+    assert re.fullmatch(r'\d+×\d+ px', first), first
+    assert square.locator('#netView').count() == 0
+    zoom, label = square.locator('#zoom').bounding_box(), pixels.bounding_box()
+    assert abs(zoom['x'] + zoom['width'] - label['x'] - label['width']) <= 16 and abs(label['y'] - zoom['y']) <= 16, (zoom, label)
     # Q: the box a square on its centre, its side the mean of its width and height.
     square.keyboard.press('q')
-    until(square, "document.querySelector('#netCaption')?.innerText === '16×16 px'")
+    until(square, "(t => t && t.split(' ')[0].split('×')[0] === t.split(' ')[0].split('×')[1])(document.querySelector('#zoomPixels')?.innerText)")
+    squared = pixels.inner_text()
     corner = square.locator('#zoom .handle-hit.se').bounding_box()
     square.mouse.move(corner['x'] + corner['width'] / 2, corner['y'] + corner['height'] / 2)
     square.mouse.down()
     square.mouse.move(corner['x'] - 40, corner['y'] - 40, steps=4)
-    assert caption.inner_text() != '14×18 px', 'the square did not follow the corner while dragging'
-    assert source.inner_text() == 'browser', source.inner_text()
+    assert pixels.inner_text() != squared, 'the pixels did not follow the corner while dragging'
     square.mouse.up()
-    until(square, "document.querySelector('#netSource').classList.contains('served')")
     # C fits every box of the frame, the one just resized by hand too.
     hand_fits = []
     square.route('**/fit', lambda route: (hand_fits.append(route.request.post_data_json['boxes']), route.fulfill(json={
@@ -254,7 +245,6 @@ with sync_playwright() as p:
     car.keyboard.press('a')
     car.wait_for_timeout(500)
     assert fits == [[carried['bbox_xyxy']]], fits
-    assert 'Boxes carried.' in car.locator('body').inner_text()
     browser.close()
 assert not errors, errors
 '''

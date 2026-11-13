@@ -515,31 +515,9 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 /* Inside the photo, in its top corner on the other side from the box (Stage.vue places and sizes it). */
 .zoom-inset { position: absolute; z-index: 2; border-color: rgba(255, 255, 255, 0.7); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45); }
 .zoom-inset #zoom { height: 100%; }
-.zoom-title { position: absolute; left: 8px; top: 6px; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-size: 13px; font-weight: 600; color: #ffd60a; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+.zoom-title { position: absolute; left: 8px; top: 6px; max-width: calc(100% - 110px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-size: 13px; font-weight: 600; color: #ffd60a; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+.zoom-pixels { position: absolute; right: 8px; top: 6px; pointer-events: none; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
 .zoom-where { position: absolute; right: 8px; bottom: 5px; pointer-events: none; font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
-/* In the zoom's top right corner, over the picture (the zoom keeps the box out of its way, BoxEditor.vue). On a screen at
-   2x each pixel of the square is one the classifier gets: 160 in 80 px; the grid, 320 in 160 px. It takes no pointer,
-   only its caption (the tooltip) and the grid button do. */
-.net-view {
-  position: absolute; top: 6px; right: 6px; width: 80px; margin: 0; border-radius: 8px; overflow: hidden; pointer-events: none;
-  background: rgba(0, 0, 0, 0.62); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.32), 0 2px 8px rgba(0, 0, 0, 0.35);
-}
-.net-view.large { width: 160px; }
-.net-view canvas { display: block; width: 100%; height: auto; aspect-ratio: 1; }
-/* The crop as drawn top left (marked), the jittered ones beside it, two by two. */
-.net-view.varied::before { content: ""; position: absolute; left: 0; top: 0; width: 50%; aspect-ratio: 1; box-shadow: inset 0 0 0 1.5px var(--accent); pointer-events: none; }
-/* Under the square, two lines: the box's pixels; the picture the server cut it from (or "browser") with the grid button at its end. */
-.net-view figcaption { position: relative; padding: 1px 3px 2px 5px; font-size: 10px; line-height: 12px; text-align: left; color: rgba(255, 255, 255, 0.88); white-space: nowrap; pointer-events: auto; }
-.net-caption, .net-source { display: block; height: 12px; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
-.net-source { padding-right: 15px; opacity: 0.7; }
-.net-source.served { opacity: 1; }
-.net-toggle { position: absolute; right: 2px; bottom: 1px; display: grid; place-items: center; width: 16px; height: 13px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: rgba(255, 255, 255, 0.75); cursor: pointer; }
-.net-toggle::after { content: ""; position: absolute; inset: -4px -2px -1px; }
-/* A finger's tap area: up over the caption and the square's corner, which take no tap (below, the frame clips it). */
-@media (pointer: coarse) { .net-toggle::after { inset: -22px -2px -1px -16px; } }
-.net-toggle svg { width: 10px; height: 10px; fill: currentColor; }
-.net-toggle:hover { background: rgba(255, 255, 255, 0.18); color: #fff; }
-.net-toggle[aria-pressed="true"], .net-toggle[aria-pressed="true"]:hover { background: var(--accent-soft); color: var(--tab-on-fg); }
 #zoomBox { fill: none; stroke: var(--ov-selected); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }
 .evidence { margin: -6px 0 0; font-size: 12.5px; color: var(--muted); }
 /* Under the box's heading: where the box comes from, and Fit box and Fit with AI right by it. */
