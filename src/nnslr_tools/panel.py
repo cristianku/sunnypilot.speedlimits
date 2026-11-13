@@ -1102,6 +1102,8 @@ class Panel:
             pass
         cards = _gpu_cards()
         info['gpus'] = cards
+        if not cards and (self.repo / REMOTE_GPU_SCRIPT).is_file():
+            info['remote_gpus'] = self._remote_gpus()
         if cards:
             activities = getattr(self._reading, 'activities', None)
             states = _card_states(cards, self._gpu_holders(self.activities() if activities is None else activities))
@@ -1114,6 +1116,28 @@ class Panel:
                                                              'temperature', 'power_w')},
                            'processes': len(every), 'process_list': every}
         return info
+
+    def _remote_gpus(self) -> dict | None:
+        """The cards of CT 131 for a site without its own (_RemoteGpus), each with its 'holders' as on a card here: the
+        panel job the runner put on it ("Prepare new drives"), else its processes by name and memory. None before the
+        first reading; 'reachable' False when CT 131 does not answer (off: only Cristian or cluster-admin start it)."""
+        reading = _REMOTE_GPUS.get()
+        if reading is None:
+            return None
+        cards = []
+        for card in reading['cards']:
+            job = card.get('runner_job')
+            holders = []
+            if job:
+                record = _read_json(self.logs / (job + '.json')) or {}
+                action = record.get('action') or job.split('-', 2)[-1]
+                holders.append({'job': job, 'label': ACTIONS.get(action, {}).get('label', job)})
+            elif card['process_list']:
+                holders = [{'job': None, 'label': process['name'] + ' · '
+                            + ('–' if process['memory_mb'] is None else f"{process['memory_mb'] / 1024:.1f} GB")}
+                           for process in card['process_list']]
+            cards.append({**card, 'free': not holders, 'holders': holders})
+        return {**reading, 'cards': cards}
 
     def ai_live(self, jobs: list[dict] | None = None) -> dict | None:
         """The Review with AI at work (one at a time, group ai), for the route list and the drive's page, from its
@@ -3561,11 +3585,24 @@ def _gpu_cards() -> list[dict]:
     """Each GPU on its own, in nvidia-smi's order: its index (the one NNSLR_GPU_INDEX takes, and CUDA's with
     CUDA_DEVICE_ORDER=PCI_BUS_ID), PCI bus ('81:00.0'), name, use, memory, temperature, power and the compute processes
     on it. A process is tied to its card by the bus: nvidia-smi gives the pids of the host, not of this container."""
-    rows = _nvidia(['--query-gpu=index,pci.bus_id,name,utilization.gpu,memory.used,memory.total,temperature.gpu,'
-                    'power.draw', '--format=csv,noheader,nounits'])
+    rows = _nvidia(GPU_QUERY)
     if not rows:
         return []
-    apps = _nvidia(['--query-compute-apps=gpu_bus_id,pid,process_name,used_memory', '--format=csv,noheader,nounits'])
+    cards = _parse_cards(rows, _nvidia(GPU_APPS_QUERY))
+    if cards:
+        # Kept for _card_indexes: the card of a /dev/nvidia<minor> a process has open, by its bus.
+        _CARD_INDEX.clear()
+        _CARD_INDEX.update({card['bus_id']: card['index'] for card in cards})
+    return cards
+
+
+GPU_QUERY = ['--query-gpu=index,pci.bus_id,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw',
+             '--format=csv,noheader,nounits']
+GPU_APPS_QUERY = ['--query-compute-apps=gpu_bus_id,pid,process_name,used_memory', '--format=csv,noheader,nounits']
+
+
+def _parse_cards(rows: str, apps: str | None) -> list[dict]:
+    """The cards of nvidia-smi's answers to GPU_QUERY and GPU_APPS_QUERY (_gpu_cards, _RemoteGpus)."""
     processes = {}
     for line in (apps or '').splitlines():
         parts = line.split(',')
@@ -3585,11 +3622,66 @@ def _gpu_cards() -> list[dict]:
                       'utilization': _number(fields[3]), 'memory_used_mb': _number(fields[4]),
                       'memory_total_mb': _number(fields[5]), 'temperature': _number(fields[6]),
                       'power_w': _number(fields[7]), 'processes': len(found), 'process_list': found})
-    if cards:
-        # Kept for _card_indexes: the card of a /dev/nvidia<minor> a process has open, by its bus.
-        _CARD_INDEX.clear()
-        _CARD_INDEX.update({card['bus_id']: card['index'] for card in cards})
     return cards
+
+
+class _RemoteGpus:
+    """The V100s of CT 131, where the GPU runner (scripts/gpu_remote.sh, #77) sends the GPU jobs of a site without a
+    card: read over ssh in a thread of its own, at most every REFRESH_S seconds, so the status never waits on ssh (a
+    reading is one call late). Each card as _gpu_cards, plus 'runner_job': the panel job the runner put on it, or None.
+    Only reads: CT 131 is never started or stopped from here (AGENTS.md)."""
+
+    REFRESH_S = 4
+    HOST = 'CT 131'
+    # The cards, then the jobs of the runner that still run, "<job id> <card>" (gpu_remote.sh's jobs/<id>/card, pgid).
+    COMMAND = ('nvidia-smi ' + ' '.join(GPU_QUERY) + '; echo ---; nvidia-smi ' + ' '.join(GPU_APPS_QUERY)
+               + '; echo ---; for f in "${RUNNER:-/root/gpu-runner}"/jobs/*/card; do [ -f "$f" ] || continue; '
+               'd=${f%/card}; kill -0 -- "-$(cat "$d/pgid" 2>/dev/null || echo 0)" 2>/dev/null '
+               '&& echo "$(basename "$d") $(cat "$f")"; done; true')
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._asked = 0.0
+        self._busy = False
+        self.reading: dict | None = None
+
+    def get(self) -> dict | None:
+        """The latest reading, {'host', 'reachable', 'cards', 'at'}; None before the first. Starts the next one."""
+        with self._lock:
+            if not self._busy and time.monotonic() - self._asked >= self.REFRESH_S:
+                self._busy, self._asked = True, time.monotonic()
+                threading.Thread(target=self._read, daemon=True, name='remote-gpus').start()
+            return self.reading
+
+    def _read(self) -> None:
+        try:
+            reading = {'host': self.HOST, 'reachable': False, 'cards': [], 'at': time.time()}
+            ct = os.environ.get('NNSLR_GPU_CT', 'root@10.10.10.213')
+            runner = os.environ.get('NNSLR_GPU_RUNNER_DIR', '/root/gpu-runner')
+            try:
+                result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
+                                         '-o', 'ConnectTimeout=3', ct, f'RUNNER={runner}; ' + self.COMMAND],
+                                        capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+            except (OSError, subprocess.SubprocessError):
+                result = None
+            if result is not None and result.returncode == 0:
+                parts = (result.stdout.split('---\n') + ['', ''])[:3]
+                held = {}
+                for line in parts[2].splitlines():
+                    job, _, card = line.strip().rpartition(' ')
+                    if job and card.isdigit():
+                        held[int(card)] = job
+                cards = _parse_cards(parts[0], parts[1])
+                reading.update(reachable=bool(cards), cards=[{**card, 'runner_job': held.get(card['index'])}
+                                                             for card in cards])
+            with self._lock:
+                self.reading = reading
+        finally:
+            with self._lock:
+                self._busy = False
+
+
+_REMOTE_GPUS = _RemoteGpus()
 
 
 # nvidia-smi's index of each card by its PCI bus, from its last answer (_gpu_cards).

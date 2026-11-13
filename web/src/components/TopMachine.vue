@@ -89,7 +89,7 @@ narrow.addEventListener('change', () => { phone.value = narrow.matches; });
  * in the panel), which leaves the room for the CPU without the pill growing into the logo at 390 px. The dot blue when
  * one works, red when a GPU is hot. */
 const summary = computed(() => {
-  const gpus = cells.value.filter((cell) => cell.kind === 'gpu');
+  const gpus = cells.value.filter((cell) => cell.kind === 'gpu' && !cell.off);
   const cpu = cells.value.find((cell) => cell.kind === 'cpu');
   const hot = cells.value.some((cell) => cell.hot === true);
   const busy = gpus.some((cell) => cell.level >= 15) || (cpu?.level ?? 0) >= 40;

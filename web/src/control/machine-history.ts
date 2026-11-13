@@ -35,6 +35,12 @@ export function gpuCards(system: SystemInfo | null | undefined): Gpu[] {
   return system.gpus?.length ? system.gpus : system.gpu ? [system.gpu] : [];
 }
 
+/** The cards the server's panel shows: this machine's (gpuCards), else those of CT 131 its GPU jobs run on. */
+export function shownCards(system: SystemInfo | null | undefined): Gpu[] {
+  const here = gpuCards(system);
+  return here.length ? here : system?.remote_gpus?.cards ?? [];
+}
+
 /** A card by its number, "GPU 0", "GPU 1", when the machine has more than one; "GPU" when it has one. position: its
  * place in gpuCards, for a card without an index (the gpu of an older server). */
 export function cardLabel(card: Gpu, position: number, count: number): string {
@@ -66,7 +72,7 @@ export function recordMachine(system: SystemInfo): void {
   const before = machineHistory.value;
   machineNow.value = system;
   machineHistory.value = {
-    gpus: gpuCards(system).map((card, position) => {
+    gpus: shownCards(system).map((card, position) => {
       const was = before.gpus[position] ?? {use: [], memory: [], temp: []};
       return {use: push(was.use, card.utilization ?? 0), memory: push(was.memory, gpuMemoryPercent(card)),
         temp: push(was.temp, card.temperature)};
@@ -94,6 +100,8 @@ export interface MachineCell {
   /** A GPU of a machine with more than one: the card (what holds it), and its name in the panel, "GPU 0 · 81:00.0". */
   card?: Gpu;
   name?: string;
+  /** The cards of CT 131 when it does not answer: a row that says so, out of the pill's GPU load. */
+  off?: boolean;
 }
 
 /** One GPU: its use, memory and temperature as three gauges. */
@@ -117,8 +125,8 @@ function cardCells(card: Gpu, history: CardHistory | undefined, recent: (values:
 /** One GPU of several in one gauge: its use, with its memory and temperature in its small line ("29.4 of 32 GB · 64 °C"),
  * so two cards stay short in the panel. */
 function cardCell(card: Gpu, position: number, count: number, history: CardHistory | undefined,
-                  recent: (values: number[]) => number[]): MachineCell {
-  const label = cardLabel(card, position, count);
+                  recent: (values: number[]) => number[], host = ''): MachineCell {
+  const label = (host ? host + ' · ' : '') + cardLabel(card, position, count);
   const bus = cardBus(card);
   const title = [cardMemoryText(card), card.temperature === null ? '' : Math.round(card.temperature) + ' °C']
     .filter(Boolean).join(' · ');
@@ -137,6 +145,15 @@ export function machineCells(system: SystemInfo, points: number, disk = false, s
   const cards = gpuCards(system);
   const list: MachineCell[] = cards.length === 1 && cards[0] ? cardCells(cards[0], history.gpus[0], recent, short)
     : cards.map((card, position) => cardCell(card, position, cards.length, history.gpus[position], recent));
+  // No card here: those of CT 131, where the GPU runner sends the GPU jobs (#77), each as one of several.
+  const remote = cards.length ? null : system.remote_gpus;
+  if (remote?.cards.length) {
+    list.push(...remote.cards.map((card, position) => cardCell(card, position, Math.max(2, remote.cards.length),
+      history.gpus[position], recent, remote.host)));
+  } else if (remote && !remote.reachable) {
+    list.push({key: 'gpu-remote', kind: 'gpu', label: remote.host + ' GPUs', name: remote.host + ' · V100s', value: 'Off',
+      title: 'Not answering: Cristian or cluster-admin start it', values: [], color: 'var(--spark-gpu)', level: 0, off: true});
+  }
   if (cpu) {
     list.push({key: 'cpu', kind: 'cpu', label: 'CPU', value: Math.round(cpu.total) + '%', title: 'all cores',
       values: recent(history.cpu), color: 'var(--spark-cpu)', level: cpu.total});

@@ -993,3 +993,25 @@ def test_work_from_a_terminal_follows_the_pairs_of_its_kind(root, label, kind): 
     for action in (key for key, item in panel_module.ACTIONS.items() if item['group'] == 'train'):
         expected = name[0].upper() + name[1:] + ' is running' if panel_module._pair_apart(action, kind) else ''
         assert (action, panel._train_clash(action, activity)) == (action, expected)
+
+
+def test_without_a_card_here_the_panel_shows_the_cards_of_ct_131(panel, checkout, monkeypatch):  # noqa: F811
+    """The server's panel of a site without a card shows the V100s its GPU jobs run on (#77): each card with the panel
+    job the runner put on it, or its processes; nothing when the runner is not in the checkout."""
+    monkeypatch.setattr(panel_module, '_gpu_cards', lambda: [])
+    assert 'remote_gpus' not in panel.system()
+    runner = checkout / 'scripts' / 'gpu_remote.sh'
+    runner.parent.mkdir(parents=True, exist_ok=True)
+    runner.write_text('#!/usr/bin/env bash\n')
+    rows = '0, 00000000:81:00.0, Tesla V100-PCIE-32GB, 87, 9300, 32768, 63, 210\n' \
+           '1, 00000000:C1:00.0, Tesla V100-PCIE-32GB, 0, 0, 32768, 40, 27\n'
+    cards = panel_module._parse_cards(rows, '')
+    cards[0]['runner_job'] = '20261113-190000-prepare'
+    cards[1]['runner_job'] = None
+    reading = {'host': 'CT 131', 'reachable': True, 'cards': cards, 'at': 0}
+    monkeypatch.setattr(panel_module._REMOTE_GPUS, 'get', lambda: reading)
+    remote = panel.system()['remote_gpus']
+    assert [card['holders'] for card in remote['cards']] == [
+        [{'job': '20261113-190000-prepare', 'label': 'Prepare new drives'}], []]
+    assert [card['free'] for card in remote['cards']] == [False, True]
+    assert panel.system()['gpus'] == []  # the cards here stay none: the runner, not the panel, picks CT 131's

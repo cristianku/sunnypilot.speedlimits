@@ -403,6 +403,18 @@ export interface Gpu {
   /** What holds it: a panel job (its id) or work the server names ("A cutter training", "openpilot.distill training",
    * "A program the server cannot name"). */
   holders?: GpuHolder[];
+  /** A card of CT 131 (remote_gpus): the panel job the GPU runner put on it, or null. */
+  runner_job?: string | null;
+}
+
+/** The V100s of CT 131, where the GPU runner sends the GPU jobs of a site without a card (#77). */
+export interface RemoteGpus {
+  host: string;
+  /** False when CT 131 does not answer (off: only Cristian or cluster-admin start it). */
+  reachable: boolean;
+  cards: Gpu[];
+  /** When it was read, in seconds since 1970. */
+  at: number;
 }
 
 export interface GpuHolder {
@@ -423,6 +435,9 @@ export interface SystemInfo {
   /** Use since the previous status call, whole CPU and per core, in percent. */
   cpu: {total: number; cores: number[]} | null;
   memory: {total_gb: number; available_gb: number; used_percent: number} | null;
+  /** A site without a card: the cards of CT 131 its GPU jobs run on; absent with a card here, null before the first
+   * reading. */
+  remote_gpus?: RemoteGpus | null;
 }
 
 export interface RouteRow {
