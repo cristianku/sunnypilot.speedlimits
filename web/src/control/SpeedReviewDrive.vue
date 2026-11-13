@@ -38,10 +38,11 @@
 // confirmed frames kept (issue #42). A guest given only the drive's signs has only this side.
 import {computed, onBeforeUnmount, onMounted, ref, shallowRef, useTemplateRef, watch} from 'vue';
 import {api, ApiError, messageOf, post} from '../common/api';
-import {plural} from '../common/format';
+import {plural, thousands} from '../common/format';
 import {isGuest} from '../common/guest';
 import {askedSigns} from '../common/sign-link';
 import AiRouteSheet from '../components/AiRouteSheet.vue';
+import {aiLive} from '../composables/ai-live';
 import {askConfirm} from '../composables/confirm';
 import {toast} from '../composables/toast';
 import {boxColor, describe, shortName} from '../review/catalog';
@@ -549,6 +550,10 @@ const aiFrames = computed(() => placed.value.filter((frame) => isAiFrame(frame) 
 const aiBars = computed(() => [...aiRuns(placed.value.filter(isAiFrame)).map((run) => ({...run, trial: false})),
   ...aiRuns(placed.value.filter((frame) => !isAiFrame(frame) && trialKeys.value.has(frame.frame_key))).map((run) => ({...run, trial: true}))]);
 const aiIn = (from: number, to: number) => aiBars.value.filter((run) => run.to >= from && run.from <= to);
+/** The frames the AI saved on this drive, for the AI REVIEW badge of the title (even one is enough). */
+const aiSaved = computed(() => placed.value.filter(isAiFrame).length);
+/** The Review with AI at work on this drive, for the blinking badge of the title. */
+const aiHere = computed(() => aiLive.value?.route === props.route ? aiLive.value : null);
 const aiBefore = computed(() => stepFrame(aiFrames.value, seconds.value, -1));
 const aiAfter = computed(() => stepFrame(aiFrames.value, seconds.value, 1));
 /** Which AI frame is on screen (1-based), else 0. */
@@ -958,7 +963,11 @@ function worksIn(from: number, to: number) {
                     sharp :rates="RATES" start-zoom="ten" :car-kph="driverKph" :pick-map="!readOnly && !speedOff" @time="follow"
                     @pick-map="fromMap" @segments="(value) => { segments = value; }" @index="(value) => { videoIndex = value ?? null; }"
                     @frame="(value) => { presented = value; }" @scan="onScan">
-    <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b></template>
+    <template #badge><b v-if="drive?.dashcam" class="dashcam-badge">DASHCAM MODE</b>
+      <b v-if="aiHere" class="ai-badge live" id="sr-drive-ai-badge" :title="aiHere.saving ? 'The AI is reviewing this drive now' : 'The AI is trying this drive now, nothing saved'"><i
+        class="sr-ai-square" aria-hidden="true"></i>AI {{ aiHere.saving ? 'REVIEWING' : 'TRYING' }}<template v-if="aiHere.total"> · {{ thousands(aiHere.done) }}/{{ thousands(aiHere.total) }}</template></b>
+      <b v-else-if="aiSaved" class="ai-badge" id="sr-drive-ai-badge" :title="thousands(aiSaved) + ' frames of this drive reviewed by the AI'"><i
+        class="sr-ai-square" aria-hidden="true"></i>AI REVIEW · {{ thousands(aiSaved) }}</b></template>
     <template #hud>
       <span v-if="!speedOff" class="dr-box sr-box-label" :class="{empty: label === null}" title="ANSWER: your dashboard speed, or your block where there is one; a dash where openpilot or the cruise held the speed"><small>ANSWER</small>
         <b>{{ label ?? '–' }}</b></span>
