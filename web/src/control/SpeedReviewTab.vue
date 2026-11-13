@@ -35,12 +35,16 @@ import {isGuest} from '../common/guest';
 import {plural, thousands} from '../common/format';
 import {signsHref} from '../common/sign-link';
 import {clockOf, scanText} from './drive-review';
+import AiRouteSheet from '../components/AiRouteSheet.vue';
 import ReadLogsCard from './ReadLogsCard.vue';
 import SectionHead from './SectionHead.vue';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {tabDrive} from './tabs';
 
-defineProps<{readOnly: boolean}>();
+const props = defineProps<{readOnly: boolean}>();
+/** "Review with AI" of a drive's signs, beside Signs (components/AiRouteSheet.vue): the administrator's, where it can save. */
+const canAi = !props.readOnly && !isGuest();
+const aiLeft = (signs: SignDrive): number => Math.max(0, signs.frame_count - signs.confirmed_count);
 
 const drives = shallowRef<SpeedRow[] | null>(shown.drives);
 const error = ref('');
@@ -177,8 +181,12 @@ onBeforeUnmount(() => window.clearTimeout(timer));
           </a>
           <a v-if="row.speed && row.signs" class="sr-signs" :class="{'sr-signs-done': !signsLeft(row.signs)}"
              :href="signsUrl(row.signs)" :title="'Open the signs of this drive at the first frame still to confirm'">Signs ›</a>
+          <button v-if="canAi && row.signs && aiLeft(row.signs) > 0" type="button" class="btn small ai-route sr-ai-row"
+                  :data-ai-route="row.route" :data-ai-name="titleOf(row)" :data-ai-left="aiLeft(row.signs)"
+                  title="The AI reviewer of Settings reviews the frames of the signs still to confirm: all signs, or only those at a traffic light">Review with AI</button>
         </li>
       </ul>
     </section>
+    <Teleport v-if="canAi" to="body"><AiRouteSheet/></Teleport>
   </template>
 </template>

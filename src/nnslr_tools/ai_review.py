@@ -745,6 +745,17 @@ LIGHT_CELL = 0.002
 EARTH_M = 111_320.0
 
 
+# A server that drops mid-run (connection refused or reset, HTTP 502/503/504) is waited for: the same frame again
+# every DOWN_WAIT s, then the run stops ('ai_down') instead of failing every frame left. A timeout is the frame's own.
+DOWN_RETRIES = 20
+DOWN_WAIT = 30.0
+
+
+def _server_down(exc: ReviewRejected) -> bool:
+    return exc.reason == 'ai_unreachable' or (exc.reason == 'ai_http_error'
+                                              and getattr(exc, 'http_code', None) in (502, 503, 504))
+
+
 def signals_path(root) -> Path:
     return Path(root) / 'derived' / 'osm' / 'traffic_signals.jsonl'
 
@@ -820,7 +831,7 @@ def _entry(key: str) -> dict:
 
 
 def review_route(service, route: str, provider: dict, *, save: bool, limit: int | None = None,
-                 scope: str = 'signs', client: str = 'ai-review', log=_stderr) -> dict:
+                 scope: str = 'signs', client: str = 'ai-review', log=_stderr, sleep=time.sleep) -> dict:
     """Every frame of a route nobody confirmed, in timeline order, up to ``limit``: suggested (dry run) or
     saved as AI reviews. Writes the suggestions to ai_reviews/<route>/<time>-<provider>.json. Saving needs a
     provider that passed its last Test (llm_providers.check_can_review): its saves are final. ``scope`` lights: only
@@ -874,11 +885,28 @@ def review_route(service, route: str, provider: dict, *, save: bool, limit: int 
             continue
         entry['base_revision'] = frame['save']['base_revision']
         began = time.monotonic()
-        try:
-            width, height = _frame_size(frame)
-            suggestion = _suggest(service, frame, provider, _sent_boxes(frame['proposals'], width, height),
-                                  RUN_TIMEOUT, light_ahead_m=lights.get(key))
-        except ReviewRejected as exc:
+        down = None
+        for attempt in range(DOWN_RETRIES + 1):
+            try:
+                width, height = _frame_size(frame)
+                suggestion = _suggest(service, frame, provider, _sent_boxes(frame['proposals'], width, height),
+                                      RUN_TIMEOUT, light_ahead_m=lights.get(key))
+            except ReviewRejected as exc:
+                down = exc
+                if not _server_down(exc) or attempt == DOWN_RETRIES:
+                    break
+                log(prefix + f'the AI server is down ({exc.message}): trying again in {DOWN_WAIT:.0f} s')
+                sleep(DOWN_WAIT)
+            else:
+                down = None
+                break
+        if down is not None and _server_down(down):
+            entry.update(outcome='failed', reason=down.reason, warnings=[down.message])
+            record['stopped'] = 'ai_down'
+            log(prefix + f'stopped: the AI server did not come back in {DOWN_RETRIES * DOWN_WAIT / 60:.0f} minutes')
+            break
+        if down is not None:
+            exc = down
             entry.update(outcome='failed', reason=exc.reason, seconds=round(time.monotonic() - began, 1),
                          warnings=[exc.message])
             counts['failed'] += 1
@@ -928,7 +956,8 @@ def review_route(service, route: str, provider: dict, *, save: bool, limit: int 
     _write_json(path, record)
     relative = path.relative_to(service.root).as_posix()
     done = f'{counts["saved"]} saved' if save else f'{counts["suggested"]} suggested'
-    head = 'AI review stopped (the report of the route was rebuilt)' if record['stopped'] else 'AI review done'
+    head = ({'stale_report': 'AI review stopped (the report of the route was rebuilt)',
+             'ai_down': 'AI review stopped (the AI server is down)'}.get(record['stopped'], 'AI review done'))
     log(f'{head}: {done}, {counts["skipped"]} skipped, {counts["failed"]} failed. Suggestions: {relative}')
     report('ai_review', total, total, 'done')
     return {'route_id': route, 'run_id': run_id, 'provider_id': provider['id'], 'model': provider['model'],

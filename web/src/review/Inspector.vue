@@ -17,7 +17,7 @@ import {releaseFocus} from './dom';
 import Icon from '../components/Icon.vue';
 import {selectedBox} from './current';
 import {toggleUsersComplete} from './edits';
-import {reasonsOf, segmentSecond} from './frames';
+import {frameStatus, reasonsOf, segmentSecond} from './frames';
 import OtherFields from './OtherFields.vue';
 import SecondReading from './SecondReading.vue';
 import {report, state} from './store';
@@ -34,6 +34,19 @@ const USERS_COMPLETE_TITLE = 'Road users complete (J): every person on foot and 
 // The previous frame has a confirmed sign and this one nothing: carrying it over is the likely next move.
 const carryHint = computed(() => carry.value.enabled
   && reasons.value.some((reason) => reason.rule === 'd' && reason.text.startsWith('the previous frame')));
+// Who reviewed the frame, at the top with a coloured square: a person (green), an AI (violet: Review with AI, REST,
+// MCP), or nobody yet (grey). The confirmed copy on the server, else this browser's confirmation.
+const reviewedBy = computed((): {kind: 'human' | 'ai' | 'none'; text: string; title: string} => {
+  const base = props.work.base;
+  const who = base?.confirmed ? base : frameStatus(props.row.frame_key) === 'done' ? props.work : null;
+  if (!who || !who.reviewer) return {kind: 'none', text: 'Not reviewed yet', title: 'Nobody has confirmed this frame yet'};
+  const ai = who.reviewer_kind === 'ai';
+  const name = who.reviewer.replace(/^ai\//, '');
+  const via = who.channel === 'mcp' ? ' · MCP' : who.channel === 'rest' ? ' · REST' : '';
+  return {kind: ai ? 'ai' : 'human', text: (ai ? 'AI · ' : '') + name + via,
+    title: (ai ? 'Reviewed by an AI: ' : 'Reviewed by a person: ') + who.reviewer
+      + (who.review_timestamp ? ', ' + who.review_timestamp.replace('T', ' ').slice(0, 16) : '')};
+});
 // On the server: what the car did at this moment (its limit, the map's, the vision's), in the drive's player of Speed review.
 const driveHref = computed(() => report.apiBase === null || isGuest() || report.embedded ? null : '/speed-review?drive=' + encodeURIComponent(report.routeId)
   + '&segment=' + props.row.segment_index + '&second=' + Math.round((segmentSecond(props.row) ?? 0) * 10) / 10);
@@ -46,6 +59,8 @@ const driveHref = computed(() => report.apiBase === null || isGuest() || report.
       <ReviewToolbar v-else/>
       <BusyBanner/>
       <AiLiveBanner/>
+      <p class="reviewed-by" :class="'rb-' + reviewedBy.kind" id="reviewedBy" :title="reviewedBy.title"><span class="rb-square"
+        aria-hidden="true"></span><template v-if="reviewedBy.kind !== 'none'">Reviewed by </template><b>{{ reviewedBy.text }}</b></p>
       <div class="section-head"><h2>Signs</h2><span class="count" id="boxCount">{{ boxCountText(count) }}</span>
         <!-- Off, it still answers a press: the reason why appears on the status line. Once it has carried the boxes,
              a second press saves and goes on, as Enter. -->

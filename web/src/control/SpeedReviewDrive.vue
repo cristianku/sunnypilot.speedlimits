@@ -1201,7 +1201,7 @@ function worksIn(from: number, to: number) {
           <button v-if="leftToReview > 0" type="button" class="btn small" id="sr-propose" :disabled="proposing || editReport.readOnly"
                   title="New boxes for the frames not confirmed of the whole drive, from the cutter, classifier and applicability network in use; the confirmed frames stay"
                   @click="proposeAgain">Propose again</button>
-          <p class="dr-hint">The AI reviewer of Settings tries or saves the boxes of the frames left; you confirm what it saves.</p>
+          <p class="dr-hint">The AI reviewer of Settings tries or saves the boxes of the frames left; what it saves goes into training as an AI review.</p>
           <p v-if="olderBoxes" class="dr-hint sr-older" id="sr-older" :title="olderBoxes.title">{{ olderBoxes.text }}: Propose
             again uses those in use.</p>
         </div>

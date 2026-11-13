@@ -73,17 +73,18 @@ REVIEWER_KINDS = ('human', 'ai')
 # so it never reads as a person) come from annotations, which checks them in the dataset.
 AI_LABEL_BASIS = 'ai_review'
 # What the site's own AI reviewer saves (Settings › AI reviewer, Review with AI: an LLM server such as llama or strata,
-# reviewer "ai/<provider>/<model>") waits for a person: the page shows it to confirm, and the import leaves it out until
-# a person confirms it. The AI assistants that review through the REST API or MCP (ai/Claude Code, ai/Codex,
-# ai/ChatGPT) count as confirmed, as before.
+# reviewer "ai/<provider>/<model>") is final since 13 Nov 2026, as the AI assistants of the REST API or MCP
+# (ai/Claude Code, ai/Codex): confirmed, imported as label_basis ai_review, never confirmed again by a person (#79).
+# Until then it waited for a person; SITE_AI_WAITS brings that rule back.
 SITE_AI_REVIEWER = re.compile(r'ai/[^/]+/.+')
-# The same in SQL: confirmed frames that count as confirmed leave these out.
-NOT_WAITING_SQL = " AND NOT (reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*')"
+SITE_AI_WAITS = False
+# The same in SQL: confirmed frames that count as confirmed leave these out (nothing while SITE_AI_WAITS is off).
+NOT_WAITING_SQL = " AND NOT (reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*')" if SITE_AI_WAITS else ''
 
 
 def waits_for_a_person(review: dict) -> bool:
-    """A confirmed frame the site's own AI reviewer saved, not a person since (SITE_AI_REVIEWER)."""
-    return bool(review.get('confirmed')) and review.get('reviewer_kind') == 'ai' \
+    """A confirmed frame the site's own AI reviewer saved, not a person since (SITE_AI_REVIEWER), while SITE_AI_WAITS."""
+    return SITE_AI_WAITS and bool(review.get('confirmed')) and review.get('reviewer_kind') == 'ai' \
         and isinstance(review.get('reviewer'), str) and SITE_AI_REVIEWER.fullmatch(review['reviewer']) is not None
 
 SCHEMA_STATEMENTS = (
@@ -494,7 +495,10 @@ class ReviewStore:
             connection.close()
 
     def waiting_count(self, route_id: str, run_id: str) -> int:
-        """The frames of a run the site's AI reviewer saved, waiting for a person to confirm them."""
+        """The frames of a run the site's AI reviewer saved, waiting for a person to confirm them (none unless
+        SITE_AI_WAITS)."""
+        if not SITE_AI_WAITS:
+            return 0
         connection = self._connect()
         try:
             return connection.execute(

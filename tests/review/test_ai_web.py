@@ -89,7 +89,7 @@ def test_the_route_list_opens_review_with_ai_and_saving_is_asked_first():
     assert 'button[data-ai-route]' in script
     assert '/api/panel/run/ai_review' in script and '/api/ai/state' in script
     assert 'Try without saving' in script and 'Review and save' in script
-    assert 'waits for you: each frame goes into training only' in script
+    assert 'is final: it goes into training at the next import' in script
     assert 'Started: follow it on the' in script
     # A trial is seen on the review page, not in a folder of the server.
     assert 'ai_reviews/' not in script and 'Open the drive' in script

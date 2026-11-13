@@ -88,15 +88,15 @@ def test_a_frame_is_placed_by_its_media_time_its_video_frame_or_its_place_among_
     assert first['boxes'] == [proposal] and answer['frames'][-1]['confirmed'] is False
 
 
-def test_a_frame_of_the_site_ai_reviewer_waits_for_a_person_with_its_own_boxes():
+def test_a_frame_of_the_site_ai_reviewer_is_confirmed_with_its_own_boxes():
     row = {'frame_key': '0/4', 'segment_index': 0, 'output_index': 4, 'media_time_s': 4.0, 'width': 1344,
            'height': 760, 'detections': [{'bbox_xyxy': [1, 2, 3, 4], 'family': 'maximum_speed', 'value_kph': 120}]}
     saved = {'bbox_xyxy': [5, 6, 7, 8], 'family': 'maximum_speed', 'value_kph': 80}
     review = {'frame_key': '0/4', 'confirmed': True, 'reviewer': 'ai/site/claude', 'reviewer_kind': 'ai',
               'payload': {'detections': [saved]}}
     frame = drive_review.sign_frames('run', [row], [review])['frames'][0]
-    # Not confirmed (Sign review counts it "AI · to confirm"), not in the lane, but its boxes are the AI's, not the model's.
-    assert frame['confirmed'] is False and frame['needs_person'] is True
+    # Final since 13 Nov 2026 (#79): confirmed, with the AI's boxes, not the model's.
+    assert frame['confirmed'] is True and frame['needs_person'] is False
     assert [box['value_kph'] for box in frame['boxes']] == [80]
     # An agent's review through the API (ai/<name>) is confirmed.
     frame = drive_review.sign_frames('run', [row], [dict(review, reviewer='ai/claude')])['frames'][0]

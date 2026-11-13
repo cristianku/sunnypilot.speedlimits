@@ -176,7 +176,7 @@ On each picture you:
 
 <img src="docs/images/readme-review-phone.png" alt="The review page on a phone: the picture with the boxed 50 sign at the top, navigation and filters below, and a Next frame button at the bottom." width="260">
 
-An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive; you still confirm its work before it counts. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
+An AI that sees images can help. **Ask AI** (key I) suggests boxes and saves nothing. **Review with AI** goes through a whole drive, all its signs or only the frames at a traffic light, and what it saves counts as an AI review, with nothing to confirm. AI assistants such as Claude Code can also review through a REST API or MCP: see [review_instructions.md](review_instructions.md).
 
 **Data › Speed review** is the other review, for the brain, the network that decides the speed: its answer is the speed you held, as the dashboard showed it, every quarter of a second of a drive whose logs are read, with nothing to confirm. Where it should have been another speed, you put a **block** from a time to a time, with that speed or left out of the training, you mark the roadworks and the kinds of road (narrow, country, gravel road, potholes, or one you add), and you correct the map's road type (town, rural, motorway…) where it is wrong. Nothing there changes the car or trains. See [the guide](docs/GUIDE.md#2-the-web-panel).
 
@@ -190,7 +190,7 @@ On the site: **Data › Training dataset**, then **Import sign reviews** (Speed 
 
 What it does:
 
-1. It reads every **confirmed** picture in the review database. Model proposals and pictures nobody confirmed stay out. Pictures saved by the site's own AI reviewer (**Review with AI**) wait for a person, and stay out until confirmed. Reviews saved by an assistant through the REST API or MCP are final, and go in as AI reviews (`ai/<name>`).
+1. It reads every **confirmed** picture in the review database. Model proposals and pictures nobody confirmed stay out. Reviews saved by the site's own AI reviewer (**Review with AI**, `ai/<provider>/<model>`) and by an assistant through the REST API or MCP (`ai/<name>`) are final, and go in as AI reviews.
 2. It writes their labels into the training dataset (`data/annotations/objects.jsonl`). It follows the latest review: a picture reviewed again replaces its old rows, and a withdrawn one is removed. Old rows are archived in `data/annotations/replaced/`, not lost.
 3. Boxes that reviewers deleted are kept as rejected proposals. The classifier learns from them as "not a sign".
 4. It checks the dataset and splits it into **train**, **validation** and **test**. The test is a set of places kept apart, with a buffer of neighbouring places left out of both, so the networks are measured on roads they never learned.

@@ -3,7 +3,7 @@
 // (button[data-ai-route], with data-ai-name and data-ai-left) opens this sheet. It reads the AI reviewer of Settings (GET /api/ai/state) and starts the panel job
 // ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames,
 // which the Signs side of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
-// a question; what it saves waits for a person to confirm it before it goes into training. Only a reviewer that passed its Test in Settings can do either.
+// a question; what it saves is final (since 13 Nov 2026, #79): an AI review that goes into training at the next import. Only a reviewer that passed its Test in Settings can do either.
 // What: All signs (every frame left) or Traffic lights (scope lights: only the frames where the car comes to a traffic
 // light of the map, #79); each frame is reviewed whole either way.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
@@ -74,8 +74,9 @@ async function start(save: boolean): Promise<void> {
   error.value = '';
   if (save) {
     const ok = await askConfirm({title: 'Review and save with the AI?', action: 'Review and save', danger: true,
-      text: 'What it saves is recorded as ' + recordedAs.value + ' and waits for you: each frame goes into training only '
-        + 'once you confirm it on the Signs side of the drive. Frames a person confirmed are never touched.'});
+      text: 'What it saves is recorded as ' + recordedAs.value + ' and is final: it goes into training at the next import '
+        + 'as an AI review, with nothing to confirm. You can still correct a frame on the Signs side. Frames a person '
+        + 'confirmed are never touched.'});
     if (!ok || drive.value !== value) return;
   }
   busy.value = true;
@@ -145,7 +146,7 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <button type="button" class="ai-choice save" id="ai-route-save" :disabled="busy" @click="start(true)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Review and save</strong>
-              <span>{{ scope === 'lights' ? 'Every frame left to review where the car comes to a traffic light of the map.' : 'Every frame left to review.' }} What the AI says is saved for you to confirm: only then does it go into training.</span></span>
+              <span>{{ scope === 'lights' ? 'Every frame left to review where the car comes to a traffic light of the map.' : 'Every frame left to review.' }} What the AI saves is final and goes into training as an AI review.</span></span>
           </button>
         </div>
       </template>

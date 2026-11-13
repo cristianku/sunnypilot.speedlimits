@@ -316,7 +316,7 @@ def test_a_dry_run_writes_its_suggestions_and_saves_nothing(site, tmp_path):
     assert 'sk-fake-key-123456' not in (tmp_path / summary['path']).read_text()
 
 
-def test_a_save_run_records_ai_reviews_that_wait_for_a_person_before_the_import(site, tmp_path):
+def test_a_save_run_records_final_ai_reviews_that_the_import_takes(site, tmp_path):
     service, rows = site
     human(service, rows['0/0'], value_kph=60)
 
@@ -352,21 +352,20 @@ def test_a_save_run_records_ai_reviews_that_wait_for_a_person_before_the_import(
     assert reviews['0/2']['payload']['detections'][0]['applicability'] == 'own_road'
     assert reviews['0/0']['reviewer_kind'] == 'human' and reviews['0/3']['reviewer_kind'] == 'human'
     assert '0/4' not in reviews
-    # Saved by the site's AI reviewer: shown to confirm, out of the dataset until a person confirms it.
+    # Saved by the site's AI reviewer: final since 13 Nov 2026 (#79), confirmed and imported as AI reviews.
     from nnslr_tools.review_db import public_review
-    assert all(public_review(reviews[key])['needs_person'] for key in ('0/1', '0/2', '0/5'))
-    assert not public_review(reviews['0/0'])['needs_person']
-    assert service.store.waiting_count(ROUTE, RUN_ID) == 3 and service.store.confirmed_count(ROUTE, RUN_ID) == 2
+    assert not any(public_review(reviews[key])['needs_person'] for key in ('0/0', '0/1', '0/2', '0/5'))
+    assert service.store.waiting_count(ROUTE, RUN_ID) == 0 and service.store.confirmed_count(ROUTE, RUN_ID) == 5
     report = import_from_db(tmp_path, tmp_path / 'dataset.jsonl', store=service.store)
-    assert report['waiting_for_a_person_frame_count'] == 3
+    assert report['waiting_for_a_person_frame_count'] == 0
     imported = [json.loads(line) for line in (tmp_path / 'dataset.jsonl').read_text().splitlines()]
-    assert not [row for row in imported if row['provenance']['label_basis'] == 'ai_review']
-    assert {row['output_index'] for row in imported} == {0, 3}
-    # A person confirms one: it goes in at the next import, as theirs.
+    assert {row['output_index'] for row in imported if row['provenance']['label_basis'] == 'ai_review'} >= {1, 2, 5}
+    assert {row['output_index'] for row in imported} >= {0, 1, 2, 3, 5}
+    # A person corrects one: at the next import it is theirs.
     human(service, rows['0/2'])
-    report = import_from_db(tmp_path, tmp_path / 'dataset.jsonl', store=service.store)
+    import_from_db(tmp_path, tmp_path / 'dataset.jsonl', store=service.store)
     imported = [json.loads(line) for line in (tmp_path / 'dataset.jsonl').read_text().splitlines()]
-    assert report['waiting_for_a_person_frame_count'] == 2 and {row['output_index'] for row in imported} == {0, 2, 3}
+    assert {row['provenance']['label_basis'] for row in imported if row['output_index'] == 2} == {'human_review'}
 
 
 def test_a_human_confirmation_during_the_answer_is_never_overwritten(site, tmp_path):
@@ -659,3 +658,27 @@ def test_a_lights_run_reviews_only_the_light_frames_whole_with_the_hint(site, tm
         assert ai_review.review_route(service, ROUTE, provider, save=False, log=lambda line: None)['scope'] == 'signs'
         with pytest.raises(ReviewRejected):
             ai_review.review_route(service, ROUTE, provider, save=False, scope='roads')
+
+
+def test_a_server_that_drops_is_waited_for_then_the_run_stops(site, tmp_path):
+    service, rows = site
+    lines, waits = [], []
+    with FakeLlm(keep_everything, status=502) as fake:
+        provider = fake_provider(tmp_path, fake)
+
+        def back_after_two(seconds):
+            waits.append(seconds)
+            if len(waits) == 2:
+                fake.status = 200
+        summary = ai_review.review_route(service, ROUTE, provider, save=False, log=lines.append, sleep=back_after_two)
+        # Down twice on the first frame, then back: every frame suggested, none failed.
+        assert waits == [ai_review.DOWN_WAIT] * 2 and summary['failed'] == 0 and summary['stopped'] is None
+        assert summary['suggested'] == summary['frames'] == 6
+        assert 'the AI server is down' in lines[0]
+        fake.status = 502
+        waits.clear()
+        summary = ai_review.review_route(service, ROUTE, provider, save=False, log=lines.append,
+                                         sleep=waits.append)
+    # Never back: one frame waited for DOWN_RETRIES times, then the run stops instead of failing the rest.
+    assert len(waits) == ai_review.DOWN_RETRIES and summary['stopped'] == 'ai_down' and summary['frames'] == 1
+    assert lines[-1].startswith('AI review stopped (the AI server is down)')
