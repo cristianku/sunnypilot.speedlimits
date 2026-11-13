@@ -360,8 +360,9 @@ def proposer_setup(proposer: str, root: Path, *, confidence: float | None = None
         if check.returncode:
             raise PreannotationError('our networks need the GPU environment (.venv-gpu with torch): see docs/INSTALL.md')
         model=our_networks(root, networks)
+        # Our networks run on a card only: a server without one stops here and says so, never on the CPU (AGENTS.md).
         return {'python': python, 'worker': 'nnslr_tools._chain_proposer', 'confidence': confidence, 'model': model,
-                'road_model': None, 'ocr': None, 'request': {'model': model}}
+                'road_model': None, 'ocr': None, 'request': {'model': model, 'require_gpu': True}}
     python=python_executable or sys.executable
     check=subprocess.run([python,'-c','import numpy, PIL, onnxruntime, rapidocr'],capture_output=True,text=True)
     if check.returncode:
