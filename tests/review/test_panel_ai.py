@@ -118,6 +118,11 @@ def test_review_runs_the_helper_with_the_route_and_provider_never_the_key(root, 
     job = panel.start('ai_review', {'route': ROUTE})
     finished(panel, job['id'])
     assert log_of(panel, job['id']).splitlines()[0] == f'== helpers/ai_review.sh {ROUTE} --provider=fake'
+    # Only the frames at a traffic light of the map; "signs" is the default and adds nothing.
+    next_second()
+    job = panel.start('ai_review', {'route': ROUTE, 'scope': 'lights'})
+    finished(panel, job['id'])
+    assert log_of(panel, job['id']).splitlines()[0] == f'== helpers/ai_review.sh {ROUTE} --provider=fake --scope=lights'
 
 
 def test_measure_runs_its_helper(root, checkout):
@@ -156,6 +161,7 @@ def test_option_checks(root, checkout):
     refused(panel, 'prepare', {'provider': 'fake'})
     refused(panel, 'train', {'limit': '5'})
     refused(panel, 'ai_review', {'route': ROUTE, 'proposer': 'ours'})
+    refused(panel, 'ai_review', {'route': ROUTE, 'scope': 'roads'})
     # Saving needs a provider that passed its last Test: never tested, or failed, it is refused.
     add_provider(root, 'Untested', reviewer=False)
     error = refused(panel, 'ai_review', {'route': ROUTE, 'provider': 'untested', 'save': 'yes'}, 409, 'ai_not_tested')

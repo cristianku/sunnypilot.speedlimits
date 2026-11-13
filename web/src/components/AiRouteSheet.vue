@@ -4,6 +4,8 @@
 // ai_review on the drive (POST /api/panel/run/ai_review): "Try without saving" suggests the boxes of 20 frames,
 // which the Signs side of the drive shows (its "AI trial" filter); "Review and save" saves what the AI says, after
 // a question; what it saves waits for a person to confirm it before it goes into training. Only a reviewer that passed its Test in Settings can do either.
+// What: All signs (every frame left) or Traffic lights (scope lights: only the frames where the car comes to a traffic
+// light of the map, #79); each frame is reviewed whole either way.
 import {computed, onBeforeUnmount, onMounted, ref, useTemplateRef} from 'vue';
 import {api, messageOf, post} from '../common/api';
 import type {AiState} from '../common/ai-types';
@@ -27,6 +29,9 @@ const loadError = ref('');
 const error = ref('');
 const busy = ref(false);
 const started = ref<{label: string; saving: boolean} | null>(null);
+type Scope = 'signs' | 'lights';
+const SCOPES: readonly {key: Scope; label: string}[] = [{key: 'signs', label: 'All signs'}, {key: 'lights', label: 'Traffic lights'}];
+const scope = ref<Scope>('signs');
 const panel = useTemplateRef<HTMLElement>('panel');
 const open = computed(() => drive.value !== null);
 const close = (): void => { drive.value = null; };
@@ -55,6 +60,7 @@ async function show(target: HTMLElement): Promise<void> {
   loadError.value = '';
   error.value = '';
   started.value = null;
+  scope.value = 'signs';
   try {
     ai.value = await api<AiState>('/api/ai/state');
   } catch (problem) {
@@ -74,8 +80,9 @@ async function start(save: boolean): Promise<void> {
   }
   busy.value = true;
   try {
-    const job = await post<StartedJob>('/api/panel/run/ai_review',
-      save ? {route: value.route, save: 'yes'} : {route: value.route, save: 'no', limit: TRY_LIMIT});
+    const body: Record<string, string> = save ? {route: value.route, save: 'yes'} : {route: value.route, save: 'no', limit: TRY_LIMIT};
+    if (scope.value === 'lights') body['scope'] = 'lights';
+    const job = await post<StartedJob>('/api/panel/run/ai_review', body);
     if (drive.value === value) started.value = {label: job.label, saving: save};
   } catch (problem) {
     if (drive.value === value) error.value = messageOf(problem);
@@ -124,16 +131,21 @@ onBeforeUnmount(() => document.removeEventListener('click', onClick));
           <li class="ai-prov"><span class="ai-prov-main"><span class="ai-prov-name">{{ ai.provider.name }}</span>
             <span class="ai-prov-sub">{{ ai.provider.model }} · saves as <code>{{ recordedAs }}</code></span></span></li>
         </ul>
+        <div class="segmented ai-scope" role="radiogroup" aria-label="What the AI reviews" id="ai-route-scope">
+          <button v-for="option in SCOPES" :key="option.key" type="button" role="radio" :aria-checked="scope === option.key"
+                  :title="option.key === 'lights' ? 'Only the frames where the car comes to a traffic light of the map; each is still reviewed whole' : 'Every frame left to review'"
+                  @click="scope = option.key">{{ option.label }}</button>
+        </div>
         <div class="ai-choices">
           <button type="button" class="ai-choice" id="ai-route-try" :disabled="busy" @click="start(false)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Try without saving</strong>
-              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review. You see them on the drive's Signs side; nothing is saved.</span></span>
+              <span>The AI suggests the boxes of {{ TRY_LIMIT }} frames left to review{{ scope === 'lights' ? ' that come to a traffic light' : '' }}. You see them on the drive's Signs side; nothing is saved.</span></span>
           </button>
           <button type="button" class="ai-choice save" id="ai-route-save" :disabled="busy" @click="start(true)">
             <span class="ai-choice-icon"><Icon name="ai"/></span>
             <span class="ai-choice-body"><strong>Review and save</strong>
-              <span>Every frame left to review. What the AI says is saved for you to confirm: only then does it go into training.</span></span>
+              <span>{{ scope === 'lights' ? 'Every frame left to review where the car comes to a traffic light of the map.' : 'Every frame left to review.' }} What the AI says is saved for you to confirm: only then does it go into training.</span></span>
           </button>
         </div>
       </template>

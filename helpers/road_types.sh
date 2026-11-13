@@ -16,7 +16,8 @@
 #      garage of the map, is a garage when it is slow                                (nnslr car-motion --all, cached)
 #   d. the map roads and car parks near the drives, again when a drive or the map is newer (scripts/osm_roads.py,
 #      osmium from uv's cache for this run only: the environments of the site and of the training stay as they are),
-#      and the names of the places that name the drives, again when the map is newer (scripts/osm_places.py)
+#      and the names of the places that name the drives, again when the map is newer (scripts/osm_places.py),
+#      and the traffic lights that Review with AI › Traffic lights picks its frames by (scripts/osm_signals.py)
 #   e. the map road of every frame, its limit and its type                         (nnslr road-types --all)
 #   f. the tunnels of the scanned drives, where the map and the lost GPS agree, written as marks of the kind tunnel in
 #      Speed review (reviewer osm; never over a person's mark, removal or check)      (nnslr tunnels --all)
@@ -41,6 +42,7 @@ MAPS="$DATA/raw/osm"
 ROADS="$DATA/derived/osm/roads.jsonl"
 PARKING="$DATA/derived/osm/parking.jsonl"
 PLACES="$DATA/derived/osm/places.jsonl"
+SIGNALS="$DATA/derived/osm/traffic_signals.jsonl"
 # The site starts this with the service's PATH, without ~/.local/bin where uv usually is.
 UV="$(command -v uv || true)"
 if [ -z "$UV" ] && [ -x "$HOME/.local/bin/uv" ]; then UV="$HOME/.local/bin/uv"; fi
@@ -116,6 +118,13 @@ if [ "$places" = yes ] && [ -n "$UV" ]; then
         < /dev/null) || echo "The names of the places not read: the drives keep the names they had"
 elif [ "$places" = yes ]; then
     echo "uv is missing: the names of the places not read, the drives keep the names they had"
+fi
+
+# Only Review with AI › Traffic lights: without them it says the map has no traffic lights.
+if [ -n "$UV" ] && { [ "$again" = yes ] || [ ! -f "$SIGNALS" ] \
+        || [ -n "$(find "$MAPS" -maxdepth 1 -name '*.osm.pbf' -newer "$SIGNALS" -print -quit)" ]; }; then
+    (cd "$ROOT" && nice "$UV" run --no-project --with osmium python scripts/osm_signals.py --data-root "$DATA" \
+        < /dev/null) || echo "The traffic lights of the map not read: Review with AI keeps the ones it had"
 fi
 
 echo "== e. Road type of every frame"

@@ -221,12 +221,12 @@ ACTION_OPTIONS = {'train_cutter': ('families', 'start', 'mapillary', 'region', '
                   'prepare': ('proposer',), 'prepare_again': ('proposer', 'route'),
                   'measure_proposer': ('proposer',), 'networks_publish': ('package',), 'send_to_car': ('signnet', 'rebuild'),
                   'try_on_comma': ('signnet',),
-                  'ai_review': ('route', 'provider', 'save', 'limit'), 'measure_ai_reviewer': ('provider', 'limit')}
+                  'ai_review': ('route', 'provider', 'save', 'limit', 'scope'), 'measure_ai_reviewer': ('provider', 'limit')}
 # [ai-reviewer] - START
 # The AI actions and their options (strings; checked by Panel._ai_arguments). The provider is an id of Settings
 # (nnslr_tools.llm_providers): its key never goes into a command line, an environment or a log, the job reads it.
 AI_ACTIONS = ('ai_review', 'measure_ai_reviewer')
-AI_OPTIONS = ('route', 'provider', 'save', 'limit')
+AI_OPTIONS = ('route', 'provider', 'save', 'limit', 'scope')
 PROVIDER_ID = re.compile(r'[a-z][a-z0-9-]{0,31}')
 MAX_AI_LIMIT = 5000
 # [ai-reviewer] - END
@@ -1863,8 +1863,9 @@ class Panel:
     def _ai_arguments(self, action: str, options: dict) -> list[str]:
         """The arguments of an AI action from its options, all strings: the route (ai_review only, one with a
         prepared report), --provider=<id of Settings> (the reviewer when none is given), --save (ai_review with
-        save 'yes'; 'no' is the default) and --limit=<frames, 1 to MAX_AI_LIMIT>. Never a key: the job reads the
-        providers file itself."""
+        save 'yes'; 'no' is the default), --limit=<frames, 1 to MAX_AI_LIMIT> and --scope=lights (ai_review: only the
+        frames that come to a traffic light of the map; signs, every frame, is the default). Never a key: the job
+        reads the providers file itself."""
         from nnslr_tools import llm_providers
         arguments = []
         if action == 'ai_review':
@@ -1901,6 +1902,11 @@ class Panel:
             if not re.fullmatch(r'[0-9]{1,4}', limit) or not 1 <= int(limit) <= MAX_AI_LIMIT:
                 raise PanelError(400, 'bad_option', f'The limit is a number of frames from 1 to {MAX_AI_LIMIT}.')
             arguments.append('--limit=' + str(int(limit)))
+        scope = options.get('scope', 'signs')
+        if action == 'ai_review' and scope not in ('signs', 'lights'):
+            raise PanelError(400, 'bad_option', 'What to review is signs or lights.')
+        if action == 'ai_review' and scope == 'lights':
+            arguments.append('--scope=lights')
         return arguments
     # [ai-reviewer] - END
 

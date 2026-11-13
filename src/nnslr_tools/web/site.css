@@ -235,6 +235,7 @@ padding:10px 16px;min-height:44px;cursor:pointer;flex:none}
 .ai-sheet .auth-error{margin:0 4px}
 /* "Review with AI": who reviews, then the two ways, as the action cards of the control pages. */
 .ai-who{margin:4px 0 12px}
+.ai-scope{margin:0 0 12px}
 .ai-choices{display:grid;gap:10px}
 .ai-choice{appearance:none;border:0;font:inherit;color:inherit;text-align:left;width:100%;display:flex;align-items:center;gap:14px;padding:14px 16px;
 border-radius:14px;background:var(--surface-2);cursor:pointer;transition:background .2s,transform .1s}

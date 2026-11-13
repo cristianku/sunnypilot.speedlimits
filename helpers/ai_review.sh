@@ -7,13 +7,15 @@
 # AI save is final: nobody approves it again, and the next import ("Import reviews", helpers/3_train.sh) puts it into
 # the training data.
 #
-# usage: helpers/ai_review.sh ROUTE [--provider=ID] [--save] [--limit=N]   (default provider: the reviewer of Settings)
+# usage: helpers/ai_review.sh ROUTE [--provider=ID] [--save] [--limit=N] [--scope=lights]
+#   (default provider: the reviewer of Settings; --scope=lights: only the frames that come to a traffic light of the
+#   map, each still reviewed whole)
 # The provider's key is read from its file by the command: it is never an argument, an environment variable or a
 # line of this log. No GPU here: the frames go to the provider's server.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ "$#" -lt 1 ]; then
-    echo "usage: helpers/ai_review.sh ROUTE [--provider=ID] [--save] [--limit=N]" >&2
+    echo "usage: helpers/ai_review.sh ROUTE [--provider=ID] [--save] [--limit=N] [--scope=lights]" >&2
     exit 2
 fi
 route="$1"

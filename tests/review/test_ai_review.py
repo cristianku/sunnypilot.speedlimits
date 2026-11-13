@@ -606,3 +606,56 @@ def test_an_unreachable_provider_fails_the_test(site, tmp_path):
         provider = fake_provider(tmp_path, fake)
     result = ai_review.test_provider(service, provider['id'])
     assert result['ok'] is False and result['message'].startswith('Cannot reach the AI server')
+
+
+# ---------- scope lights: the frames where the car comes to a traffic light of the map ----------
+
+def write_lights(root, positions, signals=((47.0010, 8.0000),)):
+    gps = root / 'derived' / 'gps' / ROUTE
+    gps.mkdir(parents=True, exist_ok=True)
+    gps.joinpath('positions.jsonl').write_text(''.join(
+        json.dumps({'frame_key': key, 'latitude': lat, 'longitude': lon, 'bearing_deg': bearing}) + '\n'
+        for key, lat, lon, bearing in positions))
+    osm = root / 'derived' / 'osm'
+    osm.mkdir(parents=True, exist_ok=True)
+    osm.joinpath('traffic_signals.jsonl').write_text(''.join(
+        json.dumps({'id': n, 'lat': lat, 'lon': lon, 'kind': 'junction'}) + '\n' for n, (lat, lon) in enumerate(signals)))
+
+
+def test_traffic_light_frames_keeps_lights_ahead_between_15_and_80_m(tmp_path):
+    # The light is 0.0010° north, about 111 m: 0/0 is too far, 0/1 sees it 56 m ahead, 0/2 drives away from it,
+    # 0/3 is 7 m from it (already under it), 0/4 heads east past it, 0/5 has no bearing.
+    write_lights(tmp_path, [('0/0', 47.0000, 8.0, 0.0), ('0/1', 47.0005, 8.0, 10.0), ('0/2', 47.0005, 8.0, 180.0),
+                            ('0/3', 47.00094, 8.0, 0.0), ('0/4', 47.0005, 8.0, 90.0), ('0/5', 47.0005, 8.0, None)])
+    assert ai_review.traffic_light_frames(tmp_path, ROUTE) == {'0/1': 56}
+
+
+def test_traffic_light_frames_needs_gps_and_the_map(tmp_path):
+    with pytest.raises(ReviewRejected) as caught:
+        ai_review.traffic_light_frames(tmp_path, ROUTE)
+    assert caught.value.reason == 'no_gps'
+    write_lights(tmp_path, [('0/1', 47.0005, 8.0, 0.0)])
+    ai_review.signals_path(tmp_path).unlink()
+    with pytest.raises(ReviewRejected) as caught:
+        ai_review.traffic_light_frames(tmp_path, ROUTE)
+    assert caught.value.reason == 'no_traffic_lights'
+
+
+def test_a_lights_run_reviews_only_the_light_frames_whole_with_the_hint(site, tmp_path):
+    service, rows = site
+    write_lights(tmp_path, [(key, 47.0005, 8.0, 0.0 if key in ('0/1', '0/4') else 180.0) for key in rows])
+    texts = []
+
+    def answer(body):
+        texts.append(frame_text(body))
+        return keep_everything(body)
+    with FakeLlm(answer) as fake:
+        provider = fake_provider(tmp_path, fake)
+        summary = ai_review.review_route(service, ROUTE, provider, save=False, scope='lights', log=lambda line: None)
+        assert summary['scope'] == 'lights' and summary['frames'] == 2
+        written = json.loads((tmp_path / summary['path']).read_text())
+        assert [frame['frame_key'] for frame in written['frames']] == ['0/1', '0/4']
+        assert all('traffic light 56 m ahead' in text for text in texts) and len(texts) == 2
+        assert ai_review.review_route(service, ROUTE, provider, save=False, log=lambda line: None)['scope'] == 'signs'
+        with pytest.raises(ReviewRejected):
+            ai_review.review_route(service, ROUTE, provider, save=False, scope='roads')

@@ -2635,6 +2635,9 @@ def build_parser() -> argparse.ArgumentParser:
                       help="save the complete suggestions as AI reviews: final, the next import puts them into "
                            "training; frames a person confirmed are never touched")
     p_ai.add_argument("--limit", type=int, help="at most this many frames")
+    p_ai.add_argument("--scope", choices=("signs", "lights"), default="signs",
+                      help="signs: every frame left (default); lights: only the frames where the car comes to a "
+                           "traffic light of the map (derived/osm/traffic_signals.jsonl), each still reviewed whole")
     p_ai.add_argument("--data-root", help="NNSLR_DATA_ROOT or <repo>/data by default")
     p_ai.set_defaults(func=_cmd_ai_review)
 
@@ -3647,7 +3650,13 @@ def _cmd_ai_review(args: argparse.Namespace) -> int:
     record = _ai_provider(root, args.provider)
     if record is None:
         return 2
-    summary = review_route(_ai_service(root), args.route, record, save=args.save, limit=args.limit)
+    from nnslr_tools.review_db import ReviewRejected
+    try:
+        summary = review_route(_ai_service(root), args.route, record, save=args.save, limit=args.limit,
+                               scope=args.scope)
+    except ReviewRejected as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(summary, indent=2, ensure_ascii=False))
     return 1 if summary["stopped"] else 0
 
