@@ -822,6 +822,22 @@ def traffic_light_frames(root, route: str) -> dict[str, int]:
     return found
 
 
+def frames_without_gps(root, route: str) -> set[str]:
+    """The frames of ``route`` with no GPS position (an underground garage, a tunnel before the first fix): the AI
+    does not review them (Cristian, 13 Nov 2026). Empty when the drive has no positions file yet (nnslr gps)."""
+    positions = Path(root) / 'derived' / 'gps' / route / 'positions.jsonl'
+    if not positions.is_file():
+        return set()
+    found = set()
+    with positions.open(encoding='utf-8') as handle:
+        for line in handle:
+            item = json.loads(line)
+            if isinstance(item.get('frame_key'), str) and not (_number(item.get('latitude'))
+                                                               and _number(item.get('longitude'))):
+                found.add(item['frame_key'])
+    return found
+
+
 def _unreviewed(service, route: str, limit: int | None) -> tuple[str, list[str]]:
     keys = []
     cursor = None
@@ -849,7 +865,8 @@ def review_route(service, route: str, provider: dict, *, save: bool, limit: int 
     """Every frame of a route nobody confirmed, in timeline order, up to ``limit``: suggested (dry run) or
     saved as AI reviews. Writes the suggestions to ai_reviews/<route>/<time>-<provider>.json. Saving needs a
     provider that passed its last Test (llm_providers.check_can_review): its saves are final. ``scope`` lights: only
-    the frames where the car comes to a traffic light of the map (traffic_light_frames), each still reviewed whole."""
+    the frames where the car comes to a traffic light of the map (traffic_light_frames), each still reviewed whole.
+    Frames without a GPS position (frames_without_gps) are left out either way."""
     from nnslr_tools.progress import report
     if scope not in SCOPES:
         raise ReviewRejected(400, 'invalid_scope', 'scope is signs or lights.')
@@ -861,11 +878,17 @@ def review_route(service, route: str, provider: dict, *, save: bool, limit: int 
     if scope == 'lights':
         run_id, keys = _unreviewed(service, route, None)
         keys = [key for key in keys if key in lights]
-        if limit is not None:
-            keys = keys[:limit]
         log(f'{len(keys)} frames left to review come to a traffic light of the map')
     else:
-        run_id, keys = _unreviewed(service, route, limit)
+        run_id, keys = _unreviewed(service, route, None)
+    blind = frames_without_gps(service.root, route)
+    if blind:
+        before = len(keys)
+        keys = [key for key in keys if key not in blind]
+        if before > len(keys):
+            log(f'{before - len(keys)} frames without GPS left out (a garage or a tunnel)')
+    if limit is not None:
+        keys = keys[:limit]
     name = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + provider['id'] + '.json'
     path = runs_dir(service.root, route) / name
     reviewer = 'ai/' + llm_providers.reviewer_name(provider)

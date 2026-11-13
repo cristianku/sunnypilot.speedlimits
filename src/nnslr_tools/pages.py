@@ -580,7 +580,7 @@ def render_index(summaries: list[dict], database: Path, nonce: str = '', *, ai_r
     """The route list, grouped: in progress, to start, done. ai_reviewer: an AI reviewer is chosen in Settings
     (each drive left to review gets "Review with AI"); without one, a single link to set it up."""
     main = ['<main class="page">',
-            '<header class="section-head"><h1 class="head-title">Data</h1>' + sub_nav('review') + '</header>']
+            '<header class="section-head"><h1 class="sr-only">Data</h1>' + sub_nav('review') + '</header>']
     if not ai_reviewer and any(s['confirmed_count'] < s['frame_count'] for s in summaries):
         main.append('<p class="ai-setup">An AI can review the drives for you. '
                     '<a href="/account#ai-reviewer">Set up AI review ›</a></p>')

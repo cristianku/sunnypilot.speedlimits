@@ -660,6 +660,20 @@ def test_a_lights_run_reviews_only_the_light_frames_whole_with_the_hint(site, tm
             ai_review.review_route(service, ROUTE, provider, save=False, scope='roads')
 
 
+def test_frames_without_gps_are_never_reviewed(site, tmp_path):
+    # An underground garage: 0/0 and 0/1 have no position; the limit counts only the frames the AI reviews.
+    service, rows = site
+    write_lights(tmp_path, [(key, None if key in ('0/0', '0/1') else 47.0005, 8.0, 0.0) for key in rows])
+    assert ai_review.frames_without_gps(tmp_path, ROUTE) == {'0/0', '0/1'}
+    lines = []
+    with FakeLlm(keep_everything) as fake:
+        provider = fake_provider(tmp_path, fake)
+        summary = ai_review.review_route(service, ROUTE, provider, save=False, limit=2, log=lines.append)
+    written = json.loads((tmp_path / summary['path']).read_text())
+    assert [frame['frame_key'] for frame in written['frames']] == ['0/2', '0/3']
+    assert lines[0] == '2 frames without GPS left out (a garage or a tunnel)'
+
+
 def test_a_server_that_drops_is_waited_for_then_the_run_stops(site, tmp_path):
     service, rows = site
     lines, waits = [], []

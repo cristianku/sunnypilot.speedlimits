@@ -193,6 +193,7 @@ calc(56px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0
    under it as a segmented control. */
 .section-head{display:flex;flex-direction:column;align-items:flex-start;gap:12px;margin:0 0 -4px}
 .page>.section-head{order:-4}
+.section-head:not(:has(.subnav)){display:contents}
 .head-title{margin:0;font-size:32px;font-weight:750;letter-spacing:-.025em;line-height:1.1;color:var(--fg)}
 .subnav{display:flex;gap:2px;padding:2px;background:var(--seg-bg);border-radius:10px;width:min(100%,420px)}
 .subnav a{flex:1 1 0;display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:4px 12px;border-radius:8px;

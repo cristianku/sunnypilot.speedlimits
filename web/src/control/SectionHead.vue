@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// The head of a page: its section's title, large as on iOS, and under it the section's pages as a segmented control
+// The head of a page: its section's title for screen readers only (the top bar already shows the section, 13 Nov 2026), and the section's pages as a segmented control
 // (Data: Drives, Review, Speed review, Sign distance, Training dataset, Reviewers; Models: Versions, Drive, Results, Publish), the page shown marked and a
 // dot on a page with work running; on a phone the control scrolls sideways, the page shown brought into view. pages.sub_nav
 // draws the same on the route list.
@@ -23,7 +23,7 @@ watch(() => props.tab, () => void nextTick(reveal));
 
 <template>
   <header class="section-head">
-    <h1 class="head-title">{{ section.title }}</h1>
+    <h1 class="sr-only">{{ section.title }}</h1>
     <nav v-if="section.pages.length" ref="nav" class="subnav" :aria-label="section.title">
       <a v-for="page in section.pages" :key="page.key" :href="page.href" :aria-current="page.key === tab ? 'page' : undefined"
          :data-busy="busyPaths.has(page.href) ? 'true' : undefined">{{ page.label }}</a>
