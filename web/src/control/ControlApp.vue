@@ -59,7 +59,8 @@ usePoll(async () => {
     recordMachine(answer.system);
     if (answer.running) {
       markBusy(busyTabs(answer.running.jobs, answer.running.activities));
-      aiLive.value = answer.running.ai_live ?? null;
+      // A server from before ai_live in this answer leaves it to the full status.
+      if (answer.running.ai_live !== undefined) aiLive.value = answer.running.ai_live;
     }
     showConnection(null);
   } catch (error) {
