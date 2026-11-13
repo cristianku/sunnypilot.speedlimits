@@ -1015,3 +1015,12 @@ def test_without_a_card_here_the_panel_shows_the_cards_of_ct_131(panel, checkout
         [{'job': '20261113-190000-prepare', 'label': 'Prepare new drives'}], []]
     assert [card['free'] for card in remote['cards']] == [False, True]
     assert panel.system()['gpus'] == []  # the cards here stay none: the runner, not the panel, picks CT 131's
+
+
+def test_the_runner_starts_the_job_without_keeping_its_ssh_open():
+    """The shell runs an "A && B &" list in a subshell that keeps ssh's pipes open until B ends: the start would return
+    only when the job ends, and the panel would get no log, no progress and no Stop until then (13 Nov 2026)."""
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[2] / 'scripts' / 'gpu_remote.sh').read_text(encoding='utf-8')
+    start = next(line for line in text.splitlines() if line.startswith('on_ct "cd \'$JOBDIR\''))
+    assert '|| exit 1; setsid ' in start and '&& setsid' not in start and start.rstrip(' \\').endswith('&"')

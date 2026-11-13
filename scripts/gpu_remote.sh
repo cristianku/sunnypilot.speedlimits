@@ -141,8 +141,10 @@ echo "== on CT 131: \$(hostname), card $card, nnslr_tools from \$(.venv-gpu/bin/
 nice -n 10 "\${cmd[@]}"
 EOF
 # The wrapper keeps a TERM of the whole group for itself (a handler, not an ignore: the job still gets it) to write the
-# code.
-on_ct "cd '$JOBDIR' && setsid bash -c 'trap : TERM INT HUP; echo \$\$ > pgid; bash run.sh > job.log 2>&1 < /dev/null; echo \$? > exit.code' > /dev/null 2>&1 < /dev/null &" \
+# code. "cd ... || exit 1; setsid ... &" and never "cd ... && setsid ... &": the shell runs an "A && B &" list in a
+# subshell that keeps ssh's pipes open while B runs, so this ssh would return only when the job ends, and until then
+# no log, no progress and no Stop would reach the panel (the brain of 13 Nov 2026, 23:09).
+on_ct "cd '$JOBDIR' || exit 1; setsid bash -c 'trap : TERM INT HUP; echo \$\$ > pgid; bash run.sh > job.log 2>&1 < /dev/null; echo \$? > exit.code' > /dev/null 2>&1 < /dev/null &" \
     || { log "the job could not be started on CT 131"; exit $UNAVAILABLE; }
 for _ in $(seq 1 20); do on_ct "test -s '$JOBDIR/pgid'" && break; sleep 0.5; done
 
