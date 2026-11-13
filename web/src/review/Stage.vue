@@ -146,7 +146,8 @@ const inset = computed(() => {
       <rect id="draft" :visibility="state.draft ? 'visible' : 'hidden'" :x="state.draft?.x" :y="state.draft?.y"
             :width="state.draft?.width" :height="state.draft?.height"></rect>
     </svg>
-    <ZoomInset v-if="inset && selectedBox" :style="inset" :row="row" :detection="selectedBox"/>
+    <ZoomInset v-if="inset && selectedBox" :style="inset" :row="row" :detection="selectedBox"
+               :index="state.selected"/>
     <div class="stage-hint" id="stageHint" :hidden="!state.drawing"><span>Drag on the image to draw the box{{ state.drawKind ? ': ' + (signKindOf(state.drawKind)?.chip ?? '') : '' }} · Shift: a square</span></div>
     <!-- After A: the boxes carried, not saved yet; A again saves and goes on (carry.ts). -->
     <div class="stage-hint carry-hint" id="carryHint" :hidden="state.drawing || carried !== row.frame_key"><span>Press A to confirm</span></div>

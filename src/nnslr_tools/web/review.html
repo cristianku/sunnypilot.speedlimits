@@ -509,6 +509,7 @@ details[open] summary { border-bottom: 1px solid var(--line); margin-bottom: 10p
 /* Inside the photo, in its top corner on the other side from the box (Stage.vue places and sizes it). */
 .zoom-inset { position: absolute; z-index: 2; border-color: rgba(255, 255, 255, 0.7); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45); }
 .zoom-inset #zoom { height: 100%; }
+.zoom-title { position: absolute; left: 8px; top: 6px; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; font-size: 13px; font-weight: 600; color: #ffd60a; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
 /* In the zoom's top right corner, over the picture (the zoom keeps the box out of its way, BoxEditor.vue). On a screen at
    2x each pixel of the square is one the classifier gets: 160 in 80 px; the grid, 320 in 160 px. It takes no pointer,
    only its caption (the tooltip) and the grid button do. */

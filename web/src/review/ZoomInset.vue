@@ -5,13 +5,17 @@
 import {computed, ref, useTemplateRef, watchEffect} from 'vue';
 import ClassifierView from './ClassifierView.vue';
 import {coarsePointer} from './dom';
-import {handlesOf, sceneScale, zoomView, type Rect} from './overlay';
+import {boxTitle, handlesOf, sceneScale, WET_TAG, zoomView, type Rect} from './overlay';
 import {finishDrag, onPointerDown, onPointerMove, onTouchStart} from './pointer';
 import {state} from './store';
 import type {Detection, FrameRow} from './types';
 import {useScreenSize} from './use-layout';
 
-const props = defineProps<{row: FrameRow; detection: Detection}>();
+const props = defineProps<{row: FrameRow; detection: Detection; index: number}>();
+
+// The box's label as on the photo ("6 · light amber · OURS"), in the zoom's top left corner.
+const title = computed(() => boxTitle(props.detection, props.index)
+  + (props.detection.supplementary_panel === 'wet' ? WET_TAG : ''));
 
 const zoom = useTemplateRef<SVGSVGElement>('zoom');
 const zoomSize = useScreenSize(zoom);
@@ -73,6 +77,7 @@ const resizing = computed(() => (state.drag?.kind === 'resize' || state.drag?.ki
               :data-corner="handle.corner"/>
       </g>
     </svg>
+    <div class="zoom-title">{{ title }}</div>
     <ClassifierView ref="net" :row="row" :box="detection.bbox_xyxy"/>
   </div>
 </template>

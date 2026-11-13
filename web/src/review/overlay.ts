@@ -125,6 +125,13 @@ export function handlesOf(b: Box, size: number, hit: number, outside: boolean): 
   });
 }
 
+/** The label of box i on the photo and on its zoom: its number, the sign and, when said, the road: our road in
+ * capitals after a road icon ("⟋⟍ 2 · 50 · OURS"), another in words. */
+export function boxTitle(d: Detection, i: number): string {
+  const road = d.applicability === 'own_road' ? ' · OURS' : d.applicability === 'other_road' ? ' · another' : '';
+  return (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
+}
+
 /** Where a label starts: at the left of its box, moved left when it would run off the right edge of the photo. */
 function labelX(left: number, width: number, imageWidth: number, k: number): number {
   return Math.max(0, Math.min(left, imageWidth - width - 4 / k));
@@ -154,10 +161,8 @@ export function drawStage(detections: readonly Detection[], selected: number, hi
     if (d.model_label) cls += ' proposal';
     if (d.check_position) cls += ' check';
     if (isSelected) cls += ' selected';
-    // The road too, when said: our road in capitals after a road icon ("⟋⟍ 2 · 50 · OURS"), another in words.
     const ours = d.applicability === 'own_road';
-    const road = ours ? ' · OURS' : d.applicability === 'other_road' ? ' · another' : '';
-    const text = (i + 1) + ' · ' + shortName(d) + road + (d.check_position ? ' · check' : '');
+    const text = boxTitle(d, i);
     const wet = d.supplementary_panel === 'wet';
     const icon = ours ? fontSize * (ROAD_ICON + 0.4) : 0;
     const width = labelWidth(text + (wet ? WET_TAG : ''), fontSize) + icon;
