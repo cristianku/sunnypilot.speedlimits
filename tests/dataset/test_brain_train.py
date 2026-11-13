@@ -1212,8 +1212,8 @@ def test_a_brain_of_today_going_on_from_the_one_of_11_nov_drops_its_sign_distanc
     assert 'sign_boxes' in LEARNED_INPUTS and 'sign_distance' not in LEARNED_INPUTS
     new = tiny(torch, groups=LEARNED_INPUTS, road_kinds=1)
     start = brain_start(torch, new, path, source_of(LEARNED_INPUTS))
-    assert start['fresh'] == [] and start['inputs_left_out'] == ['sign_distance']
-    assert start['inputs_added'] == ['road_signs', 'sign_boxes', 'light_boxes']
+    assert start['fresh'] == [] and start['inputs_left_out'] == ['hour', 'country', 'sign_distance']
+    assert start['inputs_added'] == ['road_signs', 'sign_boxes', 'light_boxes', 'country_iso', 'hour_tz']
     drive = fake_drive(['train'] * T)
     for name in ('signs', 'lead', 'motion', 'road_signs', 'sign_boxes'):
         drive['inputs'][name][:] = numpy_random(drive['inputs'][name].shape)

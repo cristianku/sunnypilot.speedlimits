@@ -22,11 +22,18 @@ domain, 3 decimals: about 100 m), each with its continent. It places the photos 
 outside Europe (nnslr_tools.gps.world_place, nnslr mapillary-locations); Europe keeps the finer borders above.
 
   python scripts/make_country_borders.py --world [<file.geojson>]
+
+--car [<clone>] writes the comma's own borders, openpilot/sunnypilot/speed_limits/country-borders.json.gz in the sunnypilot
+clone (default $NNSLR_SUNNYPILOT_CLONE or /root/sunnypilot), from the two files above, as gps.frame_country takes them:
+the European countries first, then (tier 1, asked only where Europe has no country) every country outside Europe.
+
+  python scripts/make_country_borders.py --car [<clone>]
 """
 from __future__ import annotations
 
 import gzip
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -159,7 +166,24 @@ def world(arguments: list[str]) -> int:
     return 0
 
 
+def car(arguments: list[str]) -> int:
+    clone = Path(arguments[0] if arguments else os.environ.get('NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'))
+    output = clone / 'openpilot/sunnypilot/speed_limits/country-borders.json.gz'
+    europe_file = json.loads(gzip.decompress(OUTPUT.read_bytes()))
+    world_file = json.loads(gzip.decompress(WORLD_OUTPUT.read_bytes()))
+    outside = [dict({key: value for key, value in country.items() if key != 'continent'}, tier=1)
+               for country in world_file['countries'] if country['continent'] != 'europe']
+    payload = {'source': [europe_file['source'], world_file['source']], 'license': 'Natural Earth, public domain',
+               'tiers': ['Europe, 1:10m', 'outside Europe, 1:50m: only where Europe has no country'],
+               'countries': europe_file['countries'] + outside}
+    output.write_bytes(gzip.compress(json.dumps(payload, separators=(',', ':')).encode(), mtime=0))
+    print(f'{len(europe_file["countries"])} + {len(outside)} countries -> {output} ({output.stat().st_size // 1024} KiB)')
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == '--car':
+        return car(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == '--gisco':
         return gisco(sys.argv[2:])
     if len(sys.argv) > 1 and sys.argv[1] == '--world':

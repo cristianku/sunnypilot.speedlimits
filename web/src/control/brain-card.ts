@@ -28,9 +28,9 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'plate', size: 4, use: 'car', what: 'the plate under that number: none, time, other, unknown'},
   {name: 'plate_hours', size: 5, use: 'car', what: 'the hours written on that plate, from and to'},
   {name: 'plate_wet', size: 1, use: 'car', what: 'that plate says “wet road only”'},
-  {name: 'hour', size: 3, use: 'car', what: 'the local hour, on a circle'},
+  {name: 'hour_tz', size: 3, use: 'car', what: 'the local hour, on a circle, from the real time zones of the whole world (the zone of the country nearest to the last fix)'},
   {name: 'lead', size: 3, use: 'car', what: 'metres and speed of the car ahead (radarState.leadOne)'},
-  {name: 'country', size: 7, use: 'car', what: 'the last country of the GPS: CH, DE, FR, IT, AT, US, none'},
+  {name: 'country_iso', size: 251, use: 'car', what: 'the last country of the GPS, any of the world: its ISO code among 250, or none'},
   {name: 'sign_boxes', size: 50, use: 'car', what: 'where the signs of the last frame read are in the picture and how big, as SignNet’s '
     + 'boxes say, with no metres worked out: the picture in 8 columns and, for the speed signs and for the other signs, the tallest '
     + 'box of each column (its width, its height and the height of its centre, over the frame’s); then whether a sign was ever seen '
@@ -47,6 +47,8 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   {name: 'pedals', size: 3, use: 'never', what: 'gas and brake pressed in the last second (carState)'},
   {name: 'speed', size: 2, use: 'never', what: 'the car’s own speed, vEgo'},
   {name: 'engaged', size: 7, use: 'never', what: 'openpilot on or off (selfdriveState.enabled)'},
+  {name: 'hour', size: 3, use: 'never', what: 'the local hour of CH, DE, FR, IT, AT only: the brains until 13 Nov 2026 (hour_tz since)'},
+  {name: 'country', size: 7, use: 'never', what: 'the last country of the GPS among CH, DE, FR, IT, AT, US: the brains until 13 Nov 2026 (country_iso since)'},
   {name: 'sign_distance', size: 2, use: 'never', what: 'the metres to the round sign ahead (vision.SignDistance), worked out from its '
     + 'box and vEgo: only a brain trained until 11 Nov 2026 gets them, a brain of today gets the boxes (sign_boxes)'},
 ];

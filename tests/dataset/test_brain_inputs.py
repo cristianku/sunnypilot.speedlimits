@@ -30,7 +30,7 @@ def test_the_file_of_the_car_needs_nothing_of_openpilot_and_reads_no_map():
     tree = ast.parse(BRAIN_INPUTS_PATH.read_text(encoding='utf-8'))
     imported = {name.name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for name in node.names}
     imported |= {node.module.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert imported <= {'datetime', 'math', 'numpy'}
+    assert imported <= {'bisect', 'datetime', 'gzip', 'json', 'math', 'numpy', 'pathlib'}
     code = ''.join(ast.unparse(node) for node in tree.body[1:])
     assert 'liveMapData' not in code and 'roadName' not in code
 
@@ -197,7 +197,8 @@ def test_a_group_has_the_size_it_says():
             'speed': brain.speed_row(20.0), 'plate_hours': signs.plate_hours_row(), 'plate_wet': signs.plate_wet_row(),
             'engaged': brain.EngagedInputs().row(10.0), 'sign_distance': brain.sign_distance_row(80.0),
             'motion': brain.MotionInputs().row(10.0), 'road_signs': signs.road_signs_row(10.0),
-            'sign_boxes': sign_boxes().row(10.0), 'light_boxes': light_boxes().row(10.0)}
+            'sign_boxes': sign_boxes().row(10.0), 'light_boxes': light_boxes().row(10.0),
+            'country_iso': brain.country_iso_row('PL'), 'hour_tz': brain.hour_row(12.0, 'hour_tz')}
     assert {name: len(row) for name, row in rows.items()} == sizes
     assert brain.pack_inputs(rows, tuple(sizes)).shape == (sum(sizes.values()),)
 
@@ -609,3 +610,81 @@ def test_the_boxes_of_a_real_drive_are_on_the_car_what_they_are_in_the_training(
     assert numpy.array_equal(found, as_the_car(record['readings'], record['boxes'], times))
     with_a_box = (found[:, :-2] != 0).any(axis=1)
     assert with_a_box.sum() > 100 and found[:, :-2].min() >= 0 and found[:, :-2].max() <= 1
+
+
+# -- the whole world: country_iso, hour_tz, the car's borders (#81) ---------------------------------------------------------
+def test_every_country_of_the_world_has_its_own_place_and_none_the_last():
+    brain, _ = _car()
+    assert len(brain.COUNTRY_CODES) == len(set(brain.COUNTRY_CODES)) == 250
+    assert brain.INPUT_SIZES['country_iso'] == 251
+    for code in ('PL', 'US', 'JP', 'BR', 'CH'):
+        row = brain.country_iso_row(code)
+        assert row.sum() == 1 and row[brain.COUNTRY_CODES.index(code)] == 1
+    assert brain.country_iso_row(None)[-1] == 1 and brain.country_iso_row('ZZ')[-1] == 1
+
+
+def test_the_hour_of_the_time_zones_is_the_old_hour_in_its_five_countries():
+    """The brains until 13 Nov 2026 learned the hour of WINTER_UTC_HOURS: hour_tz gives the same there, every half hour of
+    two years, summer time included."""
+    brain, _ = _car()
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()
+    for country, position in (('CH', None), ('FR', None), ('IT', None), ('AT', None), ('DE', (48.14, 11.58))):
+        for moment in range(int(start), int(start) + 2 * 365 * 86400, 1800):
+            assert brain.zone_hour(moment, country, position) == pytest.approx(brain.local_hour(moment, country))
+
+
+@pytest.mark.parametrize('country, position, zone', [
+    ('PL', None, 'Europe/Warsaw'), ('JP', None, 'Asia/Tokyo'), ('IN', None, 'Asia/Kolkata'), ('XK', None, 'Europe/Belgrade'),
+    ('US', (40.71, -74.0), 'America/New_York'), ('US', (34.05, -118.24), 'America/Los_Angeles'),
+    ('US', (33.45, -112.07), 'America/Phoenix'), ('AU', (-33.87, 151.21), 'Australia/Sydney'),
+    ('BR', (-23.55, -46.63), 'America/Sao_Paulo'), ('CA', (43.65, -79.38), 'America/Toronto')])
+def test_the_hour_anywhere_is_that_of_its_time_zone_summer_and_winter(country, position, zone):
+    brain, _ = _car()
+    for moment in (datetime(2026, 1, 15, 12, 7, tzinfo=timezone.utc), datetime(2026, 7, 15, 23, 50, tzinfo=timezone.utc),
+                   datetime(2031, 3, 30, 3, 0, tzinfo=timezone.utc)):
+        local = moment.astimezone(ZoneInfo(zone))
+        assert brain.zone_hour(moment.timestamp(), country, position) == pytest.approx(local.hour + local.minute / 60)
+
+
+def test_no_hour_without_a_clock_a_country_or_in_a_country_of_several_zones_without_a_place():
+    brain, _ = _car()
+    moment = datetime(2026, 7, 1, tzinfo=timezone.utc).timestamp()
+    assert brain.zone_hour(None, 'PL') is None and brain.zone_hour(moment, None) is None
+    assert brain.zone_hour(moment, 'US') is None and brain.zone_hour(moment, 'US', (40.71, -74.0)) is not None
+    assert not brain.hour_row(None, 'hour_tz').any() and brain.hour_row(12.0, 'hour_tz')[2] == 1
+
+
+def test_the_training_takes_the_country_and_hour_of_the_last_fix_as_the_car_does():
+    import numpy
+    from nnslr_tools.brain_targets import positions_so_far
+    gps = [[100, 40.71, -74.0, 1_782_900_000_000], [300, 34.05, -118.24, 1_782_900_000_200]]
+    assert positions_so_far(gps, numpy.array([50, 100, 299, 300, 900])) == [
+        None, (40.71, -74.0), (40.71, -74.0), (34.05, -118.24), (34.05, -118.24)]
+
+
+def _borders():
+    import importlib.util
+    from nnslr_tools.brain_targets import BRAIN_INPUTS_PATH
+    spec = importlib.util.spec_from_file_location('car_country', BRAIN_INPUTS_PATH.with_name('country.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.OfflineBorders.load()
+
+
+@pytest.mark.parametrize('place, latitude, longitude, code', [
+    ('Zurich', 47.37, 8.54, 'CH'), ('Warsaw', 52.23, 21.01, 'PL'), ('Kansas', 38.5, -98.0, 'US'),
+    ('Toronto', 43.65, -79.38, 'CA'), ('Tokyo', 35.68, 139.69, 'JP'), ('Sydney', -33.87, 151.21, 'AU'),
+    ('Sao Paulo', -23.55, -46.63, 'BR'), ('Ankara', 39.93, 32.85, 'TR'), ('Novosibirsk', 55.03, 82.92, 'RU'),
+    ('Atlantic', 40.0, -40.0, None)])
+def test_the_comma_knows_the_country_anywhere_in_the_world(place, latitude, longitude, code):
+    """Until 13 Nov 2026 the car's borders were Europe's only: in the US it knew no country, so no sign unit."""
+    assert _borders().country_at(latitude, longitude, 200) == code
+
+
+def test_the_car_and_the_training_give_the_same_country():
+    from nnslr_tools.gps import frame_country
+    borders = _borders()
+    for latitude, longitude in ((47.37, 8.54), (52.23, 21.01), (38.5, -98.0), (35.68, 139.69), (39.93, 32.85),
+                                (-33.87, 151.21), (55.75, 37.62), (30.04, 31.24), (19.43, -99.13)):
+        assert borders.country_at(latitude, longitude, 0) == frame_country(latitude, longitude, None)
+

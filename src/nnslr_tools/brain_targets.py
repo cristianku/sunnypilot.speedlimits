@@ -96,7 +96,7 @@ The inputs (drive_inputs), one group each so that a comparison can leave one out
 before the frame:
 
 - signs, plate, plate_hours, plate_wet, hour, lead, country, pedals, speed, engaged, sign_distance, motion, road_signs,
-  sign_boxes, light_boxes: what the car has,
+  sign_boxes, light_boxes, country_iso, hour_tz: what the car has,
   described in sunnypilot/speed_limits/brain_inputs.py. A drive not read yet has its signs unknown throughout. The hour and the country come from the last fix at or before the frame
   (merged['gps']), the country through the borders (gps.py): a frame never takes the country of a later fix. The lead comes
   from the series of the logs, which leave out a change under 2 m or 2 km/h (drive_extract): a little coarser than the car's.
@@ -129,6 +129,10 @@ speed far from the answer. The measure's own speed is the dashboard's (drive_log
 sign_distance is made and no longer learned either (LEFT_OUT since 12 Nov 2026, his rule): no metres worked out by a
 formula go into the brain, which gets the boxes of the signs as they are (sign_boxes). The brain of 11 Nov 2026 took it:
 its checkpoint says so, and its replay and its export still pack it.
+
+country and hour are made and no longer learned either (LEFT_OUT since 13 Nov 2026, #81): they knew only the countries of
+his drives (6, and 5 for the hour). country_iso and hour_tz take the whole world: every ISO code, and the local hour from
+the real time zones, the zone of the country nearest to the last fix. The brains until 13 Nov took the old two.
 
 The sequences (drive_chunks, learning_pieces): the whole drive in order, state carried from piece to piece, so that
 approach, crossing and exit are one sequence and the network sees only the past, as on the car. The pieces only bound the
@@ -250,7 +254,8 @@ INPUT_SIZES = BRAIN_INPUTS.INPUT_SIZES
 # and contract, and Models no longer lets one that takes the driver be chosen (model_roles.DRIVER_GROUPS).
 # sign_distance (vision.SignDistance's metres, 12 Nov 2026): no metres worked out by a formula go into the brain, his call;
 # it gets the boxes of the signs instead (sign_boxes). The brain of 11 Nov took it and can still be chosen in Models.
-LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance')
+# country and hour (13 Nov 2026, #81): only the countries of his drives; country_iso and hour_tz take the whole world.
+LEFT_OUT = ('engaged', 'pedals', 'speed', 'sign_distance', 'country', 'hour')
 pack_inputs = BRAIN_INPUTS.pack_inputs
 
 
@@ -773,6 +778,16 @@ def countries_so_far(gps: list, ns: np.ndarray, root: Path | None) -> list[str |
     return found
 
 
+def positions_so_far(gps: list, ns: np.ndarray) -> list[tuple[float, float] | None]:
+    """Latitude and longitude at each time as the car has them: those of the last fix at or before it [t_ns, latitude,
+    longitude, unix_ms], none before the first (the time zone of hour_tz)."""
+    times, found = [row[0] for row in gps], []
+    for t in ns:
+        at = bisect.bisect_right(times, int(t)) - 1
+        found.append((gps[at][1], gps[at][2]) if at >= 0 and gps[at][1] is not None and gps[at][2] is not None else None)
+    return found
+
+
 def unix_at(gps: list, ns: np.ndarray) -> list[float | None]:
     """The GPS clock at each time, seconds: its last fix at or before it [t_ns, latitude, longitude, unix_ms] and the time
     since. None before the first."""
@@ -798,8 +813,12 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
     speed = [BRAIN_INPUTS.speed_row(None if kph is None else kph / 3.6) for kph in _last_at(series.get('v_ego') or [], ns)]
     countries = countries_so_far(gps, ns, root)
     country = np.array([BRAIN_INPUTS.country_row(name) for name in countries], dtype=np.float32)
-    hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(unix, name))
-                     for unix, name in zip(unix_at(gps, ns), countries)], dtype=np.float32)
+    unix = unix_at(gps, ns)
+    hour = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.local_hour(moment, name))
+                     for moment, name in zip(unix, countries)], dtype=np.float32)
+    hour_tz = np.array([BRAIN_INPUTS.hour_row(BRAIN_INPUTS.zone_hour(moment, name, position), 'hour_tz')
+                        for moment, name, position in zip(unix, countries, positions_so_far(gps, ns))], dtype=np.float32)
+    country_iso = np.array([BRAIN_INPUTS.country_iso_row(name) for name in countries], dtype=np.float32)
     signs, plate, plate_hours, plate_wet = sign_inputs(seconds, readings)
     return {'signs': signs, 'plate': plate, 'plate_hours': plate_hours, 'plate_wet': plate_wet,
             'hour': hour.reshape(len(ns), INPUT_SIZES['hour']),
@@ -809,7 +828,9 @@ def drive_inputs(frames: list[dict], ns: np.ndarray, merged: dict, readings: lis
             'engaged': engaged_inputs(series, ns), 'sign_distance': sign_distance_inputs(ns, merged, readings, boxes),
             'motion': motion_inputs(series, ns), 'road_signs': road_sign_inputs(seconds, readings),
             'sign_boxes': box_inputs(seconds, readings, boxes),
-            'light_boxes': box_inputs(seconds, readings, boxes, 'light_boxes')}
+            'light_boxes': box_inputs(seconds, readings, boxes, 'light_boxes'),
+            'country_iso': country_iso.reshape(len(ns), INPUT_SIZES['country_iso']),
+            'hour_tz': hour_tz.reshape(len(ns), INPUT_SIZES['hour_tz'])}
 
 
 def inputs_sha256() -> str:
