@@ -790,8 +790,23 @@ def _drives_list(drives: DriveReviewStore, counts: dict) -> list[dict]:
         span = _span_of(drives, drive['route'])
         rows.append({**drive, **counts.get(drive['route'], {'blocks': 0, 'works': 0, 'road': 0}),
                      'total_s': round((span[1] - span[0]) / NS, 1) if span else 0,
-                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route']))})
+                     'dashcam': None if span is None else dashcam_drive(drives.summary(drive['route'])),
+                     'car': car_name(drives.summary(drive['route']))})
     return rows
+
+
+def car_name(summary: dict | None) -> str | None:
+    """The car of a drive in words, from the fingerprint its logs gave ('PSA_PEUGEOT_3008' -> 'Peugeot 3008',
+    'VOLKSWAGEN_GOLF_MK7' -> 'Volkswagen Golf Mk7'): what the page filters the drives by. None before its logs are read."""
+    car = ((summary or {}).get('meta') or {}).get('car') or {}
+    fingerprint = str(car.get('fingerprint') or '').strip()
+    if not fingerprint:
+        return None
+    words = fingerprint.split('_')
+    if len(words) > 1 and words[0] == 'PSA':  # the group, before the brand
+        words = words[1:]
+    return ' '.join(word if any(ch.isdigit() for ch in word) and not word.startswith('MK') else word.capitalize()
+                    for word in words)
 
 
 def frame_jpeg(root: Path, route: str, segment: int, decoded: int) -> bytes:

@@ -26,6 +26,10 @@ const GROUPS: readonly {key: Group; label: string}[] = [{key: 'todo', label: 'To
 /** The group the list shows (?show=<group> in the address, kept while the page is open); null: every drive. */
 const asked = new URLSearchParams(location.search).get('show');
 let showing: Group | null = GROUPS.some((group) => group.key === asked) ? asked as Group : null;
+/** The car whose drives the list shows (?car=<name> in the address, kept while the page is open); '': every car. */
+let carShowing = new URLSearchParams(location.search).get('car') ?? '';
+/** A drive whose logs are not read yet has no car. */
+const NO_CAR = 'Car unknown';
 </script>
 
 <script setup lang="ts">
@@ -52,6 +56,7 @@ import AiRouteSheet from '../components/AiRouteSheet.vue';
 import Icon from '../components/Icon.vue';
 import ReadLogsCard from './ReadLogsCard.vue';
 import SectionHead from './SectionHead.vue';
+import Segmented from './Segmented.vue';
 import SpeedReviewDrive from './SpeedReviewDrive.vue';
 import {tabDrive} from './tabs';
 
@@ -126,7 +131,28 @@ function pick(group: Group): void {
   else url.searchParams.delete('show');
   history.replaceState(history.state, '', url.pathname + url.search + url.hash);
 }
-const withSigns = computed(() => rows.value.flatMap((row) => row.signs ? [row.signs] : []));
+/** The car of every drive read (speed_review.car_name), sunnypilot on or off. */
+const carOf = computed(() => new Map((drives.value ?? []).map((drive) => [drive.route, drive.car ?? NO_CAR])));
+const rowCar = (row: Row): string => carOf.value.get(row.route) ?? NO_CAR;
+/** The choice of the car over the list: every car, then each with its drives, the most first; only with two or more. */
+const cars = computed(() => {
+  const count = new Map<string, number>();
+  for (const row of rows.value) count.set(rowCar(row), (count.get(rowCar(row)) ?? 0) + 1);
+  const each = [...count].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return each.length < 2 ? [] : [{key: '', label: 'All cars'}, ...each.map(([car, n]) => ({key: car, label: car + ' · ' + n}))];
+});
+const car = ref(carShowing);
+watch(car, (now) => {
+  carShowing = now;
+  const url = new URL(location.href);
+  if (now) url.searchParams.set('car', now);
+  else url.searchParams.delete('car');
+  history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+});
+/** The rows of the car chosen: the banner counts and the groups are theirs. A car no longer there shows every drive. */
+const carRows = computed(() => !car.value || !cars.value.some((item) => item.key === car.value) ? rows.value
+  : rows.value.filter((row) => rowCar(row) === car.value));
+const withSigns = computed(() => carRows.value.flatMap((row) => row.signs ? [row.signs] : []));
 /** The banner: the frames confirmed of every drive, by you and by the AI, and how many drives each group has. */
 const glance = computed(() => {
   const items = withSigns.value;
@@ -144,8 +170,8 @@ const glance = computed(() => {
     people: frames ? (confirmed - ai) * 100 / frames : 0, aiShare: frames ? ai * 100 / frames : 0, drives: items.length, tiles};
 });
 /** The rows of the group shown (a drive without signs only in every drive). */
-const shownRows = computed(() => show.value === null ? rows.value
-  : rows.value.filter((row) => row.signs !== null && inGroup(row.signs, show.value!)));
+const shownRows = computed(() => show.value === null ? carRows.value
+  : carRows.value.filter((row) => row.signs !== null && inGroup(row.signs, show.value!)));
 const titleOf = (row: Row): string => row.speed?.title ?? row.signs?.drive?.title ?? 'Places unknown';
 const whenOf = (row: Row): string => {
   const when = row.speed?.when ? (row.speed.when_certain ? '' : '≈ ') + row.speed.when : row.signs?.drive?.when ?? '';
@@ -215,8 +241,10 @@ onBeforeUnmount(() => window.clearTimeout(timer));
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>
-        <span v-if="drives" class="ds-when">{{ show ? shownRows.length + ' of ' : '' }}{{ plural(rows.length, 'drive') }}</span>
+        <span v-if="drives" class="ds-when">{{ shownRows.length !== rows.length ? shownRows.length + ' of ' : '' }}{{ plural(rows.length, 'drive') }}</span>
       </div>
+      <div v-if="cars.length" class="sr-cars" id="sr-cars" title="Only the drives of this car: the banner counts them alone">
+        <Segmented v-model="car" :options="cars" label="The car of the drives"/></div>
       <div v-if="glance.drives" class="rv-overview sr-glance" id="sr-glance" aria-label="The signs of the drives at a glance">
         <p class="rv-big"><strong>{{ glance.percent }}%</strong><span>of the frames confirmed · {{ thousands(glance.confirmed) }} of
           {{ thousands(glance.frames) }} in {{ plural(glance.drives, 'drive') }}</span></p>

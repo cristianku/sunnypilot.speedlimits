@@ -114,6 +114,8 @@ export interface SpeedRow extends DriveRow {
   total_s: number;
   /** As SpeedDrive's: the list shows only the drives where it is not false. */
   dashcam: boolean | null;
+  /** The car in words (speed_review.car_name), null before its logs are read: the list filters by it. */
+  car?: string | null;
 }
 
 /** A block is at least this long (MIN_BLOCK_SECONDS of speed_review.py). */
