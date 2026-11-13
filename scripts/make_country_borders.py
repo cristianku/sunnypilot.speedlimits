@@ -25,7 +25,8 @@ outside Europe (nnslr_tools.gps.world_place, nnslr mapillary-locations); Europe 
 
 --car [<clone>] writes the comma's own borders, openpilot/sunnypilot/speed_limits/country-borders.json.gz in the sunnypilot
 clone (default $NNSLR_SUNNYPILOT_CLONE or /root/sunnypilot), from the two files above, as gps.frame_country takes them:
-the European countries first, then (tier 1, asked only where Europe has no country) every country outside Europe.
+the European countries first, then (tier 1, asked only where Europe has no country) every country outside Europe and the
+parts of the European ones that lie wholly outside AREA.
 
   python scripts/make_country_borders.py --car [<clone>]
 """
@@ -166,13 +167,28 @@ def world(arguments: list[str]) -> int:
     return 0
 
 
+def touches_area(ring: list) -> bool:
+    lons = [point[0] for point in ring]
+    lats = [point[1] for point in ring]
+    return not (max(lons) < AREA[0] or min(lons) > AREA[2] or max(lats) < AREA[1] or min(lats) > AREA[3])
+
+
 def car(arguments: list[str]) -> int:
     clone = Path(arguments[0] if arguments else os.environ.get('NNSLR_SUNNYPILOT_CLONE', '/root/sunnypilot'))
     output = clone / 'openpilot/sunnypilot/speed_limits/country-borders.json.gz'
     europe_file = json.loads(gzip.decompress(OUTPUT.read_bytes()))
     world_file = json.loads(gzip.decompress(WORLD_OUTPUT.read_bytes()))
-    outside = [dict({key: value for key, value in country.items() if key != 'continent'}, tier=1)
-               for country in world_file['countries'] if country['continent'] != 'europe']
+    outside = []
+    for country in world_file['countries']:
+        polygons = country['polygons']
+        if country['continent'] == 'europe':
+            # Europe's file has each polygon that touches AREA: the world gives the rest (Svalbard, Sakhalin, Reunion).
+            polygons = [polygon for polygon in polygons if not touches_area(polygon[0])]
+        if polygons:
+            lons = [point[0] for polygon in polygons for point in polygon[0]]
+            lats = [point[1] for polygon in polygons for point in polygon[0]]
+            outside.append({'code': country['code'], 'name': country['name'], 'tier': 1,
+                            'bbox': [min(lons), min(lats), max(lons), max(lats)], 'polygons': polygons})
     payload = {'source': [europe_file['source'], world_file['source']], 'license': 'Natural Earth, public domain',
                'tiers': ['Europe, 1:10m', 'outside Europe, 1:50m: only where Europe has no country'],
                'countries': europe_file['countries'] + outside}

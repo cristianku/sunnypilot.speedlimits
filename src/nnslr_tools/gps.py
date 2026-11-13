@@ -222,7 +222,17 @@ def frame_country(latitude: float | None, longitude: float | None, root: Path | 
     if code is not None or latitude is None or longitude is None:
         return code
     found = _country_in(_world(), latitude, longitude)
-    return found['code'] if found is not None and found['continent'] != 'europe' else None
+    if found is None:
+        return None
+    # A European country there only outside EUROPE_AREA, where the European borders draw nothing of it (Svalbard,
+    # Sakhalin, Reunion, French Guiana): the comma's borders give the same (make_country_borders.py --car).
+    west, south, east, north = EUROPE_AREA
+    outside = not (west <= longitude <= east and south <= latitude <= north)
+    return found['code'] if found['continent'] != 'europe' or outside else None
+
+
+# The box of the European borders (scripts/make_country_borders.py AREA): they draw every polygon that touches it.
+EUROPE_AREA = (-32.0, 27.0, 50.0, 72.0)
 
 
 # Every country of the world, coarser (Natural Earth 1:50m, public domain), each with its continent

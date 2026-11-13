@@ -675,7 +675,8 @@ def _borders():
     ('Zurich', 47.37, 8.54, 'CH'), ('Warsaw', 52.23, 21.01, 'PL'), ('Kansas', 38.5, -98.0, 'US'),
     ('Toronto', 43.65, -79.38, 'CA'), ('Tokyo', 35.68, 139.69, 'JP'), ('Sydney', -33.87, 151.21, 'AU'),
     ('Sao Paulo', -23.55, -46.63, 'BR'), ('Ankara', 39.93, 32.85, 'TR'), ('Novosibirsk', 55.03, 82.92, 'RU'),
-    ('Atlantic', 40.0, -40.0, None)])
+    ('Svalbard', 78.2, 15.6, 'NO'), ('Sakhalin', 47.0, 143.0, 'RU'), ('Reunion', -21.1, 55.5, 'FR'),
+    ('Cayenne', 4.9, -52.3, 'FR'), ('Guadeloupe', 16.2, -61.6, 'FR'), ('Atlantic', 40.0, -40.0, None)])
 def test_the_comma_knows_the_country_anywhere_in_the_world(place, latitude, longitude, code):
     """Until 13 Nov 2026 the car's borders were Europe's only: in the US it knew no country, so no sign unit."""
     assert _borders().country_at(latitude, longitude, 200) == code
@@ -685,6 +686,7 @@ def test_the_car_and_the_training_give_the_same_country():
     from nnslr_tools.gps import frame_country
     borders = _borders()
     for latitude, longitude in ((47.37, 8.54), (52.23, 21.01), (38.5, -98.0), (35.68, 139.69), (39.93, 32.85),
-                                (-33.87, 151.21), (55.75, 37.62), (30.04, 31.24), (19.43, -99.13)):
+                                (-33.87, 151.21), (55.75, 37.62), (30.04, 31.24), (19.43, -99.13), (78.2, 15.6),
+                                (47.0, 143.0), (-21.1, 55.5), (4.9, -52.3)):
         assert borders.country_at(latitude, longitude, 0) == frame_country(latitude, longitude, None)
 
