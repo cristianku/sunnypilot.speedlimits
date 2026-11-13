@@ -633,7 +633,9 @@ GPU_PROPOSERS = ('vietnam', 'ours', 'qwen')
 # serverone-ai's V100s, through it (it wakes the host, sends the code and the data, brings the results back). The
 # preparations, which write into the review databases, and setup_vlm, which installs, stay here.
 REMOTE_GPU_SCRIPT = 'scripts/gpu_remote.sh'
-REMOTE_GPU_ACTIONS = tuple(action for action in EXCLUSIVE_GPU if action != 'setup_vlm') + tuple(SHARED_GPU)
+# Prepare goes too: it writes only under derived/ (frames, proposals, GPS), which the runner brings back. Prepare
+# again stays here: its --keep-reviews carries the confirmed frames inside the review database, which never comes back.
+REMOTE_GPU_ACTIONS = tuple(action for action in EXCLUSIVE_GPU if action != 'setup_vlm') + tuple(SHARED_GPU) + ('prepare',)
 # The lock of openpilot.distill's GPU work (its helpers and its training take it): its holder is on a card too.
 GPU_LOCK = '/run/lock/v100-gpu.lock'
 # A card used by a program that is neither a job of the panel nor work it knows from a terminal (another container,

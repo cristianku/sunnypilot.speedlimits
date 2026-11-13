@@ -591,8 +591,9 @@ def test_without_a_card_here_a_training_runs_through_the_gpu_runner(panel, check
     assert said(panel, cutter, 'through the runner: ') == 'through the runner: scripts/run_signnet.sh ' + cutter_run(panel, cutter)
     assert full_log(panel, cutter['id']).splitlines()[0] == '== scripts/run_signnet.sh ' + cutter_run(panel, cutter)
     finished(panel, cutter['id'])
-    # A preparation is never sent there: it writes into the review databases.
-    assert 'prepare' not in panel_module.REMOTE_GPU_ACTIONS and 'train_brain' in panel_module.REMOTE_GPU_ACTIONS
+    # Prepare goes there (it writes only derived files); Prepare again never: it writes into the review database.
+    assert 'prepare' in panel_module.REMOTE_GPU_ACTIONS and 'train_brain' in panel_module.REMOTE_GPU_ACTIONS
+    assert 'prepare_again' not in panel_module.REMOTE_GPU_ACTIONS
 
 
 def cutter_run(panel, job):
