@@ -397,3 +397,23 @@ def test_a_file_that_is_not_a_video_or_a_log_is_not_linked_and_an_old_link_to_on
             assert link.is_symlink() and os.readlink(link) == str(videos / f"{ROUTE}--{segment}" / name)
     assert sorted(path.name for path in (root / "raw/routes" / ROUTE / "0").iterdir()) == [
         "ecamera.hevc", "fcamera.hevc", "rlog.zst"]
+
+
+def test_a_cut_off_download_is_skipped_and_its_old_links_removed(tmp_path, capfd, monkeypatch):
+    videos = tmp_path / "comma-videos"
+    root = tmp_path / "data"
+    make_segment(videos, f"{ROUTE}--0", ("fcamera.hevc", "ecamera.hevc", "rlog.zst"))
+    # As a comma connect download cut off in the middle leaves it: no log yet, a camera still *.part.
+    make_segment(videos, f"{ROUTE}--1", ("fcamera.hevc", "ecamera.hevc.part"))
+    old = root / "raw/routes" / ROUTE / "1"
+    old.mkdir(parents=True)
+    (old / "fcamera.hevc").symlink_to(videos / f"{ROUTE}--1" / "fcamera.hevc")
+    monkeypatch.setenv("COMMA_VIDEOS_DIR", str(videos))
+    monkeypatch.setenv("NNSLR_DATA_ROOT", str(root))
+    code, out, err = run(capfd)
+    assert code == 0, err
+    report = json.loads(out)
+    assert report["ok"] is True
+    assert report["missing_files"] == []
+    assert report["incomplete"] == [f"{ROUTE}--1"]
+    assert sorted(p.name for p in (root / "raw/routes" / ROUTE).iterdir()) == ["0"]

@@ -443,6 +443,8 @@ def link_videos(
     Every route in the shared folder is linked, or only `route`. A segment
     with only logs and no fcamera.hevc (the fetch keeps just the log of the
     segments it trims) is not linked and is listed in log_only, not an error;
+    a segment still holding a *.part file (a download running or cut off) is
+    skipped the same way and listed in incomplete;
     links an earlier run made for it are removed, because extract-frames
     stops on a segment folder without video. A segment with fcamera.hevc but
     without a full log is reported in missing_files; its other files are
@@ -481,7 +483,7 @@ def link_videos(
 
     report: dict[str, Any] = {
         "videos_dir": str(videos), "data_root": str(root), "route": route, "dry_run": dry_run,
-        "segments": [], "files": [], "missing_files": [], "log_only": [], "removed": [],
+        "segments": [], "files": [], "missing_files": [], "log_only": [], "incomplete": [], "removed": [],
         "ignored": ignored, "counts": {}, "ok": True, "warning": _videos_dir_warning(videos),
     }
     # Plan and check every link before writing anything.
@@ -494,6 +496,12 @@ def link_videos(
                 present.append(name)
         segment_dir = root / "raw" / "routes" / route_id / str(index)
         _check_destination(root, segment_dir)
+        # A download still running or cut off (a file still named *.part): skipped like a log-only segment, its
+        # earlier links removed, until a later download completes it.
+        if any(entry.name.endswith(".part") for entry in directory.iterdir()):
+            report["incomplete"].append(directory.name)
+            _plan_log_only_cleanup(report, route_id, index, segment_dir, directory)
+            continue
         if "fcamera.hevc" not in present and not (segment_dir / "fcamera.hevc").is_file():
             report["log_only"].append(directory.name)
             _plan_log_only_cleanup(report, route_id, index, segment_dir, directory)
