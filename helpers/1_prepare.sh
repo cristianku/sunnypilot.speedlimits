@@ -212,3 +212,5 @@ fi
 
 echo
 (cd "$ROOT" && "$PY" -m helpers.route_status)
+# A drive that failed fails the run: the panel shows it red, not done.
+[ "${failed:-0}" -eq 0 ] || exit 1

@@ -50,6 +50,21 @@ def _inside(root: Path, path: Path) -> Path:
     return resolved
 
 
+def _in_this_root(root: Path, path: Path) -> Path:
+    """A manifest's picture in this data root: a relative path under it; an absolute one written by the machine that
+    extracted it (/root/smartspeed/data/derived/frames/..., read on CT 131 by the GPU runner, #77, or the older
+    /root/sunnypilot.speedlimits/data/...) taken from its derived/frames/ on. _inside still checks where it lands."""
+    if not path.is_absolute():
+        return root / path
+    if path.resolve().is_relative_to(Path(root).resolve()):
+        return path
+    parts = path.parts
+    for at in range(len(parts) - 2, 0, -1):
+        if parts[at] == 'derived' and parts[at + 1] == 'frames':
+            return Path(root).joinpath(*parts[at:])
+    return path
+
+
 def frame_row(root: Path, route: str, segment: int, raw, manifest: Path) -> dict:
     """The frame row of a line of a segment's manifest (frames.jsonl, sign_reads.jsonl, video_frames.jsonl): its
     identity checked, its picture inside the route's frames and with the hash it was extracted with."""
@@ -62,8 +77,7 @@ def frame_row(root: Path, route: str, segment: int, raw, manifest: Path) -> dict
     name = raw.get('image_path')
     if not isinstance(name, str) or not name:
         raise PreannotationError(f'missing image_path: {manifest}')
-    path = Path(name)
-    path = _inside(directory, path if path.is_absolute() else root / path)
+    path = _inside(directory, _in_this_root(root, Path(name)))
     if not path.is_file():
         raise PreannotationError(f'frame not found: {path}')
     # [frame-provenance] - START
