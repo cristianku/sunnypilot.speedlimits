@@ -703,5 +703,8 @@ def test_an_answer_cut_at_max_tokens_is_asked_again_with_more_room_not_taken_for
     cut = LlmError(502, 'ai_http_error', 'HTTP 502: structured output was incomplete (finish_reason=length); increase '
                                          'the output budget', http_code=502)
     assert llm_providers.incomplete(cut) and not ai_review._server_down(cut)
+    broken = LlmError(502, 'ai_http_error', 'HTTP 502: model did not return valid JSON: Expecting value: line 1 column 8575 '
+                                            '(char 8574)', http_code=502)
+    assert llm_providers.incomplete(broken) and not ai_review._server_down(broken)
     down = LlmError(502, 'ai_http_error', 'HTTP 502: the AI server strata is down or restarting, try later', http_code=502)
     assert ai_review._server_down(down) and not llm_providers.incomplete(down)

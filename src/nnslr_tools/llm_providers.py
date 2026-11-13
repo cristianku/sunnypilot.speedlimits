@@ -58,11 +58,14 @@ class LlmError(ReviewRejected):
 
 # An answer cut at max_tokens: the server is up, the answer did not fit (Strata says it with HTTP 502, "structured
 # output was incomplete (finish_reason=length); increase the output budget"; others with an empty answer).
-INCOMPLETE = re.compile(r'finish_reason[ =:]*length|output budget', re.I)
+# Strata's 502s for an answer of the model it could not use: cut at max_tokens, or JSON it could not read (13 Nov 2026,
+# "model did not return valid JSON: Expecting value: line 1 column 8575"). The server is up either way.
+INCOMPLETE = re.compile(r'finish_reason[ =:]*length|output budget|did not return valid JSON', re.I)
 
 
 def incomplete(exc: ReviewRejected) -> bool:
-    """The AI server answered, but its answer was cut at max_tokens: ask again with more, it is not down."""
+    """The AI server answered, but its answer was cut at max_tokens or was not valid JSON: ask again with more room;
+    it is not down."""
     return exc.reason in ('ai_http_error', 'ai_bad_answer') and bool(INCOMPLETE.search(exc.message or ''))
 
 
