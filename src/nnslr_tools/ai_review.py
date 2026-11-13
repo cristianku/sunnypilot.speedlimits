@@ -615,7 +615,13 @@ def _suggest(service, frame: dict, provider: dict, boxes: list[dict], timeout: f
     width, height = _frame_size(frame)
     image = _image(service, route, key)
     messages = build_messages(frame, image['data'], image['mime_type'], boxes, light_ahead_m=light_ahead_m)
-    text, seconds = llm_providers.chat(provider, messages, timeout=timeout)
+    try:
+        text, seconds = llm_providers.chat(provider, messages, timeout=timeout)
+    except llm_providers.LlmError as exc:
+        # A frame with many signs can need a longer answer than the default budget: once more with more room.
+        if not llm_providers.incomplete(exc):
+            raise
+        text, seconds = llm_providers.chat(provider, messages, timeout=timeout, max_tokens=MORE_TOKENS)
     suggestion = to_suggestion(parse_answer(text), boxes, width, height)
     seconds = round(seconds, 1)
     reviewer = 'ai/' + llm_providers.reviewer_name(provider)
@@ -751,7 +757,15 @@ DOWN_RETRIES = 20
 DOWN_WAIT = 30.0
 
 
+# The budget of an answer asked again after one cut at the default (llm_providers.chat's 2048).
+MORE_TOKENS = 6144
+
+
 def _server_down(exc: ReviewRejected) -> bool:
+    """Connection refused or reset, or HTTP 502/503/504, but not an answer cut at max_tokens (Strata's 502 "structured
+    output was incomplete"): that one is the frame's own, the server is up."""
+    if llm_providers.incomplete(exc):
+        return False
     return exc.reason == 'ai_unreachable' or (exc.reason == 'ai_http_error'
                                               and getattr(exc, 'http_code', None) in (502, 503, 504))
 

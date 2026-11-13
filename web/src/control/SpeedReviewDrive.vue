@@ -482,7 +482,19 @@ async function readSigns(): Promise<void> {
       ? 'The signs are not on this server yet.' : messageOf(problem);
   }
 }
-const onVisible = (): void => { if (document.visibilityState === 'visible') void readSigns(); };
+/** The frames of the drive's last "Try without saving" (GET /api/route/<route>/ai-trial, ai_review.latest_trial): nothing
+ * saved, but what the AI did, so they are on the lane and in ‹ AI / AI › too (lighter). Empty without one. */
+const trialKeys = shallowRef<ReadonlySet<string>>(new Set());
+async function readTrial(): Promise<void> {
+  if (!showSigns) return;
+  try {
+    const answer = await api<{trial: {frames: {frame_key: string}[]} | null}>('/api/route/' + encodeURIComponent(props.route) + '/ai-trial');
+    trialKeys.value = new Set((answer?.trial?.frames ?? []).map((frame) => frame.frame_key));
+  } catch {
+    trialKeys.value = new Set();
+  }
+}
+const onVisible = (): void => { if (document.visibilityState === 'visible') { void readSigns(); void readTrial(); } };
 /** The video's encode index, from the player. */
 const videoIndex = shallowRef<VideoIndex | null>(null);
 const ownFrames = computed(() => exactFrames(signs.value?.frames ?? []));
@@ -533,8 +545,9 @@ const signBefore = computed(() => [...runs.value].reverse().find((run) => run.fr
 const signAfter = computed(() => runs.value.find((run) => run.from > seconds.value + 0.05) ?? null);
 /** The frames the site's AI reviewer saved (#79): a violet bar on the Signs lane; ‹ AI and AI › (or [ and ]) go from
  * one to the next, wherever the time shown is. */
-const aiFrames = computed(() => placed.value.filter(isAiFrame));
-const aiBars = computed(() => aiRuns(aiFrames.value));
+const aiFrames = computed(() => placed.value.filter((frame) => isAiFrame(frame) || trialKeys.value.has(frame.frame_key)));
+const aiBars = computed(() => [...aiRuns(placed.value.filter(isAiFrame)).map((run) => ({...run, trial: false})),
+  ...aiRuns(placed.value.filter((frame) => !isAiFrame(frame) && trialKeys.value.has(frame.frame_key))).map((run) => ({...run, trial: true}))]);
 const aiIn = (from: number, to: number) => aiBars.value.filter((run) => run.to >= from && run.from <= to);
 const aiBefore = computed(() => stepFrame(aiFrames.value, seconds.value, -1));
 const aiAfter = computed(() => stepFrame(aiFrames.value, seconds.value, 1));
@@ -545,8 +558,8 @@ function goAi(step: -1 | 1): void {
   const frame = index >= 0 ? aiFrames.value[index] : undefined;
   if (frame) goSign(frame.at);
 }
-const aiRunTitle = (run: {from: number; to: number; count: number}): string => (run.count === 1 ? '1 frame' : run.count + ' frames')
-  + ' reviewed by the AI, ' + clockOf(run.from) + (run.to > run.from ? '–' + clockOf(run.to) : '') + ': a tap goes to the first';
+const aiRunTitle = (run: {from: number; to: number; count: number; trial: boolean}): string => (run.count === 1 ? '1 frame' : run.count + ' frames')
+  + (run.trial ? ' the AI tried (a trial, nothing saved), ' : ' reviewed by the AI, ') + clockOf(run.from) + (run.to > run.from ? '–' + clockOf(run.to) : '') + ': a tap goes to the first';
 const signWords = (box: {family: string; score?: number | null}): string => signFrame.value?.confirmed || signFrame.value?.needs_person
   ? signFrame.value.reviewer ?? 'confirmed' : typeof box.score === 'number' ? 'model ' + Math.round(box.score * 100) + '%' : 'model';
 /** Confirmed, saved by the site's AI reviewer and waiting for a person (as Sign review counts it), or the model's. */
@@ -769,6 +782,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisible);
   void read();
   void readSigns();
+  void readTrial();
 });
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey);
@@ -1027,8 +1041,8 @@ function worksIn(from: number, to: number) {
             <text v-if="sign.text" :x="x(sign.at)" :y="SIGN_HEIGHT - 11">{{ sign.text }}</text>
             <title>{{ sign.title }}</title>
           </g>
-          <rect v-for="run in aiIn(from, to)" :key="'ai' + run.from" :x="x(run.from) - 1" y="0" :width="Math.max(3, w(run.from, run.to) + 2)"
-                height="4" rx="1.5" class="sr-ai-bar" @pointerdown.stop="goSign(run.from)"><title>{{ aiRunTitle(run) }}</title></rect>
+          <rect v-for="run in aiIn(from, to)" :key="(run.trial ? 't' : 'ai') + run.from" :x="x(run.from) - 1" y="0" :width="Math.max(3, w(run.from, run.to) + 2)"
+                height="4" rx="1.5" :class="['sr-ai-bar', {trial: run.trial}]" @pointerdown.stop="goSign(run.from)"><title>{{ aiRunTitle(run) }}</title></rect>
         </svg>
       </div>
     </template>
@@ -1039,9 +1053,9 @@ function worksIn(from: number, to: number) {
           <h3 id="sr-card-title">The signs at {{ clockOf(seconds) }}</h3>
           <p v-if="alone" class="dr-hint" id="sr-editor-alone">{{ player?.videoGone ? 'The video of the drive cannot be shown'
             : 'The video of the drive has not this frame' }}: its own picture is on screen. ← → go on from frame to frame.</p>
-          <div v-if="aiFrames.length" class="sr-tools sr-ai-nav" id="sr-ai-nav">
+          <div class="sr-tools sr-ai-nav" id="sr-ai-nav">
             <button type="button" class="btn small" id="sr-ai-before" :disabled="aiBefore < 0" title="The frame before reviewed by the AI ([)" @click="goAi(-1)">‹ AI</button>
-            <span class="sr-ai-count" title="Frames of this drive reviewed by the AI, violet on the Signs lane">{{ aiAt ? aiAt + ' / ' : '' }}{{ aiFrames.length }} AI</span>
+            <span class="sr-ai-count" title="Frames of this drive reviewed by the AI, violet on the Signs lane">{{ aiFrames.length ? (aiAt ? aiAt + ' / ' : '') + aiFrames.length + ' AI' : 'No AI frame' }}</span>
             <button type="button" class="btn small" id="sr-ai-after" :disabled="aiAfter < 0" title="The next frame reviewed by the AI (])" @click="goAi(1)">AI ›</button>
           </div>
           <SignEditorPanel v-if="onFrame || alone"/>
@@ -1071,9 +1085,9 @@ function worksIn(from: number, to: number) {
               <button type="button" class="btn small" id="sr-sign-before" :disabled="!signBefore" @click="signBefore && goSign(signBefore.from)">‹ Sign before</button>
               <button type="button" class="btn small" id="sr-sign-after" :disabled="!signAfter" @click="signAfter && goSign(signAfter.from)">Sign after ›</button>
             </div>
-            <div v-if="aiFrames.length" class="sr-tools sr-ai-nav" id="sr-ai-nav">
+            <div class="sr-tools sr-ai-nav" id="sr-ai-nav">
               <button type="button" class="btn small" id="sr-ai-before" :disabled="aiBefore < 0" title="The frame before reviewed by the AI ([)" @click="goAi(-1)">‹ AI</button>
-              <span class="sr-ai-count" title="Frames of this drive reviewed by the AI, violet on the Signs lane">{{ aiAt ? aiAt + ' / ' : '' }}{{ aiFrames.length }} AI</span>
+              <span class="sr-ai-count" title="Frames of this drive reviewed by the AI, violet on the Signs lane">{{ aiFrames.length ? (aiAt ? aiAt + ' / ' : '') + aiFrames.length + ' AI' : 'No AI frame' }}</span>
               <button type="button" class="btn small" id="sr-ai-after" :disabled="aiAfter < 0" title="The next frame reviewed by the AI (])" @click="goAi(1)">AI ›</button>
             </div>
             <p class="dr-hint">Solid: confirmed; dashed: the model's proposals, or the AI reviewer's boxes, on a frame not confirmed

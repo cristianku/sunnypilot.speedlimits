@@ -354,6 +354,9 @@ export interface Job {
   stoppable: boolean;
   /** The training run the job wrote to (data/runs/<run>), when it got that far; null otherwise. */
   run?: string | null;
+  /** Review with AI: the drive it reviews and whether it saves (null until its log says); absent for other jobs. */
+  route?: string | null;
+  saving?: boolean | null;
   /** Bytes of the log so far. */
   size: number;
   progress: JobProgress;
@@ -432,6 +435,8 @@ export interface RouteRow {
   run_id: string | null;
   report_frames: number;
   confirmed: number;
+  /** Of them, saved by the AI reviewer (final since 13 Nov 2026, #79); absent from older servers. */
+  confirmed_by_ai?: number;
   new_reviews: number;
   objects: number;
   state: RouteState;

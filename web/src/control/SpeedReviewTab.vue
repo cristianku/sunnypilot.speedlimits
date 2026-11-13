@@ -7,6 +7,8 @@ interface SignDrive {
   frame_count: number;
   confirmed_count: number;
   waiting_for_person?: number;
+  /** The frames of it the AI reviewer saved (reviewer_kind ai), in confirmed_count too. */
+  confirmed_by_ai?: number;
   /** Where its signs are reviewed (review.signs_url): the Signs side, or the page of Sign review of a drive without video. */
   url?: string;
   drive?: {title: string | null; when: string | null; minutes: number | null; start?: string | null} | null;
@@ -15,6 +17,15 @@ interface SignDrive {
 /** The lists as they were last read, kept while the page is open: back on the tab (from another tab, or from a drive
  * opened by its address) they stand at once and are read again behind, as on the way back from a drive. */
 const shown: {drives: SpeedRow[] | null; signs: SignDrive[] | null} = {drives: null, signs: null};
+
+/** The groups of the banner over the list, by the signs of a drive (as Sign review's list grouped them): some frames
+ * confirmed, none yet, all; and the drives the AI reviewed part of, whatever their group. */
+type Group = 'doing' | 'todo' | 'ai' | 'done';
+const GROUPS: readonly {key: Group; label: string}[] = [{key: 'todo', label: 'To review'},
+  {key: 'doing', label: 'Started, not finished'}, {key: 'ai', label: 'Reviewed by AI'}, {key: 'done', label: 'Done'}];
+/** The group the list shows (?show=<group> in the address, kept while the page is open); null: every drive. */
+const asked = new URLSearchParams(location.search).get('show');
+let showing: Group | null = GROUPS.some((group) => group.key === asked) ? asked as Group : null;
 </script>
 
 <script setup lang="ts">
@@ -63,8 +74,6 @@ const startOf = (drive: SpeedRow): string => (drive.day ?? '') + (drive.when ?? 
 const listed = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam !== false)
   .sort((a, b) => startOf(b).localeCompare(startOf(a))));
 
-/** Drives where sunnypilot was on: the brain does not learn their speed, the list has them only for their signs. */
-const engaged = computed(() => (drives.value ?? []).filter((drive) => drive.dashcam === false).length);
 /** What a drive has: its length, its blocks, its roadworks marks and its marks of a kind of road; before its logs are read,
  * what reading them does. */
 const stateOf = (drive: SpeedRow): string => !drive.total_s ? scanText(drive.scan).text
@@ -99,6 +108,42 @@ const rows = computed((): Row[] => {
   }
   return [...byRoute.values()].sort((a, b) => timeOf(b) - timeOf(a));
 });
+const byAi = (item: SignDrive): number => Math.min(item.confirmed_by_ai ?? 0, item.confirmed_count);
+function inGroup(item: SignDrive, group: Group): boolean {
+  if (group === 'ai') return byAi(item) > 0;
+  const confirmed = Math.min(item.confirmed_count, item.frame_count);
+  return group === 'done' ? confirmed >= item.frame_count : group === 'todo' ? confirmed === 0
+    : confirmed > 0 && confirmed < item.frame_count;
+}
+const show = ref<Group | null>(showing);
+/** A tile of the banner: the list of its group, again: every drive. The address keeps it (back from a drive, a reload). */
+function pick(group: Group): void {
+  show.value = showing = show.value === group ? null : group;
+  const url = new URL(location.href);
+  if (showing) url.searchParams.set('show', showing);
+  else url.searchParams.delete('show');
+  history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+}
+const withSigns = computed(() => rows.value.flatMap((row) => row.signs ? [row.signs] : []));
+/** The banner: the frames confirmed of every drive, by you and by the AI, and how many drives each group has. */
+const glance = computed(() => {
+  const items = withSigns.value;
+  const frames = items.reduce((total, item) => total + item.frame_count, 0);
+  const confirmed = items.reduce((total, item) => total + Math.min(item.confirmed_count, item.frame_count), 0);
+  const ai = items.reduce((total, item) => total + byAi(item), 0);
+  const tiles = GROUPS.map((group) => {
+    const members = items.filter((item) => inGroup(item, group.key));
+    const left = members.reduce((total, item) => total + Math.max(0, item.frame_count - item.confirmed_count), 0);
+    const sub = !members.length ? 'none' : group.key === 'ai' ? thousands(members.reduce((total, item) => total + byAi(item), 0)) + ' frames'
+      : group.key === 'done' ? thousands(members.reduce((total, item) => total + item.frame_count, 0)) + ' frames' : thousands(left) + ' left';
+    return {...group, count: members.length, sub};
+  });
+  return {frames, confirmed, ai, percent: frames ? Math.floor(confirmed * 1000 / frames) / 10 : 0,
+    people: frames ? (confirmed - ai) * 100 / frames : 0, aiShare: frames ? ai * 100 / frames : 0, drives: items.length, tiles};
+});
+/** The rows of the group shown (a drive without signs only in every drive). */
+const shownRows = computed(() => show.value === null ? rows.value
+  : rows.value.filter((row) => row.signs !== null && inGroup(row.signs, show.value!)));
 const titleOf = (row: Row): string => row.speed?.title ?? row.signs?.drive?.title ?? 'Places unknown';
 const whenOf = (row: Row): string => {
   const when = row.speed?.when ? (row.speed.when_certain ? '' : '≈ ') + row.speed.when : row.signs?.drive?.when ?? '';
@@ -157,22 +202,32 @@ onBeforeUnmount(() => window.clearTimeout(timer));
     <section class="card sr-drives" aria-labelledby="sr-drives-title">
       <div class="ds-head">
         <h2 id="sr-drives-title">Drives</h2>
-        <span v-if="drives" class="ds-when">{{ plural(rows.length, 'drive') }}</span>
+        <span v-if="drives" class="ds-when">{{ show ? shownRows.length + ' of ' : '' }}{{ plural(rows.length, 'drive') }}</span>
       </div>
-      <p class="import-why">The brain network learns the speed to hold from your own driving: your dashboard speed at every moment
-        is its answer, with nothing to confirm. Where it should have been another speed, open the drive and put a block from a
-        time to a time, with that speed or left out of the training; mark the roadworks and the kinds of road there too.
-        <b>Signs</b> opens the drive on its signs, at the first frame still to confirm. Nothing here changes the car.</p>
-      <p v-if="engaged" class="import-why" id="sr-engaged">The speed is yours only with sunnypilot off (sunnylink › Toggles ›
-        Enable sunnypilot): {{ plural(engaged, 'drive') }} with sunnypilot on {{ engaged === 1 ? 'is' : 'are' }} here only for
-        {{ engaged === 1 ? 'its' : 'their' }} signs.</p>
+      <div v-if="glance.drives" class="rv-overview sr-glance" id="sr-glance" aria-label="The signs of the drives at a glance">
+        <p class="rv-big"><strong>{{ glance.percent }}%</strong><span>of the frames confirmed · {{ thousands(glance.confirmed) }} of
+          {{ thousands(glance.frames) }} in {{ plural(glance.drives, 'drive') }}</span></p>
+        <span class="rv-bar" aria-hidden="true"><span :style="{width: glance.people + '%'}"></span><span v-if="glance.ai" class="ai"
+          :style="{width: glance.aiShare + '%'}"></span></span>
+        <p v-if="glance.ai" class="rv-notes">{{ thousands(glance.confirmed - glance.ai) }} by you · <span class="sr-ai-word">{{ thousands(glance.ai) }} by the AI</span></p>
+        <div class="rv-tiles" role="group" aria-label="Show only">
+          <button v-for="tile in glance.tiles" :key="tile.key" type="button" class="rv-tile" :class="tile.key" :id="'sr-show-' + tile.key"
+                  :aria-pressed="show === tile.key" :disabled="!tile.count && show !== tile.key"
+                  :title="show === tile.key ? 'Show every drive again' : 'Show only these drives'" @click="pick(tile.key)">
+            <span class="rv-tile-label"><i v-if="tile.key === 'ai'" class="sr-ai-square" aria-hidden="true"></i>{{ tile.label }}</span>
+            <span class="rv-tile-n">{{ tile.count }}</span><span class="rv-tile-sub">{{ tile.sub }}</span>
+          </button>
+        </div>
+      </div>
       <p v-if="error" class="empty">{{ error }}</p>
       <p v-else-if="drives === null" class="empty">Loading…</p>
+      <p v-else-if="show && !shownRows.length" class="empty">No drive here. <button type="button" class="link-button" @click="pick(show)">Show every drive</button></p>
       <ul v-else class="rt-list">
-        <li v-for="row in rows" :key="row.route" class="rt-drive dr-drive sr-row">
+        <li v-for="row in shownRows" :key="row.route" class="rt-drive dr-drive sr-row">
           <a class="rt-open" :href="row.speed ? hrefOf(row.speed) : signsUrl(row.signs!)">
             <div class="rt-name">
-              <strong>{{ titleOf(row) }} <b v-if="row.speed?.dashcam" class="dashcam-badge">DASHCAM MODE</b></strong>
+              <strong>{{ titleOf(row) }} <b v-if="row.speed?.dashcam" class="dashcam-badge">DASHCAM MODE</b>
+                <b v-if="row.signs && byAi(row.signs)" class="ai-badge" :title="thousands(byAi(row.signs)) + ' frames of its signs reviewed by the AI'"><i class="sr-ai-square" aria-hidden="true"></i>AI REVIEW</b></strong>
               <span>{{ whenOf(row) }}</span>
             </div>
             <p v-if="row.speed" class="dr-drive-state" :class="{'dr-muted': !marked(row.speed)}">{{ stateOf(row.speed) }}</p>

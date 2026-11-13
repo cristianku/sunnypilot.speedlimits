@@ -221,7 +221,7 @@ a.prep-drive:active{background:var(--btn-2-hover)}
 .job-item+.job-item{border-top:.5px solid var(--line-strong)}
 .job-open{appearance:none;border:0;background:none;font:inherit;color:inherit;text-align:left;flex:1;min-width:0;display:flex;
 align-items:center;gap:12px;padding:10px;border-radius:12px;cursor:pointer}
-.job-open:hover{background:var(--surface-2)}
+.job-open:hover{background:var(--surface-2)}a.job-open{text-decoration:none}
 .job-open .grow{flex:1;min-width:0;display:flex;flex-direction:column}
 .job-open .what{font-weight:500;letter-spacing:-.01em}
 .job-open .sub{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
@@ -1694,7 +1694,40 @@ font-family:var(--font-ui);font-weight:700}
 .dr-lanes .sr-sign-tick line{stroke:var(--bad);stroke-width:1.5}
 .dr-lanes .sr-sign-tick text{font-size:10px;font-weight:700;text-anchor:middle;fill:var(--bad)}
 .dr-lanes .sr-sign-tick:hover line{stroke-width:2.5}
-.dr-lanes .sr-ai-bar{fill:#af52de;cursor:pointer}.dr-lanes .sr-ai-bar:hover{fill:#7b5cff}
+/* The banner over Speed review's drives (as Sign review's list had it): the frames confirmed, and a tile per group that
+   filters the list. */
+.rv-overview{display:flex;flex-direction:column;gap:12px;padding:20px 22px}
+.rv-big{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0}
+.rv-big strong{font-size:44px;font-weight:700;letter-spacing:-.035em;line-height:1;font-variant-numeric:tabular-nums}
+.rv-big span{font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rv-bar{display:flex;height:8px;border-radius:4px;background:var(--surface-3);overflow:hidden}
+.rv-bar span{flex:none;height:100%;background:var(--accent);transform-origin:left;animation:rv-grow .8s cubic-bezier(.2,.8,.2,1)}
+.rv-bar .ai{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,transparent 2px 4px),var(--accent-soft)}
+@keyframes rv-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.rv-notes{margin:0;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rv-notes .sus{color:var(--sus);font-weight:600}
+.rv-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:4px}
+.rv-tile{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:12px 14px;border-radius:14px;
+border:1px solid var(--line);background:var(--surface-2);color:inherit;font:inherit;text-align:left;cursor:pointer;
+transition:background .15s,box-shadow .15s,transform .1s}
+.rv-tile:hover:not(:disabled){background:var(--surface-3)}
+.rv-tile:active:not(:disabled){transform:scale(.98)}
+.rv-tile:disabled{opacity:.5;cursor:default}
+.rv-tile[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--accent);background:var(--surface)}
+.rv-tile.done[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--ok)}
+.rv-tile-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600;color:var(--muted)}
+.rv-tile-n{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1.1;font-variant-numeric:tabular-nums}
+.rv-tile-sub{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+@media (max-width:560px){.rv-overview{padding:16px}.rv-tiles{gap:6px}.rv-tile{padding:10px 9px}.rv-tile-label{font-size:12px}.rv-tile-n{font-size:24px}.rv-big strong{font-size:38px}}
+.sr-glance{padding:4px 0 14px;border-bottom:1px solid var(--line);margin-bottom:4px}.sr-glance .rv-tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+.rv-tile.ai[aria-pressed="true"]{box-shadow:inset 0 0 0 2px #af52de}.sr-ai-word{color:#af52de;font-weight:600}
+.sr-ai-square{display:inline-block;width:9px;height:9px;border-radius:2px;background:#af52de;margin-right:6px;vertical-align:baseline}
+.ai-badge{display:inline-flex;align-items:center;flex:none;margin-left:4px;padding:2px 8px;border-radius:6px;background:#3a1f4d;color:#e0b8ff;font-size:11px;font-weight:700;font-style:normal;letter-spacing:.06em;line-height:1.35;white-space:nowrap;vertical-align:middle;box-shadow:inset 0 0 0 1px #af52de}
+.ai-badge .sr-ai-square{margin-right:5px}
+:root[data-theme="light"] .ai-badge{background:#f3e8fd;color:#8e3dbd}
+@media (prefers-color-scheme:light){:root[data-theme="auto"] .ai-badge{background:#f3e8fd;color:#8e3dbd}}
+.loop-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.loop-chips a{padding:3px 9px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:inherit;font-size:12.5px;font-weight:600;text-decoration:none;font-variant-numeric:tabular-nums}.loop-chips a:hover{background:var(--surface-3)}.loop-chips a.ai{color:#af52de}.loop-chips .sr-ai-square{width:8px;height:8px;margin-right:5px}
+.dr-lanes .sr-ai-bar{fill:#af52de;cursor:pointer}.dr-lanes .sr-ai-bar:hover{fill:#7b5cff}.dr-lanes .sr-ai-bar.trial{fill:#af52de;fill-opacity:.45}
 .sr-ai-nav{align-items:center;margin:6px 0}.sr-ai-nav .btn{color:#af52de;font-weight:600}.sr-ai-count{font-size:12.5px;font-weight:600;color:#af52de;font-variant-numeric:tabular-nums;min-width:5.5em;text-align:center}
 .sr-panel{display:flex;width:100%}.sr-panel button{flex:1 1 0;min-width:0}
 /* The Signs side already opens Sign review on this frame: the player's own link under it would say it twice. */

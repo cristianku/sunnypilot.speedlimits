@@ -52,14 +52,16 @@ class RouteStatusTests(unittest.TestCase):
         (base / RUN / "preannotations.jsonl").write_text("{}\n" * frames)
         (base / "latest.json").write_text(json.dumps({"run_id": RUN}))
 
-    def reviews(self, count, updated_at="2026-10-21T09:00:00.000Z"):
+    def reviews(self, count, updated_at="2026-10-21T09:00:00.000Z", kind="human"):
         database = self.root / "annotations/review.sqlite"
         database.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(database)
         connection.execute("CREATE TABLE IF NOT EXISTS frame_reviews (route_id TEXT, run_id TEXT, frame_key TEXT, "
-                           "confirmed INTEGER, updated_at TEXT)")
-        connection.executemany("INSERT INTO frame_reviews VALUES (?, ?, ?, 1, ?)",
-                               [(ROUTE, RUN, f"frame-{i}-{updated_at}", updated_at) for i in range(count)])
+                           "confirmed INTEGER, updated_at TEXT, reviewer TEXT, reviewer_kind TEXT)")
+        reviewer = "ai/strata/qwen" if kind == "ai" else "cristian"
+        connection.executemany("INSERT INTO frame_reviews VALUES (?, ?, ?, 1, ?, ?, ?)",
+                               [(ROUTE, RUN, f"frame-{i}-{updated_at}-{kind}", updated_at, reviewer, kind)
+                                for i in range(count)])
         connection.commit()
         connection.close()
 
@@ -108,6 +110,18 @@ class RouteStatusTests(unittest.TestCase):
         self.reviews(1, "2026-10-21T11:00:00.000Z")
         row = self.row()
         self.assertEqual((row["state"], row["new_reviews"], row["objects"]), ("importare", 1, 3))
+
+    def test_the_ai_reviewers_saves_are_final(self):
+        # Since 13 Nov 2026 (#79) the site's AI reviewer saves for good: its frames count and are imported.
+        self.shared(1)
+        self.linked(1)
+        self.extracted(1)
+        self.report(3)
+        self.reviews(1)
+        self.reviews(2, kind="ai")
+        row = self.row()
+        self.assertEqual((row["state"], row["confirmed"], row["confirmed_by_ai"], row["new_reviews"]),
+                         ("importare", 3, 2, 3))
 
     def test_reported_route_is_never_reprocessed(self):
         self.shared(1, 2, 3)

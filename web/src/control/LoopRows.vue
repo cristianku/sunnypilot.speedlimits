@@ -25,6 +25,8 @@ const rows = computed(() => loopRows(props.status));
         <div class="loop-big">{{ row.big }}</div>
         <p v-if="row.note || row.more" class="loop-note">{{ row.note }} <a v-if="row.more" :href="row.more.href">{{ row.more.label }}</a></p>
         <p v-if="row.warn" class="loop-note warn-text">{{ row.warn }}</p>
+        <p v-if="row.chips?.length" class="loop-chips" :id="'loop-' + row.key + '-chips'">
+          <a v-for="chip in row.chips" :key="chip.href" :href="chip.href" :class="{ai: chip.ai}"><i v-if="chip.ai" class="sr-ai-square" aria-hidden="true"></i>{{ chip.label }}</a></p>
         <div class="loop-act">
           <span v-if="row.running" class="loop-running" role="status">{{ row.running }}</span>
           <template v-else-if="row.action && 'name' in row.action">

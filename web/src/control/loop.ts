@@ -38,6 +38,8 @@ export interface LoopRow {
   link: {href: string; label: string; icon: IconName} | null;
   /** The main one: the first row with work waiting, nothing of it running. */
   primary: boolean;
+  /** Counts that open the page filtered (Sign review: "12 to review", each to /speed-review?show=<group>); absent: none. */
+  chips?: {href: string; label: string; ai?: boolean}[];
 }
 
 const TO_PREPARE: RouteState[] = ['collegare', 'estrarre', 'preannotare'];
@@ -119,7 +121,21 @@ function review(status: PanelStatus): Omit<LoopRow, 'primary'> {
     action: summary.resume ? {href: summary.resume.href, label: summary.resume.started ? 'Resume review' : 'Start review',
       icon: 'resume'} : null,
     link: null,
+    chips: reviewChips(status),
   };
+}
+
+/** The drives of Sign review by group, as the banner of Speed review counts them: each opens the list of that group. */
+function reviewChips(status: PanelStatus): {href: string; label: string; ai?: boolean}[] {
+  const reported = status.routes.filter((row) => row.run_id && row.report_frames > 0);
+  const count = (test: (row: typeof reported[number]) => boolean): number => reported.filter(test).length;
+  const groups: [string, string, number, boolean?][] = [
+    ['todo', 'to review', count((row) => row.confirmed === 0)],
+    ['doing', 'started', count((row) => row.confirmed > 0 && row.confirmed < row.report_frames)],
+    ['ai', 'by AI', count((row) => (row.confirmed_by_ai ?? 0) > 0), true],
+    ['done', 'done', count((row) => row.confirmed >= row.report_frames)],
+  ];
+  return groups.filter(([, , n]) => n > 0).map(([key, label, n, ai]) => ({href: '/speed-review?show=' + key, label: n + ' ' + label, ai: !!ai}));
 }
 
 function train(status: PanelStatus): Omit<LoopRow, 'primary'> {

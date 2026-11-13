@@ -249,6 +249,18 @@ PROPOSER_LINE = re.compile(r'(?:Measuring the proposer |(?:proposing the signs(?
                            r'(vietnam|ours|qwen)\b')
 
 
+def _ai_route_of(log: Path) -> dict:
+    """{'route', 'saving'} of a Review with AI job, from the first lines of its log (AI_LIVE_ROUTE); None each when
+    its log does not say yet."""
+    try:
+        with log.open('rb') as handle:
+            head = handle.read(4096).decode('utf-8', 'replace')
+    except OSError:
+        head = ''
+    found = AI_LIVE_ROUTE.search(head)
+    return {'route': found.group(1) if found else None, 'saving': found.group(2) == 'saving' if found else None}
+
+
 def _run_of(log: Path, action: str = 'train') -> str | None:
     """The run a training job wrote to, from the start of its log (the line comes after the import; for the
     classifier's training, the first line)."""
@@ -1005,6 +1017,9 @@ class Panel:
                            'proposer': proposer,
                            'networks': _networks_of(self.root, path) if proposer == 'ours' else None,
                            'settings': _settings_of(path, action),
+                           # Review with AI: the drive it reviews (its row opens the drive, not the log) and whether it
+                           # saves; None for the other jobs.
+                           **(_ai_route_of(path) if action == 'ai_review' else {}),
                            'started': started.strftime('%Y-%m-%d %H:%M:%S'),
                            # The same moment with the server's offset, for the elapsed time in the page.
                            'started_at': started.astimezone().isoformat(timespec='seconds'),

@@ -103,29 +103,32 @@ def reviewed_routes(root: Path) -> set[str] | None:
         return None
 
 
-def review_counts(root: Path, since: str | None) -> tuple[Counter, Counter]:
-    """Confirmed frames per (route, run), and those confirmed or changed after `since` (ISO UTC)."""
+def review_counts(root: Path, since: str | None) -> tuple[Counter, Counter, Counter]:
+    """Confirmed frames per (route, run), those confirmed or changed after `since` (ISO UTC), and those the AI
+    reviewer saved. The AI's saves are final since 13 Nov 2026 (nnslr_tools.review_db.SITE_AI_WAITS, #79): they count
+    as confirmed and are imported like a person's."""
     confirmed: Counter = Counter()
     newer: Counter = Counter()
+    by_ai: Counter = Counter()
     database = root / "annotations/review.sqlite"
     if not database.is_file():
-        return confirmed, newer
+        return confirmed, newer, by_ai
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     try:
         rows = connection.execute(
-            # The frames the site's AI reviewer saved wait for a person (nnslr_tools.review_db.SITE_AI_REVIEWER).
-            "SELECT route_id, run_id, updated_at FROM frame_reviews WHERE confirmed = 1 "
-            "AND NOT (reviewer_kind = 'ai' AND reviewer GLOB 'ai/*/*')").fetchall()
+            "SELECT route_id, run_id, updated_at, reviewer_kind = 'ai' FROM frame_reviews WHERE confirmed = 1").fetchall()
     except sqlite3.Error:
         rows = []
     finally:
         connection.close()
-    for route, run, updated_at in rows:
+    for route, run, updated_at, ai in rows:
         confirmed[(route, run)] += 1
+        if ai:
+            by_ai[(route, run)] += 1
         # updated_at is ISO UTC with milliseconds and "Z": comparable as text.
         if since is None or updated_at > since:
             newer[(route, run)] += 1
-    return confirmed, newer
+    return confirmed, newer, by_ai
 
 
 def dataset_objects(root: Path) -> tuple[Counter, str | None]:
@@ -152,7 +155,7 @@ def route_rows(root: Path, videos: Path) -> list[dict]:
         if base.is_dir():
             routes.update(entry.name for entry in base.iterdir() if ROUTE_ID.fullmatch(entry.name))
     objects, dataset_changed = dataset_objects(root)
-    confirmed, newer = review_counts(root, dataset_changed)
+    confirmed, newer, by_ai = review_counts(root, dataset_changed)
 
     rows = []
     for route in sorted(routes):
@@ -171,6 +174,7 @@ def route_rows(root: Path, videos: Path) -> list[dict]:
             "run_id": run,
             "report_frames": report_frames,
             "confirmed": confirmed.get((route, run), 0) if run else 0,
+            "confirmed_by_ai": by_ai.get((route, run), 0) if run else 0,
             "new_reviews": newer.get((route, run), 0) if run else 0,
             "objects": objects.get(route, 0),
         }

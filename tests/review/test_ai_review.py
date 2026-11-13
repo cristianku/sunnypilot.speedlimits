@@ -682,3 +682,12 @@ def test_a_server_that_drops_is_waited_for_then_the_run_stops(site, tmp_path):
     # Never back: one frame waited for DOWN_RETRIES times, then the run stops instead of failing the rest.
     assert len(waits) == ai_review.DOWN_RETRIES and summary['stopped'] == 'ai_down' and summary['frames'] == 1
     assert lines[-1].startswith('AI review stopped (the AI server is down)')
+
+
+def test_an_answer_cut_at_max_tokens_is_asked_again_with_more_room_not_taken_for_a_server_down():
+    from nnslr_tools.llm_providers import LlmError
+    cut = LlmError(502, 'ai_http_error', 'HTTP 502: structured output was incomplete (finish_reason=length); increase '
+                                         'the output budget', http_code=502)
+    assert llm_providers.incomplete(cut) and not ai_review._server_down(cut)
+    down = LlmError(502, 'ai_http_error', 'HTTP 502: the AI server strata is down or restarting, try later', http_code=502)
+    assert ai_review._server_down(down) and not llm_providers.incomplete(down)

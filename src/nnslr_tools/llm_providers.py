@@ -56,6 +56,16 @@ class LlmError(ReviewRejected):
         self.http_code = http_code
 
 
+# An answer cut at max_tokens: the server is up, the answer did not fit (Strata says it with HTTP 502, "structured
+# output was incomplete (finish_reason=length); increase the output budget"; others with an empty answer).
+INCOMPLETE = re.compile(r'finish_reason[ =:]*length|output budget', re.I)
+
+
+def incomplete(exc: ReviewRejected) -> bool:
+    """The AI server answered, but its answer was cut at max_tokens: ask again with more, it is not down."""
+    return exc.reason in ('ai_http_error', 'ai_bad_answer') and bool(INCOMPLETE.search(exc.message or ''))
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec='seconds')
 
