@@ -68,6 +68,7 @@ const refinerFacts = computed(() => {
   if (!item) return '';
   return [isoWhen(item.at), item.boxes !== null ? plural(item.boxes, 'box', 'boxes') + ' to learn' : '',
     item.held_out_boxes !== null ? item.held_out_boxes + ' left out' : '',
+    typeof item.hand === 'number' ? item.hand + ' placed by hand' : '',
     item.best_epoch !== null && item.epochs !== null ? 'best epoch ' + item.best_epoch + ' of ' + item.epochs : '',
     item.minutes !== null ? item.minutes + ' min' : ''].filter(Boolean).join(' · ');
 });
@@ -81,6 +82,8 @@ const rows = computed(() => {
   const out: {key: string; name: string; measure: BoxFitMeasure}[] = [];
   if (item.all) out.push({key: 'all', name: 'All boxes', measure: item.all});
   if (item.small) out.push({key: 'small', name: 'Small signs', measure: item.small});
+  // A box Fit box placed and the reviewer accepted favours the refiner in use: these were placed otherwise.
+  if (item.fair) out.push({key: 'fair', name: 'Not placed by Fit box', measure: item.fair});
   return out;
 });
 const writtenText = computed(() => {

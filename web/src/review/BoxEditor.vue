@@ -127,9 +127,9 @@ function booleanChanged(key: BooleanField, event: Event): void {
     <div class="zoom-foot">
       <p class="evidence" id="evidence">{{ evidence }}</p>
       <div class="fit-chips">
-        <!-- Square on its centre (Q); Shift while drawing or dragging a corner draws a square. -->
+        <!-- Square on its centre (Q); Shift while drawing draws a square, while dragging a corner keeps the box's proportions. -->
         <button type="button" class="chip fit" id="squareBox" :disabled="report.readOnly"
-                title="Make this box a square on its centre; hold Shift while drawing or dragging a corner for a square"
+                title="Make this box a square on its centre; hold Shift while drawing for a square, while dragging a corner to keep the box's proportions"
                 @click="squareSelected(); releaseFocus($event)">Square<kbd>Q</kbd></button>
         <!-- This rough box made tight on the server, in a fraction of a second; C fits every box of the frame. -->
         <button v-if="canFitHere" type="button" class="chip fit" id="fitLocal" :disabled="localFitting.key !== null"

@@ -140,6 +140,10 @@ export interface BoxFitRefiner {
   minutes: number | null;
   all: BoxFitMeasure | null;
   small: BoxFitMeasure | null;
+  /** The boxes Fit box did not place (box_source, #80): the measure that does not favour the refiner in use. */
+  fair: BoxFitMeasure | null;
+  /** Boxes a person placed by hand, weighed more in training; null in a summary from before #80. */
+  hand: number | null;
   /** Better than the rankers in all and on the small signs; written: refiner.onnx replaced. */
   wins: boolean;
   written: boolean;

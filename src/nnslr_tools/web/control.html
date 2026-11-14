@@ -1591,6 +1591,14 @@ button.rg-row{cursor:pointer}
 .dr-rate button{padding-left:10px;padding-right:10px}
 .sr-lane svg{overflow:hidden}
 .dr-lanes .sr-speed{stroke:var(--fg);stroke-width:2}
+.dr-lanes .sr-off-read{stroke:var(--bad);stroke-width:2}
+.dr-lanes .sr-off-text{font-size:10px;font-weight:700;fill:var(--bad)}
+.dr-lanes rect.sr-off-band{fill:var(--bad);fill-opacity:.26;stroke:none}
+.dr-lanes rect.sr-off-top{fill:var(--bad);stroke:none}
+.sr-off-nav{display:inline-flex;align-items:center;gap:2px;margin-top:5px;font-size:10.5px;color:var(--bad);white-space:nowrap;cursor:default}
+.sr-off-nav b{font-weight:700}
+.sr-off-nav button{width:16px;height:16px;padding:0;border:1px solid currentColor;border-radius:5px;background:none;color:inherit;font:inherit;font-weight:700;line-height:1;cursor:pointer}
+.sr-off-nav button:disabled{opacity:.35;cursor:default}
 .dr-lanes rect.sr-block{fill:var(--accent-soft);stroke:none}
 .dr-lanes rect.sr-block-out{fill:var(--surface-3)}
 .dr-lanes rect.sr-held{fill:var(--muted);fill-opacity:.16;stroke:none}

@@ -79,6 +79,39 @@ export const isSpeedSign = (box: Detection): boolean => isSpeedFamily(box.family
  * the lane of our road's speed signs; the brain leaves it out too (brain_targets). */
 export const isOtherRoad = (box: Detection): boolean => box.applicability === 'other_road';
 
+/** A stretch of frames where a speed limit read for our road is far from the driver's speed: its first and last
+ * frame, how many, and at its worst the number read, his speed and when. */
+export interface OffRead {from: number; to: number; frames: number; read: number; kph: number; at: number}
+
+/** Where the speed limit read on the signs (a frame's speed signs with their number that are not another road's: the
+ * confirmed boxes of a confirmed frame, else the proposals) is more than `off` km/h from the driver's speed there
+ * (speedOf: null where the logs have none): a sign read wrong, or a sign of a side road taken for ours, to correct
+ * in Sign review. Frames less than `join` seconds apart are one stretch. */
+export function offReads(placed: readonly PlacedFrame[], speedOf: (at: number) => number | null, off: number,
+                         join: number): OffRead[] {
+  const out: OffRead[] = [];
+  for (const frame of placed) {
+    const kph = speedOf(frame.at);
+    if (kph === null) continue;
+    let worst: number | null = null;
+    for (const box of frame.boxes) {
+      const value = box.value_kph;
+      if (!isSpeedFamily(box.family) || isOtherRoad(box) || typeof value !== 'number' || value <= 0) continue;
+      if (Math.abs(value - kph) > off && (worst === null || Math.abs(value - kph) > Math.abs(worst - kph))) worst = value;
+    }
+    if (worst === null) continue;
+    const last = out[out.length - 1];
+    if (last && frame.at - last.to < join) {
+      last.to = frame.at;
+      last.frames++;
+      if (Math.abs(worst - kph) > Math.abs(last.read - last.kph)) Object.assign(last, {read: worst, kph, at: frame.at});
+    } else {
+      out.push({from: frame.at, to: frame.at, frames: 1, read: worst, kph, at: frame.at});
+    }
+  }
+  return out;
+}
+
 /** The text of a speed sign on the lane: its number, "Z30" for a zone, "end" for an end of limit, "Z end" of a zone. */
 export function signText(box: Detection): string {
   if (box.family === 'cancellation') return 'end';

@@ -188,6 +188,6 @@ function placeCarSigns(row: FrameRow, reading: CarReading): void {
     if (box[2] - box[0] < 2 || box[3] - box[1] < 2 || !carSignLeft(work, sign)) continue;
     const d = carDetection(sign);
     pushBox(work, box, d.family, d.value_kph ?? null, d.sign_type ?? null, d.supplementary_panel, d.plate_hours,
-      d.applicability, 'car');
+      d.applicability, 'car', 'car');
   }
 }

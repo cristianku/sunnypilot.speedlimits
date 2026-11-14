@@ -57,7 +57,7 @@ import {clockOf, type ScanState, secondOf as frameSecondOf, type SyncSegment} fr
 import DriveReviewDrive from './DriveReviewDrive.vue';
 import {networksText, PROPOSER_LABELS} from './proposer-words';
 import Segmented from './Segmented.vue';
-import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lightOf, type MarkRun, markRuns, nearestFrame, placeFrames, roadUserOf, type SignFrames, signRuns,
+import {aiRuns, isAiFrame, isOtherRoad, isSpeedSign, lightOf, type MarkRun, markRuns, nearestFrame, type OffRead, offReads, placeFrames, roadUserOf, type SignFrames, signRuns,
   stepFrame} from './sign-frames';
 import {boxesAt, type Drawn, exactFrames, type VideoFrame, type VideoIndex} from './frame-boxes';
 import {type Block, blockAt, canEndWorks, clampKph, draggedEdge, heldAt, MIN_BLOCK_NS, ROAD_TYPE_LABELS, ROADWORKS, type RoadKind,
@@ -928,6 +928,34 @@ function speedPath(from: number, to: number, width: number, x: (second: number) 
   return out;
 }
 watch(drive, () => { drawn = null; });
+
+// -- the speed limit read on the signs against his speed ----------------------------------------------------------------
+// Where a speed limit read for our road (Sign review's boxes of the frame: confirmed, else the networks' proposals) is
+// far from his dashboard speed, a sign was read wrong or a sign of a side road was taken for ours (Cristian, 14 Nov
+// 2026): a red band on the lane with the number read as a red line, and the arrows under the lane's name go from one
+// stretch to the next, to correct its signs in Signs. Nothing is saved here, and the answer stays his speed.
+const OFF_KPH = 30;
+/** Frames less than this many seconds apart are one stretch. */
+const OFF_JOIN_S = 2.5;
+const offRuns = computed(() => t0.value
+  ? offReads(placed.value, (at) => speedAt(speed.value, Math.round(t0.value + at * 1e9)), OFF_KPH, OFF_JOIN_S) : []);
+const offBefore = computed(() => offRuns.value.filter((run) => run.from < seconds.value - 0.05).pop() ?? null);
+const offAfter = computed(() => offRuns.value.find((run) => run.from > seconds.value + 0.05) ?? null);
+const goOff = (run: OffRead | null): void => { if (run) player.value?.seek(run.from); };
+function offIn(from: number, to: number, x: (second: number) => number) {
+  let lastX = -Infinity;
+  return offRuns.value.flatMap((run) => {
+    if (run.to < from || run.from > to) return [];
+    const first = Math.max(run.from, from);
+    const start = x(first);
+    const text = String(run.read);
+    const shown = start - lastX >= text.length * 6.5 + 8;
+    if (shown) lastX = start;
+    return [{key: run.from, from: first, to: Math.min(run.to, to), read: Math.min(run.read, top.value), text: shown ? text : '',
+      title: clockOf(run.from) + (run.to > run.from ? '–' + clockOf(run.to) : '') + ': a ' + run.read + ' read for your road, you at '
+        + run.kph + ' km/h (' + plural(run.frames, 'frame') + ')'}];
+  });
+}
 /** The blocks inside the time window, with what the lane writes on them. */
 function heldIn(from: number, to: number) {
   return held.value.flatMap(([start, stop]) => {
@@ -1000,8 +1028,14 @@ function worksIn(from: number, to: number) {
       </svg>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
-        <span class="dr-lane-name">Answer<small>km/h</small></span>
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; red band: a speed limit read for your road there is more than 30 km/h from your speed, the red line its number; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
+        <span class="dr-lane-name">Answer<small>km/h</small>
+          <span v-if="offRuns.length" class="sr-off-nav" id="sr-off-nav" @pointerdown.stop
+                :title="'A speed limit read for your road more than ' + OFF_KPH + ' km/h from your dashboard speed: ' + plural(offRuns.length, 'stretch', 'stretches') + ' on this drive, red on the lane, to check in Signs. The arrows go to the one before and the next'">
+            <button type="button" id="sr-off-prev" :disabled="!offBefore" aria-label="The stretch before where a limit read is far from your speed" @click="goOff(offBefore)">‹</button>
+            <b>{{ offRuns.length }} off</b>
+            <button type="button" id="sr-off-next" :disabled="!offAfter" aria-label="The next stretch where a limit read is far from your speed" @click="goOff(offAfter)">›</button>
+          </span></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
             <line :x1="0" :x2="width" :y1="y(kph)" :y2="y(kph)" class="rg-grid"/>
@@ -1010,6 +1044,13 @@ function worksIn(from: number, to: number) {
           <g v-for="run in heldIn(from, to)" :key="'held' + run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" class="sr-held"/>
             <text v-if="fits(run.from, run.to, 'cruise')" :x="x(run.from) + w(run.from, run.to) / 2" :y="PLOT - 4" class="dr-run-text sr-held-text">cruise</text>
+          </g>
+          <g v-for="run in offIn(from, to, x)" :key="'off' + run.key" class="sr-off">
+            <rect :x="x(run.from)" y="1" :width="Math.max(4, w(run.from, run.to))" :height="PLOT - 1" class="sr-off-band"/>
+            <rect :x="x(run.from)" y="0" :width="Math.max(4, w(run.from, run.to))" height="3" class="sr-off-top"/>
+            <line :x1="x(run.from)" :x2="x(run.from) + Math.max(4, w(run.from, run.to))" :y1="y(run.read)" :y2="y(run.read)" class="sr-off-read"/>
+            <text v-if="run.text" :x="x(run.from) + 2" :y="y(run.read) - 3" class="sr-off-text">{{ run.text }}</text>
+            <title>{{ run.title }}</title>
           </g>
           <g v-for="run in blocksIn(from, to)" :key="run.key">
             <rect :x="x(run.from)" y="1" :width="w(run.from, run.to)" :height="PLOT - 1" rx="3"

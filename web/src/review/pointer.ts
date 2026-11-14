@@ -1,5 +1,5 @@
 // Mouse and touch on the photo and on the zoom: draw a new box (drawing mode, N), select a box, move the
-// corners of the selected one or drag the whole box; Shift held makes the box drawn or resized a square. The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
+// corners of the selected one or drag the whole box; Shift held makes the box drawn a square, and a box resized keeps its proportions (Q makes it a square). The handlers of both pictures (Stage.vue, BoxEditor.vue); the point under the
 // pointer is the SVG's own math.
 import {nextTick} from 'vue';
 import {holdsPlate} from './catalog';
@@ -46,6 +46,19 @@ function squared(a: Point, b: Point, row: FrameRow, shift: boolean): Point {
   return [a[0] + sx * side, a[1] + sy * side];
 }
 
+/** Shift held on a corner: the point that keeps the proportions of ``box`` (the box when the drag began) from its
+ * opposite corner ``a``, as large as the longer way dragged, inside the image. A square is Q's (Cristian, 14 Nov 2026). */
+function proportional(a: Point, b: Point, row: FrameRow, box: Box): Point {
+  const width = box[2] - box[0];
+  const height = box[3] - box[1];
+  if (width <= 0 || height <= 0) return b;
+  const sx = b[0] < a[0] ? -1 : 1;
+  const sy = b[1] < a[1] ? -1 : 1;
+  const room = Math.min((sx > 0 ? row.width - a[0] : a[0]) / width, (sy > 0 ? row.height - a[1] : a[1]) / height);
+  const scale = Math.min(Math.max(Math.abs(b[0] - a[0]) / width, Math.abs(b[1] - a[1]) / height), room);
+  return [a[0] + sx * scale * width, a[1] + sy * scale * height];
+}
+
 /** The corner opposite to the one dragged. */
 const OPPOSITE: Record<Corner, (b: Box) => Point> = {
   nw: (b) => [b[2], b[3]], ne: (b) => [b[0], b[3]], sw: (b) => [b[2], b[1]], se: (b) => [b[0], b[1]],
@@ -71,14 +84,15 @@ export function onPointerDown(event: PointerEvent, surface: Surface): void {
     return;
   }
   const corner = cornerOf(event.target);
+  const d = selectedDetection();
   if (corner !== null) {
+    if (!d) return;
     event.preventDefault();
-    state.drag = {kind: 'resize', svg: surface, corner, moved: false};
+    state.drag = {kind: 'resize', svg: surface, corner, moved: false, box: [...d.bbox_xyxy]};
     svg.setPointerCapture(event.pointerId);
     return;
   }
   // Inside the selected box: the whole box follows the pointer.
-  const d = selectedDetection();
   if (d && onSelectedBox(event, surface, toImagePoint(svg, event, row), d.bbox_xyxy)) {
     event.preventDefault();
     state.drag = {kind: 'move', svg: surface, start: toImagePoint(svg, event, row), box: [...d.bbox_xyxy], moved: false};
@@ -113,9 +127,9 @@ export function onPointerMove(event: PointerEvent, surface: Surface): void {
     if (Math.abs(dx) + Math.abs(dy) > 0) drag.moved = true;
     return;
   }
-  // Shift: a square on the opposite corner (never a box of a sign and its plate, taller on purpose).
+  // Shift: the box grows or shrinks from the opposite corner with the proportions it had when the drag began.
   const anchor = OPPOSITE[drag.corner](d.bbox_xyxy);
-  const q = squared(anchor, p, row, event.shiftKey && !holdsPlate(d));
+  const q = event.shiftKey ? proportional(anchor, p, row, drag.box) : p;
   const b: Box = [anchor[0], anchor[1], q[0], q[1]];
   const x1 = Math.min(b[0], b[2]);
   const x2 = Math.max(b[0], b[2]);
@@ -154,6 +168,7 @@ export function finishDrag(event: PointerEvent, surface: Surface): void {
     const d = selectedDetection();
     if (d) {
       delete d.check_position;
+      d.box_source = 'hand';
       markPlacedByHand(d, true);
     }
     changed(row);

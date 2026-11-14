@@ -9,7 +9,7 @@ import {LABEL_FIELDS, type Label} from './recent';
 import {refuseChange} from './busy';
 import {revealEditor} from './scroll';
 import {hintsOf, state, store} from './store';
-import type {Box, Detection, FrameEdit, FrameRow} from './types';
+import type {Box, BoxSource, Detection, FrameEdit, FrameRow} from './types';
 
 /** The frame was changed here: it waits for a new confirmation. */
 export function changed(row: FrameRow): void {
@@ -209,6 +209,7 @@ export function squareSelected(): void {
   const cy = Math.min(Math.max((y1 + y2) / 2, side / 2), row.height - side / 2);
   d.bbox_xyxy = [cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2];
   delete d.check_position;
+  d.box_source = 'hand';
   markPlacedByHand(d, true);
   changed(row);
 }
@@ -243,10 +244,10 @@ function manualId(work: FrameEdit, prefix: string): string {
 }
 
 export function addManualBox(row: FrameRow, box: Box, family: string, value: number | null,
-  signType: string | null = null, panel = 'unknown', hours: string | null = null): void {
+  signType: string | null = null, panel = 'unknown', hours: string | null = null, source: BoxSource = 'hand'): void {
   if (refuseChange()) return;
   const work = workOf(row);
-  pushBox(work, box, family, value, signType, panel, hours);
+  pushBox(work, box, family, value, signType, panel, hours, 'unresolved', 'manual', source);
   state.drawKind = null;
   state.selected = work.detections.length - 1;
   state.selectedByUser = true;
@@ -256,7 +257,7 @@ export function addManualBox(row: FrameRow, box: Box, family: string, value: num
 
 /** A box added to the frame's list, nothing else: no box selected, and the frame still waits as it did. */
 export function pushBox(work: FrameEdit, box: Box, family: string, value: number | null, signType: string | null = null,
-  panel = 'unknown', hours: string | null = null, road = 'unresolved', prefix = 'manual'): void {
+  panel = 'unknown', hours: string | null = null, road = 'unresolved', prefix = 'manual', source: BoxSource = 'hand'): void {
   work.detections.push({
     bbox_xyxy: box,
     family,
@@ -269,6 +270,7 @@ export function pushBox(work: FrameEdit, box: Box, family: string, value: number
     applicability: road,
     supplementary_panel: panel,
     detection_id: manualId(work, prefix),
+    box_source: source,
     ...(signType && family === 'other_sign' ? {sign_type: signType} : {}),
     ...(hours ? {plate_hours: hours} : {}),
   });
@@ -282,7 +284,7 @@ export function useHint(index: number): void {
   if (!hint || !isBox(hint.box)) return;
   const family = familyForHint(hint.type);
   const value = familyHasValue(family) && Number.isInteger(hint.value_kph) ? hint.value_kph ?? null : null;
-  addManualBox(row, [...hint.box], family, value);
+  addManualBox(row, [...hint.box], family, value, null, 'unknown', null, 'hint');
 }
 
 /** Physical site or encounter of the frame (under "More"); empty: none. */

@@ -9,7 +9,7 @@ import {refuseChange} from './busy';
 import {reactive} from 'vue';
 import {messageOf} from '../common/api';
 import type {AiAction, AiState, AiSuggestion, AiTrial} from '../common/ai-types';
-import type {Box, Detection, FrameRow} from './types';
+import type {Box, BoxSource, Detection, FrameRow} from './types';
 import {askConfirm} from '../composables/confirm';
 import {holdsPlate} from './catalog';
 import {clone} from './dom';
@@ -158,7 +158,8 @@ export async function askAi(): Promise<void> {
  * the fit ran. */
 type FitOutcome = 'fitted' | 'same' | 'changed' | 'removed';
 
-function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box | null, within = 0): FitOutcome {
+function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box | null, source: BoxSource,
+  within = 0): FitOutcome {
   if (!workOf(row).detections.includes(detection)) return 'removed';
   if (JSON.stringify(detection.bbox_xyxy) !== sent) return 'changed';
   const was = detection.bbox_xyxy;
@@ -172,6 +173,7 @@ function settleFit(row: FrameRow, detection: Detection, sent: string, box: Box |
     return 'same';
   }
   detection.bbox_xyxy = box;
+  detection.box_source = source;
   // A box carried from the previous frame is now on its sign: as "Here" does, its check goes.
   delete detection.check_position;
   markPlacedByHand(detection, false);
@@ -226,7 +228,7 @@ export async function fitBox(selected = false): Promise<void> {
       const answer = await call<{box: Box | null; message: string}>('POST', apiBase + '/frame/' + key + '/ai-fit',
         {run_id: report.runId, box: detection.bbox_xyxy});
       message = answer.message;
-      outcomes.push(settleFit(row, detection, sent, answer.box));
+      outcomes.push(settleFit(row, detection, sent, answer.box, 'ai_fit'));
     }
     const count = countFits(outcomes);
     const one = count.changed ? ': the box changed meanwhile, left as it is.'
@@ -289,7 +291,7 @@ export async function fitLocal(which: FitWhich = 'frame'): Promise<void> {
     // An answer that moves no side by a pixel or more is no change: a box already right (or a confirmed frame)
     // stays as it is, not an edit to confirm again.
     const count = countFits(sent.map(({detection, box}, number) =>
-      settleFit(row, detection, box, answer.boxes[number] ?? null, 1)));
+      settleFit(row, detection, box, answer.boxes[number] ?? null, 'fit', 1)));
     const ms = ' · ' + answer.ms + ' ms.';
     const hand = byHand ? ', ' + byHand + ' placed by hand left as ' + (byHand === 1 ? 'it is' : 'they are') : '';
     const text = targets.length > 1 || byHand
@@ -322,7 +324,15 @@ export async function applyAi(): Promise<void> {
       text: 'The boxes of this frame changed after you asked the AI: applying replaces them with its suggestion.'});
     if (!ok || state.currentKey !== key || ai.asks[key]?.ticket !== ask.ticket) return;
   }
+  // A box the AI drew or moved is the AI's (box_source); one it left where it was keeps its own.
+  const before = new Map(work.detections.map((d) => [d.detection_id, d]));
   work.detections = clone(suggestion.detections);
+  for (const d of work.detections) {
+    const was = d.detection_id === undefined ? undefined : before.get(d.detection_id);
+    if (!was || JSON.stringify(was.bbox_xyxy) !== JSON.stringify(d.bbox_xyxy)) d.box_source = 'ai';
+    else if (was.box_source) d.box_source = was.box_source;
+    else delete d.box_source;
+  }
   delete ai.asks[key];
   state.selected = work.detections.length > 0 ? 0 : -1;
   state.selectedByUser = false;

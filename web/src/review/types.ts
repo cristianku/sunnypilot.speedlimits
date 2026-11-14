@@ -41,7 +41,14 @@ export interface Detection {
   /** An AI suggestion applied (review/ai.ts): what the AI did with the box. The page shows it; the server keeps
    * only the labels when saving, so the frame is saved as the reviewer's own review. */
   ai_action?: AiAction;
+  /** What last set the box's position (review_db.BOX_SOURCES, #80); absent: the model's proposal as it was. Saved
+   * with the box: Fit box's training weighs the boxes a person placed. */
+  box_source?: BoxSource;
 }
+
+/** What last set a box's position: drawn, moved, resized or squared here (hand), Fit box (fit), Fit with AI (ai_fit),
+ * an AI suggestion (ai), Apply previous (carried), the car's networks (car), the second reading (hint). */
+export type BoxSource = 'hand' | 'fit' | 'ai_fit' | 'ai' | 'carried' | 'car' | 'hint';
 
 /** One frame of the pre-annotation report. The rows carry more fields (hashes, models...): the JSONL export
  * copies them as they are. */
@@ -296,5 +303,5 @@ export type Surface = 'scene' | 'zoom';
  * moving the whole selected box (box: where it was when the drag started). */
 export type Drag =
   | {kind: 'draw'; svg: Surface; start: Point}
-  | {kind: 'resize'; svg: Surface; corner: Corner; moved: boolean}
+  | {kind: 'resize'; svg: Surface; corner: Corner; moved: boolean; /** The box when the drag began. */ box: Box}
   | {kind: 'move'; svg: Surface; start: Point; box: Box; moved: boolean};
