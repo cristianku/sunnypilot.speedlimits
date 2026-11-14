@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import sys
 
-from nnslr_tools.sign_types import class_hours, class_parts
+from nnslr_tools.sign_types import class_hours, class_parts, class_sign_type
 
 
 def proposal_of(label: str) -> tuple[str, int | None] | None:
@@ -119,10 +119,14 @@ def run(request: dict) -> None:
                                        'supplementary_panel': proposal_panel(classes[index])})
                     if class_hours(classes[index]):
                         detections[-1]['plate_hours'] = class_hours(classes[index])
+                    # The kind of an other sign (roundabout, main_road...): its review box's sign_type, as Car networks.
+                    if class_sign_type(classes[index]):
+                        detections[-1]['sign_type'] = class_sign_type(classes[index])
             detections = suppress_overlaps(detections)
-            # Whom each speed sign applies to: all the boxes of the frame in one call. The other families keep
-            # unresolved: the decider learnt ownership only on the speed families.
-            ruled = [item for item in detections if dataset_family(item['family']) in decider.families]
+            # Whom each box applies to: all the boxes of the frame in one call, every family, as Car networks (key T,
+            # car_reading.rule_signs) does (14 Nov 2026). The decider learnt ownership on the speed families: on the
+            # other signs its answer is a hint for the reviewer.
+            ruled = detections
             if ruled:
                 speed = car_speed(root, positions, frame, request['route_id'])
                 for item, (applicability, probability) in zip(ruled, decider.decide(

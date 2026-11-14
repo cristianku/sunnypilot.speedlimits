@@ -92,6 +92,23 @@ def class_parts(label: Any) -> tuple[str, str, str | None]:
     return ('maximum_speed', value.partition(':')[0], panel) if panel else (family, value, None)
 
 
+def class_sign_type(label: Any) -> str | None:
+    """The kind of an Other sign a classifier class names ("roundabout" for "other_sign:roundabout"), the sign_type of
+    its review box; None for any other class or a kind the review does not know."""
+    family, value, _ = class_parts(label)
+    return value if family == 'other_sign' and value in SIGN_TYPES else None
+
+
+def with_sign_type(detection: dict) -> dict:
+    """A proposal of Other sign with the kind its class names (model_label) when it has none: Prepare's reports before
+    14 Nov 2026 kept only "Other sign" of "other_sign:roundabout", "other_sign:main_road"... The same detection."""
+    if detection.get('family') == 'other_sign' and not detection.get('sign_type'):
+        kind = class_sign_type(detection.get('model_label'))
+        if kind:
+            detection['sign_type'] = kind
+    return detection
+
+
 def class_hours(label: Any) -> str | None:
     """The hours a classifier class says: "22-6" for "maximum_speed_hours:30:22-6", None for any other class."""
     family, _, value = str(label).partition(':')

@@ -174,9 +174,16 @@ def latest_report(root: Path, route: str) -> Path:
 
 # [reviewed-dataset] - START
 def report_rows(directory: Path) -> list[dict]:
+    """The rows of a report, each Other sign proposal with the kind its class names (sign_types.with_sign_type)."""
     from nnslr_tools.annotations import load_jsonl
+    from nnslr_tools.sign_types import with_sign_type
     source = _inside(directory, directory / 'preannotations.jsonl')
-    return load_jsonl(source)
+    rows = load_jsonl(source)
+    for row in rows:
+        for detection in row.get('detections') or ():
+            if isinstance(detection, dict):
+                with_sign_type(detection)
+    return rows
 
 
 def refresh_review(directory: Path) -> None:

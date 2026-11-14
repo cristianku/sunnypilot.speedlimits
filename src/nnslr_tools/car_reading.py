@@ -40,7 +40,7 @@ import numpy as np
 from nnslr_tools import road_type_signs, video_frames
 from nnslr_tools.car_release import GPU_VENV_ENV
 from nnslr_tools.media import FULL_SIZE
-from nnslr_tools.sign_types import class_hours, class_parts
+from nnslr_tools.sign_types import class_hours, class_parts, class_sign_type
 
 MANIFEST = road_type_signs.RELEASE_MANIFEST
 MANIFEST_FORMAT = 2
@@ -146,8 +146,8 @@ def review_box(name: str) -> dict:
     if family == 'road_marking':
         family = 'road_marking_candidate'
     box = {'family': family, 'value_kph': int(value) if value.isdigit() else None}
-    if family == 'other_sign' and value:
-        box['sign_type'] = value
+    if class_sign_type(name):
+        box['sign_type'] = class_sign_type(name)
     if panel is not None:
         box['supplementary_panel'] = panel
     if class_hours(name):
