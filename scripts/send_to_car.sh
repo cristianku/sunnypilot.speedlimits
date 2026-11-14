@@ -9,7 +9,10 @@
 #   1/5 Export   the SignNet of <run> and the classifier in use (models/active.json; --classifier: another id of the
 #                Models tab) to ONNX with the GPU venv, each checked against PyTorch with onnxruntime;
 #                the brain in use, when one is chosen, is exported here too (its ONNX step, checked along a drive,
-#                PyTorch on a V100: never on the CPU, without a card it stops).
+#                PyTorch on a V100: never on the CPU, without a card it stops). On a machine without a card (the site
+#                on serverone2) the whole step runs on a V100 of CT 131 through scripts/gpu_remote.sh, which sends the
+#                code and the data root there and brings the export back (<data root>/publish/car-export); steps
+#                2 to 5 run here, where the clones and the ssh key are. CT 131 off: it stops and says whom to ask.
 #   2/5 Publish  them in the clone of cristianku/speed-limits-models: the ONNX, their contracts and speed_limits.json
 #                (format 2, version = the day, .2 .3 ... for another one the same day), one commit pushed to main.
 #                Nothing when every ONNX is the published one already (the export is the same byte for byte).
@@ -34,7 +37,8 @@
 #      NNSLR_OPENPILOT_SCRIPTS (default /root/openpilot_scripts), NNSLR_CAR_WORKSPACE (WORKSPACE_ROOT of the build,
 #      default /root/work/op-setup-ws), NNSLR_TESTING_REPO (where the last line reads psa-torque-sunny-testing, default
 #      https://github.com/cristianku/openpilot.git), NO_PUSH=true (the build commits psa-torque-sunny-testing
-#      without pushing it).
+#      without pushing it), NNSLR_GPU_RUNNER (the runner step 1 goes through on a machine without a card, default
+#      <repo>/scripts/gpu_remote.sh; empty: never, step 1 runs here).
 # The pushes use this server's ssh key for github.com: no token is passed, printed or written.
 
 set -euo pipefail
@@ -52,6 +56,9 @@ SUBMODULE="openpilot/sunnypilot/speed_limits/models"
 TESTING_REPO="${NNSLR_TESTING_REPO:-https://github.com/cristianku/openpilot.git}"
 TESTING_BRANCH="psa-torque-sunny-testing"
 PENDING="$DATA_ROOT/models/send-to-car.pending"
+RUNNER="${NNSLR_GPU_RUNNER-$ROOT/scripts/gpu_remote.sh}"
+# Where step 1 leaves the export when it runs on CT 131: in the data root and outside tmp/, so the runner brings it back.
+EXPORT="$DATA_ROOT/publish/car-export"
 TRIAL="$DATA_ROOT/models/on-comma-trial.json"
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -114,7 +121,18 @@ trap 'rm -f "$output"' EXIT
 # Steps 1 to 3 (nnslr_tools.car_release). The brain's check along a drive runs PyTorch on a V100 (NNSLR_GPU_INDEX,
 # default 0: about 1 GB of it for some seconds, beside whatever else holds the card), never on the CPU: without a
 # card it stops and says so.
-CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}" PYTHONUNBUFFERED=1 "$VENV/bin/nnslr" "${cli[@]}" 2>&1 | tee "$output"
+has_card() { nvidia-smi -L 2> /dev/null | grep -q '^GPU '; }
+if has_card || [ -z "$RUNNER" ] || [ ! -f "$RUNNER" ]; then
+  CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES="${NNSLR_GPU_INDEX:-0}" PYTHONUNBUFFERED=1 "$VENV/bin/nnslr" "${cli[@]}" 2>&1 | tee "$output"
+else
+  # No card here: step 1 on a V100 of CT 131 through the GPU runner (beside whatever else computes on that card: the
+  # check takes about 1 GB for some seconds), then steps 2 and 3 here with the export it brought back.
+  rm -rf "$EXPORT"
+  export_cli=(send-to-car --signnet "$signnet" --data-root "$DATA_ROOT" --steps-of 5 --export-only "$EXPORT")
+  [ -z "$classifier" ] || export_cli+=(--classifier "$classifier")
+  PYTHONUNBUFFERED=1 NNSLR_ALLOW_BUSY_GPU=1 "$RUNNER" .venv-gpu/bin/nnslr "${export_cli[@]}" 2>&1 | tee "$output"
+  PYTHONUNBUFFERED=1 "$VENV/bin/nnslr" "${cli[@]}" --exported "$EXPORT" 2>&1 | tee -a "$output"
+fi
 models_commit="$(git -C "$MODELS" rev-parse HEAD)"
 published=0
 [ "$models_commit" = "$models_before" ] || published=1

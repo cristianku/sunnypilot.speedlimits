@@ -484,26 +484,67 @@ def _same_record(root: Path, record: dict) -> bool:
         key: item for key, item in record.items() if key != 'recorded_at'}
 
 
+# What an export made apart (send_to_car's export_only) says it holds: {'networks': export()'s answer}.
+EXPORT_RECORD = 'export.json'
+
+
+def taken_export(chosen: dict, folder: Path) -> dict:
+    """The export made apart in folder (send_to_car's export_only, on the machine with the cards), as export() answers
+    it: it must be of the networks chosen now, whole, each ONNX the one of its contract. It raises otherwise."""
+    try:
+        record = json.loads((folder / EXPORT_RECORD).read_text(encoding='utf-8'))['networks']
+        found = {}
+        for network, name in car_files(chosen).items():
+            contract = json.loads((folder / (name + '.contract.json')).read_text(encoding='utf-8'))
+            digest = _sha256(folder / name)
+            if contract.get('onnx_sha256') != digest or contract.get('checkpoint') != chosen[network]['id']:
+                raise ValueError(f'{name} is not the export of {chosen[network]["id"]}')
+            found[network] = {'id': chosen[network]['id'], 'file': name, 'onnx_sha256': digest}
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
+        raise ValueError(f'no whole export in {folder}: {error}') from error
+    if found != record:
+        raise ValueError(f'the export in {folder} is not of the networks in use now: export again')
+    return found
+
+
 def send_to_car(root: Path, signnet: Any = None, *, classifier: Any = None, models: Path | None = None,
                 dry_run: bool = False, today: date | None = None, steps_of: int = 3,
                 exporter: Callable[[dict, Path], dict] | None = None,
-                say: Callable[[str], None] = lambda line: print(line, flush=True)) -> dict:
+                say: Callable[[str], None] = lambda line: print(line, flush=True),
+                export_only: Path | None = None, exported_in: Path | None = None) -> dict:
     """Steps 1 to 3 of Publish to the car (see the module): the export, its publication when it differs from the
-    published networks, and on-car.json; signnet None: the cutter in use. Returns {'changed', 'commit', 'version', 'record'}."""
+    published networks, and on-car.json; signnet None: the cutter in use. Returns {'changed', 'commit', 'version', 'record'}.
+
+    The site may have no card (serverone2 since 13 Nov 2026) while the export's checks run on one, so the steps can be
+    done on two machines. export_only: step 1 alone, into that folder (emptied first), on the machine with the cards:
+    nothing is published or recorded, {'exported': ...}. exported_in: steps 2 and 3 alone, with the export of that
+    folder (taken_export checks it is of the networks in use now)."""
     root = Path(root)
     models = Path(models or os.environ.get(MODELS_CLONE_ENV) or MODELS_CLONE)
     chosen = choose(root, signnet, classifier)
     decider = f', the applicability network {chosen["decider"]["id"]}' if chosen.get('decider') else ''
     brain = f', the brain {chosen["brain"]["id"]}' if chosen.get('brain') else ''
-    say(f'== 1/{steps_of} Export the SignNet of {chosen["finder"]["run"]} and the classifier {chosen["classifier"]["id"]}'
-        + decider + brain)
+    if exported_in is None:
+        say(f'== 1/{steps_of} Export the SignNet of {chosen["finder"]["run"]} and the classifier '
+            f'{chosen["classifier"]["id"]}' + decider + brain)
+    if export_only is not None:
+        folder = Path(export_only)
+        shutil.rmtree(folder, ignore_errors=True)
+        folder.mkdir(parents=True)
+        exported = (exporter or export)(chosen, folder)
+        (folder / EXPORT_RECORD).write_text(json.dumps({'networks': exported}, indent=2, sort_keys=True) + '\n',
+                                            encoding='utf-8')
+        for network in car_files(chosen):
+            say(f'{network}: {exported[network]["id"]} onnx sha256 {exported[network]["onnx_sha256"]}')
+        return {'exported': exported}
     work = root / 'tmp'
     work.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='send-to-car-', dir=work) as name:
-        folder = Path(name)
-        exported = (exporter or export)(chosen, folder)
-        for network in car_files(chosen):
-            say(f'{network}: {exported[network]["id"]} onnx sha256 {exported[network]["onnx_sha256"]}')
+        folder = Path(name) if exported_in is None else Path(exported_in)
+        exported = (exporter or export)(chosen, folder) if exported_in is None else taken_export(chosen, folder)
+        if exported_in is None:
+            for network in car_files(chosen):
+                say(f'{network}: {exported[network]["id"]} onnx sha256 {exported[network]["onnx_sha256"]}')
         say(f'== 2/{steps_of} Publish them in {models}')
         published = publish(models, chosen, folder, exported, today=today, dry_run=dry_run,
                             settings=car_settings.values(root))

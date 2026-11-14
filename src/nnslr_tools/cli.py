@@ -1115,8 +1115,12 @@ def _cmd_send_to_car(args: argparse.Namespace) -> int:
     root = resolve_data_root(Path(args.data_root) if args.data_root else None)
     if args.steps_of < 3 or args.steps_of > 9:
         raise ValueError("--steps-of is 3 to 9")
+    if args.export_only and (args.exported or args.dry_run):
+        raise ValueError("--export-only goes alone: it publishes and records nothing")
     send_to_car(root, args.signnet, classifier=args.classifier, models=Path(args.models) if args.models else None,
-                dry_run=args.dry_run, steps_of=args.steps_of)
+                dry_run=args.dry_run, steps_of=args.steps_of,
+                export_only=Path(args.export_only) if args.export_only else None,
+                exported_in=Path(args.exported) if args.exported else None)
     return 0
 
 
@@ -2509,6 +2513,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="export and compare only: nothing copied, committed, pushed or recorded")
     p_send.add_argument("--steps-of", type=int, default=3,
                         help="number the step lines n/N (scripts/send_to_car.sh: 5, its last two steps are its own)")
+    p_send.add_argument("--export-only", metavar="DIR",
+                        help="step 1 alone, into DIR (emptied first): for the machine with the cards, when the site "
+                             "has none (scripts/send_to_car.sh sends it there through scripts/gpu_remote.sh)")
+    p_send.add_argument("--exported", metavar="DIR",
+                        help="steps 2 and 3 alone, with the export --export-only left in DIR, which must be of the "
+                             "networks in use now")
     p_send.set_defaults(func=_cmd_send_to_car)
 
     p_try = sub.add_parser(

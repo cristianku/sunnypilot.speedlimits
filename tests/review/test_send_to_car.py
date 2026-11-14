@@ -510,9 +510,11 @@ def test_nnslr_send_to_car_numbers_its_steps_for_the_script(tmp_path, monkeypatc
 FAKE_NNSLR = r'''#!/usr/bin/env bash
 # Steps 1-3 of nnslr send-to-car: FAKE_PUBLISH=<bytes> publishes in the models clone (--models), as the real one does.
 echo "nnslr $*"
-models=""; dry=0
-while [ "$#" -gt 0 ]; do case "$1" in --models) models="$2"; shift ;; --dry-run) dry=1 ;; esac; shift; done
-echo "== 1/5 Export"
+models=""; dry=0; only=0; exported=0
+while [ "$#" -gt 0 ]; do case "$1" in --models) models="$2"; shift ;; --dry-run) dry=1 ;; --export-only) only=1; shift ;;
+  --exported) exported=1; shift ;; esac; shift; done
+[ "$exported" -eq 1 ] || echo "== 1/5 Export"
+[ "$only" -eq 0 ] || exit 0
 echo "== 2/5 Publish"
 if [ -n "${FAKE_PUBLISH:-}" ] && [ "$dry" -eq 1 ]; then echo "dry run: would publish version x"; fi
 if [ -n "${FAKE_PUBLISH:-}" ] && [ "$dry" -eq 0 ]; then
@@ -558,6 +560,7 @@ def car(tmp_path):
     env = {**os.environ, **IDENTITY, 'NNSLR_DATA_ROOT': str(tmp_path / 'data'), 'NNSLR_GPU_VENV': str(venv),
            'NNSLR_MODELS_CLONE': str(clone), 'NNSLR_SUNNYPILOT_CLONE': str(sp), 'NNSLR_OPENPILOT_SCRIPTS': str(scripts),
            'NNSLR_CAR_WORKSPACE': str(tmp_path / 'ws'), 'NNSLR_TESTING_REPO': str(testing),
+           'NNSLR_GPU_RUNNER': '',  # step 1 here, whether this machine has a card or not
            'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'protocol.file.allow', 'GIT_CONFIG_VALUE_0': 'always'}
     return {'env': env, 'clone': clone, 'sp': sp, 'sp_origin': sp_origin, 'data': tmp_path / 'data', 'testing': testing}
 
@@ -800,6 +803,109 @@ def test_the_brains_check_runs_on_the_gpu_and_never_moves_to_the_cpu_by_itself(m
     # Asked for by name (the tests, a machine with no card): then the CPU.
     monkeypatch.setenv(car_release.CHECK_DEVICE_ENV, 'cpu')
     assert car_release.check_device() == 'cpu'
+
+
+FAKE_RUNNER = r'''#!/usr/bin/env bash
+# As scripts/gpu_remote.sh: it runs the job (here the fake nnslr of the venv) and gives its exit code, 75 without CT 131.
+echo "[gpu runner] busy=${NNSLR_ALLOW_BUSY_GPU:-} $*"
+[ -z "${FAKE_RUNNER_OFF:-}" ] || { echo "[gpu runner] CT 131 is off"; exit 75; }
+shift
+exec "$NNSLR_GPU_VENV/bin/nnslr" "$@"
+'''
+
+
+def no_card_here(car: dict, tmp_path: Path, smi: str = 'exit 9') -> dict:
+    """The environment of a machine whose nvidia-smi answers as smi does, with a fake GPU runner."""
+    runner = tmp_path / 'gpu_remote.sh'
+    runner.write_text(FAKE_RUNNER)
+    runner.chmod(0o755)
+    tools = tmp_path / 'tools'
+    tools.mkdir()
+    (tools / 'nvidia-smi').write_text('#!/bin/sh\n' + smi + '\n')
+    (tools / 'nvidia-smi').chmod(0o755)
+    return {'NNSLR_GPU_RUNNER': str(runner), 'PATH': f'{tools}:{os.environ["PATH"]}'}
+
+
+def test_without_a_card_here_the_export_runs_through_the_gpu_runner_and_the_rest_here(car, tmp_path):
+    """The site on serverone2 has no card (14 Nov 2026: Publish stopped at the brain's check): step 1 goes to CT 131
+    through the runner, beside whatever computes there, and steps 2 to 5 run here with the export it brought back."""
+    env = no_card_here(car, tmp_path)
+    done = send(car, '--signnet', 's1', FAKE_PUBLISH='new networks', **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    folder = car['data'] / 'publish/car-export'
+    asked = f'[gpu runner] busy=1 .venv-gpu/bin/nnslr send-to-car --signnet s1 --data-root {car["data"]} --steps-of 5'
+    assert f'{asked} --export-only {folder}\n' in done.stdout
+    here = [line for line in done.stdout.splitlines() if line.startswith('nnslr send-to-car') and '--exported' in line]
+    assert len(here) == 1 and here[0].endswith(f'--steps-of 5 --exported {folder}') and '--models' in here[0]
+    assert done.stdout.index('[gpu runner]') < done.stdout.index(here[0])
+    assert done.stdout.count('== 1/5 Export') == 1 and 'build sunny' in done.stdout
+    # The classifier asked for and a dry run go with it.
+    done = send(car, '--signnet', 's1', '--classifier', 'classifier:r1/reader', '--dry-run', **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f'--export-only {folder} --classifier classifier:r1/reader\n' in done.stdout
+    assert f'--classifier classifier:r1/reader --dry-run --exported {folder}\n' in done.stdout
+
+
+def test_without_ct_131_publish_stops_before_anything_is_published(car, tmp_path):
+    before = git(car['clone'], 'rev-parse', 'HEAD')
+    done = send(car, '--signnet', 's1', FAKE_PUBLISH='new networks', FAKE_RUNNER_OFF='1', **no_card_here(car, tmp_path))
+    assert done.returncode == 75 and 'CT 131 is off' in done.stdout
+    assert '--exported' not in done.stdout and '== 4/5' not in done.stdout and 'build sunny' not in done.stdout
+    assert git(car['clone'], 'rev-parse', 'HEAD') == before
+
+
+def test_with_a_card_here_the_export_runs_here(car, tmp_path):
+    done = send(car, '--signnet', 's1', **no_card_here(car, tmp_path, 'echo "GPU 0: Tesla V100-PCIE-32GB (UUID: GPU-x)"'))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert '[gpu runner]' not in done.stdout and '--export-only' not in done.stdout and '--exported' not in done.stdout
+
+
+def test_the_export_where_the_cards_are_then_the_publication_here(tmp_path):
+    """send_to_car on two machines: step 1 alone into a folder (export_only), then steps 2 and 3 with what it left
+    (exported_in), which publish what one call would. An export of other networks, a changed file, an empty folder:
+    refused, nothing published."""
+    data = tmp_path / 'data'
+    servers_runs(data)
+    origin, clone = models_clone(tmp_path)
+    before = git(clone, 'rev-parse', 'HEAD')
+    folder = data / 'publish/car-export'
+    folder.mkdir(parents=True)
+    (folder / 'old.onnx').write_bytes(b'of an earlier export')
+    lines = []
+    only = car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=fake_export(b'v1'), say=lines.append,
+                                   export_only=folder)
+    assert set(only) == {'exported'} and not (folder / 'old.onnx').exists()
+    assert lines[0].startswith('== 1/3 Export') and not any(line.startswith('== 2/') for line in lines)
+    assert git(clone, 'rev-parse', 'HEAD') == before == git(origin, 'rev-parse', 'main')
+    assert git(clone, 'status', '--porcelain') == '' and not (data / 'models/on-car.json').exists()
+
+    def never(chosen: dict, folder: Path) -> dict:
+        raise AssertionError('exported again')
+
+    def rest(**more):
+        return car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=never, exported_in=folder, **more)
+
+    lines.clear()
+    assert rest(dry_run=True, say=lines.append)['changed'] and git(clone, 'rev-parse', 'HEAD') == before
+    lines.clear()
+    result = rest(say=lines.append)
+    assert lines[0].startswith('== 2/3 Publish') and not any(line.startswith('== 1/') for line in lines)
+    assert result['changed'] and result['version'] == '2026-10-28'
+    assert git(origin, 'rev-parse', 'main') == result['commit'] != before
+    assert (clone / 'signnet.onnx').read_bytes() == b'v1 signnet.onnx'
+    assert json.loads((data / 'models/on-car.json').read_text())['commit'] == result['commit']
+    # The same export again: nothing to publish.
+    assert not rest(say=lambda line: None)['changed']
+    # Another SignNet in use since the export, a file changed, nothing there.
+    make_signnet(data, 's2')
+    with pytest.raises(ValueError, match='is not the export of cutter:s2/signnet'):
+        car_release.send_to_car(data, 's2', models=clone, today=TODAY, exporter=never, exported_in=folder)
+    (folder / 'classifier.onnx').write_bytes(b'changed')
+    with pytest.raises(ValueError, match='classifier.onnx is not the export of'):
+        rest()
+    with pytest.raises(ValueError, match='no whole export'):
+        car_release.send_to_car(data, 's1', models=clone, today=TODAY, exporter=never, exported_in=tmp_path / 'nowhere')
+    assert git(origin, 'rev-parse', 'main') == result['commit']
 
 
 def test_publish_gives_the_export_a_card_and_does_not_hide_them():
