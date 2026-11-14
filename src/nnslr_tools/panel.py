@@ -48,6 +48,8 @@ LOG_CHUNK_BYTES = 64 * 1024
 PROGRESS_BYTES = 4 * 1024 * 1024
 # Written by helpers/1_prepare.sh when it starts: the routes of that run, for the progress.
 BATCH_FILE = 'logs/prepare/batch.json'
+# A drive helpers/1_prepare.sh gave up on, as its job log says it.
+PREPARE_FAILED = re.compile(r'^(\S+): (?:taking the pictures out|proposing) failed', re.MULTILINE)
 HISTORY = 12
 # A download announced by pip in the GPU setup log.
 DOWNLOADING = re.compile(r'Downloading (\S+?)(?:\.whl)? \(([0-9.]+) (kB|MB|GB)\)')
@@ -2021,11 +2023,48 @@ class Panel:
                     result['routes_done'] = result['routes_done'] + 1
             if result['routes_total']:
                 result['percent'] = total // result['routes_total']
-        for route in sorted(self._working_routes()):
+        working = self._working_routes()
+        if batch is not None:
+            working = working | self._started_routes(batch, by_route)
+        for route in sorted(working):
             row = by_route.get(route)
             if row is not None:
                 result['working'].append(self._route_progress(row))
         return result
+
+    def _started_routes(self, batch: list[str], by_route: dict) -> set[str]:
+        """The drives of the batch at work that no process here shows: on CT 131's V100s (the GPU runner, #77) a
+        preparation's processes are not on this machine; the runner brings back each drive's log as it is written. A
+        drive at work: its log newer than the batch file, no report yet, and not failed in the newest Prepare's log
+        (helpers/1_prepare.sh: "<drive>: taking the pictures out failed", "<drive>: proposing failed")."""
+        try:
+            started = (self.root / BATCH_FILE).stat().st_mtime
+        except OSError:
+            return set()
+        found = set()
+        for route in batch:
+            row = by_route.get(route)
+            if row is None or row['run_id'] is not None:
+                continue
+            try:
+                if (self.root / 'logs/prepare' / f'{route}.log').stat().st_mtime >= started:
+                    found.add(route)
+            except OSError:
+                continue
+        if found:
+            return found - self._failed_routes()
+        return found
+
+    def _failed_routes(self) -> set[str]:
+        """The drives the newest Prepare's log (logs/panel/<job>-prepare.log) says failed."""
+        logs = sorted(self.logs.glob('*-prepare.log')) if self.logs.is_dir() else []
+        if not logs:
+            return set()
+        try:
+            text = logs[-1].read_text(errors='replace')
+        except OSError:
+            return set()
+        return set(PREPARE_FAILED.findall(text))
 
     def _again_progress(self, by_route: dict) -> dict | None:
         """Propose again (helpers/1_prepare.sh --again): every route of the batch already has a report, the new
@@ -3633,11 +3672,15 @@ class _RemoteGpus:
 
     REFRESH_S = 4
     HOST = 'CT 131'
-    # The cards, then the jobs of the runner that still run, "<job id> <card>" (gpu_remote.sh's jobs/<id>/card, pgid).
+    # The cards, then the jobs of the runner that hold one, "<job id> <card>": the same rule as gpu_remote.sh's card
+    # picker (no exit.code; its pgid's leader still in the job's folder, or no pgid yet and the card younger than 2
+    # minutes). Never "kill -0 -- -<pgid>" alone: with no pgid it was "kill -0 -- -0", which always succeeds.
     COMMAND = ('nvidia-smi ' + ' '.join(GPU_QUERY) + '; echo ---; nvidia-smi ' + ' '.join(GPU_APPS_QUERY)
                + '; echo ---; for f in "${RUNNER:-/root/gpu-runner}"/jobs/*/card; do [ -f "$f" ] || continue; '
-               'd=${f%/card}; kill -0 -- "-$(cat "$d/pgid" 2>/dev/null || echo 0)" 2>/dev/null '
-               '&& echo "$(basename "$d") $(cat "$f")"; done; true')
+               'd=${f%/card}; [ -f "$d/exit.code" ] && continue; p=$(cat "$d/pgid" 2>/dev/null); '
+               'if [ -n "$p" ]; then [ "$(readlink "/proc/$p/cwd" 2>/dev/null)" = "$d" ] || continue; '
+               'elif [ -z "$(find "$f" -mmin -2 2>/dev/null)" ]; then continue; fi; '
+               'echo "$(basename "$d") $(cat "$f")"; done; true')
 
     def __init__(self) -> None:
         self._lock = threading.Lock()

@@ -359,6 +359,40 @@ def test_preparation_progress_from_what_is_on_disk(root, checkout, monkeypatch, 
         'route': annotating, 'phase': 'proposing signs', 'done': 4, 'total': 8, 'unit': 'frames', 'percent': 75}
 
 
+def test_a_preparation_on_ct131_shows_the_drives_at_work_from_their_logs(root, checkout, monkeypatch, tmp_path):
+    """#77, 14 Nov 2026: on CT 131's V100s no process of the preparation is on this machine; the runner brings back the
+    batch and each drive's log as it is written. A drive of the batch at work: its log newer than the batch, no report;
+    a drive not started yet (no log, or one of an earlier run) and a drive ready are not at work."""
+    import os
+    monkeypatch.setenv('COMMA_VIDEOS_DIR', str(tmp_path / 'no-videos'))
+    started, earlier, waiting = '0000011f--77d17f9ee3', '00000122--2a20602737', '00000123--3b31717148'
+    make_route(root, started, segments=4, extracted=1)
+    make_route(root, earlier, segments=2, extracted=0)
+    make_route(root, waiting, segments=2, extracted=0)
+    logs = root / 'logs/prepare'
+    logs.mkdir(parents=True)
+    (logs / 'batch.json').write_text(
+        '{"started": "2026-11-14T12:33:00Z", "routes": ["%s", "%s", "%s", "%s"]}' % (ROUTE, started, earlier, waiting))
+    os.utime(logs / 'batch.json', (1_800_000_000, 1_800_000_000))
+    for route, when in ((ROUTE, 1_800_000_100), (started, 1_800_000_050), (earlier, 1_799_999_000)):
+        (logs / f'{route}.log').write_text('')
+        os.utime(logs / f'{route}.log', (when, when))
+    panel = Panel(root, repo=checkout)
+    monkeypatch.setattr(panel, '_working_routes', lambda: set())
+    rows = panel.status()['routes']
+    progress = panel.preparation(rows, [{'group': 'prepare', 'label': 'preparation', 'pid': 1}])
+    assert [item['route'] for item in progress['working']] == [started]
+    assert progress['working'][0]['phase'] == 'extracting frames' and progress['routes_done'] == 1
+    # A drive the newest Prepare's log says failed is no longer at work.
+    panel.logs.mkdir(parents=True, exist_ok=True)
+    (panel.logs / '20261114-120000-prepare.log').write_text('')
+    (panel.logs / '20261114-125517-prepare.log').write_text(
+        f'{started}: taking the pictures out of the videos...\n'
+        f'{started}: taking the pictures out failed (see {logs}/{started}.log)\n')
+    progress = panel.preparation(rows, [{'group': 'prepare', 'label': 'preparation', 'pid': 1}])
+    assert progress['working'] == []
+
+
 def test_read_only_panel_and_unknown_actions(root, checkout):
     panel = Panel(root, repo=checkout, actions_enabled=False)
     with pytest.raises(PanelError) as disabled:
