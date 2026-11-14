@@ -52,7 +52,14 @@ DB_RELATIVE_PATH = Path('annotations') / 'review.sqlite'
 # Fields the reviewer can change on a box: the label fields of the import plus
 # the notes. Everything else on a proposal (score, model label, class, evidence)
 # comes from the read-only report on the server.
-EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes', 'sign_type', 'painted')
+EDITABLE_DETECTION_KEYS = LABEL_KEYS + ('notes', 'sign_type', 'painted', 'box_source')
+
+# What last set a box's position (box_source, #80): drawn, moved, resized or squared by the reviewer (hand), Fit box
+# (fit), Fit with AI (ai_fit), an AI suggestion applied or an AI reviewer (ai), Apply previous (carried), the car's
+# networks (car), the second reading (hint). Absent: the model's proposal as it was, or a review saved before #80.
+# Not a label: a box keeps "accepted" whatever its source, and the dataset import leaves it out. Fit box's training
+# (box_fit.refiner_train) reads it from the review database to weigh the boxes a person placed.
+BOX_SOURCES = ('hand', 'fit', 'ai_fit', 'ai', 'carried', 'car', 'hint')
 
 # Every box of a saved frame is checked against the original image (hash and
 # PNG decode), so the number of boxes in one request is bounded.
@@ -674,6 +681,8 @@ def _reviewed_detection(item, originals: dict):
     for key in EDITABLE_DETECTION_KEYS:
         if key in item:
             detection[key] = copy.deepcopy(item[key])
+    if detection.get('box_source') is None:
+        detection.pop('box_source', None)
     if 'detection_id' in item:
         detection['detection_id'] = detection_id
     detection['review_state'] = 'reviewed'
@@ -703,7 +712,13 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
                 originals[proposal['detection_id']] = proposal
     detections = []
     for item in body['detections']:
-        detections.append(_reviewed_detection(item, originals))
+        detection = _reviewed_detection(item, originals)
+        # An AI reviewer (REST, MCP, Review with AI) sends no box_source: a box it drew or moved is its own.
+        if reviewer_kind == 'ai' and isinstance(detection, dict) and detection.get('box_source') is None:
+            original = originals.get(detection.get('detection_id'))
+            if original is None or original.get('bbox_xyxy') != detection.get('bbox_xyxy'):
+                detection['box_source'] = 'ai'
+        detections.append(detection)
     reviewer = body.get('reviewer')
     if isinstance(reviewer, str):
         reviewer = reviewer.strip()
@@ -876,6 +891,9 @@ def save_frame_review(store: ReviewStore, root: Path, *, route_id: str, run_id: 
         problem = plate_hours_problem(item) if isinstance(item, dict) else None
         if problem is not None:
             raise ReviewRejected(400, 'invalid_plate_hours', f'Box {number}: {problem}.')
+        if isinstance(item, dict) and item.get('box_source') is not None and item['box_source'] not in BOX_SOURCES:
+            raise ReviewRejected(400, 'invalid_box_source',
+                                 f'Box {number}: box_source must be one of {", ".join(BOX_SOURCES)}, or absent.')
     # "Apply previous" placed these boxes where a sign should be: someone must have looked at them.
     unchecked = unchecked_boxes(body['detections'])
     if unchecked:

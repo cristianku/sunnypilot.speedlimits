@@ -29,7 +29,7 @@ from nnslr_tools.sign_types import SIGN_TYPES
 from nnslr_tools.gps import load_positions, positions_path
 from nnslr_tools.manifest import parse_route_id
 from nnslr_tools.preannotate import PreannotationError, _inside
-from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, MAX_DETECTIONS_PER_FRAME, MAX_REVIEWER_LENGTH,
+from nnslr_tools.review_db import (AI_REVIEWER_PREFIX, BOX_SOURCES, MAX_DETECTIONS_PER_FRAME, MAX_REVIEWER_LENGTH,
                                    REVIEW_CHANNELS, REVIEWER_KINDS, ReviewRejected, public_review,
                                    save_frame_review)
 from nnslr_tools.review_hints import frame_sizes_of, load_hints, suspicious_frames
@@ -1122,6 +1122,9 @@ def review_schema() -> dict:
                               'then send it without check_position',
             'carried_from': 'only in the answer of apply_previous: the frame the labels come from (ignored when '
                             'saving)',
+            'box_source': 'optional: what last set the box\'s position, one of ' + ', '.join(BOX_SOURCES)
+                          + ' (hand: drawn or moved by the reviewer; carried: placed by apply_previous). Send it back '
+                          'as read; omit it on a box you draw or move: an AI reviewer\'s own boxes are saved as ai',
         },
         'label_fields': list(LABEL_KEYS) + ['notes'],
         'frame_filters': list(FRAME_FILTERS),

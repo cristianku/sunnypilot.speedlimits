@@ -28,7 +28,7 @@ import sys
 import threading
 from pathlib import Path
 
-from nnslr_tools.review_db import ReviewRejected
+from nnslr_tools.review_db import BOX_SOURCES, ReviewRejected
 from nnslr_tools.review_service import DETECTION_FAMILIES, review_schema
 from nnslr_tools.sign_types import NOT_A_SIGN_TYPES, SIGN_TYPES
 
@@ -269,6 +269,8 @@ def build_server(service, *, client: str, read_only: bool = False):
         # From apply_previous_frame: a save refuses check_position true (look, fix the box, drop the flag).
         check_position: bool
         carried_from: str
+        # What last set the box's position (#80): send it back as read; omit it on a box you draw or move.
+        box_source: Literal[BOX_SOURCES]
 
     class SaveResult(TypedDict):
         ok: bool

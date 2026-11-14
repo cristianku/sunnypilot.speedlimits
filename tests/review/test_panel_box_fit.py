@@ -216,7 +216,23 @@ def test_the_last_summary_of_each_part(root, checkout):
         'file': 'refiner-20261108T110000Z.json', 'at': '2026-11-08T11:00:00+00:00', 'boxes': 3000,
         'held_out_boxes': 900, 'best_epoch': 31, 'epochs': 40, 'minutes': 58.2,
         'all': {'cases': 2700, 'rough': 0.6, 'rankers': 0.81, 'refiner': 0.84},
-        'small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'refiner': 0.69}, 'wins': False, 'written': False}
+        'small': {'cases': 800, 'rough': 0.5, 'rankers': 0.7, 'refiner': 0.69}, 'fair': None, 'hand': None,
+        'wins': False, 'written': False}
+
+
+def test_the_card_shows_the_fair_measure_and_the_boxes_placed_by_hand(root, checkout):
+    # #80: a summary that knows each box's source gives the measure on the boxes Fit box did not place.
+    folder = summaries(root)
+    data = json.loads((folder / 'refiner-20261108T110000Z.json').read_text())
+    data['by_source'] = {'fit': 2000, 'hand': 120, 'model': 880}
+    data['left_out']['fair'] = {'cases': 300, 'rough': 0.55, 'rankers': 0.78, 'refiner': 0.8}
+    (folder / 'refiner-20261109T110000Z.json').write_text(json.dumps(data))
+    refiner = Panel(root, repo=checkout).box_fit()['refiner']
+    assert refiner['fair'] == {'cases': 300, 'rough': 0.55, 'rankers': 0.78, 'refiner': 0.8}
+    assert refiner['hand'] == 120
+    data['by_source'] = {'fit': 2000}
+    (folder / 'refiner-20261110T110000Z.json').write_text(json.dumps(data))
+    assert Panel(root, repo=checkout).box_fit()['refiner']['hand'] == 0
 
 
 def test_the_review_server_serves_the_card_and_refuses_a_refiner_that_is_not_a_string(root, checkout):

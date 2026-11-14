@@ -1652,7 +1652,8 @@ class Panel:
         scripts/train_box_fit.sh keeps them in evaluations/box_fit of the data root, or None. The rankers
         (<time>.json): the boxes, the routes and the mean IoU with the person's box on routes left out, the rough box's
         and the fit's. The refiner (refiner-<time>.json): the rough box's, the rankers' and the refiner's mean IoU on the
-        full frames of the routes left out, in all and on the small signs, and whether refiner.onnx was written. A file
+        full frames of the routes left out, in all, on the small signs and on the boxes Fit box did not place (fair, #80),
+        the boxes placed by hand, and whether refiner.onnx was written. A file
         that cannot be read is skipped."""
         folder = self.root / BOX_FIT_SUMMARIES
 
@@ -1696,7 +1697,9 @@ class Panel:
             refiner = {'file': name, 'at': when(name), 'boxes': number(data.get('train_boxes')),
                        'held_out_boxes': number(data.get('held_out_boxes')), 'best_epoch': number(data.get('best_epoch')),
                        'epochs': number(data.get('epochs')), 'minutes': number(data.get('minutes')),
-                       'all': measure('all'), 'small': measure('size:small'),
+                       'all': measure('all'), 'small': measure('size:small'), 'fair': measure('fair'),
+                       # Boxes placed by hand (box_source, #80); None in a summary from before.
+                       'hand': number((data.get('by_source') or {}).get('hand', 0 if 'by_source' in data else None)),
                        'wins': bool(data.get('refiner_wins')), 'written': bool(data.get('written'))}
         return {'rankers': rankers, 'refiner': refiner, 'folder': str(BOX_FIT_SUMMARIES),
                 'refiner_model': (self.repo / 'src' / 'nnslr_tools' / 'box_fit' / 'refiner.onnx').is_file()}

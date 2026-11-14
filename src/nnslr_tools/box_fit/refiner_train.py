@@ -7,6 +7,12 @@ that is not ``ai/...``), not ``not_a_sign``, at least 4 px a side, on a frame wh
 need no import into the dataset. Unlike the rankers' training (:mod:`.train`), a box a person kept as the model drew
 it counts too: the person looked at it and kept it.
 
+Each box has its source (``box_source`` of the review, #80): what last set its position, ``hand`` (the reviewer drew,
+moved, resized or squared it), ``fit`` (Fit box), ``carried``, ``ai_fit``... A box saved without one is ``model`` when it
+is still where its proposal was, else ``unknown`` (a review saved before #80). A box placed by hand is drawn
+``HAND_WEIGHT`` times as often in training. The measure on the routes left out is also given by source and for the
+boxes Fit box did not place (``fair``): a box Fit box placed and the reviewer accepted favours the refiner that drew it.
+
 The routes are split by a hash of their name: about a quarter left out, the same every time. Each box of the others
 has its neighbourhood cut once from its frame (``REGION`` times its longer side, at most ``MAX_REGION`` pixels); each
 epoch draws new rough boxes around it (loose, shifted, tight: as a reviewer draws them and as a pass of the refiner
@@ -49,6 +55,9 @@ BATCH = 128
 LR = 2e-3
 SEED = 0
 MIN_BOXES = 200
+HAND_WEIGHT = 3                   # a box a person placed by hand, drawn this many times as often in training
+# The sources whose position Fit box may have made: they are left out of the "fair" measure.
+FIT_SOURCES = ('fit', 'unknown')
 
 
 def confirmed_boxes(review_db: Path, data_root: Path) -> list[dict]:
@@ -69,6 +78,8 @@ def confirmed_boxes(review_db: Path, data_root: Path) -> list[dict]:
         image = frame.get('image_path')
         if not image or not (data_root / image).exists():
             continue
+        proposed = {p.get('detection_id'): p.get('bbox_xyxy') for p in frame.get('source_proposals') or []
+                    if isinstance(p, dict)}
         for n, det in enumerate(frame.get('detections') or []):
             b = det.get('bbox_xyxy')
             family = det.get('family')
@@ -80,8 +91,18 @@ def confirmed_boxes(review_db: Path, data_root: Path) -> list[dict]:
                         'route': route, 'family': family,
                         'size': 'small' if side < 20 else ('mid' if side < 50 else 'big'),
                         'width': int(frame.get('width') or 1344), 'height': int(frame.get('height') or 760),
-                        'truth': [float(v) for v in b]})
+                        'truth': [float(v) for v in b], 'source': box_source(det, proposed)})
     return out
+
+
+def box_source(det: dict, proposed: dict) -> str:
+    """What last set the position of a confirmed box (see the module's description)."""
+    source = det.get('box_source')
+    if isinstance(source, str) and source:
+        return source
+    if det.get('detection_id') in proposed and proposed[det.get('detection_id')] == det.get('bbox_xyxy'):
+        return 'model'
+    return 'unknown'
 
 
 def held_out(route: str) -> bool:
@@ -239,7 +260,8 @@ def _compare_one(case):
     rankers = box_fit.fit_image(img, rough, use_refiner=False) or rough
     # Fit box as the site runs it with this refiner: under refiner.GATE the refiner, then the rankers.
     refined = box_fit.fit_image(img, rough) or rough
-    return {'size': case['size'], 'kind': case['kind'], 'family': case['family'], 'rough': iou(rough, case['truth']),
+    return {'size': case['size'], 'kind': case['kind'], 'family': case['family'], 'source': case.get('source', 'unknown'),
+            'rough': iou(rough, case['truth']),
             'rankers': iou(rankers, case['truth']), 'refiner': iou(refined, case['truth'])}
 
 
@@ -257,8 +279,10 @@ def compare(cases, workers: int) -> dict:
         rows = [r for r in pool.map(_compare_one, cases, chunksize=16) if r]
     groups = collections.defaultdict(list)
     for r in rows:
-        for g in ('all', 'size:' + r['size'], 'kind:' + r['kind']):
+        for g in ('all', 'size:' + r['size'], 'kind:' + r['kind'], 'source:' + r['source']):
             groups[g].append(r)
+        if r['source'] not in FIT_SOURCES:
+            groups['fair'].append(r)
     return {g: {'cases': len(rs), **{k: round(float(np.mean([r[k] for r in rs])), 4) for k in ('rough', 'rankers', 'refiner')},
                 **{k + '>=0.8': round(float(np.mean([r[k] >= 0.8 for r in rs])), 4) for k in ('rankers', 'refiner')}}
             for g, rs in sorted(groups.items())}
@@ -276,6 +300,8 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     summary = {'boxes': len(items), 'train_boxes': len(train_items), 'held_out_boxes': len(val_items),
                'routes': len({it['route'] for it in items}), 'held_out_routes': len({it['route'] for it in val_items}),
                'by_size': dict(sorted(collections.Counter(it['size'] for it in items).items())),
+               'by_source': dict(sorted(collections.Counter(it['source'] for it in items).items())),
+               'hand_weight': HAND_WEIGHT,
                'min_boxes': MIN_BOXES, 'epochs': epochs, 'out': str(out_dir / refiner.MODEL.name)}
     if dry_run:
         return {'dry_run': True, **summary}
@@ -287,12 +313,15 @@ def run(data_root: Path, out_dir: Path, *, epochs: int, workers: int, dry_run: b
     with get_context('fork').Pool(workers) as pool:
         train_regions = pool.map(cut_region, train_items, chunksize=32)
         val_regions = pool.map(cut_region, val_items, chunksize=32)
-    regions = [(r[0], r[1], it['truth']) for r, it in zip(train_regions, train_items) if r is not None]
+    # A box placed by hand is drawn HAND_WEIGHT times as often: the same box, new rough boxes each time.
+    regions = [(r[0], r[1], it['truth']) for r, it in zip(train_regions, train_items) if r is not None
+               for _ in range(HAND_WEIGHT if it['source'] == 'hand' else 1)]
     cases = rankers_train.make_cases(val_items)
     region_of = {it['annotation_id']: r for it, r in zip(val_items, val_regions)}
     val = [(region_of[c['annotation_id']][0], region_of[c['annotation_id']][1], c) for c in cases
            if region_of[c['annotation_id']] is not None]
-    log(f'{len(regions)} boxes to train on, {len(val)} rough boxes left out, cut in {time.time() - started:.0f} s')
+    log(f'{len(regions)} boxes to train on (by hand {HAND_WEIGHT} times), {len(val)} rough boxes left out, '
+        f'cut in {time.time() - started:.0f} s')
 
     class Boxes(torch.utils.data.Dataset):
         def __init__(self, epoch):

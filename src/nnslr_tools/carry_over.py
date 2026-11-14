@@ -62,6 +62,10 @@ LABEL_KEYS = ('family', 'value_kph', 'applicability', 'supplementary_panel', 'vi
 VALUE_FAMILIES = ('maximum_speed', 'cancellation', 'zone', 'variable_display', 'road_marking_candidate')
 CHECK_FIELD = 'check_position'
 FROM_FIELD = 'carried_from'
+# What last set a box's position (review_db.BOX_SOURCES, #80): a box placed here, or taken down over a plate, is the
+# carry's; a box of this frame that takes the labels keeps its position, so it keeps its source too.
+SOURCE_FIELD = 'box_source'
+CARRIED = 'carried'
 # A carried box mostly out of the picture is dropped: the car has passed the sign.
 MIN_INSIDE = 0.3
 MIN_SIDE = 4
@@ -310,6 +314,7 @@ def carry_over(previous: list, current: list, *, width: float, height: float, so
         item['value_state'] = 'unknown' if item.get('value_kph') is None else 'reviewed'
         item['detection_id'] = _new_id(ids, source_key)
         item[FROM_FIELD] = source_key
+        item[SOURCE_FIELD] = CARRIED
         result.append(item)
         if found is not None:
             followed = followed + 1
@@ -343,6 +348,7 @@ def _carry(target: dict, old: dict, source_key: str, height: float) -> bool:
         return True
     target['bbox_xyxy'] = box[:3] + [round(min(float(height), tall[3]), 1)]
     target[CHECK_FIELD] = True
+    target[SOURCE_FIELD] = CARRIED
     return False
 
 
