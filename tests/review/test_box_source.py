@@ -57,6 +57,9 @@ def test_an_ai_reviewer_s_own_boxes_are_the_ai_s():
     assert [d.get('box_source') for d in frame['detections']] == [None, 'ai']
     person = build_reviewed_frame(row, {'detections': [moved], 'reviewer': 'Cristian'}, 'now')
     assert 'box_source' not in person['detections'][0]
+    # A detection_id that is no string: built without a crash, for the checks of the save to refuse it.
+    odd = dict(copy.deepcopy(proposal), detection_id=['x'])
+    build_reviewed_frame(row, {'detections': [odd], 'reviewer': 'claude'}, 'now', reviewer_kind='ai', channel='rest')
 
 
 def test_apply_previous_marks_the_boxes_it_places_and_leaves_the_ones_it_labels():

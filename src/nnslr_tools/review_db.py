@@ -715,7 +715,9 @@ def build_reviewed_frame(report_row: dict, body: dict, timestamp: str, *, review
         detection = _reviewed_detection(item, originals)
         # An AI reviewer (REST, MCP, Review with AI) sends no box_source: a box it drew or moved is its own.
         if reviewer_kind == 'ai' and isinstance(detection, dict) and detection.get('box_source') is None:
-            original = originals.get(detection.get('detection_id'))
+            # A detection_id that is no string (a malformed body) is refused by the checks below, not here.
+            identity = detection.get('detection_id')
+            original = originals.get(identity) if isinstance(identity, str) else None
             if original is None or original.get('bbox_xyxy') != detection.get('bbox_xyxy'):
                 detection['box_source'] = 'ai'
         detections.append(detection)
