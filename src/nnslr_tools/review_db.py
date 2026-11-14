@@ -681,6 +681,11 @@ def _reviewed_detection(item, originals: dict):
     for key in EDITABLE_DETECTION_KEYS:
         if key in item:
             detection[key] = copy.deepcopy(item[key])
+    # A proposal of an Other sign has its kind since 14 Nov 2026 (sign_types.with_sign_type). A box that says its
+    # family says its kind too, none when it names none: the proposal's kind must not stay on a box the reviewer made
+    # a speed limit, or left an Other sign without a kind. A box that only names its proposal keeps all of it.
+    if 'family' in item and 'sign_type' not in item:
+        detection.pop('sign_type', None)
     if detection.get('box_source') is None:
         detection.pop('box_source', None)
     if 'detection_id' in item:

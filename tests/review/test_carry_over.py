@@ -71,6 +71,24 @@ def test_the_same_sign_grown_takes_the_labels_and_other_boxes_stay():
     assert boxes['far']['family'] == 'other_sign' and 'carried_from' not in boxes['far']
 
 
+def test_the_kind_read_here_goes_when_the_carried_box_is_of_another_family():
+    """14 Nov 2026: a proposal of an Other sign has its kind. A speed limit carried onto it must not keep "give way"
+    (a save refuses sign_type on any other family); an Other sign carried without a kind keeps the kind read here."""
+    old = box_at(700, 300, 20)
+    here = dict(proposal(closer(old, 1.1), 'p1'), sign_type='give_way')
+
+    def carried(previous):
+        current = [dict(here)]
+        result = carry_over([previous], current, width=W, height=H, source_key='0/1', proposals=current)
+        assert result['matched'] == 1
+        return result['detections'][0]
+
+    limit = carried(confirmed(old, 'maximum_speed', 50))
+    assert limit['family'] == 'maximum_speed' and 'sign_type' not in limit
+    assert carried(confirmed(old, 'other_sign', None))['sign_type'] == 'give_way'
+    assert carried(confirmed(old, 'other_sign', None, sign_type='stop'))['sign_type'] == 'stop'
+
+
 def test_a_turn_slides_the_whole_view():
     signs = [box_at(500, 340, 26), box_at(820, 320, 26)]
     current = [proposal(closer(box, 1.25, slide=(-260, 10)), 'p' + str(i)) for i, box in enumerate(signs)]

@@ -375,6 +375,11 @@ def _take_labels(target: dict, old: dict, source_key: str) -> None:
         target.update(original_reading)
     if plate_here and target.get('family') == 'maximum_speed':
         target['supplementary_panel'] = plate_here
+    # The kind read here on a proposal (an Other sign's, since 14 Nov 2026) goes when the previous box says another
+    # family and names no kind: a speed limit never keeps "give way". An Other sign carried without a kind keeps the
+    # kind read here, as a number read here is kept.
+    if target.get('family') != 'other_sign' and 'sign_type' not in old:
+        target.pop('sign_type', None)
     if target.get('family') != 'maximum_speed' or not holds_hours(target):
         target.pop('plate_hours', None)
     target['value_state'] = 'unknown' if target.get('value_kph') is None else 'reviewed'

@@ -932,8 +932,8 @@ watch(drive, () => { drawn = null; });
 // -- the speed limit read on the signs against his speed ----------------------------------------------------------------
 // Where a speed limit read for our road (Sign review's boxes of the frame: confirmed, else the networks' proposals) is
 // far from his dashboard speed, a sign was read wrong or a sign of a side road was taken for ours (Cristian, 14 Nov
-// 2026): a red band on the lane with the number read as a red line, and the arrows under the lane's name go from one
-// stretch to the next, to correct its signs in Signs. Nothing is saved here, and the answer stays his speed.
+// 2026): a red band on the Answer lane with the number read as a red line, the same band on the Signs lane, and the
+// arrows under the Signs lane's name go from one place to the next, to correct its signs in Signs. Nothing is saved here, and the answer stays his speed.
 const OFF_KPH = 30;
 /** Frames less than this many seconds apart are one stretch. */
 const OFF_JOIN_S = 2.5;
@@ -1028,14 +1028,8 @@ function worksIn(from: number, to: number) {
       </svg>
     </template>
     <template #lane="{x, w, width, from, to, fits}">
-      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; red band: a speed limit read for your road there is more than 30 km/h from your speed, the red line its number; bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
-        <span class="dr-lane-name">Answer<small>km/h</small>
-          <span v-if="offRuns.length" class="sr-off-nav" id="sr-off-nav" @pointerdown.stop
-                :title="'A speed limit read for your road more than ' + OFF_KPH + ' km/h from your dashboard speed: ' + plural(offRuns.length, 'stretch', 'stretches') + ' on this drive, red on the lane, to check in Signs. The arrows go to the one before and the next'">
-            <button type="button" id="sr-off-prev" :disabled="!offBefore" aria-label="The stretch before where a limit read is far from your speed" @click="goOff(offBefore)">‹</button>
-            <b>{{ offRuns.length }} off</b>
-            <button type="button" id="sr-off-next" :disabled="!offAfter" aria-label="The next stretch where a limit read is far from your speed" @click="goOff(offAfter)">›</button>
-          </span></span>
+      <div class="dr-lane sr-lane" title="The answer the brain learns: the line is your dashboard speed; a box is a block of yours, its kph instead of your speed, grey left out, its ends dragged to move them; light grey band: openpilot or the cruise held the speed, not learnt; red band: a speed sign read for your road there is more than 30 km/h from your speed, the red line its number (the Signs lane has the arrows to them); bar: the marks picked, orange the roadworks, blue a kind of road; grey line: gone through for them">
+        <span class="dr-lane-name">Answer<small>km/h</small></span>
         <svg :width="width" :height="HEIGHT" :viewBox="`0 0 ${width} ${HEIGHT}`" aria-hidden="true">
           <g v-for="kph in ticks" :key="kph">
             <line :x1="0" :x2="width" :y1="y(kph)" :y2="y(kph)" class="rg-grid"/>
@@ -1095,9 +1089,17 @@ function worksIn(from: number, to: number) {
                 :height="TYPE_HEIGHT - 2" rx="2" class="sr-type-new"/>
         </svg>
       </div>
-      <div v-if="signs" class="dr-lane sr-sign-lane" title="The speed signs confirmed (their number, Z a zone, end an end of limit): a tap goes to the sign, its boxes on the picture. Violet on top: the frames the AI reviewed ([ and ] go from one to the next)">
-        <span class="dr-lane-name">Signs<small>review</small></span>
+      <div v-if="signs" class="dr-lane sr-sign-lane" title="The speed signs confirmed (their number, Z a zone, end an end of limit): a tap goes to the sign, its boxes on the picture. Red band: a speed sign read for your road there is more than 30 km/h from your speed. Violet on top: the frames the AI reviewed ([ and ] go from one to the next)">
+        <span class="dr-lane-name">Signs<small>review</small>
+          <span v-if="offRuns.length" class="sr-off-nav" id="sr-off-nav" @pointerdown.stop
+                :title="'Speed signs read for your road more than ' + OFF_KPH + ' km/h from your dashboard speed: ' + plural(offRuns.length, 'place', 'places') + ' on this drive, red here and on the Answer lane with the number read. A sign read wrong, or a sign of a side road taken for yours: correct it in Signs. The arrows go to the one before and the next'">
+            <button type="button" id="sr-off-prev" :disabled="!offBefore" aria-label="The place before where a speed sign read is far from your speed" @click="goOff(offBefore)">‹</button>
+            <b>{{ offRuns.length }} off</b>
+            <button type="button" id="sr-off-next" :disabled="!offAfter" aria-label="The next place where a speed sign read is far from your speed" @click="goOff(offAfter)">›</button>
+          </span></span>
         <svg :width="width" :height="SIGN_HEIGHT" :viewBox="`0 0 ${width} ${SIGN_HEIGHT}`" aria-hidden="true">
+          <rect v-for="run in offIn(from, to, x)" :key="'off' + run.key" :x="x(run.from)" y="0" :width="Math.max(4, w(run.from, run.to))"
+                :height="SIGN_HEIGHT" class="sr-off-band"><title>{{ run.title }}</title></rect>
           <g v-for="sign in signsIn(from, to, x)" :key="sign.key" class="sr-sign-tick" @pointerdown.stop="goSign(sign.at)">
             <rect :x="x(sign.at) - 6" y="0" :width="Math.max(12, w(sign.at, sign.ticks[sign.ticks.length - 1] ?? sign.at) + 12)"
                   :height="SIGN_HEIGHT" class="sr-sign-hit"/>

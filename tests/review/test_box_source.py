@@ -62,6 +62,23 @@ def test_an_ai_reviewer_s_own_boxes_are_the_ai_s():
     build_reviewed_frame(row, {'detections': [odd], 'reviewer': 'claude'}, 'now', reviewer_kind='ai', channel='rest')
 
 
+def test_a_box_that_says_its_family_does_not_keep_the_kind_of_its_proposal():
+    """14 Nov 2026: a proposal of an Other sign has its kind (sign_types.with_sign_type). A box the reviewer made a
+    speed limit, or left an Other sign without a kind, must not keep it; a box that only names its proposal does."""
+    proposal = {'bbox_xyxy': [10, 10, 30, 30], 'family': 'other_sign', 'value_kph': None, 'sign_type': 'give_way',
+                'model_label': 'other_sign:give_way', 'detection_id': 'p1'}
+    row = {'frame_key': '0/0', 'detections': [proposal], 'route_id': ROUTE}
+
+    def saved(item):
+        return build_reviewed_frame(row, {'detections': [item], 'reviewer': 'Cristian'}, 'now')['detections'][0]
+
+    limit = saved({'detection_id': 'p1', 'bbox_xyxy': [10, 10, 30, 30], 'family': 'maximum_speed', 'value_kph': 50})
+    assert limit['family'] == 'maximum_speed' and 'sign_type' not in limit
+    assert 'sign_type' not in saved({'detection_id': 'p1', 'bbox_xyxy': [10, 10, 30, 30], 'family': 'other_sign'})
+    assert saved({'detection_id': 'p1', 'family': 'other_sign', 'sign_type': 'stop'})['sign_type'] == 'stop'
+    assert saved({'detection_id': 'p1'})['sign_type'] == 'give_way'
+
+
 def test_apply_previous_marks_the_boxes_it_places_and_leaves_the_ones_it_labels():
     old = [{'bbox_xyxy': [545, 315, 575, 345], 'family': 'maximum_speed', 'value_kph': 80, 'detection_id': 'o1',
             'applicability': 'own_road', 'supplementary_panel': 'none'},
